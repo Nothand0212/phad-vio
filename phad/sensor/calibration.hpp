@@ -103,4 +103,11 @@ namespace phad::sensor
     double         gyr_rw  = 0.0;  // gyroscope_random_walk_radps2_per_sqrt_hz 陀螺仪随机游走 (rad/s^2/√Hz)
   };
 
+  struct StereoImuCalibration
+  {
+    CameraCalibration left;
+    CameraCalibration right;
+    ImuCalibration    imu;
+  };
+
 }  // namespace phad::sensor

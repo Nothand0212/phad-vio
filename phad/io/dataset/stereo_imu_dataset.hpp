@@ -21,12 +21,7 @@ namespace phad::io::dataset
     std::filesystem::path right_path;
   };
 
-  struct StereoImuCalibration
-  {
-    sensor::CameraCalibration left;
-    sensor::CameraCalibration right;
-    sensor::ImuCalibration    imu;
-  };
+  using StereoImuCalibration = sensor::StereoImuCalibration;
 
   namespace internal
   {

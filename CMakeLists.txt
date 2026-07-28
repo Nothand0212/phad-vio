@@ -9,26 +9,38 @@ option(PHAD_ENABLE_MH01_TESTS "Enable local EuRoC MH_01 integration tests" OFF)
 option(PHAD_ENABLE_TUMVI_CORRIDOR1_TESTS
   "Enable local TUM VI corridor1 integration tests" OFF)
 
-find_package(OpenCV 4 REQUIRED COMPONENTS imgcodecs)
+find_package(OpenCV 4 REQUIRED COMPONENTS core highgui imgcodecs)
 find_package(yaml-cpp 0.8 REQUIRED)
+
+add_library(phad_io INTERFACE)
+add_library(phad::io ALIAS phad_io)
+target_compile_features(phad_io INTERFACE cxx_std_20)
+target_include_directories(phad_io INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_library(phad_io_dataset
   phad/io/dataset/internal/dataset_adapter_utils.cpp
+  phad/io/dataset/dataset_replay_source.cpp
   phad/io/dataset/stereo_imu_dataset.cpp
   phad/io/dataset/euroc/euroc_dataset.cpp
   phad/io/dataset/tum_vi/tum_vi_dataset.cpp
 )
 add_library(phad::io_dataset ALIAS phad_io_dataset)
 
-target_compile_features(phad_io_dataset PUBLIC cxx_std_20)
-target_include_directories(phad_io_dataset PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(phad_io_dataset PRIVATE opencv_imgcodecs yaml-cpp::yaml-cpp)
+target_link_libraries(phad_io_dataset
+  PUBLIC phad::io
+  PRIVATE opencv_imgcodecs yaml-cpp::yaml-cpp
+)
 target_compile_options(phad_io_dataset PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
 add_executable(phad_euroc_inspect apps/phad_euroc_inspect.cpp)
 target_link_libraries(phad_euroc_inspect PRIVATE phad::io_dataset)
+
+add_executable(phad_euroc_runner apps/phad_euroc_runner.cpp)
+target_link_libraries(phad_euroc_runner
+  PRIVATE phad::io_dataset opencv_core opencv_highgui
+)
 
 if(PHAD_BUILD_TESTS)
   enable_testing()
@@ -37,6 +49,7 @@ if(PHAD_BUILD_TESTS)
 
   add_executable(phad_io_dataset_tests
     tests/common/timestamp_test.cpp
+    tests/io/dataset/dataset_replay_source_test.cpp
     tests/io/dataset/euroc/euroc_dataset_test.cpp
     tests/io/dataset/tum_vi/tum_vi_dataset_test.cpp
   )

@@ -40,6 +40,8 @@
 - 使用整数纳秒建立严格有序的 IMU 和双目帧索引；
 - 按 timestamp 对 cam0/cam1 做 exact join；
 - 全清单校验和 uint8/uint16 双目图像惰性解码；
+- 来源无关的 pull-based `SensorSource` seam；
+- 通过 `DatasetReplaySource` 确定性合并并回放 IMU/双目事件；
 - 数据集摘要检查工具。
 
 测试：
@@ -63,6 +65,7 @@
   IMU 索引和双目索引；
 - 第一、中间和最后一对图像均可按需解码；
 - adapter 外不存在 EuRoC/TUM VI 路径、标定字段、坐标或单位转换；
+- VO 上游可通过同一 `SensorSource` interface 消费规范化事件；
 - 常驻内存不随已遍历图像总数线性增长；
 - 尚不执行 IMU 分段、边界插值、初始化、特征提取或 VIO。
 
@@ -163,7 +166,7 @@
 
 范围：
 
-- 消费阶段 1 dataset adapter 的规范化输出；
+- 消费阶段 1 `SensorSource` 的规范化事件；
 - sensor synchronizer；
 - 图像边界 IMU 插值；
 - 起始静止初始化；

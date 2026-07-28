@@ -16,6 +16,10 @@ This is a single-context repository. See `docs/agents/domain.md`.
 
 C++ identifiers follow project naming rules. See `docs/agents/cpp-naming.md`.
 
+### C++ style
+
+C++ formatting and control-flow style follow project rules. See `docs/agents/cpp-style.md`.
+
 ## Learned User Preferences
 
 - Prefer Chinese for agent-facing docs under `docs/agents/`; keep English for technical terms and code identifiers
@@ -28,4 +32,5 @@ C++ identifiers follow project naming rules. See `docs/agents/cpp-naming.md`.
 - After CMake or source-file changes, regenerate with `cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`
 - Core `sensor::*` and calibration types stay POD + STL (`std::array`); Eigen/GTSAM are deferred past the EuRoC loader (M1) phase
 - C++ naming authority is `docs/agents/cpp-naming.md`, mirrored by `.cursor/rules/cpp-naming.mdc`
+- C++ style authority is `docs/agents/cpp-style.md`, mirrored by `.cursor/rules/cpp-style.mdc`; formatting details follow root `.clang-format`
 

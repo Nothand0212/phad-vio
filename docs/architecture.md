@@ -113,9 +113,10 @@ dataset 共享随机访问 interface。`phad::sensor` 只定义与数据来源�
 ```text
 phad::io
 ├── dataset
+│   └── DatasetReplaySource
 ├── serial        # future
 ├── ros           # future
-└── SensorSource  # future seam
+└── SensorSource
 ```
 
 数据集特有知识只存在于 adapter 内。核心模块不得出现 `euroc`、`kitti`
@@ -129,6 +130,12 @@ phad::io
 `Image` 保留数据集原始无符号灰度深度，当前支持 `uint8_t` 与 `uint16_t`。
 调用方必须使用与 `PixelType` 一致的 typed pixel view，不能把 16-bit 图像
 静默截断为 8-bit。
+
+`SensorSource` 是来源无关的 pull-based 输入 seam，只公开稳定标定和下一个
+规范化 sensor event。`DatasetReplaySource` 按值拥有
+`StereoImuDataset`，合并严格有序的 IMU 与双目索引；timestamp 相同时先
+输出 IMU，并保持图像惰性解码。正常耗尽与读取失败是不同的 terminal
+状态。该 seam 不执行 IMU 分段、边界插值或 packet 构造。
 
 ### 3.2 Sensor synchronizer
 
