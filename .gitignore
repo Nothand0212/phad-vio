@@ -1,6 +1,7 @@
 .cache/
 .cursor/
 .vscode/
+.worktree/
 
 thirdparty/
 /build*/

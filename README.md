@@ -9,9 +9,15 @@ stereo visual-inertial odometry 项目。
 
 ## 当前状态
 
-当前只完成阶段 0 的设计文档，尚无代码、构建系统或可执行程序。
+当前已完成数据集 adapter 基础：
 
-已确定的方向：
+- `StereoImuDataset` 提供统一的双目、IMU 与标定 interface；
+- EuRoC 与 TUM VI 目录和标定格式由独立 adapter 解析；
+- EuRoC 8-bit 与 TUM VI 16-bit 灰度图均按需解码并保持原始像素类型；
+- `phad_euroc_inspect` 可检查 EuRoC 数据摘要和抽样图像；
+- 默认测试使用自生成 fixture，真实数据集测试通过 CMake option 显式启用。
+
+后续 VIO 方向：
 
 - 双目相机提供可观尺度；
 - IMU 与左相机时间戳对齐；

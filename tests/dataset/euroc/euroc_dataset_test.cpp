@@ -1,3 +1,5 @@
+#include "phad/dataset/euroc/euroc_dataset.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -13,8 +15,6 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-
-#include "phad/dataset/euroc/euroc_dataset.hpp"
 
 #ifdef __linux__
 #include <unistd.h>
@@ -172,6 +172,15 @@ namespace
     fs::path m_root;
   };
 
+  TEST( EurocDatasetTest, AdapterReturnsNormalizedStereoImuDataset )
+  {
+    EurocFixture fixture;
+    auto         result = phad::dataset::euroc::open( fixture.root() );
+    ASSERT_TRUE( result.hasValue() ) << result.error().describe();
+    EXPECT_EQ( result.value().stereoIndex().size(), 3U );
+    EXPECT_EQ( result.value().imuMeasurements().size(), 4U );
+  }
+
   TEST( EurocDatasetTest, OpensCalibrationImuAndExactStereoIndex )
   {
     EurocFixture fixture;
@@ -283,19 +292,28 @@ namespace
       EXPECT_EQ( frame.left.height(), 3 );
       EXPECT_EQ( frame.left.channels(), 1 );
       EXPECT_EQ( frame.left.pixelType(), phad::sensor::PixelType::kUint8 );
-      EXPECT_EQ( frame.left.pixels().size(), 12U );
-      EXPECT_EQ( frame.left.pixels().front(), left_value );
-      EXPECT_EQ( frame.right.pixels().front(), right_value );
+      const auto left_pixels  = frame.left.pixels<std::uint8_t>();
+      const auto right_pixels = frame.right.pixels<std::uint8_t>();
+      ASSERT_TRUE( left_pixels.has_value() );
+      ASSERT_TRUE( right_pixels.has_value() );
+      EXPECT_EQ( left_pixels->size(), 12U );
+      EXPECT_EQ( left_pixels->front(), left_value );
+      EXPECT_EQ( right_pixels->front(), right_value );
+      EXPECT_FALSE( frame.left.pixels<std::uint16_t>().has_value() );
     }
 
     auto first_load  = dataset.loadStereo( 1 );
     auto second_load = dataset.loadStereo( 1 );
     ASSERT_TRUE( first_load.hasValue() );
     ASSERT_TRUE( second_load.hasValue() );
-    EXPECT_TRUE( std::ranges::equal( first_load.value().left.pixels(),
-                                     second_load.value().left.pixels() ) );
-    EXPECT_NE( first_load.value().left.pixels().data(),
-               second_load.value().left.pixels().data() );
+    const auto first_pixels =
+        first_load.value().left.pixels<std::uint8_t>();
+    const auto second_pixels =
+        second_load.value().left.pixels<std::uint8_t>();
+    ASSERT_TRUE( first_pixels.has_value() );
+    ASSERT_TRUE( second_pixels.has_value() );
+    EXPECT_TRUE( std::ranges::equal( *first_pixels, *second_pixels ) );
+    EXPECT_NE( first_pixels->data(), second_pixels->data() );
   }
 
   TEST( EurocDatasetTest, DefersCorruptPngFailureUntilStereoIsRequested )
@@ -709,8 +727,9 @@ namespace
     {
       auto loaded = opened.value().loadStereo( index );
       ASSERT_TRUE( loaded.hasValue() ) << loaded.error().describe();
-      EXPECT_EQ( loaded.value().left.pixels().front(),
-                 static_cast<std::uint8_t>( index ) );
+      const auto pixels = loaded.value().left.pixels<std::uint8_t>();
+      ASSERT_TRUE( pixels.has_value() );
+      EXPECT_EQ( pixels->front(), static_cast<std::uint8_t>( index ) );
     }
     const std::size_t resident_after_traversal = CurrentResidentBytes();
 

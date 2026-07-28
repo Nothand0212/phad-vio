@@ -28,11 +28,13 @@ namespace phad::sensor
   /**
    * @brief DistortionModel 枚举类型用于表示畸变模型。
    *
-   * 每个枚举值对应一个特定的畸变模型，用于标识畸变的类型。目前只支持径向切向畸变模型。
+   * 每个枚举值对应一个特定的畸变模型，用于标识畸变的类型。
+   * 当前支持径向切向和等距畸变模型。
    */
   enum class DistortionModel : std::uint8_t
   {
-    kRadialTangential = 0
+    kRadialTangential = 0,
+    kEquidistant      = 1
   };
 
   /**

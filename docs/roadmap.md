@@ -24,19 +24,22 @@
 
 当前状态：文档已建立，仍需在首次实现前由维护者审阅待确认事项。
 
-## 阶段 1：EuRoC 数据加载
+## 阶段 1：离线 Stereo-IMU 数据加载
 
 范围：
 
 - CMake 项目骨架和测试框架；
 - timestamp、IMU measurement、camera calibration 和 IMU calibration
   核心类型；
-- 具体的 EuRoC dataset adapter，不提前创建通用 `DatasetInterface`；
+- 规范化 `StereoImuDataset` 值类型，以及 EuRoC、TUM VI 两个具体
+  dataset adapter；
 - 从原生 EuRoC/ASL 目录解析 cam0、cam1、imu0 的 `sensor.yaml` 和
   `data.csv`；
+- 从 TUM VI Euroc/DSO export 解析 `mav0` manifest、
+  `dso/camchain.yaml` 和 `dso/imu_config.yaml`；
 - 使用整数纳秒建立严格有序的 IMU 和双目帧索引；
 - 按 timestamp 对 cam0/cam1 做 exact join；
-- 全清单校验和双目图像惰性解码；
+- 全清单校验和 uint8/uint16 双目图像惰性解码；
 - 数据集摘要检查工具。
 
 测试：
@@ -51,12 +54,15 @@
 - 非法外参、相机模型和 IMU noise 字段；
 - 可选的 `MH_01_easy` 本地集成测试验证 3682 对双目帧和 36820 条
   IMU 测量。
+- 可选的 TUM VI `corridor1_512_16` 本地集成测试验证 5990 对双目帧、
+  59721 条 IMU 测量和 16-bit 灰度解码。
 
 阶段出口：
 
-- 能从原生 `MH_01_easy` 确定性加载标定、IMU 索引和双目索引；
+- 能从原生 `MH_01_easy` 和 TUM VI `corridor1_512_16` 确定性加载标定、
+  IMU 索引和双目索引；
 - 第一、中间和最后一对图像均可按需解码；
-- adapter 外不存在 EuRoC 路径、CSV 字段、坐标或单位转换；
+- adapter 外不存在 EuRoC/TUM VI 路径、标定字段、坐标或单位转换；
 - 常驻内存不随已遍历图像总数线性增长；
 - 尚不执行 IMU 分段、边界插值、初始化、特征提取或 VIO。
 

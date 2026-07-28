@@ -1,8 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <span>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "phad/common/timestamp.hpp"
@@ -13,11 +16,13 @@ namespace phad::sensor
   /**
    * @brief PixelType 枚举类型用于表示图像像素类型。
    *
-   * 每个枚举值对应一个特定的像素类型，用于标识图像像素的存储方式。目前只支持无符号 8 位整数类型。
+   * 每个枚举值对应一个特定的像素类型，用于标识图像像素的存储方式。
+   * 当前支持无符号 8 位和 16 位整数。
    */
   enum class PixelType : std::uint8_t
   {
-    kUint8 = 0
+    kUint8  = 0,
+    kUint16 = 1
   };
 
   /**
@@ -29,29 +34,50 @@ namespace phad::sensor
   class Image
   {
   public:
-    Image( int width, int height, int channels, PixelType pixel_type,
+    Image( int width, int height, int channels,
            std::vector<std::uint8_t> pixels )
         : m_width( width ),
           m_height( height ),
           m_channels( channels ),
-          m_pixel_type( pixel_type ),
           m_pixels( std::move( pixels ) ) {}
 
-    [[nodiscard]] int                           width() const noexcept { return m_width; }
-    [[nodiscard]] int                           height() const noexcept { return m_height; }
-    [[nodiscard]] int                           channels() const noexcept { return m_channels; }
-    [[nodiscard]] PixelType                     pixelType() const noexcept { return m_pixel_type; }
-    [[nodiscard]] std::span<const std::uint8_t> pixels() const noexcept
+    Image( int width, int height, int channels,
+           std::vector<std::uint16_t> pixels )
+        : m_width( width ),
+          m_height( height ),
+          m_channels( channels ),
+          m_pixels( std::move( pixels ) ) {}
+
+    [[nodiscard]] int       width() const noexcept { return m_width; }
+    [[nodiscard]] int       height() const noexcept { return m_height; }
+    [[nodiscard]] int       channels() const noexcept { return m_channels; }
+    [[nodiscard]] PixelType pixelType() const noexcept
     {
-      return m_pixels;
+      return std::holds_alternative<std::vector<std::uint8_t>>( m_pixels )
+                 ? PixelType::kUint8
+                 : PixelType::kUint16;
+    }
+
+    template <typename Pixel>
+    [[nodiscard]] std::optional<std::span<const Pixel>> pixels() const noexcept
+    {
+      static_assert( std::is_same_v<Pixel, std::uint8_t> ||
+                         std::is_same_v<Pixel, std::uint16_t>,
+                     "Image only supports uint8_t and uint16_t pixels" );
+      const auto* pixels = std::get_if<std::vector<Pixel>>( &m_pixels );
+      if ( pixels == nullptr )
+      {
+        return std::nullopt;
+      }
+      return std::span<const Pixel>{ *pixels };
     }
 
   private:
-    int                       m_width;
-    int                       m_height;
-    int                       m_channels;
-    PixelType                 m_pixel_type;
-    std::vector<std::uint8_t> m_pixels;
+    int m_width;
+    int m_height;
+    int m_channels;
+    std::variant<std::vector<std::uint8_t>, std::vector<std::uint16_t>>
+        m_pixels;
   };
 
   /**

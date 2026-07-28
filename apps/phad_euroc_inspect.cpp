@@ -1,5 +1,6 @@
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
 
@@ -42,7 +43,14 @@ int main( int argc, char** argv )
         std::cerr << loaded.error().describe() << '\n';
         return 1;
       }
-      const auto& frame = loaded.value();
+      const auto& frame        = loaded.value();
+      const auto  left_pixels  = frame.left.pixels<std::uint8_t>();
+      const auto  right_pixels = frame.right.pixels<std::uint8_t>();
+      if ( !left_pixels || !right_pixels )
+      {
+        std::cerr << "decoded EuRoC image has an unexpected pixel type\n";
+        return 1;
+      }
       std::cout << "sample[" << index
                 << "]: timestamp_ns=" << frame.timestamp.nanoseconds()
                 << ", left=" << frame.left.width() << 'x'

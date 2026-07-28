@@ -1,4 +1,4 @@
-#include "phad/dataset/euroc/euroc_dataset.hpp"
+#include "phad/dataset/tum_vi/tum_vi_dataset.hpp"
 
 #include <yaml-cpp/yaml.h>
 
@@ -6,13 +6,12 @@
 #include <cmath>
 #include <filesystem>
 #include <string>
-#include <string_view>
 #include <utility>
 
 #include "phad/dataset/internal/dataset_adapter_utils.hpp"
 #include "phad/dataset/internal/stereo_imu_dataset_builder.hpp"
 
-namespace phad::dataset
+namespace phad::dataset::tum_vi
 {
   namespace
   {
@@ -20,74 +19,81 @@ namespace phad::dataset
     namespace fs      = std::filesystem;
     namespace adapter = internal;
 
-    DatasetResult<sensor::RigidTransform> parseTransform(
-        const YAML::Node& root, const std::string& sensor_id,
-        const fs::path& path )
+    constexpr double kCameraRateHz = 20.0;
+
+    sensor::RigidTransform identityTransform()
+    {
+      sensor::RigidTransform transform;
+      transform.matrix[ 0 ]  = 1.0;
+      transform.matrix[ 5 ]  = 1.0;
+      transform.matrix[ 10 ] = 1.0;
+      transform.matrix[ 15 ] = 1.0;
+      return transform;
+    }
+
+    DatasetResult<sensor::RigidTransform> parseKalibrTransform(
+        const YAML::Node& node, const std::string& sensor_id,
+        const fs::path& path, const std::string& field )
     {
       try
       {
-        const YAML::Node transform = root[ "T_BS" ];
-        if ( !transform || transform[ "rows" ].as<int>() != 4 ||
-             transform[ "cols" ].as<int>() != 4 )
+        if ( !node.IsSequence() || node.size() != 4U )
         {
           return adapter::makeError(
-              DatasetErrorCode::kInvalidCalibration, sensor_id, path, "T_BS",
-              "T_BS must be a 4x4 matrix" );
+              DatasetErrorCode::kInvalidCalibration, sensor_id, path, field,
+              "transform must contain four rows" );
         }
-        const YAML::Node data = transform[ "data" ];
-        if ( !data.IsSequence() || data.size() != 16U )
+        sensor::RigidTransform transform;
+        for ( std::size_t row = 0; row < 4; ++row )
         {
-          return adapter::makeError(
-              DatasetErrorCode::kInvalidCalibration, sensor_id, path,
-              "T_BS.data", "T_BS data must contain 16 values" );
+          if ( !node[ row ].IsSequence() || node[ row ].size() != 4U )
+          {
+            return adapter::makeError(
+                DatasetErrorCode::kInvalidCalibration, sensor_id, path, field,
+                "each transform row must contain four values" );
+          }
+          for ( std::size_t column = 0; column < 4; ++column )
+          {
+            transform.matrix[ row * 4 + column ] =
+                node[ row ][ column ].as<double>();
+          }
         }
-
-        sensor::RigidTransform result;
-        for ( std::size_t index = 0; index < result.matrix.size(); ++index )
-        {
-          result.matrix[ index ] = data[ index ].as<double>();
-        }
-        return adapter::validateRigidTransform( result, sensor_id, path,
-                                                "T_BS" );
+        return adapter::validateRigidTransform( transform, sensor_id, path,
+                                                field );
       }
       catch ( const YAML::Exception& exception )
       {
         return adapter::makeError(
-            DatasetErrorCode::kInvalidCalibration, sensor_id, path, "T_BS",
+            DatasetErrorCode::kInvalidCalibration, sensor_id, path, field,
             exception.what() );
       }
     }
 
     DatasetResult<sensor::CameraCalibration> parseCameraCalibration(
-        const fs::path& path, const std::string& sensor_id )
+        const YAML::Node& root, const std::string& sensor_id,
+        const fs::path& path )
     {
-      auto yaml = adapter::loadYaml( path, sensor_id );
-      if ( !yaml )
-      {
-        return yaml.error();
-      }
-      const YAML::Node& root = yaml.value();
+      const YAML::Node camera = root[ sensor_id ];
       try
       {
-        if ( root[ "sensor_type" ].as<std::string>() != "camera" )
+        if ( !camera )
         {
           return adapter::makeError(
               DatasetErrorCode::kInvalidCalibration, sensor_id, path,
-              "sensor_type", "expected camera" );
+              sensor_id, "camera entry is missing" );
         }
-        if ( root[ "camera_model" ].as<std::string>() != "pinhole" )
+        if ( camera[ "camera_model" ].as<std::string>() != "pinhole" )
         {
           return adapter::makeError(
               DatasetErrorCode::kUnsupportedCameraModel, sensor_id, path,
-              "camera_model", "only pinhole is supported" );
+              "camera_model", "TUM VI adapter requires pinhole cameras" );
         }
-        if ( root[ "distortion_model" ].as<std::string>() !=
-             "radial-tangential" )
+        if ( camera[ "distortion_model" ].as<std::string>() != "equidistant" )
         {
           return adapter::makeError(
               DatasetErrorCode::kUnsupportedDistortionModel, sensor_id, path,
               "distortion_model",
-              "EuRoC requires radial-tangential distortion" );
+              "TUM VI adapter requires equidistant distortion" );
         }
       }
       catch ( const YAML::Exception& exception )
@@ -97,26 +103,23 @@ namespace phad::dataset
             exception.what() );
       }
 
-      auto transform = parseTransform( root, sensor_id, path );
-      auto rate =
-          adapter::positiveYamlScalar( root, "rate_hz", sensor_id, path );
-      if ( !transform )
+      auto T_camera_imu = parseKalibrTransform(
+          camera[ "T_cam_imu" ], sensor_id, path, "T_cam_imu" );
+      if ( !T_camera_imu )
       {
-        return transform.error();
-      }
-      if ( !rate )
-      {
-        return rate.error();
+        return T_camera_imu.error();
       }
 
       sensor::CameraCalibration calibration;
-      calibration.T_B_camera = transform.value();
-      calibration.rate_hz    = rate.value();
+      calibration.distortion_model = sensor::DistortionModel::kEquidistant;
+      calibration.T_B_camera =
+          adapter::invertRigidTransform( T_camera_imu.value() );
+      calibration.rate_hz = kCameraRateHz;
       try
       {
-        const YAML::Node resolution = root[ "resolution" ];
-        const YAML::Node intrinsics = root[ "intrinsics" ];
-        const YAML::Node distortion = root[ "distortion_coefficients" ];
+        const YAML::Node resolution = camera[ "resolution" ];
+        const YAML::Node intrinsics = camera[ "intrinsics" ];
+        const YAML::Node distortion = camera[ "distortion_coeffs" ];
         if ( !resolution.IsSequence() || resolution.size() != 2U )
         {
           return adapter::makeError(
@@ -157,8 +160,7 @@ namespace phad::dataset
         {
           return adapter::makeError(
               DatasetErrorCode::kInvalidCalibration, sensor_id, path,
-              "distortion_coefficients",
-              "distortion must contain 4 values" );
+              "distortion_coeffs", "distortion must contain 4 values" );
         }
         for ( std::size_t index = 0;
               index < calibration.distortion_coefficients.size(); ++index )
@@ -170,8 +172,7 @@ namespace phad::dataset
           {
             return adapter::makeError(
                 DatasetErrorCode::kInvalidCalibration, sensor_id, path,
-                "distortion_coefficients",
-                "distortion values must be finite" );
+                "distortion_coeffs", "distortion values must be finite" );
           }
         }
       }
@@ -194,25 +195,8 @@ namespace phad::dataset
         return yaml.error();
       }
       const YAML::Node& root = yaml.value();
-      try
-      {
-        if ( root[ "sensor_type" ].as<std::string>() != "imu" )
-        {
-          return adapter::makeError(
-              DatasetErrorCode::kInvalidCalibration, sensor_id, path,
-              "sensor_type", "expected imu" );
-        }
-      }
-      catch ( const YAML::Exception& exception )
-      {
-        return adapter::makeError(
-            DatasetErrorCode::kInvalidCalibration, sensor_id, path,
-            "sensor_type", exception.what() );
-      }
-
-      auto transform = parseTransform( root, sensor_id, path );
-      auto rate =
-          adapter::positiveYamlScalar( root, "rate_hz", sensor_id, path );
+      auto              rate =
+          adapter::positiveYamlScalar( root, "update_rate", sensor_id, path );
       auto accel_noise = adapter::positiveYamlScalar(
           root, "accelerometer_noise_density", sensor_id, path );
       auto gyro_noise = adapter::positiveYamlScalar(
@@ -221,10 +205,6 @@ namespace phad::dataset
           root, "accelerometer_random_walk", sensor_id, path );
       auto gyro_walk = adapter::positiveYamlScalar(
           root, "gyroscope_random_walk", sensor_id, path );
-      if ( !transform )
-      {
-        return transform.error();
-      }
       if ( !rate )
       {
         return rate.error();
@@ -246,14 +226,13 @@ namespace phad::dataset
         return gyro_walk.error();
       }
       return sensor::ImuCalibration{
-          transform.value(), rate.value(), accel_noise.value(),
+          identityTransform(), rate.value(), accel_noise.value(),
           gyro_noise.value(), accel_walk.value(), gyro_walk.value() };
     }
 
   }  // namespace
 
-  DatasetResult<StereoImuDataset> euroc::open(
-      const fs::path& sequence_root )
+  DatasetResult<StereoImuDataset> open( const fs::path& sequence_root )
   {
     std::error_code ec;
     if ( !fs::is_directory( sequence_root, ec ) || ec )
@@ -264,22 +243,26 @@ namespace phad::dataset
     }
 
     const fs::path mav0 = sequence_root / "mav0";
-    for ( const auto* sensor_id : { "cam0", "cam1", "imu0" } )
+    const fs::path dso  = sequence_root / "dso";
+    for ( const auto& [ path, directory ] :
+          std::array<std::pair<fs::path, bool>, 7>{
+              std::pair{ mav0 / "cam0", true },
+              std::pair{ mav0 / "cam1", true },
+              std::pair{ mav0 / "imu0", true },
+              std::pair{ mav0 / "cam0" / "data.csv", false },
+              std::pair{ mav0 / "cam1" / "data.csv", false },
+              std::pair{ mav0 / "imu0" / "data.csv", false },
+              std::pair{ dso / "camchain.yaml", false } } )
     {
-      const fs::path sensor_root = mav0 / sensor_id;
-      for ( const auto& [ path, directory ] :
-            std::array<std::pair<fs::path, bool>, 3>{
-                std::pair{ sensor_root, true },
-                std::pair{ sensor_root / "sensor.yaml", false },
-                std::pair{ sensor_root / "data.csv", false } } )
+      if ( auto error = adapter::validateRequiredPath( path, directory ) )
       {
-        if ( auto error =
-                 adapter::validateRequiredPath( path, directory ) )
-        {
-          error->sensor_id = sensor_id;
-          return *std::move( error );
-        }
+        return *std::move( error );
       }
+    }
+    if ( auto error =
+             adapter::validateRequiredPath( dso / "imu_config.yaml", false ) )
+    {
+      return *std::move( error );
     }
     for ( const auto* sensor_id : { "cam0", "cam1" } )
     {
@@ -291,12 +274,17 @@ namespace phad::dataset
       }
     }
 
-    auto left_calibration =
-        parseCameraCalibration( mav0 / "cam0" / "sensor.yaml", "cam0" );
-    auto right_calibration =
-        parseCameraCalibration( mav0 / "cam1" / "sensor.yaml", "cam1" );
+    auto camchain = adapter::loadYaml( dso / "camchain.yaml", "cam0/cam1" );
+    if ( !camchain )
+    {
+      return camchain.error();
+    }
+    auto left_calibration = parseCameraCalibration(
+        camchain.value(), "cam0", dso / "camchain.yaml" );
+    auto right_calibration = parseCameraCalibration(
+        camchain.value(), "cam1", dso / "camchain.yaml" );
     auto imu_calibration =
-        parseImuCalibration( mav0 / "imu0" / "sensor.yaml" );
+        parseImuCalibration( dso / "imu_config.yaml" );
     if ( !left_calibration )
     {
       return left_calibration.error();
@@ -308,14 +296,6 @@ namespace phad::dataset
     if ( !imu_calibration )
     {
       return imu_calibration.error();
-    }
-    if ( !adapter::isIdentity( imu_calibration.value().T_B_imu ) )
-    {
-      return adapter::makeError(
-          DatasetErrorCode::kUnsupportedImuExtrinsics, "imu0",
-          mav0 / "imu0" / "sensor.yaml", "T_BS",
-          "EuRoC adapter requires identity IMU extrinsics so measurements "
-          "already satisfy the body-frame contract" );
     }
 
     auto left_records = adapter::parseCameraCsv(
@@ -348,19 +328,8 @@ namespace phad::dataset
                               right_calibration.value(),
                               imu_calibration.value() },
         std::move( imu_measurements ).value(),
-        std::move( stereo_index ).value(), sensor::PixelType::kUint8,
-        sensor::PixelType::kUint8 );
+        std::move( stereo_index ).value(), sensor::PixelType::kUint16,
+        sensor::PixelType::kUint16 );
   }
 
-  DatasetResult<EurocDataset> EurocDataset::open(
-      const fs::path& sequence_root )
-  {
-    auto opened = euroc::open( sequence_root );
-    if ( !opened )
-    {
-      return opened.error();
-    }
-    return EurocDataset{ std::move( opened ).value() };
-  }
-
-}  // namespace phad::dataset
+}  // namespace phad::dataset::tum_vi

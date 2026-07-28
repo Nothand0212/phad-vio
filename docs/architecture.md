@@ -108,6 +108,15 @@ estimator 返回完整的当前导航状态、估计时间戳和诊断摘要。�
 数据集特有知识只存在于 adapter 内。核心模块不得出现 `euroc`、`kitti`
 等条件分支。
 
+离线双目惯性数据统一产出 `StereoImuDataset`。该 module 拥有规范化标定、
+严格有序的 IMU 测量、双目索引和惰性图像解码；EuRoC 与 TUM VI adapter
+只负责格式专属的目录、CSV/YAML 字段、外参方向和像素类型转换。格式由
+调用方显式选择，不进行目录猜测，也不通过虚基类暴露 parser 生命周期。
+
+`Image` 保留数据集原始无符号灰度深度，当前支持 `uint8_t` 与 `uint16_t`。
+调用方必须使用与 `PixelType` 一致的 typed pixel view，不能把 16-bit 图像
+静默截断为 8-bit。
+
 ### 3.2 Sensor synchronizer
 
 对外接口应保持小而完整，例如：
@@ -266,4 +275,3 @@ shutdown、队列溢出和后台异常都必须是可观察事件。
 5. 增加独立 global pose graph 与回环。
 
 每次只替换一个主要机制，并保留上一阶段的合成测试作为回归证据。
-

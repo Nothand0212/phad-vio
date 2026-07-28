@@ -6,12 +6,17 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(PHAD_BUILD_TESTS "Build phad-vio tests" ON)
 option(PHAD_ENABLE_MH01_TESTS "Enable local EuRoC MH_01 integration tests" OFF)
+option(PHAD_ENABLE_TUMVI_CORRIDOR1_TESTS
+  "Enable local TUM VI corridor1 integration tests" OFF)
 
 find_package(OpenCV 4 REQUIRED COMPONENTS imgcodecs)
 find_package(yaml-cpp 0.8 REQUIRED)
 
 add_library(phad_dataset
+  phad/dataset/internal/dataset_adapter_utils.cpp
+  phad/dataset/stereo_imu_dataset.cpp
   phad/dataset/euroc/euroc_dataset.cpp
+  phad/dataset/tum_vi/tum_vi_dataset.cpp
 )
 add_library(phad::dataset ALIAS phad_dataset)
 
@@ -33,6 +38,7 @@ if(PHAD_BUILD_TESTS)
   add_executable(phad_dataset_tests
     tests/common/timestamp_test.cpp
     tests/dataset/euroc/euroc_dataset_test.cpp
+    tests/dataset/tum_vi/tum_vi_dataset_test.cpp
   )
   target_link_libraries(phad_dataset_tests PRIVATE
     phad::dataset GTest::gtest_main opencv_imgcodecs
@@ -45,5 +51,17 @@ if(PHAD_BUILD_TESTS)
     )
     target_link_libraries(phad_euroc_mh01_test PRIVATE phad::dataset GTest::gtest_main)
     gtest_discover_tests(phad_euroc_mh01_test PROPERTIES LABELS "mh01")
+  endif()
+
+  if(PHAD_ENABLE_TUMVI_CORRIDOR1_TESTS)
+    add_executable(phad_tumvi_corridor1_test
+      tests/dataset/tum_vi/tum_vi_corridor1_test.cpp
+    )
+    target_link_libraries(phad_tumvi_corridor1_test
+      PRIVATE phad::dataset GTest::gtest_main
+    )
+    gtest_discover_tests(phad_tumvi_corridor1_test
+      PROPERTIES LABELS "tumvi-corridor1"
+    )
   endif()
 endif()
