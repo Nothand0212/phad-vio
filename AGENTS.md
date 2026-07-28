@@ -12,3 +12,7 @@ Use the five default canonical triage labels. See `docs/agents/triage-labels.md`
 
 This is a single-context repository. See `docs/agents/domain.md`.
 
+### C++ naming
+
+C++ identifiers follow project naming rules. See `docs/agents/cpp-naming.md`.
+

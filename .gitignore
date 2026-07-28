@@ -1,1 +1,7 @@
+.cache/
+.cursor/
+.vscode/
+
 thirdparty/
+/build*/
+compile_commands.json
