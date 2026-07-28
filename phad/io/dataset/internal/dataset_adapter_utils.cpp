@@ -1,5 +1,3 @@
-#include "phad/dataset/internal/dataset_adapter_utils.hpp"
-
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -10,7 +8,17 @@
 #include <system_error>
 #include <utility>
 
-namespace phad::dataset::internal
+#include "phad/io/dataset/internal/dataset_adapter_utils.hpp"
+
+/**
+ * @file dataset_adapter_utils.cpp
+ * @brief 数据集加载过程中的辅助工具函数实现。
+ *
+ * 该文件实现了 phad::io::dataset::internal 命名空间中的辅助工具函数，
+ * 用于数据集加载过程中的错误处理和数据解析。
+ */
+
+namespace phad::io::dataset::internal
 {
   namespace
   {
@@ -500,4 +508,4 @@ namespace phad::dataset::internal
     return stereo_index;
   }
 
-}  // namespace phad::dataset::internal
+}  // namespace phad::io::dataset::internal

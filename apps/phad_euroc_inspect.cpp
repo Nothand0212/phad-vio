@@ -4,7 +4,7 @@
 #include <filesystem>
 #include <iostream>
 
-#include "phad/dataset/euroc/euroc_dataset.hpp"
+#include "phad/io/dataset/euroc/euroc_dataset.hpp"
 
 int main( int argc, char** argv )
 {
@@ -15,7 +15,7 @@ int main( int argc, char** argv )
   }
 
   auto opened =
-      phad::dataset::EurocDataset::open( std::filesystem::path{ argv[ 1 ] } );
+      phad::io::dataset::EurocDataset::open( std::filesystem::path{ argv[ 1 ] } );
   if ( !opened )
   {
     std::cerr << opened.error().describe() << '\n';

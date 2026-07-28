@@ -1,4 +1,4 @@
-#include "phad/dataset/tum_vi/tum_vi_dataset.hpp"
+#include "phad/io/dataset/tum_vi/tum_vi_dataset.hpp"
 
 #include <gtest/gtest.h>
 
@@ -136,7 +136,7 @@ namespace
   TEST( TumViDatasetTest, OpensNormalizedCalibrationImuAndUint16Stereo )
   {
     TumViFixture fixture;
-    auto         opened = phad::dataset::tum_vi::open( fixture.root() );
+    auto         opened = phad::io::dataset::tum_vi::open( fixture.root() );
     ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
 
     const auto& dataset = opened.value();
@@ -177,20 +177,20 @@ namespace
     {
       TumViFixture fixture;
       fixture.writeCamchain( "equidistant", true );
-      auto opened = phad::dataset::tum_vi::open( fixture.root() );
+      auto opened = phad::io::dataset::tum_vi::open( fixture.root() );
       ASSERT_FALSE( opened.hasValue() );
       EXPECT_EQ( opened.error().code,
-                 phad::dataset::DatasetErrorCode::kInvalidCalibration );
+                 phad::io::dataset::DatasetErrorCode::kInvalidCalibration );
       EXPECT_EQ( opened.error().field, "T_cam_imu.bottom_row" );
     }
     {
       TumViFixture fixture;
       fixture.writeCamchain( "radtan", false );
-      auto opened = phad::dataset::tum_vi::open( fixture.root() );
+      auto opened = phad::io::dataset::tum_vi::open( fixture.root() );
       ASSERT_FALSE( opened.hasValue() );
       EXPECT_EQ(
           opened.error().code,
-          phad::dataset::DatasetErrorCode::kUnsupportedDistortionModel );
+          phad::io::dataset::DatasetErrorCode::kUnsupportedDistortionModel );
     }
   }
 
@@ -202,23 +202,23 @@ namespace
           "cam1",
           "#timestamp [ns],filename\n"
           "1520531829251142059,1520531829251142058.png\n" );
-      auto opened = phad::dataset::tum_vi::open( fixture.root() );
+      auto opened = phad::io::dataset::tum_vi::open( fixture.root() );
       ASSERT_FALSE( opened.hasValue() );
       EXPECT_EQ(
           opened.error().code,
-          phad::dataset::DatasetErrorCode::kStereoTimestampMismatch );
+          phad::io::dataset::DatasetErrorCode::kStereoTimestampMismatch );
     }
     {
       TumViFixture fixture;
       fixture.writeImage( "cam0", "1520531829301142058.png", 12,
                           CV_8UC1 );
-      auto opened = phad::dataset::tum_vi::open( fixture.root() );
+      auto opened = phad::io::dataset::tum_vi::open( fixture.root() );
       ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
       auto loaded = opened.value().loadStereo( 1 );
       ASSERT_FALSE( loaded.hasValue() );
       EXPECT_EQ(
           loaded.error().code,
-          phad::dataset::DatasetErrorCode::kImageFormatMismatch );
+          phad::io::dataset::DatasetErrorCode::kImageFormatMismatch );
       EXPECT_EQ( loaded.error().field, "pixel_type" );
     }
   }

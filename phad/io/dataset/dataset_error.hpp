@@ -9,7 +9,7 @@
 
 #include "phad/common/timestamp.hpp"
 
-namespace phad::dataset
+namespace phad::io::dataset
 {
 
   /**
@@ -113,4 +113,4 @@ namespace phad::dataset
     std::optional<DatasetError> m_error;
   };
 
-}  // namespace phad::dataset
+}  // namespace phad::io::dataset

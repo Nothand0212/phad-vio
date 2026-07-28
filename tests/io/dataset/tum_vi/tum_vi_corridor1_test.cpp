@@ -7,7 +7,7 @@
 #include <filesystem>
 #include <string>
 
-#include "phad/dataset/tum_vi/tum_vi_dataset.hpp"
+#include "phad/io/dataset/tum_vi/tum_vi_dataset.hpp"
 
 namespace
 {
@@ -22,7 +22,7 @@ namespace
       GTEST_SKIP() << "PHAD_TUMVI_CORRIDOR1_PATH is not set";
     }
 
-    auto opened = phad::dataset::tum_vi::open(
+    auto opened = phad::io::dataset::tum_vi::open(
         std::filesystem::path{ configured_path } );
     ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
     const auto& dataset = opened.value();
@@ -40,7 +40,7 @@ namespace
     EXPECT_EQ( imu.back().timestamp.nanoseconds(),
                1'520'532'128'752'735'058 );
     EXPECT_TRUE( std::ranges::is_sorted(
-        stereo, {}, &phad::dataset::StereoFrameRef::timestamp ) );
+        stereo, {}, &phad::io::dataset::StereoFrameRef::timestamp ) );
     EXPECT_TRUE( std::ranges::is_sorted(
         imu, {}, &phad::sensor::ImuMeasurement::timestamp ) );
 

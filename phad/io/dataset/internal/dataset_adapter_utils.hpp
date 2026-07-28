@@ -8,11 +8,24 @@
 #include <string_view>
 #include <vector>
 
-#include "phad/dataset/stereo_imu_dataset.hpp"
+#include "phad/io/dataset/stereo_imu_dataset.hpp"
 
-namespace phad::dataset::internal
+/**
+ * @file dataset_adapter_utils.hpp
+ * @brief 数据集加载过程中的辅助工具函数。
+ *
+ * 该文件定义了 phad::io::dataset::internal 命名空间中的辅助工具函数，
+ * 用于数据集加载过程中的错误处理和数据解析。
+ */
+
+namespace phad::io::dataset::internal
 {
 
+  /**
+   * @brief CameraRecord 结构体用于表示相机记录。
+   *
+   * 该结构体封装了时间戳、图像路径和行号，提供对相机记录的快速访问和引用。
+   */
   struct CameraRecord
   {
     common::Timestamp     timestamp;
@@ -20,6 +33,12 @@ namespace phad::dataset::internal
     std::size_t           line = 0;
   };
 
+  /**
+   * @brief makeError 函数用于创建数据集加载过程中的错误信息。
+   *
+   * 该函数根据提供的错误代码、传感器标识、文件路径、字段名和错误原因，
+   * 创建一个 DatasetError 结构体，用于表示数据集加载过程中的错误信息。
+   */
   [[nodiscard]] DatasetError makeError(
       DatasetErrorCode code, std::string sensor_id,
       std::filesystem::path source_path, std::string field, std::string cause,
@@ -58,4 +77,4 @@ namespace phad::dataset::internal
       const std::vector<CameraRecord>& right_records,
       const std::filesystem::path&     source_path );
 
-}  // namespace phad::dataset::internal
+}  // namespace phad::io::dataset::internal

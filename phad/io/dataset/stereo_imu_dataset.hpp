@@ -6,12 +6,12 @@
 #include <utility>
 #include <vector>
 
-#include "phad/dataset/dataset_error.hpp"
+#include "phad/io/dataset/dataset_error.hpp"
 #include "phad/sensor/calibration.hpp"
 #include "phad/sensor/imu_measurement.hpp"
 #include "phad/sensor/stereo_frame.hpp"
 
-namespace phad::dataset
+namespace phad::io::dataset
 {
 
   struct StereoFrameRef
@@ -76,4 +76,4 @@ namespace phad::dataset
     sensor::PixelType                   m_right_pixel_type;
   };
 
-}  // namespace phad::dataset
+}  // namespace phad::io::dataset

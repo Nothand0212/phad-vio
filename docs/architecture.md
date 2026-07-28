@@ -5,7 +5,7 @@
 第一版目标是建立一条可解释、可测试的双目 VIO pipeline：
 
 ```text
-dataset / sensors
+io: dataset / live sensors
         |
         v
 sensor adapters
@@ -104,6 +104,19 @@ estimator 返回完整的当前导航状态、估计时间戳和诊断摘要。�
 - 应用已标定的时间偏移；
 - 保留原始时间信息供诊断；
 - 产出核心数据类型。
+
+`phad::io` 是外部数据进入或离开系统的顶层 module。离线数据集 adapter
+归属 `phad::io::dataset`；未来串口和 ROS 输入也归属 `phad::io`，但不与
+dataset 共享随机访问 interface。`phad::sensor` 只定义与数据来源无关的
+测量、图像和标定类型。
+
+```text
+phad::io
+├── dataset
+├── serial        # future
+├── ros           # future
+└── SensorSource  # future seam
+```
 
 数据集特有知识只存在于 adapter 内。核心模块不得出现 `euroc`、`kitti`
 等条件分支。

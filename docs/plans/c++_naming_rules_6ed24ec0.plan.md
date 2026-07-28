@@ -31,7 +31,7 @@ isProject: false
 补充约定（与现有代码一致，写入规则以免歧义）：
 - 枚举值：`k` + 大驼峰（已有，如 `kRootNotFound`）
 - 常量：`k` + 大驼峰或 `SCREAMING_SNAKE`（按现有风格保留 `kCameraHeader` 一类）
-- 命名空间：蛇形（`phad::dataset`）
+- 命名空间：蛇形（`phad::io::dataset`）
 
 ## 交付物
 
@@ -49,10 +49,10 @@ isProject: false
 
 主要改动点（当前不符）：
 
-- 成员：[`euroc_dataset.hpp`](phad/dataset/euroc/euroc_dataset.hpp) 的 `calibration_` → `m_calibration` 等；[`dataset_error.hpp`](phad/dataset/dataset_error.hpp) 的 `value_` / `error_` → `m_value` / `m_error`
-- 自由函数 / 方法：[`euroc_dataset.cpp`](phad/dataset/euroc/euroc_dataset.cpp) 中 PascalCase（如 `MakeError`, `ParseTimestamp`, `RemoveCarriageReturn`）→ 小驼峰（`makeError`, `parseTimestamp`, `removeCarriageReturn`）
+- 成员：[`euroc_dataset.hpp`](phad/io/dataset/euroc/euroc_dataset.hpp) 的 `calibration_` → `m_calibration` 等；[`dataset_error.hpp`](phad/io/dataset/dataset_error.hpp) 的 `value_` / `error_` → `m_value` / `m_error`
+- 自由函数 / 方法：[`euroc_dataset.cpp`](phad/io/dataset/euroc/euroc_dataset.cpp) 中 PascalCase（如 `MakeError`, `ParseTimestamp`, `RemoveCarriageReturn`）→ 小驼峰（`makeError`, `parseTimestamp`, `removeCarriageReturn`）
 - 方法：`Open` → `open`；保留已是小驼峰的 `loadStereo` / `imuMeasurements` 等
-- 同步更新测试与调用处：[`euroc_dataset_test.cpp`](tests/dataset/euroc/euroc_dataset_test.cpp)、[`euroc_mh01_test.cpp`](tests/dataset/euroc/euroc_mh01_test.cpp)、[`phad_euroc_inspect.cpp`](apps/phad_euroc_inspect.cpp)
+- 同步更新测试与调用处：[`euroc_dataset_test.cpp`](tests/io/dataset/euroc/euroc_dataset_test.cpp)、[`euroc_mh01_test.cpp`](tests/io/dataset/euroc/euroc_mh01_test.cpp)、[`phad_euroc_inspect.cpp`](apps/phad_euroc_inspect.cpp)
 
 **不改**：类型名、枚举值、局部蛇形变量、文件名。
 

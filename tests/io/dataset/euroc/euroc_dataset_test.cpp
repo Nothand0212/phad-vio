@@ -1,4 +1,4 @@
-#include "phad/dataset/euroc/euroc_dataset.hpp"
+#include "phad/io/dataset/euroc/euroc_dataset.hpp"
 
 #include <gtest/gtest.h>
 
@@ -24,7 +24,7 @@ namespace
 {
 
   namespace fs = std::filesystem;
-  using phad::dataset::EurocDataset;
+  using phad::io::dataset::EurocDataset;
 
   class EurocFixture
   {
@@ -175,7 +175,7 @@ namespace
   TEST( EurocDatasetTest, AdapterReturnsNormalizedStereoImuDataset )
   {
     EurocFixture fixture;
-    auto         result = phad::dataset::euroc::open( fixture.root() );
+    auto         result = phad::io::dataset::euroc::open( fixture.root() );
     ASSERT_TRUE( result.hasValue() ) << result.error().describe();
     EXPECT_EQ( result.value().stereoIndex().size(), 3U );
     EXPECT_EQ( result.value().imuMeasurements().size(), 4U );
@@ -331,17 +331,17 @@ namespace
 
     ASSERT_FALSE( loaded.hasValue() );
     EXPECT_EQ( loaded.error().code,
-               phad::dataset::DatasetErrorCode::kImageDecodeFailed );
+               phad::io::dataset::DatasetErrorCode::kImageDecodeFailed );
     EXPECT_EQ( loaded.error().sensor_id, "cam1" );
     EXPECT_EQ( loaded.error().line_or_record_index, 1U );
     EXPECT_EQ( loaded.error().timestamp->nanoseconds(),
                EurocFixture::kFirstTimestamp + 50'000'000 );
   }
 
-  void expectOpenError( const fs::path&                 root,
-                        phad::dataset::DatasetErrorCode expected_code,
-                        const std::string&              expected_sensor = {},
-                        const std::string&              expected_field  = {} )
+  void expectOpenError( const fs::path&                     root,
+                        phad::io::dataset::DatasetErrorCode expected_code,
+                        const std::string&                  expected_sensor = {},
+                        const std::string&                  expected_field  = {} )
   {
     auto result = EurocDataset::open( root );
     ASSERT_FALSE( result.hasValue() );
@@ -362,11 +362,11 @@ namespace
   {
     EurocFixture fixture;
     expectOpenError( fixture.root() / "absent",
-                     phad::dataset::DatasetErrorCode::kRootNotFound );
+                     phad::io::dataset::DatasetErrorCode::kRootNotFound );
 
     fs::remove( fixture.sensorPath( "cam1", "sensor.yaml" ) );
     expectOpenError( fixture.root(),
-                     phad::dataset::DatasetErrorCode::kRequiredFileMissing,
+                     phad::io::dataset::DatasetErrorCode::kRequiredFileMissing,
                      "cam1" );
   }
 
@@ -376,7 +376,7 @@ namespace
       EurocFixture fixture;
       fixture.writeCsv( "cam0", "timestamp,filename\n" );
       expectOpenError( fixture.root(),
-                       phad::dataset::DatasetErrorCode::kInvalidCsvHeader,
+                       phad::io::dataset::DatasetErrorCode::kInvalidCsvHeader,
                        "cam0", "header" );
     }
     {
@@ -385,7 +385,7 @@ namespace
           "cam0",
           "#timestamp [ns],filename\n1403636579763555584,left-a.png,extra\n" );
       expectOpenError( fixture.root(),
-                       phad::dataset::DatasetErrorCode::kInvalidColumnCount,
+                       phad::io::dataset::DatasetErrorCode::kInvalidColumnCount,
                        "cam0" );
     }
     {
@@ -396,7 +396,7 @@ namespace
           "w_RS_S_z [rad s^-1],a_RS_S_x [m s^-2],a_RS_S_y [m s^-2],"
           "a_RS_S_z [m s^-2]\n1403636579763555584,nope,0,0,0,0,1\n" );
       expectOpenError( fixture.root(),
-                       phad::dataset::DatasetErrorCode::kInvalidField, "imu0",
+                       phad::io::dataset::DatasetErrorCode::kInvalidField, "imu0",
                        "w_RS_S_x" );
     }
   }
@@ -410,7 +410,7 @@ namespace
       EurocFixture fixture;
       fixture.writeCsv( "cam0", camera_csv( "1.5,left-a.png\n" ) );
       expectOpenError( fixture.root(),
-                       phad::dataset::DatasetErrorCode::kInvalidTimestamp,
+                       phad::io::dataset::DatasetErrorCode::kInvalidTimestamp,
                        "cam0", "timestamp" );
     }
     {
@@ -418,7 +418,7 @@ namespace
       fixture.writeCsv( "cam0",
                         camera_csv( "9223372036854775808,left-a.png\n" ) );
       expectOpenError( fixture.root(),
-                       phad::dataset::DatasetErrorCode::kTimestampOverflow,
+                       phad::io::dataset::DatasetErrorCode::kTimestampOverflow,
                        "cam0", "timestamp" );
     }
     {
@@ -427,7 +427,7 @@ namespace
           "cam0", camera_csv( "1403636579763555584,left-a.png\n"
                               "1403636579763555584,left-b.png\n" ) );
       expectOpenError( fixture.root(),
-                       phad::dataset::DatasetErrorCode::kDuplicateTimestamp,
+                       phad::io::dataset::DatasetErrorCode::kDuplicateTimestamp,
                        "cam0", "timestamp" );
     }
     {
@@ -436,7 +436,7 @@ namespace
           "cam0", camera_csv( "1403636579813555584,left-b.png\n"
                               "1403636579763555584,left-a.png\n" ) );
       expectOpenError( fixture.root(),
-                       phad::dataset::DatasetErrorCode::kOutOfOrderTimestamp,
+                       phad::io::dataset::DatasetErrorCode::kOutOfOrderTimestamp,
                        "cam0", "timestamp" );
     }
   }
@@ -455,7 +455,7 @@ namespace
       auto result = EurocDataset::open( fixture.root() );
       ASSERT_FALSE( result.hasValue() );
       EXPECT_EQ( result.error().code,
-                 phad::dataset::DatasetErrorCode::kNonFiniteMeasurement );
+                 phad::io::dataset::DatasetErrorCode::kNonFiniteMeasurement );
       EXPECT_EQ( result.error().sensor_id, "imu0" );
       EXPECT_EQ( result.error().line_or_record_index, 2U );
       EXPECT_EQ( result.error().timestamp->nanoseconds(),
@@ -477,7 +477,7 @@ namespace
                       "1403636579763555584,0,0,0,0,0,1\n"
                       "1403636579763555584,0,0,0,0,0,1\n" );
       expectOpenError( fixture.root(),
-                       phad::dataset::DatasetErrorCode::kDuplicateTimestamp,
+                       phad::io::dataset::DatasetErrorCode::kDuplicateTimestamp,
                        "imu0", "timestamp" );
     }
     {
@@ -487,7 +487,7 @@ namespace
                       "1403636579813555584,0,0,0,0,0,1\n"
                       "1403636579763555584,0,0,0,0,0,1\n" );
       expectOpenError( fixture.root(),
-                       phad::dataset::DatasetErrorCode::kOutOfOrderTimestamp,
+                       phad::io::dataset::DatasetErrorCode::kOutOfOrderTimestamp,
                        "imu0", "timestamp" );
     }
   }
@@ -503,7 +503,7 @@ namespace
           "1403636579813555584,right-b.png\n" );
       expectOpenError(
           fixture.root(),
-          phad::dataset::DatasetErrorCode::kStereoTimestampMismatch,
+          phad::io::dataset::DatasetErrorCode::kStereoTimestampMismatch,
           "cam0/cam1", "timestamp" );
     }
     {
@@ -516,7 +516,7 @@ namespace
           "1403636579863555584,right-c.png\n" );
       expectOpenError(
           fixture.root(),
-          phad::dataset::DatasetErrorCode::kStereoTimestampMismatch,
+          phad::io::dataset::DatasetErrorCode::kStereoTimestampMismatch,
           "cam0/cam1", "timestamp" );
     }
   }
@@ -530,21 +530,21 @@ namespace
       EurocFixture fixture;
       fixture.writeCsv( "cam0", csv( "/tmp/image.png" ) );
       expectOpenError( fixture.root(),
-                       phad::dataset::DatasetErrorCode::kUnsafeImagePath, "cam0",
+                       phad::io::dataset::DatasetErrorCode::kUnsafeImagePath, "cam0",
                        "filename" );
     }
     {
       EurocFixture fixture;
       fixture.writeCsv( "cam0", csv( "../left-a.png" ) );
       expectOpenError( fixture.root(),
-                       phad::dataset::DatasetErrorCode::kUnsafeImagePath, "cam0",
+                       phad::io::dataset::DatasetErrorCode::kUnsafeImagePath, "cam0",
                        "filename" );
     }
     {
       EurocFixture fixture;
       fixture.writeCsv( "cam0", csv( "missing.png" ) );
       expectOpenError( fixture.root(),
-                       phad::dataset::DatasetErrorCode::kImageFileMissing, "cam0",
+                       phad::io::dataset::DatasetErrorCode::kImageFileMissing, "cam0",
                        "filename" );
     }
   }
@@ -563,7 +563,7 @@ namespace
           "distortion_model: radial-tangential\n"
           "distortion_coefficients: [0, 0, 0, 0]\n" );
       expectOpenError( fixture.root(),
-                       phad::dataset::DatasetErrorCode::kInvalidCalibration,
+                       phad::io::dataset::DatasetErrorCode::kInvalidCalibration,
                        "cam0", "T_BS.rotation" );
     }
     {
@@ -572,7 +572,7 @@ namespace
                                EurocFixture::validCameraYaml( "omnidirectional" ) );
       expectOpenError(
           fixture.root(),
-          phad::dataset::DatasetErrorCode::kUnsupportedCameraModel, "cam0",
+          phad::io::dataset::DatasetErrorCode::kUnsupportedCameraModel, "cam0",
           "camera_model" );
     }
     {
@@ -581,7 +581,7 @@ namespace
           "cam0", EurocFixture::validCameraYaml( "pinhole", "equidistant" ) );
       expectOpenError(
           fixture.root(),
-          phad::dataset::DatasetErrorCode::kUnsupportedDistortionModel, "cam0",
+          phad::io::dataset::DatasetErrorCode::kUnsupportedDistortionModel, "cam0",
           "distortion_model" );
     }
   }
@@ -601,7 +601,7 @@ namespace
 
     expectOpenError(
         fixture.root(),
-        phad::dataset::DatasetErrorCode::kUnsupportedImuExtrinsics, "imu0",
+        phad::io::dataset::DatasetErrorCode::kUnsupportedImuExtrinsics, "imu0",
         "T_BS" );
   }
 
@@ -614,7 +614,7 @@ namespace
       yaml.erase( yaml.find( line ), line.size() );
       fixture.writeSensorFile( "imu0", yaml );
       expectOpenError( fixture.root(),
-                       phad::dataset::DatasetErrorCode::kInvalidCalibration,
+                       phad::io::dataset::DatasetErrorCode::kInvalidCalibration,
                        "imu0", "gyroscope_noise_density" );
     }
     for ( const std::string value : { "0", "-1", ".nan", ".inf" } )
@@ -626,7 +626,7 @@ namespace
                     "accelerometer_random_walk: " + value );
       fixture.writeSensorFile( "imu0", yaml );
       expectOpenError( fixture.root(),
-                       phad::dataset::DatasetErrorCode::kInvalidCalibration,
+                       phad::io::dataset::DatasetErrorCode::kInvalidCalibration,
                        "imu0", "accelerometer_random_walk" );
     }
   }
@@ -641,7 +641,7 @@ namespace
       auto loaded = opened.value().loadStereo( 1 );
       ASSERT_FALSE( loaded.hasValue() );
       EXPECT_EQ( loaded.error().code,
-                 phad::dataset::DatasetErrorCode::kImageFormatMismatch );
+                 phad::io::dataset::DatasetErrorCode::kImageFormatMismatch );
       EXPECT_EQ( loaded.error().field, "resolution" );
     }
     for ( const int type : { CV_8UC3, CV_16UC1 } )
@@ -653,7 +653,7 @@ namespace
       auto loaded = opened.value().loadStereo( 1 );
       ASSERT_FALSE( loaded.hasValue() );
       EXPECT_EQ( loaded.error().code,
-                 phad::dataset::DatasetErrorCode::kImageFormatMismatch );
+                 phad::io::dataset::DatasetErrorCode::kImageFormatMismatch );
       EXPECT_EQ( loaded.error().field, "pixel_type" );
     }
   }
@@ -666,7 +666,7 @@ namespace
     auto loaded = opened.value().loadStereo( 3 );
     ASSERT_FALSE( loaded.hasValue() );
     EXPECT_EQ( loaded.error().code,
-               phad::dataset::DatasetErrorCode::kIndexOutOfRange );
+               phad::io::dataset::DatasetErrorCode::kIndexOutOfRange );
   }
 
 #ifdef __linux__

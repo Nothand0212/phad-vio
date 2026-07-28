@@ -1,4 +1,4 @@
-#include "phad/dataset/stereo_imu_dataset.hpp"
+#include "phad/io/dataset/stereo_imu_dataset.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-namespace phad::dataset
+namespace phad::io::dataset
 {
   namespace
   {
@@ -121,4 +121,4 @@ namespace phad::dataset
                                 std::move( right ).value() };
   }
 
-}  // namespace phad::dataset
+}  // namespace phad::io::dataset

@@ -31,8 +31,8 @@
 - CMake 项目骨架和测试框架；
 - timestamp、IMU measurement、camera calibration 和 IMU calibration
   核心类型；
-- 规范化 `StereoImuDataset` 值类型，以及 EuRoC、TUM VI 两个具体
-  dataset adapter；
+- `phad::io::dataset` 下的规范化 `StereoImuDataset` 值类型，以及
+  EuRoC、TUM VI 两个具体 dataset adapter；
 - 从原生 EuRoC/ASL 目录解析 cam0、cam1、imu0 的 `sensor.yaml` 和
   `data.csv`；
 - 从 TUM VI Euroc/DSO export 解析 `mav0` manifest、

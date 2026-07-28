@@ -1,5 +1,9 @@
 # 通用 Stereo-IMU 数据集与 EuRoC/TUM VI Adapter
 
+> 模块归属已由
+> [`dataset_io_module_relocation.plan.md`](dataset_io_module_relocation.plan.md)
+> 修正：本文中的 dataset 公开接口现位于 `phad::io::dataset`。
+
 ## Summary
 
 1. 引入统一的 `StereoImuDataset` 值类型。
@@ -15,8 +19,8 @@
   - `loadStereo(index)`
 - 新增：
   ```cpp
-  phad::dataset::euroc::open(sequence_root);
-  phad::dataset::tum_vi::open(sequence_root);
+  phad::io::dataset::euroc::open(sequence_root);
+  phad::io::dataset::tum_vi::open(sequence_root);
   ```
   均返回 `DatasetResult<StereoImuDataset>`。
 - 保留 `EurocDataset::open()` 和现有访问方法，通过组合委托给通用对象。

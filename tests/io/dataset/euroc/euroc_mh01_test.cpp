@@ -6,7 +6,7 @@
 #include <filesystem>
 #include <string>
 
-#include "phad/dataset/euroc/euroc_dataset.hpp"
+#include "phad/io/dataset/euroc/euroc_dataset.hpp"
 
 namespace
 {
@@ -20,7 +20,7 @@ namespace
     }
 
     auto opened =
-        phad::dataset::EurocDataset::open( std::filesystem::path{ configured_path } );
+        phad::io::dataset::EurocDataset::open( std::filesystem::path{ configured_path } );
     ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
     const auto& dataset = opened.value();
     const auto  stereo  = dataset.stereoIndex();
@@ -32,7 +32,7 @@ namespace
     EXPECT_EQ( stereo.back().timestamp.nanoseconds(), 1'403'636'763'813'555'456 );
     EXPECT_EQ( imu.front().timestamp.nanoseconds(), 1'403'636'579'758'555'392 );
     EXPECT_EQ( imu.back().timestamp.nanoseconds(), 1'403'636'763'853'555'456 );
-    EXPECT_TRUE( std::ranges::is_sorted( stereo, {}, &phad::dataset::StereoFrameRef::timestamp ) );
+    EXPECT_TRUE( std::ranges::is_sorted( stereo, {}, &phad::io::dataset::StereoFrameRef::timestamp ) );
     EXPECT_TRUE( std::ranges::is_sorted(
         imu, {}, &phad::sensor::ImuMeasurement::timestamp ) );
 

@@ -3,9 +3,18 @@
 #include <filesystem>
 #include <utility>
 
-#include "phad/dataset/stereo_imu_dataset.hpp"
+#include "phad/io/dataset/stereo_imu_dataset.hpp"
 
-namespace phad::dataset
+/**
+ * @file euroc_dataset.hpp
+ * @brief EurocDataset 类用于表示 Euroc 数据集。
+ *
+ * 该文件定义了 phad::io::dataset::EurocDataset 类，
+ * 封装了 Euroc 数据集的相机和 IMU 外参、IMU 测量和立体帧索引，
+ * 提供对 Euroc 数据集的快速访问和引用。
+ */
+
+namespace phad::io::dataset
 {
 
   using EurocCalibration = StereoImuCalibration;
@@ -16,6 +25,13 @@ namespace phad::dataset
         const std::filesystem::path& sequence_root );
   }
 
+
+  /**
+   * @brief EurocDataset 类用于表示 Euroc 数据集。
+   *
+   * 该类封装了 Euroc 数据集的相机和 IMU 外参、IMU 测量和立体帧索引，
+   * 提供对 Euroc 数据集的快速访问和引用。
+   */
   class EurocDataset
   {
   public:
@@ -51,4 +67,4 @@ namespace phad::dataset
     StereoImuDataset m_dataset;
   };
 
-}  // namespace phad::dataset
+}  // namespace phad::io::dataset

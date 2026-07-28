@@ -2,6 +2,10 @@
 
 日期：2026-07-28
 
+> 本文保留当时的调研结论。顶层 `phad::dataset` 布局已被后续架构诊断取代；
+> 当前实现归属 `phad::io::dataset`，见
+> [`dataset_io_module_relocation.plan.md`](../plans/dataset_io_module_relocation.plan.md)。
+
 ## 1. 结论
 
 建议把新的第一个里程碑定义为：

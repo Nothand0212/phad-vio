@@ -11,7 +11,7 @@
 
 - 枚举值：`k` + PascalCase（如 `kRootNotFound`）
 - 常量：`k` + PascalCase（如 `kCameraHeader`）
-- 命名空间：snake_case（如 `phad::dataset`）
+- 命名空间：snake_case（如 `phad::io::dataset`）
 
 ## 禁止写法
 

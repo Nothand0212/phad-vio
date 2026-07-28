@@ -11,7 +11,8 @@ stereo visual-inertial odometry 项目。
 
 当前已完成数据集 adapter 基础：
 
-- `StereoImuDataset` 提供统一的双目、IMU 与标定 interface；
+- `phad::io::dataset::StereoImuDataset` 提供统一的双目、IMU 与标定
+  interface；
 - EuRoC 与 TUM VI 目录和标定格式由独立 adapter 解析；
 - EuRoC 8-bit 与 TUM VI 16-bit 灰度图均按需解码并保持原始像素类型；
 - `phad_euroc_inspect` 可检查 EuRoC 数据摘要和抽样图像；
