@@ -38,7 +38,7 @@ namespace phad::io::dataset
     [[nodiscard]] static DatasetResult<EurocDataset> open(
         const std::filesystem::path& sequence_root );
 
-    [[nodiscard]] const EurocCalibration& calibration() const noexcept
+    [[nodiscard]] EurocCalibration calibration() const
     {
       return m_dataset.calibration();
     }

@@ -28,6 +28,7 @@ namespace phad::io::dataset
     [[nodiscard]] io::SensorReadResult fail( const DatasetError& error );
 
     StereoImuDataset                     m_dataset;
+    sensor::StereoImuCalibration         m_calibration;
     std::size_t                          m_next_imu_index    = 0;
     std::size_t                          m_next_stereo_index = 0;
     std::optional<io::SensorSourceError> m_terminal_error;

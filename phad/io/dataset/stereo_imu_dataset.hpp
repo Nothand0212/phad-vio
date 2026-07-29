@@ -1,9 +1,15 @@
 #pragma once
 
+#include <compare>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
+#include <memory>
+#include <optional>
 #include <span>
+#include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "phad/io/dataset/dataset_error.hpp"
@@ -23,29 +29,89 @@ namespace phad::io::dataset
 
   using StereoImuCalibration = sensor::StereoImuCalibration;
 
+  struct DatasetStreamSummary
+  {
+    std::size_t                      count = 0;
+    std::optional<common::Timestamp> first_timestamp;
+    std::optional<common::Timestamp> last_timestamp;
+  };
+
+  struct StereoImuDatasetSummary
+  {
+    DatasetStreamSummary imu;
+    DatasetStreamSummary stereo;
+  };
+
+  struct DatasetReaderEnd
+  {
+    auto operator<=>( const DatasetReaderEnd& ) const = default;
+  };
+
+  enum class DatasetReaderErrorCode : std::uint8_t
+  {
+    kImageDecodeFailed   = 0,
+    kImageFormatMismatch = 1,
+  };
+
+  struct DatasetReaderError
+  {
+    DatasetReaderErrorCode code;
+    std::string            sensor_id;
+    common::Timestamp      timestamp;
+    std::size_t            record_number;
+    std::string            cause;
+
+    bool operator==( const DatasetReaderError& ) const = default;
+  };
+
+  template <typename T>
+  using DatasetReaderResult =
+      std::variant<T, DatasetReaderEnd, DatasetReaderError>;
+
   namespace internal
   {
     class StereoImuDatasetBuilder;
-  }
+    class StereoImuDatasetImpl;
+  }  // namespace internal
+
+  class StereoImuDatasetReader
+  {
+  public:
+    StereoImuDatasetReader( const StereoImuDatasetReader& )            = delete;
+    StereoImuDatasetReader& operator=( const StereoImuDatasetReader& ) = delete;
+    StereoImuDatasetReader( StereoImuDatasetReader&& ) noexcept        = default;
+    StereoImuDatasetReader& operator=( StereoImuDatasetReader&& ) noexcept =
+        default;
+
+    [[nodiscard]] DatasetReaderResult<sensor::ImuMeasurement> takeImu();
+    [[nodiscard]] DatasetReaderResult<common::Timestamp>
+                                                           peekStereoTimestamp();
+    [[nodiscard]] DatasetReaderResult<sensor::StereoFrame> takeStereo();
+
+  private:
+    friend class StereoImuDataset;
+
+    explicit StereoImuDatasetReader(
+        std::shared_ptr<const internal::StereoImuDatasetImpl> impl );
+
+    std::shared_ptr<const internal::StereoImuDatasetImpl> m_impl;
+    std::size_t                                           m_next_imu_index    = 0;
+    std::size_t                                           m_next_stereo_index = 0;
+    std::optional<DatasetReaderError>                     m_terminal_error;
+  };
 
   class StereoImuDataset
   {
   public:
-    [[nodiscard]] const StereoImuCalibration& calibration() const noexcept
-    {
-      return m_calibration;
-    }
+    [[nodiscard]] StereoImuCalibration calibration() const;
+
+    [[nodiscard]] StereoImuDatasetSummary summary() const noexcept;
+    [[nodiscard]] StereoImuDatasetReader  reader() const;
 
     [[nodiscard]] std::span<const sensor::ImuMeasurement> imuMeasurements()
-        const noexcept
-    {
-      return m_imu_measurements;
-    }
+        const noexcept;
 
-    [[nodiscard]] std::span<const StereoFrameRef> stereoIndex() const noexcept
-    {
-      return m_stereo_index;
-    }
+    [[nodiscard]] std::span<const StereoFrameRef> stereoIndex() const noexcept;
 
     [[nodiscard]] DatasetResult<sensor::StereoFrame> loadStereo(
         std::size_t index ) const;
@@ -57,18 +123,9 @@ namespace phad::io::dataset
                       std::vector<sensor::ImuMeasurement> imu_measurements,
                       std::vector<StereoFrameRef>         stereo_index,
                       sensor::PixelType                   left_pixel_type,
-                      sensor::PixelType                   right_pixel_type )
-        : m_calibration( std::move( calibration ) ),
-          m_imu_measurements( std::move( imu_measurements ) ),
-          m_stereo_index( std::move( stereo_index ) ),
-          m_left_pixel_type( left_pixel_type ),
-          m_right_pixel_type( right_pixel_type ) {}
+                      sensor::PixelType                   right_pixel_type );
 
-    StereoImuCalibration                m_calibration;
-    std::vector<sensor::ImuMeasurement> m_imu_measurements;
-    std::vector<StereoFrameRef>         m_stereo_index;
-    sensor::PixelType                   m_left_pixel_type;
-    sensor::PixelType                   m_right_pixel_type;
+    std::shared_ptr<const internal::StereoImuDatasetImpl> m_impl;
   };
 
 }  // namespace phad::io::dataset

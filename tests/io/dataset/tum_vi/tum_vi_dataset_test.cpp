@@ -9,6 +9,7 @@
 #include <fstream>
 #include <opencv2/imgcodecs.hpp>
 #include <string>
+#include <variant>
 
 namespace
 {
@@ -170,6 +171,19 @@ namespace
     EXPECT_EQ( right_pixels->front(), 2001U );
     EXPECT_FALSE(
         loaded.value().left.pixels<std::uint8_t>().has_value() );
+
+    auto reader = dataset.reader();
+    auto taken  = reader.takeStereo();
+    ASSERT_TRUE(
+        std::holds_alternative<phad::sensor::StereoFrame>( taken ) );
+    const auto& reader_frame =
+        std::get<phad::sensor::StereoFrame>( taken );
+    EXPECT_EQ( reader_frame.left.pixelType(),
+               phad::sensor::PixelType::kUint16 );
+    EXPECT_TRUE(
+        reader_frame.left.pixels<std::uint16_t>().has_value() );
+    EXPECT_TRUE(
+        reader_frame.right.pixels<std::uint16_t>().has_value() );
   }
 
   TEST( TumViDatasetTest, RejectsInvalidKalibrTransformAndDistortion )

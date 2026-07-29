@@ -7,14 +7,15 @@ namespace phad::io::dataset
 {
 
   DatasetReplaySource::DatasetReplaySource( StereoImuDataset dataset )
-      : m_dataset( std::move( dataset ) )
+      : m_dataset( std::move( dataset ) ),
+        m_calibration( m_dataset.calibration() )
   {
   }
 
   const sensor::StereoImuCalibration& DatasetReplaySource::calibration()
       const noexcept
   {
-    return m_dataset.calibration();
+    return m_calibration;
   }
 
   io::SensorReadResult DatasetReplaySource::next()
