@@ -1,11 +1,10 @@
 #include <gtest/gtest.h>
 
-#include <algorithm>
-#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <variant>
 
 #include "phad/io/dataset/tum_vi/tum_vi_dataset.hpp"
 
@@ -26,45 +25,41 @@ namespace
         std::filesystem::path{ configured_path } );
     ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
     const auto& dataset = opened.value();
-    const auto  stereo  = dataset.stereoIndex();
-    const auto  imu     = dataset.imuMeasurements();
+    const auto  summary = dataset.summary();
 
-    ASSERT_EQ( stereo.size(), 5990U );
-    ASSERT_EQ( imu.size(), 59721U );
-    EXPECT_EQ( stereo.front().timestamp.nanoseconds(),
+    ASSERT_EQ( summary.stereo.count, 5990U );
+    ASSERT_EQ( summary.imu.count, 59721U );
+    ASSERT_TRUE( summary.stereo.first_timestamp.has_value() );
+    ASSERT_TRUE( summary.stereo.last_timestamp.has_value() );
+    ASSERT_TRUE( summary.imu.first_timestamp.has_value() );
+    ASSERT_TRUE( summary.imu.last_timestamp.has_value() );
+    EXPECT_EQ( summary.stereo.first_timestamp->nanoseconds(),
                1'520'531'829'251'142'058 );
-    EXPECT_EQ( stereo.back().timestamp.nanoseconds(),
+    EXPECT_EQ( summary.stereo.last_timestamp->nanoseconds(),
                1'520'532'128'710'396'829 );
-    EXPECT_EQ( imu.front().timestamp.nanoseconds(),
+    EXPECT_EQ( summary.imu.first_timestamp->nanoseconds(),
                1'520'531'829'221'612'058 );
-    EXPECT_EQ( imu.back().timestamp.nanoseconds(),
+    EXPECT_EQ( summary.imu.last_timestamp->nanoseconds(),
                1'520'532'128'752'735'058 );
-    EXPECT_TRUE( std::ranges::is_sorted(
-        stereo, {}, &phad::io::dataset::StereoFrameRef::timestamp ) );
-    EXPECT_TRUE( std::ranges::is_sorted(
-        imu, {}, &phad::sensor::ImuMeasurement::timestamp ) );
 
-    for ( const std::size_t index :
-          std::array<std::size_t, 3>{
-              0, stereo.size() / 2, stereo.size() - 1 } )
-    {
-      auto loaded = dataset.loadStereo( index );
-      ASSERT_TRUE( loaded.hasValue() ) << loaded.error().describe();
-      EXPECT_EQ( loaded.value().left.width(), 512 );
-      EXPECT_EQ( loaded.value().left.height(), 512 );
-      EXPECT_EQ( loaded.value().left.channels(), 1 );
-      EXPECT_EQ( loaded.value().left.pixelType(),
-                 phad::sensor::PixelType::kUint16 );
-      EXPECT_EQ( loaded.value().right.width(), 512 );
-      EXPECT_EQ( loaded.value().right.height(), 512 );
-      EXPECT_EQ( loaded.value().right.channels(), 1 );
-      EXPECT_EQ( loaded.value().right.pixelType(),
-                 phad::sensor::PixelType::kUint16 );
-      EXPECT_TRUE(
-          loaded.value().left.pixels<std::uint16_t>().has_value() );
-      EXPECT_TRUE(
-          loaded.value().right.pixels<std::uint16_t>().has_value() );
-    }
+    auto       reader = dataset.reader();
+    const auto taken  = reader.takeStereo();
+    ASSERT_TRUE(
+        std::holds_alternative<phad::sensor::StereoFrame>( taken ) );
+    const auto& frame = std::get<phad::sensor::StereoFrame>( taken );
+    EXPECT_EQ( frame.timestamp, *summary.stereo.first_timestamp );
+    EXPECT_EQ( frame.left.width(), 512 );
+    EXPECT_EQ( frame.left.height(), 512 );
+    EXPECT_EQ( frame.left.channels(), 1 );
+    EXPECT_EQ( frame.left.pixelType(), phad::sensor::PixelType::kUint16 );
+    EXPECT_EQ( frame.right.width(), 512 );
+    EXPECT_EQ( frame.right.height(), 512 );
+    EXPECT_EQ( frame.right.channels(), 1 );
+    EXPECT_EQ( frame.right.pixelType(), phad::sensor::PixelType::kUint16 );
+    EXPECT_TRUE( frame.left.pixels<std::uint16_t>().has_value() );
+    EXPECT_TRUE( frame.right.pixels<std::uint16_t>().has_value() );
+    EXPECT_FALSE( frame.left.pixels<std::uint8_t>().has_value() );
+    EXPECT_FALSE( frame.right.pixels<std::uint8_t>().has_value() );
   }
 
 }  // namespace
