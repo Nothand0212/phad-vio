@@ -1,5 +1,10 @@
 # 将 Dataset 迁移至 IO 模块
 
+> **历史计划，接口部分已失效。** 本文仅记录 module relocation，不再定义
+> dataset 的当前 public contract。文中的旧清单类型、兼容 facade 和按位置
+> 解码行为已由 GitHub Parent #1 与 Issue #6 取代；当前合同见
+> `docs/architecture.md` 和 `docs/roadmap.md`。
+
 ## Summary
 
 修复 dataset 的模块归属：离线 dataset 是 `io` 的一种输入形式，不应作为与

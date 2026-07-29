@@ -12,7 +12,7 @@
 - 新增 `apps/phad_euroc_runner.cpp`，用法为
   `phad_euroc_runner <sequence-root>`；保留现有 `phad_euroc_inspect`。
 - 通过 `euroc::open()` 打开数据集，移动构造 `DatasetReplaySource`，后续
-  只依赖 `SensorSource&::next()`，不绕过 source 直接调用 `loadStereo()`。
+  只依赖 `SensorSource&::next()`，不绕过 source 直接操作 dataset reader。
 - 明确分派 `ImuMeasurement`、`StereoFrame`、`EndOfStream` 和
   `SensorSourceError`；只对双目帧执行拼接和显示。
 - 按双目时间戳与 wall clock deadline 实时节流；解码耗时超过帧间隔时立即

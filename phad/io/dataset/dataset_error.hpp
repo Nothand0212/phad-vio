@@ -40,7 +40,6 @@ namespace phad::io::dataset
     kUnsupportedImuExtrinsics   = 17,
     kImageDecodeFailed          = 18,
     kImageFormatMismatch        = 19,
-    kIndexOutOfRange            = 20,
   };
 
   /**

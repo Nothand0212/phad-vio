@@ -2,9 +2,11 @@
 
 日期：2026-07-28
 
-> 本文保留当时的调研结论。顶层 `phad::dataset` 布局已被后续架构诊断取代；
-> 当前实现归属 `phad::io::dataset`，见
-> [`dataset_io_module_relocation.plan.md`](../plans/dataset_io_module_relocation.plan.md)。
+> **历史调研，接口建议已失效。** 本文保留 2026-07-28 的证据与当时结论，
+> 不再定义当前 dataset contract。顶层 module 布局、公开清单、EuRoC facade
+> 和按位置解码建议均已被 GitHub Parent #1 与 Issue #6 取代。当前实现归属
+> `phad::io::dataset`，当前合同见 `docs/architecture.md` 与
+> `docs/roadmap.md`。
 
 ## 1. 结论
 

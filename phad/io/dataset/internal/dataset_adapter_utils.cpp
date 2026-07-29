@@ -1,3 +1,5 @@
+#include "phad/io/dataset/internal/dataset_adapter_utils.hpp"
+
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -7,8 +9,6 @@
 #include <limits>
 #include <system_error>
 #include <utility>
-
-#include "phad/io/dataset/internal/dataset_adapter_utils.hpp"
 
 /**
  * @file dataset_adapter_utils.cpp
@@ -477,7 +477,7 @@ namespace phad::io::dataset::internal
     return measurements;
   }
 
-  DatasetResult<std::vector<StereoFrameRef>> joinStereo(
+  DatasetResult<std::vector<StereoFrameManifestEntry>> joinStereo(
       const std::vector<CameraRecord>& left_records,
       const std::vector<CameraRecord>& right_records,
       const fs::path&                  source_path )
@@ -489,8 +489,8 @@ namespace phad::io::dataset::internal
                         "camera manifests have different record counts" );
     }
 
-    std::vector<StereoFrameRef> stereo_index;
-    stereo_index.reserve( left_records.size() );
+    std::vector<StereoFrameManifestEntry> stereo_manifest;
+    stereo_manifest.reserve( left_records.size() );
     for ( std::size_t index = 0; index < left_records.size(); ++index )
     {
       const auto& left  = left_records[ index ];
@@ -502,10 +502,10 @@ namespace phad::io::dataset::internal
                           "camera timestamps do not match exactly", index,
                           left.timestamp );
       }
-      stereo_index.push_back(
-          StereoFrameRef{ left.timestamp, left.image_path, right.image_path } );
+      stereo_manifest.push_back( StereoFrameManifestEntry{
+          left.timestamp, left.image_path, right.image_path } );
     }
-    return stereo_index;
+    return stereo_manifest;
   }
 
 }  // namespace phad::io::dataset::internal

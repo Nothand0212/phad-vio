@@ -1,5 +1,10 @@
 # 通用 Stereo-IMU 数据集与 EuRoC/TUM VI Adapter
 
+> **历史计划，接口部分已失效。** 本文记录首次引入通用 adapter 时的实现
+> 形状，不再定义当前合同。旧清单访问、兼容 facade 和按位置解码合同已由
+> GitHub Parent #1 与 Issue #6 取代；当前合同见 `docs/architecture.md` 和
+> `docs/roadmap.md`。
+>
 > 模块归属已由
 > [`dataset_io_module_relocation.plan.md`](dataset_io_module_relocation.plan.md)
 > 修正：本文中的 dataset 公开接口现位于 `phad::io::dataset`。

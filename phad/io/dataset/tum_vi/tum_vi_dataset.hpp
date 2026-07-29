@@ -2,6 +2,7 @@
 
 #include <filesystem>
 
+#include "phad/io/dataset/dataset_error.hpp"
 #include "phad/io/dataset/stereo_imu_dataset.hpp"
 
 namespace phad::io::dataset::tum_vi

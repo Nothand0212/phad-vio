@@ -250,7 +250,7 @@ namespace
     EXPECT_NE( error.find( missing_path.string() ), std::string::npos );
   }
 
-  TEST( EurocDatasetTest,
+  TEST( EurocAdapterTest,
         AdapterOpensCalibrationSummaryAndSequentialMeasurements )
   {
     EurocFixture fixture;
@@ -339,7 +339,7 @@ namespace
         reader.takeStereo() ) );
   }
 
-  TEST( EurocDatasetTest, CopiedHandleReturnsCalibrationAndSummaryByValue )
+  TEST( EurocAdapterTest, CopiedHandleReturnsCalibrationAndSummaryByValue )
   {
     EurocFixture fixture;
     auto         opened = phad::io::dataset::euroc::open( fixture.root() );
@@ -369,7 +369,7 @@ namespace
                EurocFixture::kFirstTimestamp + 100'000'000 );
   }
 
-  TEST( EurocDatasetTest, MoveOnlyReaderOutlivesDatasetHandle )
+  TEST( EurocAdapterTest, MoveOnlyReaderOutlivesDatasetHandle )
   {
     EurocFixture fixture;
     auto         reader = [ &fixture ] {
@@ -389,7 +389,7 @@ namespace
                EurocFixture::kFirstTimestamp - 5'000'000 );
   }
 
-  TEST( EurocDatasetTest, RepeatedStereoPeekDoesNotDecodeOrAdvance )
+  TEST( EurocAdapterTest, RepeatedStereoPeekDoesNotDecodeOrAdvance )
   {
     EurocFixture fixture;
     auto         opened = phad::io::dataset::euroc::open( fixture.root() );
@@ -412,7 +412,7 @@ namespace
                std::get<phad::common::Timestamp>( first ) );
   }
 
-  TEST( EurocDatasetTest, TakeStereoDecodesOwnedFrameThenAdvances )
+  TEST( EurocAdapterTest, TakeStereoDecodesOwnedFrameThenAdvances )
   {
     EurocFixture fixture;
     auto         opened = phad::io::dataset::euroc::open( fixture.root() );
@@ -436,7 +436,7 @@ namespace
                EurocFixture::kFirstTimestamp + 50'000'000 );
   }
 
-  TEST( EurocDatasetTest, ReadersHaveIndependentCursorsAndDecodedImages )
+  TEST( EurocAdapterTest, ReadersHaveIndependentCursorsAndDecodedImages )
   {
     EurocFixture fixture;
     auto         opened = phad::io::dataset::euroc::open( fixture.root() );
@@ -477,7 +477,7 @@ namespace
     EXPECT_NE( first_pixels->data(), second_pixels->data() );
   }
 
-  TEST( EurocDatasetTest, ImuAndStereoStreamsEndIndependentlyAndStably )
+  TEST( EurocAdapterTest, ImuAndStereoStreamsEndIndependentlyAndStably )
   {
     EurocFixture fixture;
     auto         opened = phad::io::dataset::euroc::open( fixture.root() );
@@ -507,7 +507,7 @@ namespace
         reader.takeImu() ) );
   }
 
-  TEST( EurocDatasetTest, SummaryRepresentsEmptyAndSingleRecordStreams )
+  TEST( EurocAdapterTest, SummaryRepresentsEmptyAndSingleRecordStreams )
   {
     const std::string imu_header =
         "#timestamp [ns],w_RS_S_x [rad s^-1],w_RS_S_y [rad s^-1],"
@@ -549,7 +549,7 @@ namespace
     }
   }
 
-  TEST( EurocDatasetTest, StereoFailureIsStickyAndLocalToReader )
+  TEST( EurocAdapterTest, StereoFailureIsStickyAndLocalToReader )
   {
     EurocFixture fixture;
     auto         opened = phad::io::dataset::euroc::open( fixture.root() );
@@ -586,7 +586,7 @@ namespace
         other_reader.takeStereo() ) );
   }
 
-  TEST( EurocDatasetTest, ReaderReportsImageFormatMismatchWithoutPath )
+  TEST( EurocAdapterTest, ReaderReportsImageFormatMismatchWithoutPath )
   {
     EurocFixture fixture;
     auto         opened = phad::io::dataset::euroc::open( fixture.root() );
@@ -611,7 +611,7 @@ namespace
                std::string::npos );
   }
 
-  TEST( EurocDatasetTest, PreservesEurocTbsAsProjectBodyFromCameraTransform )
+  TEST( EurocAdapterTest, PreservesEurocTbsAsProjectBodyFromCameraTransform )
   {
     EurocFixture      fixture;
     std::string       yaml     = EurocFixture::validCameraYaml();
@@ -632,7 +632,7 @@ namespace
     EXPECT_DOUBLE_EQ( T_B_camera[ 11 ], 3.75 );
   }
 
-  TEST( EurocDatasetTest, IndependentDatasetsAndReadersAreDeterministic )
+  TEST( EurocAdapterTest, IndependentDatasetsAndReadersAreDeterministic )
   {
     EurocFixture fixture;
     auto         first  = phad::io::dataset::euroc::open( fixture.root() );
@@ -703,7 +703,7 @@ namespace
     }
   }
 
-  TEST( EurocDatasetTest,
+  TEST( EurocAdapterTest,
         DefersCorruptPngFailureUntilSequentialStereoConsumption )
   {
     EurocFixture fixture;
@@ -758,7 +758,7 @@ namespace
     EXPECT_FALSE( result.error().cause.empty() );
   }
 
-  TEST( EurocDatasetTest, RejectsMissingRootAndRequiredFiles )
+  TEST( EurocAdapterTest, RejectsMissingRootAndRequiredFiles )
   {
     EurocFixture fixture;
     expectOpenError( fixture.root() / "absent",
@@ -770,7 +770,7 @@ namespace
                      "cam1" );
   }
 
-  TEST( EurocDatasetTest, RejectsCsvHeaderColumnAndFieldErrors )
+  TEST( EurocAdapterTest, RejectsCsvHeaderColumnAndFieldErrors )
   {
     {
       EurocFixture fixture;
@@ -801,7 +801,7 @@ namespace
     }
   }
 
-  TEST( EurocDatasetTest, RejectsInvalidOverflowDuplicateAndReverseTimestamps )
+  TEST( EurocAdapterTest, RejectsInvalidOverflowDuplicateAndReverseTimestamps )
   {
     const auto camera_csv = []( const std::string& rows ) {
       return "#timestamp [ns],filename\n" + rows;
@@ -841,7 +841,7 @@ namespace
     }
   }
 
-  TEST( EurocDatasetTest, RejectsNonFiniteImuMeasurementsWithContext )
+  TEST( EurocAdapterTest, RejectsNonFiniteImuMeasurementsWithContext )
   {
     for ( const std::string value : { "nan", "inf", "-inf" } )
     {
@@ -864,7 +864,7 @@ namespace
     }
   }
 
-  TEST( EurocDatasetTest, RejectsDuplicateAndReverseImuTimestamps )
+  TEST( EurocAdapterTest, RejectsDuplicateAndReverseImuTimestamps )
   {
     const std::string header =
         "#timestamp [ns],w_RS_S_x [rad s^-1],w_RS_S_y [rad s^-1],"
@@ -892,7 +892,7 @@ namespace
     }
   }
 
-  TEST( EurocDatasetTest, RejectsMissingOrMismatchedStereoRecords )
+  TEST( EurocAdapterTest, RejectsMissingOrMismatchedStereoRecords )
   {
     {
       EurocFixture fixture;
@@ -921,7 +921,7 @@ namespace
     }
   }
 
-  TEST( EurocDatasetTest, RejectsUnsafeAndMissingManifestImagePaths )
+  TEST( EurocAdapterTest, RejectsUnsafeAndMissingManifestImagePaths )
   {
     const auto csv = []( const std::string& filename ) {
       return "#timestamp [ns],filename\n1403636579763555584," + filename + "\n";
@@ -949,7 +949,7 @@ namespace
     }
   }
 
-  TEST( EurocDatasetTest, RejectsInvalidTransformAndUnsupportedCameraModels )
+  TEST( EurocAdapterTest, RejectsInvalidTransformAndUnsupportedCameraModels )
   {
     {
       EurocFixture fixture;
@@ -986,7 +986,7 @@ namespace
     }
   }
 
-  TEST( EurocDatasetTest, RejectsNonIdentityImuExtrinsicsInM1 )
+  TEST( EurocAdapterTest, RejectsNonIdentityImuExtrinsicsInM1 )
   {
     EurocFixture      fixture;
     std::string       yaml     = EurocFixture::validImuYaml();
@@ -1005,7 +1005,7 @@ namespace
         "T_BS" );
   }
 
-  TEST( EurocDatasetTest, RejectsMissingAndInvalidImuNoiseFields )
+  TEST( EurocAdapterTest, RejectsMissingAndInvalidImuNoiseFields )
   {
     {
       EurocFixture      fixture;
@@ -1056,7 +1056,7 @@ namespace
     expectStickyTerminalError( reader, error );
   }
 
-  TEST( EurocDatasetTest,
+  TEST( EurocAdapterTest,
         ReportsWrongImageDimensionsAndPixelTypesAsStickyReaderErrors )
   {
     {
@@ -1082,7 +1082,7 @@ namespace
     return resident_pages * static_cast<std::size_t>( sysconf( _SC_PAGESIZE ) );
   }
 
-  TEST( EurocDatasetTest, ResidentImageMemoryDoesNotGrowWithTraversedFrameCount )
+  TEST( EurocAdapterTest, ResidentImageMemoryDoesNotGrowWithTraversedFrameCount )
   {
 #if defined( __SANITIZE_ADDRESS__ )
     GTEST_SKIP() << "ASan quarantine makes process RSS unsuitable for cache detection";

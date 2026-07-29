@@ -106,9 +106,9 @@ estimator 返回完整的当前导航状态、估计时间戳和诊断摘要。�
 - 产出核心数据类型。
 
 `phad::io` 是外部数据进入或离开系统的顶层 module。离线数据集 adapter
-归属 `phad::io::dataset`；未来串口和 ROS 输入也归属 `phad::io`，但不与
-dataset 共享随机访问 interface。`phad::sensor` 只定义与数据来源无关的
-测量、图像和标定类型。
+归属 `phad::io::dataset`；未来串口和 ROS 输入也归属 `phad::io`，并各自
+定义符合来源特性的输入合同。`phad::sensor` 只定义与数据来源无关的测量、
+图像和标定类型。
 
 ```text
 phad::io
@@ -122,10 +122,16 @@ phad::io
 数据集特有知识只存在于 adapter 内。核心模块不得出现 `euroc`、`kitti`
 等条件分支。
 
-离线双目惯性数据统一产出 `StereoImuDataset`。该 module 拥有规范化标定、
-严格有序的 IMU 测量、双目索引和惰性图像解码；EuRoC 与 TUM VI adapter
-只负责格式专属的目录、CSV/YAML 字段、外参方向和像素类型转换。格式由
-调用方显式选择，不进行目录猜测，也不通过虚基类暴露 parser 生命周期。
+离线双目惯性数据统一产出可廉价复制的不可变 `StereoImuDataset` handle。
+完整校验后的 IMU 与双目 metadata、filesystem path、预期 pixel type 和
+解码配置只存在于共享只读 implementation。dataset 对外按值提供 calibration
+和 summary，并为每次回放创建 move-only、single-pass 的独立 reader。
+reader 拥有自己的双流消费位置与 sticky terminal error，通过 `takeImu()`、
+`peekStereoTimestamp()` 和 `takeStereo()` 顺序消费；观察 timestamp 不触发
+图像 I/O，取得 stereo 时才惰性解码。EuRoC 与 TUM VI adapter 只负责格式
+专属的目录、CSV/YAML 字段、外参方向和像素类型转换，并只通过各自 concrete
+`open()` 产生通用 dataset handle。格式由调用方显式选择，不进行目录猜测，
+也不通过虚基类或转发 facade 暴露 parser 生命周期。
 
 `Image` 保留数据集原始无符号灰度深度，当前支持 `uint8_t` 与 `uint16_t`。
 调用方必须使用与 `PixelType` 一致的 typed pixel view，不能把 16-bit 图像

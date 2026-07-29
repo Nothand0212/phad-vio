@@ -19,13 +19,15 @@ IMU/双目事件；本次不包含同步、线程、背压、节流或 VO 算法
 ## Implementation
 
 - 新增不可复制、可移动的
-  `phad::io::dataset::DatasetReplaySource final`，按值持有移动进来的
-  `StereoImuDataset`，维护独立 IMU/stereo 游标。
+  `phad::io::dataset::DatasetReplaySource final`，从
+  `const StereoImuDataset&` 复制 calibration 并创建自持有的独立 reader；
+  source 仅维护 reader、一条 IMU lookahead 与自身 terminal state。
 - `next()` 输出 timestamp 较早的事件；timestamp 相同时固定先输出 IMU。
-- stereo 仅在即将输出时调用 `loadStereo()`，成功后才推进游标。
+- stereo 仅在即将输出时调用 reader 的 `takeStereo()`，成功后才推进。
 - 两个流耗尽后稳定返回 `EndOfStream`。
-- dataset 解码错误转换为 `kReadFailed`，保留 sensor id、timestamp 和完整
-  `DatasetError::describe()`；此后重复返回相同 terminal error，不跳帧。
+- reader error 转换为来源无关的 `kReadFailed`，保留 sensor id、timestamp、
+  1-based record number 与原始 cause，不携带 filesystem path；此后重复
+  返回相同 terminal error，不跳帧。
 - 更新架构与路线图，标记 source seam 和 dataset replay 已落地。
 
 ## Test Plan
@@ -44,5 +46,6 @@ IMU/双目事件；本次不包含同步、线程、背压、节流或 VO 算法
   queue 或 backpressure。
 - `SensorSource` 不执行 IMU 分段、边界插值或 `StereoImuPacket` 构造。
 - adapter-specific 输入仍由各自构造或 `open()` 处理。
-- 不改变 dataset 随机访问、校验、错误和像素所有权合同。
+- dataset 使用不可变 handle 与独立顺序 reader；本计划不扩展 reader 的
+  single-pass、校验、错误和像素所有权合同。
 - 不执行 commit、push 或 PR。

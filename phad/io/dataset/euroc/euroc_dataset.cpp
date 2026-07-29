@@ -1,3 +1,5 @@
+#include "phad/io/dataset/euroc/euroc_dataset.hpp"
+
 #include <yaml-cpp/yaml.h>
 
 #include <array>
@@ -7,17 +9,8 @@
 #include <string_view>
 #include <utility>
 
-#include "phad/io/dataset/euroc/euroc_dataset.hpp"
 #include "phad/io/dataset/internal/dataset_adapter_utils.hpp"
 #include "phad/io/dataset/internal/stereo_imu_dataset_builder.hpp"
-
-/**
- * @file euroc_dataset.cpp
- * @brief EurocDataset 类实现。
- *
- * 该文件实现了 phad::io::dataset::EurocDataset 类，
- * 提供了 Euroc 数据集的加载和访问功能。
- */
 
 namespace phad::io::dataset
 {
@@ -357,17 +350,6 @@ namespace phad::io::dataset
         std::move( imu_measurements ).value(),
         std::move( stereo_index ).value(), sensor::PixelType::kUint8,
         sensor::PixelType::kUint8 );
-  }
-
-  DatasetResult<EurocDataset> EurocDataset::open(
-      const fs::path& sequence_root )
-  {
-    auto opened = euroc::open( sequence_root );
-    if ( !opened )
-    {
-      return opened.error();
-    }
-    return EurocDataset{ std::move( opened ).value() };
   }
 
 }  // namespace phad::io::dataset

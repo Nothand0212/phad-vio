@@ -37,7 +37,7 @@
   `data.csv`；
 - 从 TUM VI Euroc/DSO export 解析 `mav0` manifest、
   `dso/camchain.yaml` 和 `dso/imu_config.yaml`；
-- 使用整数纳秒建立严格有序的 IMU 和双目帧索引；
+- 使用整数纳秒建立严格有序的内部 IMU 与双目 metadata；
 - 按 timestamp 对 cam0/cam1 做 exact join；
 - 全清单校验和 uint8/uint16 双目图像惰性解码；
 - 来源无关的 pull-based `SensorSource` seam；
@@ -46,7 +46,7 @@
 
 测试：
 
-- 最小 fixture 的标定、IMU 和双目索引加载；
+- 最小 fixture 的标定、summary 与顺序 reader 加载；
 - timestamp 保持整数纳秒且每个流严格递增；
 - 左右目 timestamp 完全匹配；
 - 图像只在请求时解码，且尺寸和 pixel type 符合标定；
@@ -61,9 +61,10 @@
 
 阶段出口：
 
-- 能从原生 `MH_01_easy` 和 TUM VI `corridor1_512_16` 确定性加载标定、
-  IMU 索引和双目索引；
-- 第一、中间和最后一对图像均可按需解码；
+- 能从原生 `MH_01_easy` 和 TUM VI `corridor1_512_16` 确定性取得标定、
+  已审计 summary 与独立顺序 reader；
+- 两个真实数据集均通过顺序 reader 解码第一对图像，并验证实际尺寸、
+  pixel type 与 typed view；
 - adapter 外不存在 EuRoC/TUM VI 路径、标定字段、坐标或单位转换；
 - VO 上游可通过同一 `SensorSource` interface 消费规范化事件；
 - 常驻内存不随已遍历图像总数线性增长；

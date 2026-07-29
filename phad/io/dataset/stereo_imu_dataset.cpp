@@ -5,10 +5,12 @@
 #include <memory>
 #include <opencv2/imgcodecs.hpp>
 #include <optional>
-#include <span>
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "phad/io/dataset/dataset_error.hpp"
+#include "phad/io/dataset/internal/stereo_imu_dataset_builder.hpp"
 
 namespace phad::io::dataset
 {
@@ -19,24 +21,39 @@ namespace phad::io::dataset
     {
     public:
       StereoImuDatasetImpl(
-          StereoImuCalibration                calibration,
-          std::vector<sensor::ImuMeasurement> imu_measurements,
-          std::vector<StereoFrameRef>         stereo_index,
-          sensor::PixelType                   left_pixel_type,
-          sensor::PixelType                   right_pixel_type )
+          StereoImuCalibration                  calibration,
+          std::vector<sensor::ImuMeasurement>   imu_measurements,
+          std::vector<StereoFrameManifestEntry> stereo_manifest,
+          sensor::PixelType                     left_pixel_type,
+          sensor::PixelType                     right_pixel_type )
           : m_calibration( std::move( calibration ) ),
             m_imu_measurements( std::move( imu_measurements ) ),
-            m_stereo_index( std::move( stereo_index ) ),
+            m_stereo_manifest( std::move( stereo_manifest ) ),
             m_left_pixel_type( left_pixel_type ),
             m_right_pixel_type( right_pixel_type )
       {
       }
 
-      StereoImuCalibration                m_calibration;
-      std::vector<sensor::ImuMeasurement> m_imu_measurements;
-      std::vector<StereoFrameRef>         m_stereo_index;
-      sensor::PixelType                   m_left_pixel_type;
-      sensor::PixelType                   m_right_pixel_type;
+      StereoImuCalibration                  m_calibration;
+      std::vector<sensor::ImuMeasurement>   m_imu_measurements;
+      std::vector<StereoFrameManifestEntry> m_stereo_manifest;
+      sensor::PixelType                     m_left_pixel_type;
+      sensor::PixelType                     m_right_pixel_type;
+    };
+
+    class StereoImuDatasetReaderImpl
+    {
+    public:
+      explicit StereoImuDatasetReaderImpl(
+          std::shared_ptr<const StereoImuDatasetImpl> dataset )
+          : m_dataset( std::move( dataset ) )
+      {
+      }
+
+      std::shared_ptr<const StereoImuDatasetImpl> m_dataset;
+      std::size_t                                 m_next_imu_index    = 0;
+      std::size_t                                 m_next_stereo_index = 0;
+      std::optional<DatasetReaderError>           m_terminal_error;
     };
 
   }  // namespace internal
@@ -142,13 +159,13 @@ namespace phad::io::dataset
     }
 
     DatasetResult<sensor::StereoFrame> decodeStereo(
-        const StereoFrameRef&       reference,
-        const StereoImuCalibration& calibration,
-        sensor::PixelType           left_pixel_type,
-        sensor::PixelType           right_pixel_type,
-        const std::string&          left_sensor_id,
-        const std::string&          right_sensor_id,
-        std::size_t                 record_index )
+        const internal::StereoFrameManifestEntry& reference,
+        const StereoImuCalibration&               calibration,
+        sensor::PixelType                         left_pixel_type,
+        sensor::PixelType                         right_pixel_type,
+        const std::string&                        left_sensor_id,
+        const std::string&                        right_sensor_id,
+        std::size_t                               record_index )
     {
       auto left = decodeImage(
           reference.left_path, left_sensor_id, record_index,
@@ -171,15 +188,22 @@ namespace phad::io::dataset
 
   }  // namespace
 
-  StereoImuDataset::StereoImuDataset(
-      StereoImuCalibration                calibration,
-      std::vector<sensor::ImuMeasurement> imu_measurements,
-      std::vector<StereoFrameRef>         stereo_index,
-      sensor::PixelType                   left_pixel_type,
-      sensor::PixelType                   right_pixel_type )
-      : m_impl( std::make_shared<const internal::StereoImuDatasetImpl>(
+  StereoImuDataset internal::StereoImuDatasetBuilder::build(
+      StereoImuCalibration                  calibration,
+      std::vector<sensor::ImuMeasurement>   imu_measurements,
+      std::vector<StereoFrameManifestEntry> stereo_manifest,
+      sensor::PixelType                     left_pixel_type,
+      sensor::PixelType                     right_pixel_type )
+  {
+    return StereoImuDataset{
+        std::make_shared<const StereoImuDatasetImpl>(
             std::move( calibration ), std::move( imu_measurements ),
-            std::move( stereo_index ), left_pixel_type, right_pixel_type ) )
+            std::move( stereo_manifest ), left_pixel_type, right_pixel_type ) };
+  }
+
+  StereoImuDataset::StereoImuDataset(
+      std::shared_ptr<const internal::StereoImuDatasetImpl> impl )
+      : m_impl( std::move( impl ) )
   {
   }
 
@@ -200,7 +224,7 @@ namespace phad::io::dataset
       return result;
     };
     return StereoImuDatasetSummary{ summarize( m_impl->m_imu_measurements ),
-                                    summarize( m_impl->m_stereo_index ) };
+                                    summarize( m_impl->m_stereo_manifest ) };
   }
 
   StereoImuDatasetReader StereoImuDataset::reader() const
@@ -210,96 +234,83 @@ namespace phad::io::dataset
 
   StereoImuDatasetReader::StereoImuDatasetReader(
       std::shared_ptr<const internal::StereoImuDatasetImpl> impl )
-      : m_impl( std::move( impl ) )
+      : m_impl( std::make_unique<internal::StereoImuDatasetReaderImpl>(
+            std::move( impl ) ) )
   {
   }
+
+  StereoImuDatasetReader::~StereoImuDatasetReader() = default;
+
+  StereoImuDatasetReader::StereoImuDatasetReader(
+      StereoImuDatasetReader&& ) noexcept = default;
+
+  StereoImuDatasetReader& StereoImuDatasetReader::operator=(
+      StereoImuDatasetReader&& ) noexcept = default;
 
   DatasetReaderResult<sensor::ImuMeasurement>
   StereoImuDatasetReader::takeImu()
   {
-    if ( m_terminal_error.has_value() )
+    if ( m_impl->m_terminal_error.has_value() )
     {
-      return *m_terminal_error;
+      return *m_impl->m_terminal_error;
     }
-    if ( m_next_imu_index >= m_impl->m_imu_measurements.size() )
+    if ( m_impl->m_next_imu_index >=
+         m_impl->m_dataset->m_imu_measurements.size() )
     {
       return DatasetReaderEnd{};
     }
-    return m_impl->m_imu_measurements[ m_next_imu_index++ ];
+    return m_impl
+        ->m_dataset->m_imu_measurements[ m_impl->m_next_imu_index++ ];
   }
 
   DatasetReaderResult<common::Timestamp>
   StereoImuDatasetReader::peekStereoTimestamp()
   {
-    if ( m_terminal_error.has_value() )
+    if ( m_impl->m_terminal_error.has_value() )
     {
-      return *m_terminal_error;
+      return *m_impl->m_terminal_error;
     }
-    if ( m_next_stereo_index >= m_impl->m_stereo_index.size() )
+    if ( m_impl->m_next_stereo_index >=
+         m_impl->m_dataset->m_stereo_manifest.size() )
     {
       return DatasetReaderEnd{};
     }
-    return m_impl->m_stereo_index[ m_next_stereo_index ].timestamp;
+    return m_impl
+        ->m_dataset->m_stereo_manifest[ m_impl->m_next_stereo_index ]
+        .timestamp;
   }
 
   DatasetReaderResult<sensor::StereoFrame>
   StereoImuDatasetReader::takeStereo()
   {
-    if ( m_terminal_error.has_value() )
+    if ( m_impl->m_terminal_error.has_value() )
     {
-      return *m_terminal_error;
+      return *m_impl->m_terminal_error;
     }
-    if ( m_next_stereo_index >= m_impl->m_stereo_index.size() )
+    if ( m_impl->m_next_stereo_index >=
+         m_impl->m_dataset->m_stereo_manifest.size() )
     {
       return DatasetReaderEnd{};
     }
 
-    const auto&       reference     = m_impl->m_stereo_index[ m_next_stereo_index ];
-    const std::size_t record_number = m_next_stereo_index + 1;
+    const auto& reference =
+        m_impl->m_dataset
+            ->m_stereo_manifest[ m_impl->m_next_stereo_index ];
+    const std::size_t record_number = m_impl->m_next_stereo_index + 1;
     auto              decoded       = decodeStereo(
-        reference, m_impl->m_calibration, m_impl->m_left_pixel_type,
-        m_impl->m_right_pixel_type, "left_camera", "right_camera",
-        m_next_stereo_index );
+        reference, m_impl->m_dataset->m_calibration,
+        m_impl->m_dataset->m_left_pixel_type,
+        m_impl->m_dataset->m_right_pixel_type, "left_camera", "right_camera",
+        m_impl->m_next_stereo_index );
     if ( !decoded )
     {
-      m_terminal_error =
+      m_impl->m_terminal_error =
           makeReaderError( decoded.error(), record_number, reference.timestamp );
-      return *m_terminal_error;
+      return *m_impl->m_terminal_error;
     }
 
-    ++m_next_stereo_index;
+    ++m_impl->m_next_stereo_index;
     return std::move( decoded ).value();
-  }
-
-  std::span<const sensor::ImuMeasurement>
-  StereoImuDataset::imuMeasurements() const noexcept
-  {
-    return m_impl->m_imu_measurements;
-  }
-
-  std::span<const StereoFrameRef> StereoImuDataset::stereoIndex() const noexcept
-  {
-    return m_impl->m_stereo_index;
-  }
-
-  DatasetResult<sensor::StereoFrame> StereoImuDataset::loadStereo(
-      std::size_t index ) const
-  {
-    if ( index >= m_impl->m_stereo_index.size() )
-    {
-      return DatasetError{ DatasetErrorCode::kIndexOutOfRange,
-                           "cam0/cam1",
-                           {},
-                           index,
-                           std::nullopt,
-                           "index",
-                           "stereo frame index is out of range" };
-    }
-
-    return decodeStereo(
-        m_impl->m_stereo_index[ index ], m_impl->m_calibration,
-        m_impl->m_left_pixel_type, m_impl->m_right_pixel_type, "cam0", "cam1",
-        index );
   }
 
 }  // namespace phad::io::dataset
