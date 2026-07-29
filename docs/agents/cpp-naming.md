@@ -13,6 +13,31 @@
 - 常量：`k` + PascalCase（如 `kCameraHeader`）
 - 命名空间：snake_case（如 `phad::io::dataset`）
 
+## 坐标变换记号例外
+
+表示坐标系间刚体变换的标识符采用
+`T_<target_frame>_<source_frame>`，作为普通 camelCase / snake_case
+规则的受控例外。该变换把 `source_frame` 中表达的量转换到
+`target_frame`：
+
+```cpp
+RigidTransform T_B_left_camera;
+RigidTransform T_W_B;
+
+const RigidTransform& T_B_left_camera() const;
+
+RigidTransform m_T_B_left_camera;
+RigidTransform m_T_B_right_camera;
+```
+
+- `T` 保持大写；`W`、`B` 等规范单字母 frame symbol 保持大写；
+  `left_camera` 等描述性 frame token 使用 snake_case。
+- 局部变量、参数和 accessor 可直接使用该记号；成员变量只在前面增加
+  `m_`。
+- target/source 顺序必须遵循 `docs/conventions.md`，不得使用
+  `extrinsics`、`camera_transform`、`T_camera` 等无法从名称确定方向的写法。
+- 该例外只适用于坐标变换记号；其他函数和变量仍遵循本文件的一般规则。
+
 ## 禁止写法
 
 ```cpp

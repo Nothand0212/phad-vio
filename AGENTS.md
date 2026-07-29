@@ -1,5 +1,11 @@
 ## Agent skills
 
+### Incremental development
+
+Implement the smallest working vertical slice for the current milestone, then
+evolve it from observed needs and failures. See
+`docs/agents/incremental-development.md`.
+
 ### Issue tracker
 
 Issues and PRDs are tracked in GitHub Issues. See `docs/agents/issue-tracker.md`.
