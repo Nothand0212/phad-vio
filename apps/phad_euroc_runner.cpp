@@ -136,7 +136,7 @@ namespace
       return 1;
     }
 
-    phad::io::dataset::DatasetReplaySource replay_source{ std::move( opened ).value() };
+    phad::io::dataset::DatasetReplaySource replay_source{ opened.value() };
     phad::io::SensorSource&                source = replay_source;
 
     cv::namedWindow( kWindowName, cv::WINDOW_AUTOSIZE );

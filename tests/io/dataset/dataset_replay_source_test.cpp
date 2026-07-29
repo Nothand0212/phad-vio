@@ -180,7 +180,8 @@ namespace
     {
       throw std::runtime_error( opened.error().describe() );
     }
-    return DatasetReplaySource{ std::move( opened ).value() };
+    const auto dataset = std::move( opened ).value();
+    return DatasetReplaySource{ dataset };
   }
 
   const SensorEvent& expectEvent( const SensorReadResult& result )
@@ -258,12 +259,14 @@ namespace
         std::holds_alternative<SensorSourceError>( first_failure ) );
     const auto& error = std::get<SensorSourceError>( first_failure );
     EXPECT_EQ( error.code, phad::io::SensorSourceErrorCode::kReadFailed );
-    EXPECT_EQ( error.source_id, "cam1" );
+    EXPECT_EQ( error.source_id, "right_camera" );
     ASSERT_TRUE( error.timestamp.has_value() );
     EXPECT_EQ( error.timestamp->nanoseconds(),
                ReplayDatasetFixture::kFirstTimestamp + 10'000'000 );
+    EXPECT_NE( error.cause.find( "record=2" ), std::string::npos );
     EXPECT_NE( error.cause.find( "OpenCV could not decode the image" ),
                std::string::npos );
+    EXPECT_EQ( error.cause.find( fixture.root().string() ), std::string::npos );
 
     const SensorReadResult repeated_failure = seam.next();
     ASSERT_TRUE(
@@ -275,7 +278,8 @@ namespace
     EXPECT_EQ( repeated_error.cause, error.cause );
   }
 
-  TEST( DatasetReplaySourceTest, OwnsMovedDatasetAndStereoPixels )
+  TEST( DatasetReplaySourceTest,
+        OwnsReaderAndStereoPixelsAfterDatasetHandleDestruction )
   {
     static_assert( !std::is_copy_constructible_v<DatasetReplaySource> );
     static_assert( std::is_move_constructible_v<DatasetReplaySource> );

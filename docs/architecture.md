@@ -132,10 +132,12 @@ phad::io
 静默截断为 8-bit。
 
 `SensorSource` 是来源无关的 pull-based 输入 seam，只公开稳定标定和下一个
-规范化 sensor event。`DatasetReplaySource` 按值拥有
-`StereoImuDataset`，合并严格有序的 IMU 与双目索引；timestamp 相同时先
-输出 IMU，并保持图像惰性解码。正常耗尽与读取失败是不同的 terminal
-状态。该 seam 不执行 IMU 分段、边界插值或 packet 构造。
+规范化 sensor event。`DatasetReplaySource` 从 dataset 创建并拥有独立
+reader，同时自持有 calibration、一条 IMU lookahead 和 terminal state；
+它比较 lookahead 与 reader 观察到的下一帧 stereo timestamp，timestamp
+相同时先输出 IMU，并仅在 stereo 成为下一事件时解码图像。正常耗尽与读取
+失败是不同的 terminal 状态。该 seam 不执行 IMU 分段、边界插值或 packet
+构造。
 
 ### 3.2 Sensor synchronizer
 

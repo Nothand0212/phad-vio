@@ -1,7 +1,7 @@
 #pragma once
 
-#include <cstddef>
 #include <optional>
+#include <variant>
 
 #include "phad/io/dataset/stereo_imu_dataset.hpp"
 #include "phad/io/sensor_source.hpp"
@@ -12,7 +12,7 @@ namespace phad::io::dataset
   class DatasetReplaySource final : public io::SensorSource
   {
   public:
-    explicit DatasetReplaySource( StereoImuDataset dataset );
+    explicit DatasetReplaySource( const StereoImuDataset& dataset );
 
     DatasetReplaySource( const DatasetReplaySource& )                = delete;
     DatasetReplaySource& operator=( const DatasetReplaySource& )     = delete;
@@ -25,13 +25,17 @@ namespace phad::io::dataset
     [[nodiscard]] io::SensorReadResult next() override;
 
   private:
-    [[nodiscard]] io::SensorReadResult fail( const DatasetError& error );
+    using TerminalState = std::variant<io::EndOfStream, io::SensorSourceError>;
 
-    StereoImuDataset                     m_dataset;
-    sensor::StereoImuCalibration         m_calibration;
-    std::size_t                          m_next_imu_index    = 0;
-    std::size_t                          m_next_stereo_index = 0;
-    std::optional<io::SensorSourceError> m_terminal_error;
+    [[nodiscard]] io::SensorReadResult fail(
+        const DatasetReaderError& error );
+    [[nodiscard]] io::SensorReadResult finish();
+    [[nodiscard]] io::SensorReadResult terminalResult() const;
+
+    sensor::StereoImuCalibration          m_calibration;
+    StereoImuDatasetReader                m_reader;
+    std::optional<sensor::ImuMeasurement> m_imu_lookahead;
+    std::optional<TerminalState>          m_terminal_state;
   };
 
 }  // namespace phad::io::dataset
