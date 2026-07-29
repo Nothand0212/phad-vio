@@ -1,17 +1,18 @@
 #include <gtest/gtest.h>
 
-#include <algorithm>
-#include <array>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <variant>
 
 #include "phad/io/dataset/euroc/euroc_dataset.hpp"
 
 namespace
 {
 
-  TEST( EurocMh01IntegrationTest, LoadsAuditedManifestAndSampleImages )
+  TEST( EurocMh01IntegrationTest,
+        LoadsAuditedSummaryAndFirstSequentialStereoFrame )
   {
     const char* configured_path = std::getenv( "PHAD_EUROC_MH01_PATH" );
     if ( configured_path == nullptr || std::string( configured_path ).empty() )
@@ -19,39 +20,44 @@ namespace
       GTEST_SKIP() << "PHAD_EUROC_MH01_PATH is not set";
     }
 
-    auto opened =
-        phad::io::dataset::EurocDataset::open( std::filesystem::path{ configured_path } );
+    auto opened = phad::io::dataset::euroc::open(
+        std::filesystem::path{ configured_path } );
     ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
-    const auto& dataset = opened.value();
-    const auto  stereo  = dataset.stereoIndex();
-    const auto  imu     = dataset.imuMeasurements();
+    const auto summary = opened.value().summary();
 
-    ASSERT_EQ( stereo.size(), 3682U );
-    ASSERT_EQ( imu.size(), 36820U );
-    EXPECT_EQ( stereo.front().timestamp.nanoseconds(), 1'403'636'579'763'555'584 );
-    EXPECT_EQ( stereo.back().timestamp.nanoseconds(), 1'403'636'763'813'555'456 );
-    EXPECT_EQ( imu.front().timestamp.nanoseconds(), 1'403'636'579'758'555'392 );
-    EXPECT_EQ( imu.back().timestamp.nanoseconds(), 1'403'636'763'853'555'456 );
-    EXPECT_TRUE( std::ranges::is_sorted( stereo, {}, &phad::io::dataset::StereoFrameRef::timestamp ) );
-    EXPECT_TRUE( std::ranges::is_sorted(
-        imu, {}, &phad::sensor::ImuMeasurement::timestamp ) );
+    ASSERT_EQ( summary.stereo.count, 3682U );
+    ASSERT_EQ( summary.imu.count, 36820U );
+    ASSERT_TRUE( summary.stereo.first_timestamp.has_value() );
+    ASSERT_TRUE( summary.stereo.last_timestamp.has_value() );
+    ASSERT_TRUE( summary.imu.first_timestamp.has_value() );
+    ASSERT_TRUE( summary.imu.last_timestamp.has_value() );
+    EXPECT_EQ( summary.stereo.first_timestamp->nanoseconds(),
+               1'403'636'579'763'555'584 );
+    EXPECT_EQ( summary.stereo.last_timestamp->nanoseconds(),
+               1'403'636'763'813'555'456 );
+    EXPECT_EQ( summary.imu.first_timestamp->nanoseconds(),
+               1'403'636'579'758'555'392 );
+    EXPECT_EQ( summary.imu.last_timestamp->nanoseconds(),
+               1'403'636'763'853'555'456 );
 
-    for ( const std::size_t index :
-          std::array<std::size_t, 3>{ 0, stereo.size() / 2, stereo.size() - 1 } )
-    {
-      auto loaded = dataset.loadStereo( index );
-      ASSERT_TRUE( loaded.hasValue() ) << loaded.error().describe();
-      EXPECT_EQ( loaded.value().left.width(), 752 );
-      EXPECT_EQ( loaded.value().left.height(), 480 );
-      EXPECT_EQ( loaded.value().left.channels(), 1 );
-      EXPECT_EQ( loaded.value().left.pixelType(),
-                 phad::sensor::PixelType::kUint8 );
-      EXPECT_EQ( loaded.value().right.width(), 752 );
-      EXPECT_EQ( loaded.value().right.height(), 480 );
-      EXPECT_EQ( loaded.value().right.channels(), 1 );
-      EXPECT_EQ( loaded.value().right.pixelType(),
-                 phad::sensor::PixelType::kUint8 );
-    }
+    auto       reader = opened.value().reader();
+    const auto loaded = reader.takeStereo();
+    ASSERT_TRUE(
+        std::holds_alternative<phad::sensor::StereoFrame>( loaded ) );
+    const auto& frame = std::get<phad::sensor::StereoFrame>( loaded );
+    EXPECT_EQ( frame.timestamp, *summary.stereo.first_timestamp );
+    EXPECT_EQ( frame.left.width(), 752 );
+    EXPECT_EQ( frame.left.height(), 480 );
+    EXPECT_EQ( frame.left.channels(), 1 );
+    EXPECT_EQ( frame.left.pixelType(), phad::sensor::PixelType::kUint8 );
+    EXPECT_EQ( frame.right.width(), 752 );
+    EXPECT_EQ( frame.right.height(), 480 );
+    EXPECT_EQ( frame.right.channels(), 1 );
+    EXPECT_EQ( frame.right.pixelType(), phad::sensor::PixelType::kUint8 );
+    EXPECT_TRUE( frame.left.pixels<std::uint8_t>().has_value() );
+    EXPECT_TRUE( frame.right.pixels<std::uint8_t>().has_value() );
+    EXPECT_FALSE( frame.left.pixels<std::uint16_t>().has_value() );
+    EXPECT_FALSE( frame.right.pixels<std::uint16_t>().has_value() );
   }
 
 }  // namespace

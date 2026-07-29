@@ -56,6 +56,10 @@ if(PHAD_BUILD_TESTS)
   target_link_libraries(phad_io_dataset_tests PRIVATE
     phad::io_dataset GTest::gtest_main opencv_imgcodecs
   )
+  target_compile_definitions(phad_io_dataset_tests PRIVATE
+    PHAD_EUROC_INSPECT_PATH="$<TARGET_FILE:phad_euroc_inspect>"
+  )
+  add_dependencies(phad_io_dataset_tests phad_euroc_inspect)
   gtest_discover_tests(phad_io_dataset_tests PROPERTIES LABELS "unit")
 
   if(PHAD_ENABLE_MH01_TESTS)

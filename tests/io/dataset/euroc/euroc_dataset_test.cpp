@@ -6,12 +6,13 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <optional>
 #include <random>
-#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -26,7 +27,6 @@ namespace
 {
 
   namespace fs = std::filesystem;
-  using phad::io::dataset::EurocDataset;
 
   class EurocFixture
   {
@@ -174,13 +174,169 @@ namespace
     fs::path m_root;
   };
 
-  TEST( EurocDatasetTest, AdapterReturnsNormalizedStereoImuDataset )
+  std::string readFile( const fs::path& path )
+  {
+    std::ifstream      input( path );
+    std::ostringstream contents;
+    contents << input.rdbuf();
+    return contents.str();
+  }
+
+  template <typename T>
+  void expectReaderError(
+      const phad::io::dataset::DatasetReaderResult<T>& result,
+      const phad::io::dataset::DatasetReaderError&     expected )
+  {
+    ASSERT_TRUE(
+        std::holds_alternative<phad::io::dataset::DatasetReaderError>(
+            result ) );
+    EXPECT_EQ( std::get<phad::io::dataset::DatasetReaderError>( result ),
+               expected );
+  }
+
+  void expectStickyTerminalError(
+      phad::io::dataset::StereoImuDatasetReader&   reader,
+      const phad::io::dataset::DatasetReaderError& expected )
+  {
+    expectReaderError( reader.takeImu(), expected );
+    expectReaderError( reader.peekStereoTimestamp(), expected );
+    expectReaderError( reader.takeStereo(), expected );
+  }
+
+  TEST( EurocInspectTest, PrintsCalibrationAndSummaryWithoutDecodingImages )
+  {
+    EurocFixture fixture;
+    {
+      std::ofstream corrupt(
+          fixture.sensorPath( "cam0", "data/left-a.png" ),
+          std::ios::binary | std::ios::trunc );
+      corrupt << "not a png";
+    }
+    const fs::path    stdout_path = fixture.root() / "inspect.stdout";
+    const fs::path    stderr_path = fixture.root() / "inspect.stderr";
+    const std::string command =
+        std::string{ "\"" PHAD_EUROC_INSPECT_PATH "\" \"" } +
+        fixture.root().string() + "\" > \"" + stdout_path.string() +
+        "\" 2> \"" + stderr_path.string() + "\"";
+
+    ASSERT_EQ( std::system( command.c_str() ), 0 ) << readFile( stderr_path );
+    const std::string output = readFile( stdout_path );
+    EXPECT_NE( output.find( "left_camera_resolution: 4x3" ),
+               std::string::npos );
+    EXPECT_NE( output.find( "right_camera_resolution: 4x3" ),
+               std::string::npos );
+    EXPECT_NE( output.find( "imu_rate_hz: 200" ), std::string::npos );
+    EXPECT_NE( output.find( "stereo_frames: 3" ), std::string::npos );
+    EXPECT_NE( output.find( "imu_measurements: 4" ), std::string::npos );
+    EXPECT_EQ( output.find( "sample[" ), std::string::npos );
+    EXPECT_TRUE( readFile( stderr_path ).empty() );
+  }
+
+  TEST( EurocInspectTest, ReportsOpenErrorAndReturnsNonzero )
+  {
+    EurocFixture      fixture;
+    const fs::path    missing_path = fixture.root() / "missing";
+    const fs::path    stdout_path  = fixture.root() / "inspect.stdout";
+    const fs::path    stderr_path  = fixture.root() / "inspect.stderr";
+    const std::string command =
+        std::string{ "\"" PHAD_EUROC_INSPECT_PATH "\" \"" } +
+        missing_path.string() + "\" > \"" + stdout_path.string() +
+        "\" 2> \"" + stderr_path.string() + "\"";
+
+    EXPECT_NE( std::system( command.c_str() ), 0 );
+    EXPECT_TRUE( readFile( stdout_path ).empty() );
+    const std::string error = readFile( stderr_path );
+    EXPECT_NE( error.find( "dataset error" ), std::string::npos );
+    EXPECT_NE( error.find( missing_path.string() ), std::string::npos );
+  }
+
+  TEST( EurocDatasetTest,
+        AdapterOpensCalibrationSummaryAndSequentialMeasurements )
   {
     EurocFixture fixture;
     auto         result = phad::io::dataset::euroc::open( fixture.root() );
     ASSERT_TRUE( result.hasValue() ) << result.error().describe();
-    EXPECT_EQ( result.value().stereoIndex().size(), 3U );
-    EXPECT_EQ( result.value().imuMeasurements().size(), 4U );
+    const auto calibration = result.value().calibration();
+    const auto summary     = result.value().summary();
+    EXPECT_EQ( calibration.left.resolution.width, 4 );
+    EXPECT_EQ( calibration.left.resolution.height, 3 );
+    EXPECT_DOUBLE_EQ( calibration.left.intrinsics.fx_pixels, 100.0 );
+    EXPECT_DOUBLE_EQ( calibration.left.T_B_camera.matrix[ 0 ], 1.0 );
+    EXPECT_DOUBLE_EQ( calibration.imu.rate_hz, 200.0 );
+    EXPECT_DOUBLE_EQ( calibration.imu.gyr_nd, 0.0001 );
+    EXPECT_DOUBLE_EQ( calibration.imu.acc_rw, 0.003 );
+    EXPECT_EQ( summary.imu.count, 4U );
+    EXPECT_EQ( summary.stereo.count, 3U );
+
+    struct ExpectedImu
+    {
+      std::int64_t timestamp;
+      double       gyro_z;
+      double       accel_z;
+    };
+    const std::array<ExpectedImu, 4> expected_imu{
+        ExpectedImu{ EurocFixture::kFirstTimestamp - 5'000'000, 0.3, 9.8 },
+        ExpectedImu{ EurocFixture::kFirstTimestamp, 0.6, 9.7 },
+        ExpectedImu{ EurocFixture::kFirstTimestamp + 5'000'000, 0.9, 9.6 },
+        ExpectedImu{ EurocFixture::kFirstTimestamp + 10'000'000, 1.2, 9.5 } };
+    auto                                   reader = result.value().reader();
+    std::optional<phad::common::Timestamp> previous_imu_timestamp;
+    for ( const auto& expected : expected_imu )
+    {
+      const auto imu_result = reader.takeImu();
+      ASSERT_TRUE( std::holds_alternative<phad::sensor::ImuMeasurement>(
+          imu_result ) );
+      const auto& measurement =
+          std::get<phad::sensor::ImuMeasurement>( imu_result );
+      EXPECT_EQ( measurement.timestamp.nanoseconds(), expected.timestamp );
+      EXPECT_DOUBLE_EQ( measurement.gyro_radps[ 2 ], expected.gyro_z );
+      EXPECT_DOUBLE_EQ( measurement.accel_mps2[ 2 ], expected.accel_z );
+      if ( previous_imu_timestamp.has_value() )
+      {
+        EXPECT_LT( *previous_imu_timestamp, measurement.timestamp );
+      }
+      previous_imu_timestamp = measurement.timestamp;
+    }
+    const std::array<std::array<std::int64_t, 3>, 3> expected_stereo{
+        std::array<std::int64_t, 3>{
+            EurocFixture::kFirstTimestamp, 11, 21 },
+        std::array<std::int64_t, 3>{
+            EurocFixture::kFirstTimestamp + 50'000'000, 12, 22 },
+        std::array<std::int64_t, 3>{
+            EurocFixture::kFirstTimestamp + 100'000'000, 13, 23 } };
+    std::optional<phad::common::Timestamp> previous_stereo_timestamp;
+    for ( const auto& expected : expected_stereo )
+    {
+      const auto stereo_result = reader.takeStereo();
+      ASSERT_TRUE( std::holds_alternative<phad::sensor::StereoFrame>(
+          stereo_result ) );
+      const auto& frame =
+          std::get<phad::sensor::StereoFrame>( stereo_result );
+      EXPECT_EQ( frame.timestamp.nanoseconds(), expected[ 0 ] );
+      if ( previous_stereo_timestamp.has_value() )
+      {
+        EXPECT_LT( *previous_stereo_timestamp, frame.timestamp );
+      }
+      previous_stereo_timestamp = frame.timestamp;
+      EXPECT_EQ( frame.left.pixelType(), phad::sensor::PixelType::kUint8 );
+      EXPECT_EQ( frame.right.pixelType(), phad::sensor::PixelType::kUint8 );
+      const auto left_pixels  = frame.left.pixels<std::uint8_t>();
+      const auto right_pixels = frame.right.pixels<std::uint8_t>();
+      ASSERT_TRUE( left_pixels.has_value() );
+      ASSERT_TRUE( right_pixels.has_value() );
+      EXPECT_EQ( left_pixels->front(), expected[ 1 ] );
+      EXPECT_EQ( right_pixels->front(), expected[ 2 ] );
+    }
+    EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
+        reader.takeImu() ) );
+    EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
+        reader.takeImu() ) );
+    EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
+        reader.peekStereoTimestamp() ) );
+    EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
+        reader.takeStereo() ) );
+    EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
+        reader.takeStereo() ) );
   }
 
   TEST( EurocDatasetTest, CopiedHandleReturnsCalibrationAndSummaryByValue )
@@ -425,18 +581,7 @@ namespace
                std::string::npos );
 
     fixture.writeImage( "cam1", "right-a.png", 21 );
-    EXPECT_EQ(
-        std::get<phad::io::dataset::DatasetReaderError>(
-            failed_reader.takeImu() ),
-        error );
-    EXPECT_EQ(
-        std::get<phad::io::dataset::DatasetReaderError>(
-            failed_reader.peekStereoTimestamp() ),
-        error );
-    EXPECT_EQ(
-        std::get<phad::io::dataset::DatasetReaderError>(
-            failed_reader.takeStereo() ),
-        error );
+    expectStickyTerminalError( failed_reader, error );
     EXPECT_TRUE( std::holds_alternative<phad::sensor::StereoFrame>(
         other_reader.takeStereo() ) );
   }
@@ -466,42 +611,6 @@ namespace
                std::string::npos );
   }
 
-  TEST( EurocDatasetTest, OpensCalibrationImuAndExactStereoIndex )
-  {
-    EurocFixture fixture;
-
-    auto result = EurocDataset::open( fixture.root() );
-    ASSERT_TRUE( result.hasValue() ) << result.error().describe();
-    const auto& dataset = result.value();
-
-    ASSERT_EQ( dataset.imuMeasurements().size(), 4U );
-    EXPECT_EQ( dataset.imuMeasurements()[ 1 ].timestamp.nanoseconds(),
-               EurocFixture::kFirstTimestamp );
-    EXPECT_DOUBLE_EQ( dataset.imuMeasurements()[ 1 ].gyro_radps[ 2 ], 0.6 );
-    EXPECT_DOUBLE_EQ( dataset.imuMeasurements()[ 1 ].accel_mps2[ 2 ], 9.7 );
-    EXPECT_LT( dataset.imuMeasurements()[ 0 ].timestamp,
-               dataset.imuMeasurements()[ 1 ].timestamp );
-
-    ASSERT_EQ( dataset.stereoIndex().size(), 3U );
-    EXPECT_EQ( dataset.stereoIndex()[ 0 ].timestamp.nanoseconds(),
-               EurocFixture::kFirstTimestamp );
-    EXPECT_EQ( dataset.stereoIndex()[ 0 ].left_path.filename(), "left-a.png" );
-    EXPECT_EQ( dataset.stereoIndex()[ 0 ].right_path.filename(), "right-a.png" );
-    EXPECT_LT( dataset.stereoIndex()[ 1 ].timestamp,
-               dataset.stereoIndex()[ 2 ].timestamp );
-
-    const auto& calibration = dataset.calibration();
-    EXPECT_EQ( calibration.left.resolution.width, 4 );
-    EXPECT_EQ( calibration.left.resolution.height, 3 );
-    EXPECT_DOUBLE_EQ( calibration.left.intrinsics.fx_pixels, 100.0 );
-    EXPECT_DOUBLE_EQ( calibration.left.T_B_camera.matrix[ 0 ], 1.0 );
-    EXPECT_DOUBLE_EQ( calibration.imu.rate_hz, 200.0 );
-    EXPECT_DOUBLE_EQ(
-        calibration.imu.gyr_nd, 0.0001 );
-    EXPECT_DOUBLE_EQ(
-        calibration.imu.acc_rw, 0.003 );
-  }
-
   TEST( EurocDatasetTest, PreservesEurocTbsAsProjectBodyFromCameraTransform )
   {
     EurocFixture      fixture;
@@ -515,7 +624,7 @@ namespace
     yaml.replace( yaml.find( identity ), identity.size(), translated );
     fixture.writeSensorFile( "cam0", yaml );
 
-    auto opened = EurocDataset::open( fixture.root() );
+    auto opened = phad::io::dataset::euroc::open( fixture.root() );
     ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
     const auto& T_B_camera = opened.value().calibration().left.T_B_camera.matrix;
     EXPECT_DOUBLE_EQ( T_B_camera[ 3 ], 1.25 );
@@ -523,85 +632,79 @@ namespace
     EXPECT_DOUBLE_EQ( T_B_camera[ 11 ], 3.75 );
   }
 
-  TEST( EurocDatasetTest, RepeatedFullManifestTraversalIsDeterministic )
+  TEST( EurocDatasetTest, IndependentDatasetsAndReadersAreDeterministic )
   {
     EurocFixture fixture;
-    auto         first  = EurocDataset::open( fixture.root() );
-    auto         second = EurocDataset::open( fixture.root() );
+    auto         first  = phad::io::dataset::euroc::open( fixture.root() );
+    auto         second = phad::io::dataset::euroc::open( fixture.root() );
     ASSERT_TRUE( first.hasValue() ) << first.error().describe();
     ASSERT_TRUE( second.hasValue() ) << second.error().describe();
+    EXPECT_EQ( first.value().summary().imu.count,
+               second.value().summary().imu.count );
+    EXPECT_EQ( first.value().summary().stereo.count,
+               second.value().summary().stereo.count );
 
-    ASSERT_EQ( first.value().stereoIndex().size(),
-               second.value().stereoIndex().size() );
-    for ( std::size_t index = 0; index < first.value().stereoIndex().size();
-          ++index )
+    auto first_reader  = first.value().reader();
+    auto second_reader = second.value().reader();
+    for ( std::size_t consumed = 0;
+          consumed < first.value().summary().imu.count; ++consumed )
     {
-      const auto& lhs = first.value().stereoIndex()[ index ];
-      const auto& rhs = second.value().stereoIndex()[ index ];
-      EXPECT_EQ( lhs.timestamp, rhs.timestamp );
-      EXPECT_EQ( lhs.left_path, rhs.left_path );
-      EXPECT_EQ( lhs.right_path, rhs.right_path );
+      const auto first_imu  = first_reader.takeImu();
+      const auto second_imu = second_reader.takeImu();
+      ASSERT_TRUE( std::holds_alternative<phad::sensor::ImuMeasurement>(
+          first_imu ) );
+      ASSERT_TRUE( std::holds_alternative<phad::sensor::ImuMeasurement>(
+          second_imu ) );
+      EXPECT_EQ( std::get<phad::sensor::ImuMeasurement>( first_imu ).timestamp,
+                 std::get<phad::sensor::ImuMeasurement>( second_imu ).timestamp );
+      EXPECT_EQ( std::get<phad::sensor::ImuMeasurement>( first_imu ).accel_mps2,
+                 std::get<phad::sensor::ImuMeasurement>( second_imu ).accel_mps2 );
+      EXPECT_EQ( std::get<phad::sensor::ImuMeasurement>( first_imu ).gyro_radps,
+                 std::get<phad::sensor::ImuMeasurement>( second_imu ).gyro_radps );
     }
-
-    ASSERT_EQ( first.value().imuMeasurements().size(),
-               second.value().imuMeasurements().size() );
-    for ( std::size_t index = 0; index < first.value().imuMeasurements().size();
-          ++index )
+    for ( std::size_t consumed = 0;
+          consumed < first.value().summary().stereo.count; ++consumed )
     {
-      const auto& lhs = first.value().imuMeasurements()[ index ];
-      const auto& rhs = second.value().imuMeasurements()[ index ];
-      EXPECT_EQ( lhs.timestamp, rhs.timestamp );
-      EXPECT_EQ( lhs.accel_mps2, rhs.accel_mps2 );
-      EXPECT_EQ( lhs.gyro_radps, rhs.gyro_radps );
+      const auto first_stereo  = first_reader.takeStereo();
+      const auto second_stereo = second_reader.takeStereo();
+      ASSERT_TRUE( std::holds_alternative<phad::sensor::StereoFrame>(
+          first_stereo ) );
+      ASSERT_TRUE( std::holds_alternative<phad::sensor::StereoFrame>(
+          second_stereo ) );
+      const auto& first_frame =
+          std::get<phad::sensor::StereoFrame>( first_stereo );
+      const auto& second_frame =
+          std::get<phad::sensor::StereoFrame>( second_stereo );
+      EXPECT_EQ( first_frame.timestamp, second_frame.timestamp );
+      ASSERT_EQ( first_frame.left.pixelType(),
+                 phad::sensor::PixelType::kUint8 );
+      ASSERT_EQ( first_frame.right.pixelType(),
+                 phad::sensor::PixelType::kUint8 );
+      ASSERT_EQ( second_frame.left.pixelType(),
+                 phad::sensor::PixelType::kUint8 );
+      ASSERT_EQ( second_frame.right.pixelType(),
+                 phad::sensor::PixelType::kUint8 );
+      const auto first_left_pixels =
+          first_frame.left.pixels<std::uint8_t>();
+      const auto first_right_pixels =
+          first_frame.right.pixels<std::uint8_t>();
+      const auto second_left_pixels =
+          second_frame.left.pixels<std::uint8_t>();
+      const auto second_right_pixels =
+          second_frame.right.pixels<std::uint8_t>();
+      ASSERT_TRUE( first_left_pixels.has_value() );
+      ASSERT_TRUE( first_right_pixels.has_value() );
+      ASSERT_TRUE( second_left_pixels.has_value() );
+      ASSERT_TRUE( second_right_pixels.has_value() );
+      EXPECT_TRUE(
+          std::ranges::equal( *first_left_pixels, *second_left_pixels ) );
+      EXPECT_TRUE(
+          std::ranges::equal( *first_right_pixels, *second_right_pixels ) );
     }
   }
 
-  TEST( EurocDatasetTest, LazilyDecodesFirstMiddleAndLastOwnedStereoFrames )
-  {
-    EurocFixture fixture;
-    auto         opened = EurocDataset::open( fixture.root() );
-    ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
-    const auto& dataset = opened.value();
-
-    for ( const auto [ index, left_value, right_value ] :
-          std::array<std::array<std::size_t, 3>, 3>{
-              std::array<std::size_t, 3>{ 0, 11, 21 },
-              std::array<std::size_t, 3>{ 1, 12, 22 },
-              std::array<std::size_t, 3>{ 2, 13, 23 } } )
-    {
-      auto loaded = dataset.loadStereo( index );
-      ASSERT_TRUE( loaded.hasValue() ) << loaded.error().describe();
-      const auto& frame = loaded.value();
-      EXPECT_EQ( frame.timestamp, dataset.stereoIndex()[ index ].timestamp );
-      EXPECT_EQ( frame.left.width(), 4 );
-      EXPECT_EQ( frame.left.height(), 3 );
-      EXPECT_EQ( frame.left.channels(), 1 );
-      EXPECT_EQ( frame.left.pixelType(), phad::sensor::PixelType::kUint8 );
-      const auto left_pixels  = frame.left.pixels<std::uint8_t>();
-      const auto right_pixels = frame.right.pixels<std::uint8_t>();
-      ASSERT_TRUE( left_pixels.has_value() );
-      ASSERT_TRUE( right_pixels.has_value() );
-      EXPECT_EQ( left_pixels->size(), 12U );
-      EXPECT_EQ( left_pixels->front(), left_value );
-      EXPECT_EQ( right_pixels->front(), right_value );
-      EXPECT_FALSE( frame.left.pixels<std::uint16_t>().has_value() );
-    }
-
-    auto first_load  = dataset.loadStereo( 1 );
-    auto second_load = dataset.loadStereo( 1 );
-    ASSERT_TRUE( first_load.hasValue() );
-    ASSERT_TRUE( second_load.hasValue() );
-    const auto first_pixels =
-        first_load.value().left.pixels<std::uint8_t>();
-    const auto second_pixels =
-        second_load.value().left.pixels<std::uint8_t>();
-    ASSERT_TRUE( first_pixels.has_value() );
-    ASSERT_TRUE( second_pixels.has_value() );
-    EXPECT_TRUE( std::ranges::equal( *first_pixels, *second_pixels ) );
-    EXPECT_NE( first_pixels->data(), second_pixels->data() );
-  }
-
-  TEST( EurocDatasetTest, DefersCorruptPngFailureUntilStereoIsRequested )
+  TEST( EurocDatasetTest,
+        DefersCorruptPngFailureUntilSequentialStereoConsumption )
   {
     EurocFixture fixture;
     {
@@ -610,17 +713,29 @@ namespace
       corrupt << "not a png";
     }
 
-    auto opened = EurocDataset::open( fixture.root() );
+    auto opened = phad::io::dataset::euroc::open( fixture.root() );
     ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
-    auto loaded = opened.value().loadStereo( 1 );
+    EXPECT_EQ( opened.value().summary().stereo.count, 3U );
+    auto reader = opened.value().reader();
+    EXPECT_TRUE( std::holds_alternative<phad::common::Timestamp>(
+        reader.peekStereoTimestamp() ) );
+    EXPECT_TRUE( std::holds_alternative<phad::sensor::StereoFrame>(
+        reader.takeStereo() ) );
 
-    ASSERT_FALSE( loaded.hasValue() );
-    EXPECT_EQ( loaded.error().code,
-               phad::io::dataset::DatasetErrorCode::kImageDecodeFailed );
-    EXPECT_EQ( loaded.error().sensor_id, "cam1" );
-    EXPECT_EQ( loaded.error().line_or_record_index, 1U );
-    EXPECT_EQ( loaded.error().timestamp->nanoseconds(),
+    const auto failed = reader.takeStereo();
+    ASSERT_TRUE(
+        std::holds_alternative<phad::io::dataset::DatasetReaderError>(
+            failed ) );
+    const auto error =
+        std::get<phad::io::dataset::DatasetReaderError>( failed );
+    EXPECT_EQ(
+        error.code,
+        phad::io::dataset::DatasetReaderErrorCode::kImageDecodeFailed );
+    EXPECT_EQ( error.sensor_id, "right_camera" );
+    EXPECT_EQ( error.record_number, 2U );
+    EXPECT_EQ( error.timestamp.nanoseconds(),
                EurocFixture::kFirstTimestamp + 50'000'000 );
+    expectStickyTerminalError( reader, error );
   }
 
   void expectOpenError( const fs::path&                     root,
@@ -628,7 +743,7 @@ namespace
                         const std::string&                  expected_sensor = {},
                         const std::string&                  expected_field  = {} )
   {
-    auto result = EurocDataset::open( root );
+    auto result = phad::io::dataset::euroc::open( root );
     ASSERT_FALSE( result.hasValue() );
     EXPECT_EQ( result.error().code, expected_code ) << result.error().describe();
     if ( !expected_sensor.empty() )
@@ -737,7 +852,7 @@ namespace
           "w_RS_S_z [rad s^-1],a_RS_S_x [m s^-2],a_RS_S_y [m s^-2],"
           "a_RS_S_z [m s^-2]\n1403636579763555584," +
               value + ",0,0,0,0,1\n" );
-      auto result = EurocDataset::open( fixture.root() );
+      auto result = phad::io::dataset::euroc::open( fixture.root() );
       ASSERT_FALSE( result.hasValue() );
       EXPECT_EQ( result.error().code,
                  phad::io::dataset::DatasetErrorCode::kNonFiniteMeasurement );
@@ -916,42 +1031,45 @@ namespace
     }
   }
 
-  TEST( EurocDatasetTest, RejectsWrongImageDimensionsAndPixelTypesOnDecode )
+  void expectSequentialFormatMismatch( EurocFixture& fixture )
+  {
+    auto opened = phad::io::dataset::euroc::open( fixture.root() );
+    ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
+    auto reader = opened.value().reader();
+    ASSERT_TRUE( std::holds_alternative<phad::sensor::StereoFrame>(
+        reader.takeStereo() ) );
+
+    const auto failed = reader.takeStereo();
+    ASSERT_TRUE(
+        std::holds_alternative<phad::io::dataset::DatasetReaderError>(
+            failed ) );
+    const auto error =
+        std::get<phad::io::dataset::DatasetReaderError>( failed );
+    EXPECT_EQ(
+        error.code,
+        phad::io::dataset::DatasetReaderErrorCode::kImageFormatMismatch );
+    EXPECT_EQ( error.sensor_id, "left_camera" );
+    EXPECT_EQ( error.record_number, 2U );
+    EXPECT_EQ( error.timestamp.nanoseconds(),
+               EurocFixture::kFirstTimestamp + 50'000'000 );
+    EXPECT_FALSE( error.cause.empty() );
+    expectStickyTerminalError( reader, error );
+  }
+
+  TEST( EurocDatasetTest,
+        ReportsWrongImageDimensionsAndPixelTypesAsStickyReaderErrors )
   {
     {
       EurocFixture fixture;
       fixture.writeImage( "cam0", "left-b.png", 12, 5, 3 );
-      auto opened = EurocDataset::open( fixture.root() );
-      ASSERT_TRUE( opened.hasValue() );
-      auto loaded = opened.value().loadStereo( 1 );
-      ASSERT_FALSE( loaded.hasValue() );
-      EXPECT_EQ( loaded.error().code,
-                 phad::io::dataset::DatasetErrorCode::kImageFormatMismatch );
-      EXPECT_EQ( loaded.error().field, "resolution" );
+      expectSequentialFormatMismatch( fixture );
     }
     for ( const int type : { CV_8UC3, CV_16UC1 } )
     {
       EurocFixture fixture;
       fixture.writeImage( "cam0", "left-b.png", 12, 4, 3, type );
-      auto opened = EurocDataset::open( fixture.root() );
-      ASSERT_TRUE( opened.hasValue() );
-      auto loaded = opened.value().loadStereo( 1 );
-      ASSERT_FALSE( loaded.hasValue() );
-      EXPECT_EQ( loaded.error().code,
-                 phad::io::dataset::DatasetErrorCode::kImageFormatMismatch );
-      EXPECT_EQ( loaded.error().field, "pixel_type" );
+      expectSequentialFormatMismatch( fixture );
     }
-  }
-
-  TEST( EurocDatasetTest, RejectsOutOfRangeStereoIndex )
-  {
-    EurocFixture fixture;
-    auto         opened = EurocDataset::open( fixture.root() );
-    ASSERT_TRUE( opened.hasValue() );
-    auto loaded = opened.value().loadStereo( 3 );
-    ASSERT_FALSE( loaded.hasValue() );
-    EXPECT_EQ( loaded.error().code,
-               phad::io::dataset::DatasetErrorCode::kIndexOutOfRange );
   }
 
 #ifdef __linux__
@@ -1001,21 +1119,28 @@ namespace
     fixture.writeCsv( "cam0", left_csv.str() );
     fixture.writeCsv( "cam1", right_csv.str() );
 
-    auto opened = EurocDataset::open( fixture.root() );
+    auto opened = phad::io::dataset::euroc::open( fixture.root() );
     ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
+    auto reader = opened.value().reader();
     {
-      auto warmup = opened.value().loadStereo( 0 );
-      ASSERT_TRUE( warmup.hasValue() );
+      const auto warmup = reader.takeStereo();
+      ASSERT_TRUE( std::holds_alternative<phad::sensor::StereoFrame>(
+          warmup ) );
     }
     const std::size_t resident_after_warmup = CurrentResidentBytes();
-    for ( std::size_t index = 0; index < kFrameCount; ++index )
+    for ( std::size_t consumed = 1; consumed < kFrameCount; ++consumed )
     {
-      auto loaded = opened.value().loadStereo( index );
-      ASSERT_TRUE( loaded.hasValue() ) << loaded.error().describe();
-      const auto pixels = loaded.value().left.pixels<std::uint8_t>();
+      const auto loaded = reader.takeStereo();
+      ASSERT_TRUE( std::holds_alternative<phad::sensor::StereoFrame>(
+          loaded ) );
+      const auto pixels =
+          std::get<phad::sensor::StereoFrame>( loaded )
+              .left.pixels<std::uint8_t>();
       ASSERT_TRUE( pixels.has_value() );
-      EXPECT_EQ( pixels->front(), static_cast<std::uint8_t>( index ) );
+      EXPECT_EQ( pixels->front(), static_cast<std::uint8_t>( consumed ) );
     }
+    EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
+        reader.takeStereo() ) );
     const std::size_t resident_after_traversal = CurrentResidentBytes();
 
     // A retained cache would hold roughly 24 MiB for this fixture. Allow 8 MiB
