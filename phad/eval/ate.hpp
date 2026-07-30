@@ -8,6 +8,7 @@
 #include "phad/common/trajectory.hpp"
 #include "phad/eval/align.hpp"
 #include "phad/eval/associate.hpp"
+#include "phad/eval/error_stats.hpp"
 #include "phad/eval/eval_error.hpp"
 
 /**
@@ -21,15 +22,6 @@
 
 namespace phad::eval
 {
-
-  struct ErrorStats
-  {
-    double rmse   = 0.0;
-    double mean   = 0.0;
-    double median = 0.0;
-    double stddev = 0.0;
-    double max    = 0.0;
-  };
 
   struct PoseErrorSample
   {

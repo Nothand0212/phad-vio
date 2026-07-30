@@ -78,6 +78,8 @@ add_library(phad_eval
   phad/eval/align.cpp
   phad/eval/associate.cpp
   phad/eval/ate.cpp
+  phad/eval/error_stats.cpp
+  phad/eval/rpe.cpp
   phad/eval/tum_io.cpp
 )
 add_library(phad::eval ALIAS phad_eval)
@@ -141,6 +143,7 @@ if(PHAD_BUILD_TESTS)
     tests/eval/align_test.cpp
     tests/eval/associate_test.cpp
     tests/eval/ate_test.cpp
+    tests/eval/rpe_test.cpp
     tests/eval/tum_io_test.cpp
   )
   target_link_libraries(phad_eval_tests PRIVATE phad::eval GTest::gtest_main)

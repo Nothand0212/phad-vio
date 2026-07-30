@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "phad/eval/ate.hpp"
+#include "phad/eval/rpe.hpp"
 #include "phad/eval/tum_io.hpp"
 #include "phad/io/dataset/euroc/euroc_groundtruth.hpp"
 
@@ -86,6 +87,23 @@ namespace
     ASSERT_TRUE( report ) << report.error().describe();
     EXPECT_EQ( report.value().association.pairs.size(), groundtruth.size() );
     EXPECT_EQ( report.value().association.droppedTotal(), 0U );
+    EXPECT_NEAR( report.value().trans_m.rmse, 0.0, 1e-9 );
+    EXPECT_NEAR( report.value().rot_deg.rmse, 0.0, 1e-6 );
+  }
+
+  TEST_F( Mh01GroundtruthTest, GroundtruthComparesToItselfWithZeroRpe )
+  {
+    // 合成轨迹的时间戳是规则网格，真实真值不是；这里检查间隔伙伴搜索在
+    // 真实时间戳上仍然覆盖除尾部一个 delta 之外的全部位姿。
+    auto trajectory = phad::io::dataset::euroc::openGroundtruth( m_root );
+    ASSERT_TRUE( trajectory ) << trajectory.error().describe();
+    const Trajectory groundtruth = std::move( trajectory ).value();
+
+    const auto report = phad::eval::computeRpe( groundtruth, groundtruth );
+    ASSERT_TRUE( report ) << report.error().describe();
+    EXPECT_EQ( report.value().pair_count + report.value().dropped_no_partner,
+               groundtruth.size() );
+    EXPECT_LT( report.value().dropped_no_partner, 220U );
     EXPECT_NEAR( report.value().trans_m.rmse, 0.0, 1e-9 );
     EXPECT_NEAR( report.value().rot_deg.rmse, 0.0, 1e-6 );
   }

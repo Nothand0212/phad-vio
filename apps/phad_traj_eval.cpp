@@ -13,6 +13,7 @@
 
 #include "phad/common/trajectory.hpp"
 #include "phad/eval/ate.hpp"
+#include "phad/eval/rpe.hpp"
 #include "phad/eval/tum_io.hpp"
 #include "phad/io/dataset/euroc/euroc_groundtruth.hpp"
 
@@ -28,7 +29,7 @@ namespace
       "usage: phad_traj_eval --est <est.tum>\n"
       "                      (--gt <gt.tum> | --gt-euroc <sequence-root>)\n"
       "                      [--max-dt-ms <value>] [--min-match-rate <value>]\n"
-      "                      [--errors-csv <path>]\n";
+      "                      [--rpe-delta-s <value>] [--errors-csv <path>]\n";
 
   struct Arguments
   {
@@ -38,6 +39,7 @@ namespace
     std::filesystem::path errors_csv_path;
     double                max_dt_ms      = 2.5;
     double                min_match_rate = 0.5;
+    double                rpe_delta_s    = 1.0;
   };
 
   [[nodiscard]] bool parseDouble( std::string_view text, double& value )
@@ -92,6 +94,20 @@ namespace
              arguments.min_match_rate < 0.0 || arguments.min_match_rate > 1.0 )
         {
           std::cerr << "--min-match-rate expects a value in [0, 1]\n";
+          return false;
+        }
+      }
+      else if ( flag == "--rpe-delta-s" )
+      {
+        // 间隔匹配容差固定在库内，间隔必须大于它才有意义。
+        constexpr double kMinRpeDeltaS =
+            static_cast<double>( phad::eval::kDefaultRpeDeltaToleranceNs ) *
+            1e-9;
+        if ( !parseDouble( value, arguments.rpe_delta_s ) ||
+             arguments.rpe_delta_s <= kMinRpeDeltaS )
+        {
+          std::cerr << "--rpe-delta-s expects a number greater than the "
+                    << kMinRpeDeltaS << " s pairing tolerance\n";
           return false;
         }
       }
@@ -199,12 +215,15 @@ int main( int argc, char** argv )
     return 1;
   }
 
-  phad::eval::AteOptions options;
-  options.association.max_dt_ns = static_cast<std::int64_t>(
+  phad::eval::AssociationOptions association_options;
+  association_options.max_dt_ns = static_cast<std::int64_t>(
       std::llround( arguments.max_dt_ms * 1'000'000.0 ) );
-  options.association.min_match_rate = arguments.min_match_rate;
+  association_options.min_match_rate = arguments.min_match_rate;
 
-  auto report = phad::eval::computeAte( est.value(), *gt, options );
+  phad::eval::AteOptions ate_options;
+  ate_options.association = association_options;
+
+  auto report = phad::eval::computeAte( est.value(), *gt, ate_options );
   if ( !report )
   {
     std::cerr << report.error().describe() << '\n';
@@ -222,6 +241,24 @@ int main( int argc, char** argv )
             << arguments.max_dt_ms << " ms\n";
   printStats( "ATE translation [m] ", report.value().trans_m );
   printStats( "ATE rotation [deg]  ", report.value().rot_deg );
+
+  phad::eval::RpeOptions rpe_options;
+  rpe_options.association = association_options;
+  rpe_options.delta_ns    = static_cast<std::int64_t>(
+      std::llround( arguments.rpe_delta_s * 1'000'000'000.0 ) );
+
+  auto rpe = phad::eval::computeRpe( est.value(), *gt, rpe_options );
+  if ( !rpe )
+  {
+    std::cerr << rpe.error().describe() << '\n';
+    return 1;
+  }
+
+  std::cout << "RPE over " << arguments.rpe_delta_s << " s from "
+            << rpe.value().pair_count << " pose pairs, skipped "
+            << rpe.value().dropped_no_partner << " poses without a partner\n";
+  printStats( "RPE translation [m] ", rpe.value().trans_m );
+  printStats( "RPE rotation [deg]  ", rpe.value().rot_deg );
 
   if ( !arguments.errors_csv_path.empty() &&
        !writeErrorsCsv( arguments.errors_csv_path, report.value() ) )

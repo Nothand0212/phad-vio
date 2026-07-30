@@ -30,6 +30,8 @@ namespace phad::eval
     kTooFewMatches       = 4,
     kMatchRateTooLow     = 5,
     kDegenerateAlignment = 6,
+    kNoDeltaPairs        = 7,
+    kInvalidOptions      = 8,
   };
 
   struct EvalError
