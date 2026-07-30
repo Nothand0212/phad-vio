@@ -27,6 +27,17 @@ target_compile_options(phad_sensor PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
+add_library(phad_camera
+  phad/camera/camera_model.cpp
+)
+add_library(phad::camera ALIAS phad_camera)
+target_compile_features(phad_camera PUBLIC cxx_std_20)
+target_include_directories(phad_camera PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(phad_camera PUBLIC phad::sensor)
+target_compile_options(phad_camera PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
 add_library(phad_io INTERFACE)
 add_library(phad::io ALIAS phad_io)
 target_compile_features(phad_io INTERFACE cxx_std_20)
@@ -79,6 +90,18 @@ if(PHAD_BUILD_TESTS)
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
   )
   gtest_discover_tests(phad_sensor_tests PROPERTIES LABELS "unit")
+
+  add_executable(phad_camera_tests
+    tests/camera/camera_model_header_test.cpp
+    tests/camera/camera_model_test.cpp
+  )
+  target_link_libraries(phad_camera_tests PRIVATE
+    phad::camera GTest::gtest_main
+  )
+  target_compile_options(phad_camera_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+  gtest_discover_tests(phad_camera_tests PROPERTIES LABELS "unit")
 
   add_executable(phad_io_dataset_tests
     tests/common/timestamp_test.cpp
