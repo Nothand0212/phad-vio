@@ -68,7 +68,9 @@
 - adapter 外不存在 EuRoC/TUM VI 路径、标定字段、坐标或单位转换；
 - VO 上游可通过同一 `SensorSource` interface 消费规范化事件；
 - 常驻内存不随已遍历图像总数线性增长；
-- 尚不执行 IMU 分段、边界插值、初始化、特征提取或 VIO。
+- 尚不执行 IMU 分段、边界插值、初始化或 VIO；`phad_euroc_runner` 中的
+  GFTT 角点叠加仅为可视化探针，不构成 visual-inertial frontend，也不产出
+  `KeyframeMeasurement`。
 
 详细设计与证据见
 [EuRoC 数据集加载器设计调研](research/euroc-dataset-loader-design.md)。

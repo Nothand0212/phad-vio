@@ -2,41 +2,44 @@
 
 ### Incremental development
 
-Implement the smallest working vertical slice for the current milestone, then
-evolve it from observed needs and failures. See
-`docs/agents/incremental-development.md`.
+针对当前 milestone，先实现最小可运行的 vertical slice，再根据观测到的需求与失败逐步演进。详见
+`docs/agents/incremental-development.md`。
 
 ### Issue tracker
 
-Issues and PRDs are tracked in GitHub Issues. See `docs/agents/issue-tracker.md`.
+Issues 与 PRDs 在 GitHub Issues 中跟踪。详见 `docs/agents/issue-tracker.md`。
 
 ### Triage labels
 
-Use the five default canonical triage labels. See `docs/agents/triage-labels.md`.
+使用五个默认的 canonical triage labels。详见 `docs/agents/triage-labels.md`。
 
 ### Domain docs
 
-This is a single-context repository. See `docs/agents/domain.md`.
+本仓库为 single-context repository。详见 `docs/agents/domain.md`。
 
 ### C++ naming
 
-C++ identifiers follow project naming rules. See `docs/agents/cpp-naming.md`.
+C++ identifiers 遵循项目命名规则。详见 `docs/agents/cpp-naming.md`。
 
 ### C++ style
 
-C++ formatting and control-flow style follow project rules. See `docs/agents/cpp-style.md`.
+C++ formatting 与 control-flow style 遵循项目规则。详见 `docs/agents/cpp-style.md`。
 
 ## Learned User Preferences
 
-- Prefer Chinese for agent-facing docs under `docs/agents/`; keep English for technical terms and code identifiers
-- Persist Cursor rules that agents should follow into `docs/agents/` and link them from `AGENTS.md`
-- Prefer clangd for C++ go-to-definition and references; keep Microsoft C/C++ IntelliSense disabled to avoid conflicts
+- `docs/agents/` 下面向 agent 的文档优先使用中文；专有名词、技术术语与 code identifiers 保留英文
+- 应将 agents 需遵守的 Cursor rules 持久化到 `docs/agents/`，并在 `AGENTS.md` 中链接
+- C++ 的 go-to-definition 与 references 优先使用 clangd；禁用 Microsoft C/C++ IntelliSense 以避免冲突
+- C++ identifiers 宜短，使用常见领域缩写（`imu`、`acc`、`gyr`、`nd`、`rw`、`fx`）；避免自造缩写与拼写出的单位后缀
+- 在主 checkout 上使用短生命周期分支，而非 git worktrees；本地 merge 到 `main` 后删除分支，除非明确要求否则不 push 到 remote
 
 ## Learned Workspace Facts
 
-- clangd is configured via `.clangd` with `CompilationDatabase: build`; root `compile_commands.json` is a symlink to `build/compile_commands.json` and is gitignored
-- After CMake or source-file changes, regenerate with `cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`
-- Core `sensor::*` and calibration types stay POD + STL (`std::array`); Eigen/GTSAM are deferred past the EuRoC loader (M1) phase
-- C++ naming authority is `docs/agents/cpp-naming.md`, mirrored by `.cursor/rules/cpp-naming.mdc`
-- C++ style authority is `docs/agents/cpp-style.md`, mirrored by `.cursor/rules/cpp-style.mdc`; formatting details follow root `.clang-format`
-
+- clangd 通过 `.clangd` 配置，`CompilationDatabase: build`；根目录 `compile_commands.json` 是指向 `build/compile_commands.json` 的 symlink，且已被 gitignore
+- 修改 CMake 或源文件后，用 `cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` 重新生成
+- 核心 `sensor::*` 与 calibration types 保持 POD + STL（`std::array`）；Eigen/GTSAM 推迟到 EuRoC loader（M1）阶段之后
+- C++ naming 权威文档为 `docs/agents/cpp-naming.md`，并由 `.cursor/rules/cpp-naming.mdc` 镜像
+- C++ style 权威文档为 `docs/agents/cpp-style.md`，并由 `.cursor/rules/cpp-style.mdc` 镜像；格式细节遵循根目录 `.clang-format`
+- 单元测试在 `build/` 下通过 `ctest --output-on-failure -L unit` 运行；也可直接运行各 suite 二进制，如 `phad_sensor_tests`、`phad_io_dataset_tests`
+- 内部 C++ APIs 使用缩写命名（`accNd()`、`m_acc_nd`、错误路径 `imu.acc_nd`），外部 dataset YAML/CSV keys 保留原始完整拼写；单位在注释中说明
+- `docs/architecture.md` 与 `docs/roadmap.md` 是模块边界与 phase 顺序的权威来源：frontend 负责 feature tracking 与 keyframe 决策，estimator 负责 factor graph 与 landmark lifecycle

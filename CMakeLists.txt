@@ -9,7 +9,7 @@ option(PHAD_ENABLE_MH01_TESTS "Enable local EuRoC MH_01 integration tests" OFF)
 option(PHAD_ENABLE_TUMVI_CORRIDOR1_TESTS
   "Enable local TUM VI corridor1 integration tests" OFF)
 
-find_package(OpenCV 4 REQUIRED COMPONENTS core highgui imgcodecs)
+find_package(OpenCV 4 REQUIRED COMPONENTS core highgui imgcodecs imgproc)
 find_package(Eigen3 3.4 REQUIRED NO_MODULE)
 find_package(yaml-cpp 0.8 REQUIRED)
 
@@ -66,7 +66,7 @@ target_link_libraries(phad_euroc_inspect PRIVATE phad::io_dataset)
 
 add_executable(phad_euroc_runner apps/phad_euroc_runner.cpp)
 target_link_libraries(phad_euroc_runner
-  PRIVATE phad::io_dataset opencv_core opencv_highgui
+  PRIVATE phad::io_dataset opencv_core opencv_highgui opencv_imgproc
 )
 
 if(PHAD_BUILD_TESTS)

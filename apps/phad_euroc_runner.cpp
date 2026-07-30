@@ -6,11 +6,13 @@
 #include <limits>
 #include <opencv2/core.hpp>
 #include <opencv2/highgui.hpp>
+#include <opencv2/imgproc.hpp>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include "phad/io/dataset/dataset_replay_source.hpp"
 #include "phad/io/dataset/euroc/euroc_dataset.hpp"
@@ -23,6 +25,13 @@ namespace
   constexpr char kWindowName[] = "phad-vio EuRoC stereo";
   constexpr int  kEscapeKey    = 27;
   constexpr int  kQKey         = 'q';
+
+  constexpr int    kMaxCorners   = 500;
+  constexpr double kQualityLevel = 0.01;
+  constexpr double kMinDistance  = 20.0;
+  constexpr int    kCornerRadius = 3;
+  const cv::Scalar kCornerColor{ 0, 255, 0 };  // BGR
+  const cv::Scalar kTextColor{ 0, 255, 0 };    // BGR
 
   [[nodiscard]] bool isQuitKey( int key ) noexcept
   {
@@ -59,7 +68,27 @@ namespace
     return result;
   }
 
-  [[nodiscard]] cv::Mat stitchStereo(
+  [[nodiscard]] std::vector<cv::Point2f> detectCorners( const cv::Mat& gray )
+  {
+    std::vector<cv::Point2f> corners;
+    cv::goodFeaturesToTrack( gray, corners, kMaxCorners, kQualityLevel,
+                             kMinDistance );
+    return corners;
+  }
+
+  void drawCorners( cv::Mat& canvas, const std::vector<cv::Point2f>& corners,
+                    int x_offset )
+  {
+    for ( const cv::Point2f& corner : corners )
+    {
+      const cv::Point center{ cvRound( corner.x ) + x_offset,
+                              cvRound( corner.y ) };
+      cv::circle( canvas, center, kCornerRadius, kCornerColor, 1,
+                  cv::LINE_AA );
+    }
+  }
+
+  [[nodiscard]] cv::Mat renderStereo(
       const phad::sensor::StereoFrame& frame )
   {
     if ( frame.left.width() != frame.right.width() ||
@@ -73,9 +102,23 @@ namespace
 
     const cv::Mat left  = copyGrayImage( frame.left );
     const cv::Mat right = copyGrayImage( frame.right );
-    cv::Mat       stitched;
+
+    cv::Mat stitched;
     cv::hconcat( left, right, stitched );
-    return stitched;
+    cv::Mat canvas;
+    cv::cvtColor( stitched, canvas, cv::COLOR_GRAY2BGR );
+
+    const std::vector<cv::Point2f> left_corners  = detectCorners( left );
+    const std::vector<cv::Point2f> right_corners = detectCorners( right );
+    drawCorners( canvas, left_corners, 0 );
+    drawCorners( canvas, right_corners, left.cols );
+
+    const std::string count_text =
+        "L:" + std::to_string( left_corners.size() ) +
+        " R:" + std::to_string( right_corners.size() );
+    cv::putText( canvas, count_text, cv::Point( 10, 24 ),
+                 cv::FONT_HERSHEY_SIMPLEX, 0.7, kTextColor, 1, cv::LINE_AA );
+    return canvas;
   }
 
   class PlaybackClock
@@ -163,13 +206,13 @@ namespace
         continue;
       }
 
-      const cv::Mat stitched = stitchStereo( *frame );
+      const cv::Mat canvas = renderStereo( *frame );
       if ( !playback_clock.waitUntil( frame->timestamp ) )
       {
         return 0;
       }
 
-      cv::imshow( kWindowName, stitched );
+      cv::imshow( kWindowName, canvas );
       if ( isQuitKey( cv::waitKey( 1 ) ) || !windowIsOpen() )
       {
         return 0;
