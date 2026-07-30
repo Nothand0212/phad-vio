@@ -2,8 +2,12 @@
 
 本项目的 issues 和 PRDs 存储在 GitHub Issues 中。所有操作使用 `gh` CLI。
 
-当前项目尚未初始化为 Git 仓库，也没有 GitHub remote。在执行 issue 操作前，
-必须先完成仓库初始化并配置 GitHub remote；不得猜测目标仓库。
+目标仓库为 `git remote -v` 中的 `origin`（`Nothand0212/phad-vio`）；不得猜测
+目标仓库。
+
+环境变量 `GITHUB_TOKEN` 指向的 fine-grained PAT 没有 Issues 写权限，`gh issue
+create` 会以 `Resource not accessible by personal access token` 失败。用
+`env -u GITHUB_TOKEN gh ...` 改用 keyring 中带 `repo` scope 的凭据。
 
 ## Conventions
 
