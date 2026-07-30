@@ -31,8 +31,9 @@
 
 ### 事实
 
-当前 [roadmap](../roadmap.md) 把阶段 1 定义为纯 IMU 预积分，把“目标数据集
-adapter、sensor synchronizer、边界插值和数据集片段回放”一起放在阶段 4。
+调研当时的 [roadmap](../roadmap.md) 把阶段 1 定义为纯 IMU 预积分，把“目标
+数据集 adapter、sensor synchronizer、边界插值和数据集片段回放”一起放在
+阶段 4。
 [architecture](../architecture.md) 又明确要求数据集特有知识只存在于 adapter，
 同步模块独占 IMU 切片和图像边界插值。
 

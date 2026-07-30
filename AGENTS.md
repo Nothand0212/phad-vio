@@ -42,4 +42,6 @@ C++ formatting 与 control-flow style 遵循项目规则。详见 `docs/agents/c
 - C++ style 权威文档为 `docs/agents/cpp-style.md`，并由 `.cursor/rules/cpp-style.mdc` 镜像；格式细节遵循根目录 `.clang-format`
 - 单元测试在 `build/` 下通过 `ctest --output-on-failure -L unit` 运行；也可直接运行各 suite 二进制，如 `phad_sensor_tests`、`phad_io_dataset_tests`
 - 内部 C++ APIs 使用缩写命名（`accNd()`、`m_acc_nd`、错误路径 `imu.acc_nd`），外部 dataset YAML/CSV keys 保留原始完整拼写；单位在注释中说明
-- `docs/architecture.md` 与 `docs/roadmap.md` 是模块边界与 phase 顺序的权威来源：frontend 负责 feature tracking 与 keyframe 决策，estimator 负责 factor graph 与 landmark lifecycle
+- `docs/architecture.md` 与 `docs/roadmap.md` 是模块边界与里程碑顺序的权威来源：frontend 负责 feature tracking 与 keyframe 决策，estimator 负责 factor graph 与 landmark lifecycle
+- 里程碑为 M1 数据 IO（已完成）→ M2 双目 VO 最小闭环 → M3 VO 加固 → M4 接入 IMU → M5 正式初始化 → M6 边缘化 → M7 线程 → M8 解耦回环 → M9 研究平台；每个里程碑以真实序列上的 ATE 或可观察行为收尾
+- 前端用 OpenCV、后端用 GTSAM；自研实现以调库版本为对拍 oracle，不通过对拍则两者并存

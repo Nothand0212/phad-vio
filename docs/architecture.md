@@ -31,6 +31,12 @@ GTSAM VIO estimator ----> VioEstimate
 - 不在首个闭环中使用 smart factor 或 fixed-lag smoother；
 - 不同时维护 g2o、Ceres 和 GTSAM 三套后端。
 
+本文档描述的是**完整 VIO 的目标形态**。按
+[实现里程碑与验收标准](roadmap.md)，第一条打通的闭环（M2）是它的纯视觉
+子集：不经过 sensor synchronizer，`KeyframeMeasurement` 不携带
+preintegration，估计器状态只有 `X(k)` 与 `L(j)`。M4 接入 IMU 时补齐
+synchronizer 与 `V/B` 状态，视觉侧的数据合同不变。
+
 ## 2. 核心数据合同
 
 ### 2.1 `ImuMeasurement`
@@ -80,6 +86,9 @@ struct KeyframeMeasurement {
 
 这是 frontend 与 estimator 之间的主要 seam。调用方不负责分配 GTSAM
 keys、添加 factor、维护 `Values` 或重置 bias。
+
+M2 的纯视觉闭环中不存在 `pim` 字段；它在 M4 接入 IMU 时加入，其余字段
+保持不变。
 
 ### 2.5 `VioEstimate`
 
@@ -219,6 +228,23 @@ VioUpdateResult update(const KeyframeMeasurement& measurement);
 
 初始化失败必须返回原因和所需的下一步数据。
 
+M2 的纯视觉闭环使用视觉初始化（首帧建立 gauge-fixing prior 并三角化初始
+landmark）。上述惯性初始化在 M4 加入，M5 用更鲁棒的方案替换起始静止假设。
+
+### 3.6 评估与可视化
+
+评估模块是估计链路之外的独立模块，只消费不可变结果，不参与优化：
+
+- 真值轨迹加载与时间关联；
+- TUM 格式轨迹导出；
+- SE3 对齐（双目尺度已知，不估 scale）与 ATE、RPE 计算；
+- 实时 2D 面板与离线绘图。
+
+它必须能被单独测试：把真值当作估计输入时 ATE 为 0，是该模块自身正确性的
+判据。轨迹导出格式与 `evo` 兼容，以便交叉验证自实现的指标。
+
+估计器不依赖评估模块，评估模块也不回写估计状态。
+
 ## 4. 第一版因子图
 
 关键帧状态：
@@ -249,6 +275,10 @@ BetweenFactor<ConstantBias>        B(k), B(k+1)
 引入 structureless smart factor 前，直接检查 landmark 初值、cheirality
 和重投影误差。
 
+M2 的纯视觉图只包含 `X(k)`、`L(j)`、一个 gauge-fixing `PriorFactor<Pose3>`
+和 stereo projection factor。M4 在此基础上加入 `V(k)`、`B(k)` 与
+`ImuFactor`、`BetweenFactor<ConstantBias>`，视觉部分不变。
+
 ## 5. 状态与所有权
 
 - sensor adapter 拥有外部资源句柄；
@@ -262,15 +292,15 @@ BetweenFactor<ConstantBias>        B(k), B(k+1)
 
 ## 6. 线程模型
 
-阶段 1 至阶段 4 使用单线程确定性执行：
+M1 至 M6 使用单线程确定性执行：
 
 ```text
 read -> synchronize -> frontend -> estimator -> record
 ```
 
-只有在 batch VIO 正确、可复现并通过数据集回放后才引入线程。未来线程化
-时保持相同数据合同，通过有界队列连接模块，不让模块共享可变 frame、
-track 或 factor graph。
+只有在 VIO 在真实序列上正确、可复现且 ATE 稳定后（M7）才引入线程。
+线程化时保持相同数据合同，通过有界队列连接模块，不让模块共享可变
+frame、track 或 factor graph。
 
 shutdown、队列溢出和后台异常都必须是可观察事件。
 
@@ -294,12 +324,25 @@ shutdown、队列溢出和后台异常都必须是可观察事件。
 
 ## 8. 受控演进
 
-基础 batch VIO 验证后，按以下顺序演进：
+先用最短路径打通端到端可观察行为，再按 ATE 指标逐层加深。顺序为：
 
-1. batch optimizer 替换为 fixed-lag smoother；
-2. 显式 landmark 替换为 smart stereo factor；
-3. 接入真实 LK frontend；
-4. 引入 bounded queues 和线程；
-5. 增加独立 global pose graph 与回环。
+1. 建立评估与可视化底座（轨迹导出、ATE/RPE、实时面板）；
+2. 接入 LK frontend，打通纯双目 VO 闭环并测出第一个真实 ATE；
+3. 以 ATE 为准绳加固 VO（几何验证、关键帧策略、landmark 生命周期）；
+4. 加入 IMU 预积分、synchronizer 与 `V/B` 状态，视觉因子不变；
+5. batch optimizer 替换为 fixed-lag smoother 并引入边缘化；
+6. 视需要将显式 landmark 替换为 smart stereo factor；
+7. 引入 bounded queues 和线程；
+8. 增加解耦的 global pose graph 与回环。
 
-每次只替换一个主要机制，并保留上一阶段的合成测试作为回归证据。
+两条约束贯穿全过程：
+
+- **每次只替换一个主要机制**，并保留上一阶段的测试作为回归证据；
+- **每次替换都伴随同一组序列的 ATE 前后数字**。无法测量的改动不构成
+  演进。
+
+前端与后端均先使用成熟库（OpenCV、GTSAM）。任何自研替换以调库版本为
+oracle，通过 ATE 与中间量分布的对拍验收，不满足对拍时两者并存。
+
+阶段划分与出口条件的权威来源是
+[实现里程碑与验收标准](roadmap.md)。
