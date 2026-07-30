@@ -13,6 +13,17 @@ find_package(OpenCV 4 REQUIRED COMPONENTS core highgui imgcodecs imgproc)
 find_package(Eigen3 3.4 REQUIRED NO_MODULE)
 find_package(yaml-cpp 0.8 REQUIRED)
 
+add_library(phad_common
+  phad/common/trajectory.cpp
+)
+add_library(phad::common ALIAS phad_common)
+target_compile_features(phad_common PUBLIC cxx_std_20)
+target_include_directories(phad_common PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(phad_common PUBLIC Eigen3::Eigen)
+target_compile_options(phad_common PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
 add_library(phad_sensor
   phad/sensor/camera_parameters.cpp
   phad/sensor/imu_parameters.cpp
@@ -49,16 +60,31 @@ add_library(phad_io_dataset
   phad/io/dataset/dataset_replay_source.cpp
   phad/io/dataset/stereo_imu_dataset.cpp
   phad/io/dataset/euroc/euroc_dataset.cpp
+  phad/io/dataset/euroc/euroc_groundtruth.cpp
   phad/io/dataset/euroc/internal/euroc_yaml.cpp
   phad/io/dataset/tum_vi/tum_vi_dataset.cpp
 )
 add_library(phad::io_dataset ALIAS phad_io_dataset)
 
 target_link_libraries(phad_io_dataset
-  PUBLIC phad::io
+  PUBLIC phad::io phad::common
   PRIVATE opencv_imgcodecs yaml-cpp::yaml-cpp
 )
 target_compile_options(phad_io_dataset PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
+add_library(phad_eval
+  phad/eval/align.cpp
+  phad/eval/associate.cpp
+  phad/eval/ate.cpp
+  phad/eval/tum_io.cpp
+)
+add_library(phad::eval ALIAS phad_eval)
+target_compile_features(phad_eval PUBLIC cxx_std_20)
+target_include_directories(phad_eval PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(phad_eval PUBLIC phad::common)
+target_compile_options(phad_eval PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
@@ -69,6 +95,12 @@ add_executable(phad_euroc_runner apps/phad_euroc_runner.cpp)
 target_link_libraries(phad_euroc_runner
   PRIVATE phad::io_dataset opencv_core opencv_highgui opencv_imgproc
 )
+
+add_executable(phad_euroc_gt_export apps/phad_euroc_gt_export.cpp)
+target_link_libraries(phad_euroc_gt_export PRIVATE phad::io_dataset phad::eval)
+
+add_executable(phad_traj_eval apps/phad_traj_eval.cpp)
+target_link_libraries(phad_traj_eval PRIVATE phad::io_dataset phad::eval)
 
 if(PHAD_BUILD_TESTS)
   enable_testing()
@@ -104,10 +136,25 @@ if(PHAD_BUILD_TESTS)
   )
   gtest_discover_tests(phad_camera_tests PROPERTIES LABELS "unit")
 
+  add_executable(phad_eval_tests
+    tests/common/trajectory_test.cpp
+    tests/eval/align_test.cpp
+    tests/eval/associate_test.cpp
+    tests/eval/ate_test.cpp
+    tests/eval/tum_io_test.cpp
+  )
+  target_link_libraries(phad_eval_tests PRIVATE phad::eval GTest::gtest_main)
+  target_include_directories(phad_eval_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+  target_compile_options(phad_eval_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+  gtest_discover_tests(phad_eval_tests PROPERTIES LABELS "unit")
+
   add_executable(phad_io_dataset_tests
     tests/common/timestamp_test.cpp
     tests/io/dataset/dataset_replay_source_test.cpp
     tests/io/dataset/euroc/euroc_dataset_test.cpp
+    tests/io/dataset/euroc/euroc_groundtruth_test.cpp
     tests/io/dataset/tum_vi/tum_vi_dataset_test.cpp
   )
   target_link_libraries(phad_io_dataset_tests PRIVATE
@@ -127,6 +174,14 @@ if(PHAD_BUILD_TESTS)
       PRIVATE phad::io_dataset GTest::gtest_main
     )
     gtest_discover_tests(phad_euroc_mh01_test PROPERTIES LABELS "mh01")
+
+    add_executable(phad_eval_mh01_test
+      tests/eval/euroc_mh01_groundtruth_test.cpp
+    )
+    target_link_libraries(phad_eval_mh01_test
+      PRIVATE phad::io_dataset phad::eval GTest::gtest_main
+    )
+    gtest_discover_tests(phad_eval_mh01_test PROPERTIES LABELS "mh01")
   endif()
 
   if(PHAD_ENABLE_TUMVI_CORRIDOR1_TESTS)
