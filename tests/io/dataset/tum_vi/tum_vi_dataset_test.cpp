@@ -249,11 +249,8 @@ namespace
             calibration.leftCamera().modelParameters() ) );
     EXPECT_DOUBLE_EQ( calibration.leftCamera().rateHz(), 20.0 );
     EXPECT_DOUBLE_EQ( calibration.imu().rateHz(), 200.0 );
-    EXPECT_DOUBLE_EQ(
-        calibration.imu().accelerometerNoiseDensityMps2PerSqrtHz(), 0.0028 );
-    EXPECT_DOUBLE_EQ(
-        calibration.imu().gyroscopeBiasRandomWalkRadps2PerSqrtHz(),
-        0.000022 );
+    EXPECT_DOUBLE_EQ( calibration.imu().accNd(), 0.0028 );
+    EXPECT_DOUBLE_EQ( calibration.imu().gyrRw(), 0.000022 );
     const auto translation =
         calibration.T_B_left_camera().translation();
     EXPECT_DOUBLE_EQ( translation.x(), -0.1 );
@@ -443,26 +440,22 @@ namespace
           "accelerometer_noise_density: 0.0028",
           "accelerometer_noise_density: 0", "accelerometer_noise_density",
           phad::sensor::CalibrationErrorCode::kNonPositiveValue,
-          "imu.accelerometer_noise_density_mps2_per_sqrt_hz",
-          "IMU parameter must be strictly positive" },
+          "imu.acc_nd", "IMU parameter must be strictly positive" },
         { "dso/imu_config.yaml", "imu0",
           "gyroscope_noise_density: 0.00016",
           "gyroscope_noise_density: 0", "gyroscope_noise_density",
           phad::sensor::CalibrationErrorCode::kNonPositiveValue,
-          "imu.gyroscope_noise_density_radps_per_sqrt_hz",
-          "IMU parameter must be strictly positive" },
+          "imu.gyr_nd", "IMU parameter must be strictly positive" },
         { "dso/imu_config.yaml", "imu0",
           "accelerometer_random_walk: 0.00086",
           "accelerometer_random_walk: 0", "accelerometer_random_walk",
           phad::sensor::CalibrationErrorCode::kNonPositiveValue,
-          "imu.accelerometer_bias_random_walk_mps3_per_sqrt_hz",
-          "IMU parameter must be strictly positive" },
+          "imu.acc_rw", "IMU parameter must be strictly positive" },
         { "dso/imu_config.yaml", "imu0",
           "gyroscope_random_walk: 0.000022",
           "gyroscope_random_walk: 0", "gyroscope_random_walk",
           phad::sensor::CalibrationErrorCode::kNonPositiveValue,
-          "imu.gyroscope_bias_random_walk_radps2_per_sqrt_hz",
-          "IMU parameter must be strictly positive" },
+          "imu.gyr_rw", "IMU parameter must be strictly positive" },
     } };
 
     for ( const auto& test_case : cases )

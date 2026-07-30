@@ -267,14 +267,10 @@ namespace
     ASSERT_TRUE( result );
     const auto& value = result.value();
     EXPECT_DOUBLE_EQ( value.rateHz(), 200.0 );
-    EXPECT_DOUBLE_EQ(
-        value.accelerometerNoiseDensityMps2PerSqrtHz(), 0.002 );
-    EXPECT_DOUBLE_EQ(
-        value.gyroscopeNoiseDensityRadpsPerSqrtHz(), 0.00016968 );
-    EXPECT_DOUBLE_EQ(
-        value.accelerometerBiasRandomWalkMps3PerSqrtHz(), 0.003 );
-    EXPECT_DOUBLE_EQ(
-        value.gyroscopeBiasRandomWalkRadps2PerSqrtHz(), 1.9393e-05 );
+    EXPECT_DOUBLE_EQ( value.accNd(), 0.002 );
+    EXPECT_DOUBLE_EQ( value.gyrNd(), 0.00016968 );
+    EXPECT_DOUBLE_EQ( value.accRw(), 0.003 );
+    EXPECT_DOUBLE_EQ( value.gyrRw(), 1.9393e-05 );
   }
 
   TEST( ImuParametersTest, RejectsEveryNonFiniteValue )
@@ -282,11 +278,8 @@ namespace
     constexpr std::array<double, 5> kValid{
         200.0, 0.002, 0.00016968, 0.003, 1.9393e-05 };
     constexpr std::array<const char*, 5> kFieldPaths{
-        "imu.rate_hz",
-        "imu.accelerometer_noise_density_mps2_per_sqrt_hz",
-        "imu.gyroscope_noise_density_radps_per_sqrt_hz",
-        "imu.accelerometer_bias_random_walk_mps3_per_sqrt_hz",
-        "imu.gyroscope_bias_random_walk_radps2_per_sqrt_hz" };
+        "imu.rate_hz", "imu.acc_nd", "imu.gyr_nd", "imu.acc_rw",
+        "imu.gyr_rw" };
     for ( std::size_t index = 0; index < kValid.size(); ++index )
     {
       for ( const double invalid :
@@ -309,11 +302,8 @@ namespace
     constexpr std::array<double, 5> kValid{
         200.0, 0.002, 0.00016968, 0.003, 1.9393e-05 };
     constexpr std::array<const char*, 5> kFieldPaths{
-        "imu.rate_hz",
-        "imu.accelerometer_noise_density_mps2_per_sqrt_hz",
-        "imu.gyroscope_noise_density_radps_per_sqrt_hz",
-        "imu.accelerometer_bias_random_walk_mps3_per_sqrt_hz",
-        "imu.gyroscope_bias_random_walk_radps2_per_sqrt_hz" };
+        "imu.rate_hz", "imu.acc_nd", "imu.gyr_nd", "imu.acc_rw",
+        "imu.gyr_rw" };
     for ( std::size_t index = 0; index < kValid.size(); ++index )
     {
       for ( const double invalid : { 0.0, -1.0 } )

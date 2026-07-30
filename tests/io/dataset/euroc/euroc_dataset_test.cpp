@@ -312,10 +312,8 @@ namespace
     EXPECT_DOUBLE_EQ( left_model.fxPixels(), 100.0 );
     EXPECT_DOUBLE_EQ( calibration.T_B_left_camera().rotation()( 0, 0 ), 1.0 );
     EXPECT_DOUBLE_EQ( calibration.imu().rateHz(), 200.0 );
-    EXPECT_DOUBLE_EQ(
-        calibration.imu().gyroscopeNoiseDensityRadpsPerSqrtHz(), 0.0001 );
-    EXPECT_DOUBLE_EQ(
-        calibration.imu().accelerometerBiasRandomWalkMps3PerSqrtHz(), 0.003 );
+    EXPECT_DOUBLE_EQ( calibration.imu().gyrNd(), 0.0001 );
+    EXPECT_DOUBLE_EQ( calibration.imu().accRw(), 0.003 );
     EXPECT_EQ( summary.imu.count, 4U );
     EXPECT_EQ( summary.stereo.count, 3U );
 
@@ -1170,23 +1168,19 @@ namespace
         { "imu0", "accelerometer_noise_density: 0.002",
           "accelerometer_noise_density: 0", "accelerometer_noise_density",
           phad::sensor::CalibrationErrorCode::kNonPositiveValue,
-          "imu.accelerometer_noise_density_mps2_per_sqrt_hz",
-          "IMU parameter must be strictly positive" },
+          "imu.acc_nd", "IMU parameter must be strictly positive" },
         { "imu0", "gyroscope_noise_density: 0.0001",
           "gyroscope_noise_density: 0", "gyroscope_noise_density",
           phad::sensor::CalibrationErrorCode::kNonPositiveValue,
-          "imu.gyroscope_noise_density_radps_per_sqrt_hz",
-          "IMU parameter must be strictly positive" },
+          "imu.gyr_nd", "IMU parameter must be strictly positive" },
         { "imu0", "accelerometer_random_walk: 0.003",
           "accelerometer_random_walk: 0", "accelerometer_random_walk",
           phad::sensor::CalibrationErrorCode::kNonPositiveValue,
-          "imu.accelerometer_bias_random_walk_mps3_per_sqrt_hz",
-          "IMU parameter must be strictly positive" },
+          "imu.acc_rw", "IMU parameter must be strictly positive" },
         { "imu0", "gyroscope_random_walk: 0.00001",
           "gyroscope_random_walk: 0", "gyroscope_random_walk",
           phad::sensor::CalibrationErrorCode::kNonPositiveValue,
-          "imu.gyroscope_bias_random_walk_radps2_per_sqrt_hz",
-          "IMU parameter must be strictly positive" },
+          "imu.gyr_rw", "IMU parameter must be strictly positive" },
     } };
 
     for ( const auto& test_case : cases )

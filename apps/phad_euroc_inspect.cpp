@@ -107,20 +107,10 @@ int main( int argc, char** argv )
               std::array{ 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
                           0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0 } );
   std::cout << "imu_rate_hz: " << calibration.imu().rateHz() << '\n'
-            << "imu_acc_nd: "
-            << calibration.imu().accelerometerNoiseDensityMps2PerSqrtHz()
-            << '\n'
-            << "imu_gyr_nd: "
-            << calibration.imu().gyroscopeNoiseDensityRadpsPerSqrtHz()
-            << '\n'
-            << "imu_acc_rw: "
-            << calibration.imu()
-                   .accelerometerBiasRandomWalkMps3PerSqrtHz()
-            << '\n'
-            << "imu_gyr_rw: "
-            << calibration.imu()
-                   .gyroscopeBiasRandomWalkRadps2PerSqrtHz()
-            << '\n'
+            << "imu_acc_nd: " << calibration.imu().accNd() << '\n'
+            << "imu_gyr_nd: " << calibration.imu().gyrNd() << '\n'
+            << "imu_acc_rw: " << calibration.imu().accRw() << '\n'
+            << "imu_gyr_rw: " << calibration.imu().gyrRw() << '\n'
             << "stereo_frames: " << summary.stereo.count << '\n'
             << "imu_measurements: " << summary.imu.count << '\n';
   printTimestamp( "stereo_first_ns", summary.stereo.first_timestamp );

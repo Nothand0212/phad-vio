@@ -207,18 +207,15 @@ namespace phad::io::dataset::tum_vi
       {
         return "update_rate";
       }
-      if ( error.field_path.find( "accelerometer_noise_density" ) !=
-           std::string::npos )
+      if ( error.field_path == "imu.acc_nd" )
       {
         return "accelerometer_noise_density";
       }
-      if ( error.field_path.find( "gyroscope_noise_density" ) !=
-           std::string::npos )
+      if ( error.field_path == "imu.gyr_nd" )
       {
         return "gyroscope_noise_density";
       }
-      if ( error.field_path.find( "accelerometer_bias_random_walk" ) !=
-           std::string::npos )
+      if ( error.field_path == "imu.acc_rw" )
       {
         return "accelerometer_random_walk";
       }
