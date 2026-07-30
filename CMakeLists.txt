@@ -10,15 +10,19 @@ option(PHAD_ENABLE_TUMVI_CORRIDOR1_TESTS
   "Enable local TUM VI corridor1 integration tests" OFF)
 
 find_package(OpenCV 4 REQUIRED COMPONENTS core highgui imgcodecs)
+find_package(Eigen3 3.4 REQUIRED NO_MODULE)
 find_package(yaml-cpp 0.8 REQUIRED)
 
 add_library(phad_sensor
   phad/sensor/camera_parameters.cpp
   phad/sensor/imu_parameters.cpp
+  phad/sensor/rigid_transform.cpp
+  phad/sensor/stereo_imu_calibration.cpp
 )
 add_library(phad::sensor ALIAS phad_sensor)
 target_compile_features(phad_sensor PUBLIC cxx_std_20)
 target_include_directories(phad_sensor PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(phad_sensor PUBLIC Eigen3::Eigen)
 target_compile_options(phad_sensor PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
@@ -27,6 +31,7 @@ add_library(phad_io INTERFACE)
 add_library(phad::io ALIAS phad_io)
 target_compile_features(phad_io INTERFACE cxx_std_20)
 target_include_directories(phad_io INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(phad_io INTERFACE phad::sensor)
 
 add_library(phad_io_dataset
   phad/io/dataset/internal/dataset_adapter_utils.cpp
@@ -62,7 +67,10 @@ if(PHAD_BUILD_TESTS)
     tests/sensor/calibration_error_header_test.cpp
     tests/sensor/camera_parameters_header_test.cpp
     tests/sensor/imu_parameters_header_test.cpp
+    tests/sensor/rigid_transform_header_test.cpp
     tests/sensor/sensor_parameters_test.cpp
+    tests/sensor/stereo_imu_calibration_header_test.cpp
+    tests/sensor/stereo_imu_calibration_test.cpp
   )
   target_link_libraries(phad_sensor_tests PRIVATE
     phad::sensor GTest::gtest_main

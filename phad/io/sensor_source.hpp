@@ -6,9 +6,9 @@
 #include <variant>
 
 #include "phad/common/timestamp.hpp"
-#include "phad/sensor/calibration.hpp"
 #include "phad/sensor/imu_measurement.hpp"
 #include "phad/sensor/stereo_frame.hpp"
+#include "phad/sensor/stereo_imu_calibration.hpp"
 
 namespace phad::io
 {

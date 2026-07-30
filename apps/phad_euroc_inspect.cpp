@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 
 #include "phad/io/dataset/euroc/euroc_dataset.hpp"
 
@@ -38,25 +39,43 @@ namespace
   }
 
   void printCameraCalibration(
-      std::string_view                       side,
-      const phad::sensor::CameraCalibration& calibration )
+      std::string_view                      side,
+      const phad::sensor::CameraParameters& parameters,
+      const phad::sensor::RigidTransform&   T_B_camera )
   {
+    const auto& model =
+        std::get<phad::sensor::PinholeRadialTangentialParameters>(
+            parameters.modelParameters() );
     std::cout << side << "_camera_model: pinhole\n"
               << side << "_camera_distortion_model: radial-tangential\n"
               << side << "_camera_resolution: "
-              << calibration.resolution.width << 'x'
-              << calibration.resolution.height << '\n'
-              << side << "_camera_rate_hz: " << calibration.rate_hz << '\n';
+              << parameters.imageWidth() << 'x'
+              << parameters.imageHeight() << '\n'
+              << side << "_camera_rate_hz: " << parameters.rateHz() << '\n';
     printArray(
         std::string{ side } + "_camera_intrinsics",
-        std::array{ calibration.intrinsics.fx_pixels,
-                    calibration.intrinsics.fy_pixels,
-                    calibration.intrinsics.cx_pixels,
-                    calibration.intrinsics.cy_pixels } );
+        std::array{ model.fxPixels(), model.fyPixels(), model.cxPixels(),
+                    model.cyPixels() } );
     printArray( std::string{ side } + "_camera_distortion_coefficients",
-                calibration.distortion_coefficients );
+                std::array{ model.k1(), model.k2(), model.p1(), model.p2() } );
+
+    std::array<double, 16> matrix{};
+    const auto             rotation    = T_B_camera.rotation();
+    const auto             translation = T_B_camera.translation();
+    for ( std::size_t row = 0; row < 3; ++row )
+    {
+      for ( std::size_t column = 0; column < 3; ++column )
+      {
+        matrix[ row * 4 + column ] =
+            rotation( static_cast<Eigen::Index>( row ),
+                      static_cast<Eigen::Index>( column ) );
+      }
+      matrix[ row * 4 + 3 ] =
+          translation( static_cast<Eigen::Index>( row ) );
+    }
+    matrix[ 15 ] = 1.0;
     printArray( std::string{ side } + "_camera_T_B_camera",
-                calibration.T_B_camera.matrix );
+                matrix );
   }
 
 }  // namespace
@@ -80,14 +99,28 @@ int main( int argc, char** argv )
   const auto& dataset     = opened.value();
   const auto  calibration = dataset.calibration();
   const auto  summary     = dataset.summary();
-  printCameraCalibration( "left", calibration.left );
-  printCameraCalibration( "right", calibration.right );
-  printArray( "imu_T_B_imu", calibration.imu.T_B_imu.matrix );
-  std::cout << "imu_rate_hz: " << calibration.imu.rate_hz << '\n'
-            << "imu_acc_nd: " << calibration.imu.acc_nd << '\n'
-            << "imu_gyr_nd: " << calibration.imu.gyr_nd << '\n'
-            << "imu_acc_rw: " << calibration.imu.acc_rw << '\n'
-            << "imu_gyr_rw: " << calibration.imu.gyr_rw << '\n'
+  printCameraCalibration( "left", calibration.leftCamera(),
+                          calibration.T_B_left_camera() );
+  printCameraCalibration( "right", calibration.rightCamera(),
+                          calibration.T_B_right_camera() );
+  printArray( "imu_T_B_imu",
+              std::array{ 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+                          0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0 } );
+  std::cout << "imu_rate_hz: " << calibration.imu().rateHz() << '\n'
+            << "imu_acc_nd: "
+            << calibration.imu().accelerometerNoiseDensityMps2PerSqrtHz()
+            << '\n'
+            << "imu_gyr_nd: "
+            << calibration.imu().gyroscopeNoiseDensityRadpsPerSqrtHz()
+            << '\n'
+            << "imu_acc_rw: "
+            << calibration.imu()
+                   .accelerometerBiasRandomWalkMps3PerSqrtHz()
+            << '\n'
+            << "imu_gyr_rw: "
+            << calibration.imu()
+                   .gyroscopeBiasRandomWalkRadps2PerSqrtHz()
+            << '\n'
             << "stereo_frames: " << summary.stereo.count << '\n'
             << "imu_measurements: " << summary.imu.count << '\n';
   printTimestamp( "stereo_first_ns", summary.stereo.first_timestamp );

@@ -10,6 +10,7 @@
 
 #include "phad/io/dataset/dataset_error.hpp"
 #include "phad/io/dataset/internal/stereo_imu_dataset_builder.hpp"
+#include "phad/sensor/calibration_error.hpp"
 
 /**
  * @file dataset_adapter_utils.hpp
@@ -49,16 +50,16 @@ namespace phad::io::dataset::internal
   [[nodiscard]] DatasetResult<YAML::Node> loadYaml(
       const std::filesystem::path& path, const std::string& sensor_id );
 
-  [[nodiscard]] DatasetResult<double> positiveYamlScalar(
+  [[nodiscard]] DatasetResult<double> yamlScalar(
       const YAML::Node& root, std::string_view key, const std::string& sensor_id,
       const std::filesystem::path& path );
 
-  [[nodiscard]] DatasetResult<sensor::RigidTransform> validateRigidTransform(
-      sensor::RigidTransform transform, const std::string& sensor_id,
-      const std::filesystem::path& path, std::string field );
+  [[nodiscard]] DatasetError mapCalibrationError(
+      const sensor::CalibrationError& error, std::string sensor_id,
+      std::filesystem::path source_path, std::string field );
 
-  [[nodiscard]] sensor::RigidTransform invertRigidTransform(
-      const sensor::RigidTransform& transform ) noexcept;
+  [[nodiscard]] sensor::CalibrationResult<sensor::RigidTransform>
+  invertRigidTransform( const sensor::RigidTransform& transform );
 
   [[nodiscard]] bool isIdentity(
       const sensor::RigidTransform& transform ) noexcept;

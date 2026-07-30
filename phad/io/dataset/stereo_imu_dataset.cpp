@@ -21,7 +21,7 @@ namespace phad::io::dataset
     {
     public:
       StereoImuDatasetImpl(
-          StereoImuCalibration                  calibration,
+          sensor::StereoImuCalibration          calibration,
           std::vector<sensor::ImuMeasurement>   imu_measurements,
           std::vector<StereoFrameManifestEntry> stereo_manifest,
           sensor::PixelType                     left_pixel_type,
@@ -34,7 +34,7 @@ namespace phad::io::dataset
       {
       }
 
-      StereoImuCalibration                  m_calibration;
+      sensor::StereoImuCalibration          m_calibration;
       std::vector<sensor::ImuMeasurement>   m_imu_measurements;
       std::vector<StereoFrameManifestEntry> m_stereo_manifest;
       sensor::PixelType                     m_left_pixel_type;
@@ -91,7 +91,8 @@ namespace phad::io::dataset
 
     DatasetResult<sensor::Image> decodeImage(
         const fs::path& path, const std::string& sensor_id, std::size_t index,
-        common::Timestamp timestamp, const sensor::ImageResolution& expected,
+        common::Timestamp timestamp, std::uint32_t expected_width,
+        std::uint32_t     expected_height,
         sensor::PixelType expected_pixel_type )
     {
       cv::Mat decoded;
@@ -110,7 +111,9 @@ namespace phad::io::dataset
                           "image", "OpenCV could not decode the image", index,
                           timestamp );
       }
-      if ( decoded.cols != expected.width || decoded.rows != expected.height )
+      if ( decoded.cols < 0 || decoded.rows < 0 ||
+           static_cast<std::uint32_t>( decoded.cols ) != expected_width ||
+           static_cast<std::uint32_t>( decoded.rows ) != expected_height )
       {
         return makeError(
             DatasetErrorCode::kImageFormatMismatch, sensor_id, path, "resolution",
@@ -160,7 +163,7 @@ namespace phad::io::dataset
 
     DatasetResult<sensor::StereoFrame> decodeStereo(
         const internal::StereoFrameManifestEntry& reference,
-        const StereoImuCalibration&               calibration,
+        const sensor::StereoImuCalibration&       calibration,
         sensor::PixelType                         left_pixel_type,
         sensor::PixelType                         right_pixel_type,
         const std::string&                        left_sensor_id,
@@ -169,14 +172,16 @@ namespace phad::io::dataset
     {
       auto left = decodeImage(
           reference.left_path, left_sensor_id, record_index,
-          reference.timestamp, calibration.left.resolution, left_pixel_type );
+          reference.timestamp, calibration.leftCamera().imageWidth(),
+          calibration.leftCamera().imageHeight(), left_pixel_type );
       if ( !left )
       {
         return left.error();
       }
       auto right = decodeImage(
           reference.right_path, right_sensor_id, record_index,
-          reference.timestamp, calibration.right.resolution, right_pixel_type );
+          reference.timestamp, calibration.rightCamera().imageWidth(),
+          calibration.rightCamera().imageHeight(), right_pixel_type );
       if ( !right )
       {
         return right.error();
@@ -189,7 +194,7 @@ namespace phad::io::dataset
   }  // namespace
 
   StereoImuDataset internal::StereoImuDatasetBuilder::build(
-      StereoImuCalibration                  calibration,
+      sensor::StereoImuCalibration          calibration,
       std::vector<sensor::ImuMeasurement>   imu_measurements,
       std::vector<StereoFrameManifestEntry> stereo_manifest,
       sensor::PixelType                     left_pixel_type,
@@ -207,7 +212,7 @@ namespace phad::io::dataset
   {
   }
 
-  StereoImuCalibration StereoImuDataset::calibration() const
+  sensor::StereoImuCalibration StereoImuDataset::calibration() const
   {
     return m_impl->m_calibration;
   }

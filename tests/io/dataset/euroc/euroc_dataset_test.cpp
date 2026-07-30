@@ -20,6 +20,7 @@
 #include <variant>
 
 #ifdef __linux__
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -121,6 +122,23 @@ namespace
              "accelerometer_random_walk: 0.003\n";
     }
 
+    static std::string validRightCameraYaml(
+        const std::string& camera_model     = "pinhole",
+        const std::string& distortion_model = "radial-tangential",
+        int width = 4, int height = 3 )
+    {
+      std::string yaml = validCameraYaml(
+          camera_model, distortion_model, width, height );
+      const std::string identity = identityTransformYaml();
+      const std::string translated =
+          "T_BS:\n"
+          "  rows: 4\n"
+          "  cols: 4\n"
+          "  data: [1, 0, 0, 0.1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]\n";
+      yaml.replace( yaml.find( identity ), identity.size(), translated );
+      return yaml;
+    }
+
   private:
     static fs::path makeUniqueRoot()
     {
@@ -144,7 +162,7 @@ namespace
     void writeDefaultCalibrations()
     {
       writeSensorFile( "cam0", validCameraYaml() );
-      writeSensorFile( "cam1", validCameraYaml() );
+      writeSensorFile( "cam1", validRightCameraYaml() );
       writeSensorFile( "imu0", validImuYaml() );
     }
 
@@ -220,19 +238,41 @@ namespace
         "\" 2> \"" + stderr_path.string() + "\"";
 
     ASSERT_EQ( std::system( command.c_str() ), 0 ) << readFile( stderr_path );
-    const std::string output = readFile( stdout_path );
-    EXPECT_NE( output.find( "left_camera_resolution: 4x3" ),
-               std::string::npos );
-    EXPECT_NE( output.find( "right_camera_resolution: 4x3" ),
-               std::string::npos );
-    EXPECT_NE( output.find( "imu_rate_hz: 200" ), std::string::npos );
-    EXPECT_NE( output.find( "stereo_frames: 3" ), std::string::npos );
-    EXPECT_NE( output.find( "imu_measurements: 4" ), std::string::npos );
-    EXPECT_EQ( output.find( "sample[" ), std::string::npos );
+    const std::string expected_output =
+        "left_camera_model: pinhole\n"
+        "left_camera_distortion_model: radial-tangential\n"
+        "left_camera_resolution: 4x3\n"
+        "left_camera_rate_hz: 20\n"
+        "left_camera_intrinsics: [100, 101, 2, 1.5]\n"
+        "left_camera_distortion_coefficients: [0.1, -0.2, 0.001, -0.002]\n"
+        "left_camera_T_B_camera: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, "
+        "0, 0, 0, 1]\n"
+        "right_camera_model: pinhole\n"
+        "right_camera_distortion_model: radial-tangential\n"
+        "right_camera_resolution: 4x3\n"
+        "right_camera_rate_hz: 20\n"
+        "right_camera_intrinsics: [100, 101, 2, 1.5]\n"
+        "right_camera_distortion_coefficients: [0.1, -0.2, 0.001, "
+        "-0.002]\n"
+        "right_camera_T_B_camera: [1, 0, 0, 0.1, 0, 1, 0, 0, 0, 0, 1, "
+        "0, 0, 0, 0, 1]\n"
+        "imu_T_B_imu: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]\n"
+        "imu_rate_hz: 200\n"
+        "imu_acc_nd: 0.002\n"
+        "imu_gyr_nd: 0.0001\n"
+        "imu_acc_rw: 0.003\n"
+        "imu_gyr_rw: 1e-05\n"
+        "stereo_frames: 3\n"
+        "imu_measurements: 4\n"
+        "stereo_first_ns: 1403636579763555584\n"
+        "stereo_last_ns: 1403636579863555584\n"
+        "imu_first_ns: 1403636579758555584\n"
+        "imu_last_ns: 1403636579773555584\n";
+    EXPECT_EQ( readFile( stdout_path ), expected_output );
     EXPECT_TRUE( readFile( stderr_path ).empty() );
   }
 
-  TEST( EurocInspectTest, ReportsOpenErrorAndReturnsNonzero )
+  TEST( EurocInspectTest, ReportsExactOpenErrorAndReturnsOne )
   {
     EurocFixture      fixture;
     const fs::path    missing_path = fixture.root() / "missing";
@@ -243,11 +283,17 @@ namespace
         missing_path.string() + "\" > \"" + stdout_path.string() +
         "\" 2> \"" + stderr_path.string() + "\"";
 
-    EXPECT_NE( std::system( command.c_str() ), 0 );
+    const int status = std::system( command.c_str() );
+#ifdef __linux__
+    ASSERT_TRUE( WIFEXITED( status ) );
+    EXPECT_EQ( WEXITSTATUS( status ), 1 );
+#else
+    EXPECT_EQ( status, 1 );
+#endif
     EXPECT_TRUE( readFile( stdout_path ).empty() );
-    const std::string error = readFile( stderr_path );
-    EXPECT_NE( error.find( "dataset error" ), std::string::npos );
-    EXPECT_NE( error.find( missing_path.string() ), std::string::npos );
+    EXPECT_EQ( readFile( stderr_path ),
+               "dataset error 0, path=" + missing_path.string() +
+                   ": No such file or directory\n" );
   }
 
   TEST( EurocAdapterTest,
@@ -258,13 +304,18 @@ namespace
     ASSERT_TRUE( result.hasValue() ) << result.error().describe();
     const auto calibration = result.value().calibration();
     const auto summary     = result.value().summary();
-    EXPECT_EQ( calibration.left.resolution.width, 4 );
-    EXPECT_EQ( calibration.left.resolution.height, 3 );
-    EXPECT_DOUBLE_EQ( calibration.left.intrinsics.fx_pixels, 100.0 );
-    EXPECT_DOUBLE_EQ( calibration.left.T_B_camera.matrix[ 0 ], 1.0 );
-    EXPECT_DOUBLE_EQ( calibration.imu.rate_hz, 200.0 );
-    EXPECT_DOUBLE_EQ( calibration.imu.gyr_nd, 0.0001 );
-    EXPECT_DOUBLE_EQ( calibration.imu.acc_rw, 0.003 );
+    EXPECT_EQ( calibration.leftCamera().imageWidth(), 4U );
+    EXPECT_EQ( calibration.leftCamera().imageHeight(), 3U );
+    const auto& left_model =
+        std::get<phad::sensor::PinholeRadialTangentialParameters>(
+            calibration.leftCamera().modelParameters() );
+    EXPECT_DOUBLE_EQ( left_model.fxPixels(), 100.0 );
+    EXPECT_DOUBLE_EQ( calibration.T_B_left_camera().rotation()( 0, 0 ), 1.0 );
+    EXPECT_DOUBLE_EQ( calibration.imu().rateHz(), 200.0 );
+    EXPECT_DOUBLE_EQ(
+        calibration.imu().gyroscopeNoiseDensityRadpsPerSqrtHz(), 0.0001 );
+    EXPECT_DOUBLE_EQ(
+        calibration.imu().accelerometerBiasRandomWalkMps3PerSqrtHz(), 0.003 );
     EXPECT_EQ( summary.imu.count, 4U );
     EXPECT_EQ( summary.stereo.count, 3U );
 
@@ -352,7 +403,7 @@ namespace
 
     const auto calibration = copy.calibration();
     const auto summary     = copy.summary();
-    EXPECT_EQ( calibration.left.resolution.width, 4 );
+    EXPECT_EQ( calibration.leftCamera().imageWidth(), 4U );
     EXPECT_EQ( summary.imu.count, 4U );
     ASSERT_TRUE( summary.imu.first_timestamp.has_value() );
     ASSERT_TRUE( summary.imu.last_timestamp.has_value() );
@@ -626,10 +677,11 @@ namespace
 
     auto opened = phad::io::dataset::euroc::open( fixture.root() );
     ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
-    const auto& T_B_camera = opened.value().calibration().left.T_B_camera.matrix;
-    EXPECT_DOUBLE_EQ( T_B_camera[ 3 ], 1.25 );
-    EXPECT_DOUBLE_EQ( T_B_camera[ 7 ], -2.5 );
-    EXPECT_DOUBLE_EQ( T_B_camera[ 11 ], 3.75 );
+    const auto T_B_camera =
+        opened.value().calibration().T_B_left_camera().translation();
+    EXPECT_DOUBLE_EQ( T_B_camera.x(), 1.25 );
+    EXPECT_DOUBLE_EQ( T_B_camera.y(), -2.5 );
+    EXPECT_DOUBLE_EQ( T_B_camera.z(), 3.75 );
   }
 
   TEST( EurocAdapterTest, IndependentDatasetsAndReadersAreDeterministic )
@@ -756,6 +808,22 @@ namespace
     }
     EXPECT_FALSE( result.error().source_path.empty() );
     EXPECT_FALSE( result.error().cause.empty() );
+  }
+
+  void expectCoreCalibrationCause(
+      const phad::io::dataset::DatasetError& error,
+      phad::sensor::CalibrationErrorCode     code,
+      const std::string&                     canonical_field,
+      const std::string&                     detail )
+  {
+    EXPECT_NE(
+        error.cause.find( "core calibration error " +
+                          std::to_string( static_cast<int>( code ) ) ),
+        std::string::npos );
+    EXPECT_NE( error.cause.find( "field=" + canonical_field ),
+               std::string::npos );
+    ASSERT_FALSE( detail.empty() );
+    EXPECT_NE( error.cause.find( ": " + detail ), std::string::npos );
   }
 
   TEST( EurocAdapterTest, RejectsMissingRootAndRequiredFiles )
@@ -965,6 +1033,32 @@ namespace
       expectOpenError( fixture.root(),
                        phad::io::dataset::DatasetErrorCode::kInvalidCalibration,
                        "cam0", "T_BS.rotation" );
+      const auto opened =
+          phad::io::dataset::euroc::open( fixture.root() );
+      expectCoreCalibrationCause(
+          opened.error(), phad::sensor::CalibrationErrorCode::kInvalidRotation,
+          "rigid_transform.rotation",
+          "rotation must be orthogonal with determinant +1" );
+    }
+    {
+      EurocFixture fixture;
+      fixture.writeSensorFile(
+          "cam0",
+          "sensor_type: camera\n"
+          "T_BS: {rows: 4, cols: 4, data: [1, 0, 0, 0, 0, 1, 0, 0, 0, "
+          "0, 1, 0, 0.000002, 0, 0, 1]}\n"
+          "rate_hz: 20\nresolution: [4, 3]\ncamera_model: pinhole\n"
+          "intrinsics: [100, 101, 2, 1.5]\n"
+          "distortion_model: radial-tangential\n"
+          "distortion_coefficients: [0, 0, 0, 0]\n" );
+      auto opened = phad::io::dataset::euroc::open( fixture.root() );
+      ASSERT_FALSE( opened );
+      EXPECT_EQ( opened.error().field, "T_BS.bottom_row" );
+      expectCoreCalibrationCause(
+          opened.error(),
+          phad::sensor::CalibrationErrorCode::kInvalidHomogeneousRow,
+          "rigid_transform.bottom_row",
+          "bottom row must be [0, 0, 0, 1]" );
     }
     {
       EurocFixture fixture;
@@ -983,6 +1077,206 @@ namespace
           fixture.root(),
           phad::io::dataset::DatasetErrorCode::kUnsupportedDistortionModel, "cam0",
           "distortion_model" );
+    }
+  }
+
+  TEST( EurocAdapterTest, MapsEveryCoreSourceFieldWithProvenance )
+  {
+    struct MappingCase
+    {
+      const char*                        sensor_id;
+      const char*                        original;
+      const char*                        replacement;
+      const char*                        raw_field;
+      phad::sensor::CalibrationErrorCode code;
+      const char*                        canonical_field;
+      const char*                        detail;
+    };
+    constexpr const char* kTransform =
+        "data: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]";
+    const std::array<MappingCase, 19> cases{ {
+        { "cam0", kTransform,
+          "data: [.nan, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]",
+          "T_BS", phad::sensor::CalibrationErrorCode::kNonFiniteValue,
+          "rigid_transform.matrix", "all matrix elements must be finite" },
+        { "cam0", kTransform,
+          "data: [2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]",
+          "T_BS.rotation",
+          phad::sensor::CalibrationErrorCode::kInvalidRotation,
+          "rigid_transform.rotation",
+          "rotation must be orthogonal with determinant +1" },
+        { "cam0", kTransform,
+          "data: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 2]",
+          "T_BS.bottom_row",
+          phad::sensor::CalibrationErrorCode::kInvalidHomogeneousRow,
+          "rigid_transform.bottom_row",
+          "bottom row must be [0, 0, 0, 1]" },
+        { "cam0", "intrinsics: [100, 101, 2, 1.5]",
+          "intrinsics: [0, 101, 2, 1.5]", "intrinsics",
+          phad::sensor::CalibrationErrorCode::kNonPositiveValue,
+          "camera.model_parameters.radial_tangential.fx_pixels",
+          "fx_pixels must be strictly positive" },
+        { "cam0", "intrinsics: [100, 101, 2, 1.5]",
+          "intrinsics: [100, 0, 2, 1.5]", "intrinsics",
+          phad::sensor::CalibrationErrorCode::kNonPositiveValue,
+          "camera.model_parameters.radial_tangential.fy_pixels",
+          "fy_pixels must be strictly positive" },
+        { "cam0", "intrinsics: [100, 101, 2, 1.5]",
+          "intrinsics: [100, 101, .nan, 1.5]", "intrinsics",
+          phad::sensor::CalibrationErrorCode::kNonFiniteValue,
+          "camera.model_parameters.radial_tangential.cx_pixels",
+          "camera model parameter must be finite" },
+        { "cam0", "intrinsics: [100, 101, 2, 1.5]",
+          "intrinsics: [100, 101, 2, .nan]", "intrinsics",
+          phad::sensor::CalibrationErrorCode::kNonFiniteValue,
+          "camera.model_parameters.radial_tangential.cy_pixels",
+          "camera model parameter must be finite" },
+        { "cam0", "distortion_coefficients: [0.1, -0.2, 0.001, -0.002]",
+          "distortion_coefficients: [.nan, -0.2, 0.001, -0.002]",
+          "distortion_coefficients",
+          phad::sensor::CalibrationErrorCode::kNonFiniteValue,
+          "camera.model_parameters.radial_tangential.k1",
+          "camera model parameter must be finite" },
+        { "cam0", "distortion_coefficients: [0.1, -0.2, 0.001, -0.002]",
+          "distortion_coefficients: [0.1, .nan, 0.001, -0.002]",
+          "distortion_coefficients",
+          phad::sensor::CalibrationErrorCode::kNonFiniteValue,
+          "camera.model_parameters.radial_tangential.k2",
+          "camera model parameter must be finite" },
+        { "cam0", "distortion_coefficients: [0.1, -0.2, 0.001, -0.002]",
+          "distortion_coefficients: [0.1, -0.2, .nan, -0.002]",
+          "distortion_coefficients",
+          phad::sensor::CalibrationErrorCode::kNonFiniteValue,
+          "camera.model_parameters.radial_tangential.p1",
+          "camera model parameter must be finite" },
+        { "cam0", "distortion_coefficients: [0.1, -0.2, 0.001, -0.002]",
+          "distortion_coefficients: [0.1, -0.2, 0.001, .nan]",
+          "distortion_coefficients",
+          phad::sensor::CalibrationErrorCode::kNonFiniteValue,
+          "camera.model_parameters.radial_tangential.p2",
+          "camera model parameter must be finite" },
+        { "cam0", "resolution: [4, 3]", "resolution: [0, 3]",
+          "resolution", phad::sensor::CalibrationErrorCode::kNonPositiveValue,
+          "camera.image_width", "image width must be positive" },
+        { "cam0", "resolution: [4, 3]", "resolution: [4, 0]",
+          "resolution", phad::sensor::CalibrationErrorCode::kNonPositiveValue,
+          "camera.image_height", "image height must be positive" },
+        { "cam0", "rate_hz: 20", "rate_hz: .nan", "rate_hz",
+          phad::sensor::CalibrationErrorCode::kNonFiniteValue,
+          "camera.rate_hz", "declared sample rate must be finite" },
+        { "imu0", "rate_hz: 200", "rate_hz: 0", "rate_hz",
+          phad::sensor::CalibrationErrorCode::kNonPositiveValue,
+          "imu.rate_hz", "IMU parameter must be strictly positive" },
+        { "imu0", "accelerometer_noise_density: 0.002",
+          "accelerometer_noise_density: 0", "accelerometer_noise_density",
+          phad::sensor::CalibrationErrorCode::kNonPositiveValue,
+          "imu.accelerometer_noise_density_mps2_per_sqrt_hz",
+          "IMU parameter must be strictly positive" },
+        { "imu0", "gyroscope_noise_density: 0.0001",
+          "gyroscope_noise_density: 0", "gyroscope_noise_density",
+          phad::sensor::CalibrationErrorCode::kNonPositiveValue,
+          "imu.gyroscope_noise_density_radps_per_sqrt_hz",
+          "IMU parameter must be strictly positive" },
+        { "imu0", "accelerometer_random_walk: 0.003",
+          "accelerometer_random_walk: 0", "accelerometer_random_walk",
+          phad::sensor::CalibrationErrorCode::kNonPositiveValue,
+          "imu.accelerometer_bias_random_walk_mps3_per_sqrt_hz",
+          "IMU parameter must be strictly positive" },
+        { "imu0", "gyroscope_random_walk: 0.00001",
+          "gyroscope_random_walk: 0", "gyroscope_random_walk",
+          phad::sensor::CalibrationErrorCode::kNonPositiveValue,
+          "imu.gyroscope_bias_random_walk_radps2_per_sqrt_hz",
+          "IMU parameter must be strictly positive" },
+    } };
+
+    for ( const auto& test_case : cases )
+    {
+      SCOPED_TRACE( test_case.canonical_field );
+      EurocFixture fixture;
+      std::string  yaml     = std::string{ test_case.sensor_id } == "imu0"
+                                  ? EurocFixture::validImuYaml()
+                                  : EurocFixture::validCameraYaml();
+      const auto   position = yaml.find( test_case.original );
+      ASSERT_NE( position, std::string::npos );
+      yaml.replace( position, std::string{ test_case.original }.size(),
+                    test_case.replacement );
+      fixture.writeSensorFile( test_case.sensor_id, yaml );
+
+      auto opened = phad::io::dataset::euroc::open( fixture.root() );
+      ASSERT_FALSE( opened );
+      EXPECT_EQ( opened.error().code,
+                 phad::io::dataset::DatasetErrorCode::kInvalidCalibration );
+      EXPECT_EQ( opened.error().sensor_id, test_case.sensor_id );
+      EXPECT_EQ( opened.error().source_path,
+                 fixture.sensorPath( test_case.sensor_id, "sensor.yaml" ) );
+      EXPECT_EQ( opened.error().field, test_case.raw_field );
+      expectCoreCalibrationCause(
+          opened.error(), test_case.code, test_case.canonical_field,
+          test_case.detail );
+    }
+  }
+
+  TEST( EurocAdapterTest, MapsZeroBaselineWithJointProvenance )
+  {
+    {
+      EurocFixture fixture;
+      fixture.writeSensorFile( "cam1", EurocFixture::validCameraYaml() );
+
+      auto opened = phad::io::dataset::euroc::open( fixture.root() );
+      ASSERT_FALSE( opened );
+      EXPECT_EQ( opened.error().code,
+                 phad::io::dataset::DatasetErrorCode::kInvalidCalibration );
+      EXPECT_EQ( opened.error().sensor_id, "cam0/cam1" );
+      EXPECT_EQ( opened.error().source_path, fixture.root() / "mav0" );
+      EXPECT_EQ( opened.error().field, "cam0.T_BS/cam1.T_BS" );
+      expectCoreCalibrationCause(
+          opened.error(),
+          phad::sensor::CalibrationErrorCode::kZeroStereoBaseline,
+          "stereo_imu_calibration.camera_centers",
+          "left and right camera centers must not coincide" );
+    }
+  }
+
+  TEST( EurocAdapterTest, PreservesRawRateFieldForYamlConversionFailures )
+  {
+    struct TestCase
+    {
+      const char* sensor_id;
+      const char* valid_line;
+      const char* invalid_line;
+    };
+    const std::array<TestCase, 4> cases{ {
+        { "cam0", "rate_hz: 20\n", "rate_hz: not-a-number\n" },
+        { "cam0", "rate_hz: 20\n", "" },
+        { "imu0", "rate_hz: 200\n", "rate_hz: not-a-number\n" },
+        { "imu0", "rate_hz: 200\n", "" },
+    } };
+    for ( const auto& test_case : cases )
+    {
+      SCOPED_TRACE( std::string{ test_case.sensor_id } +
+                    ( test_case.invalid_line[ 0 ] == '\0' ? " missing"
+                                                          : " conversion" ) );
+      EurocFixture fixture;
+      std::string  yaml     = std::string{ test_case.sensor_id } == "imu0"
+                                  ? EurocFixture::validImuYaml()
+                                  : EurocFixture::validCameraYaml();
+      const auto   position = yaml.find( test_case.valid_line );
+      ASSERT_NE( position, std::string::npos );
+      yaml.replace( position, std::string{ test_case.valid_line }.size(),
+                    test_case.invalid_line );
+      fixture.writeSensorFile( test_case.sensor_id, yaml );
+
+      auto opened = phad::io::dataset::euroc::open( fixture.root() );
+      ASSERT_FALSE( opened );
+      EXPECT_EQ( opened.error().code,
+                 phad::io::dataset::DatasetErrorCode::kInvalidCalibration );
+      EXPECT_EQ( opened.error().sensor_id, test_case.sensor_id );
+      EXPECT_EQ( opened.error().source_path,
+                 fixture.sensorPath( test_case.sensor_id, "sensor.yaml" ) );
+      EXPECT_EQ( opened.error().field, "rate_hz" );
+      EXPECT_FALSE( opened.error().cause.empty() );
+      EXPECT_EQ( opened.error().cause.find( "core calibration error" ),
+                 std::string::npos );
     }
   }
 
@@ -1095,8 +1389,9 @@ namespace
         "cam0", EurocFixture::validCameraYaml( "pinhole", "radial-tangential",
                                                kWidth, kHeight ) );
     fixture.writeSensorFile(
-        "cam1", EurocFixture::validCameraYaml( "pinhole", "radial-tangential",
-                                               kWidth, kHeight ) );
+        "cam1",
+        EurocFixture::validRightCameraYaml(
+            "pinhole", "radial-tangential", kWidth, kHeight ) );
 
     std::ostringstream left_csv;
     std::ostringstream right_csv;

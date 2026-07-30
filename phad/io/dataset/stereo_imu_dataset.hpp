@@ -8,14 +8,12 @@
 #include <string>
 #include <variant>
 
-#include "phad/sensor/calibration.hpp"
 #include "phad/sensor/imu_measurement.hpp"
 #include "phad/sensor/stereo_frame.hpp"
+#include "phad/sensor/stereo_imu_calibration.hpp"
 
 namespace phad::io::dataset
 {
-
-  using StereoImuCalibration = sensor::StereoImuCalibration;
 
   struct DatasetStreamSummary
   {
@@ -90,7 +88,7 @@ namespace phad::io::dataset
   class StereoImuDataset
   {
   public:
-    [[nodiscard]] StereoImuCalibration calibration() const;
+    [[nodiscard]] sensor::StereoImuCalibration calibration() const;
 
     [[nodiscard]] StereoImuDatasetSummary summary() const noexcept;
     [[nodiscard]] StereoImuDatasetReader  reader() const;

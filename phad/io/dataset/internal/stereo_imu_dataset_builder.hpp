@@ -28,7 +28,7 @@ namespace phad::io::dataset::internal
   {
   public:
     [[nodiscard]] static StereoImuDataset build(
-        StereoImuCalibration                  calibration,
+        sensor::StereoImuCalibration          calibration,
         std::vector<sensor::ImuMeasurement>   imu_measurements,
         std::vector<StereoFrameManifestEntry> stereo_manifest,
         sensor::PixelType                     left_pixel_type,

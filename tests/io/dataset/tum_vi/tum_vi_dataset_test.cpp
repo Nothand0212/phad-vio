@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <opencv2/imgcodecs.hpp>
+#include <sstream>
 #include <string>
 #include <variant>
 
@@ -95,6 +96,20 @@ namespace
           m_root / "mav0" / sensor_id / "data" / filename,
           std::ios::binary | std::ios::trunc );
       stream << "not a png";
+    }
+
+    void replaceInFile( const fs::path& relative, const std::string& from,
+                        const std::string& to )
+    {
+      const fs::path     path = m_root / relative;
+      std::ifstream      input( path );
+      std::ostringstream contents;
+      contents << input.rdbuf();
+      std::string text     = contents.str();
+      const auto  position = text.find( from );
+      ASSERT_NE( position, std::string::npos );
+      text.replace( position, from.size(), to );
+      std::ofstream( path, std::ios::trunc ) << text;
     }
 
   private:
@@ -190,6 +205,22 @@ namespace
     expectStickyTerminalError( reader, error );
   }
 
+  void expectCoreCalibrationCause(
+      const phad::io::dataset::DatasetError& error,
+      phad::sensor::CalibrationErrorCode     code,
+      const std::string&                     canonical_field,
+      const std::string&                     detail )
+  {
+    EXPECT_NE(
+        error.cause.find( "core calibration error " +
+                          std::to_string( static_cast<int>( code ) ) ),
+        std::string::npos );
+    EXPECT_NE( error.cause.find( "field=" + canonical_field ),
+               std::string::npos );
+    ASSERT_FALSE( detail.empty() );
+    EXPECT_NE( error.cause.find( ": " + detail ), std::string::npos );
+  }
+
   TEST( TumViDatasetTest, OpensNormalizedCalibrationImuAndUint16Stereo )
   {
     TumViFixture fixture;
@@ -213,17 +244,21 @@ namespace
                TumViFixture::kFirstTimestamp );
     EXPECT_EQ( summary.stereo.last_timestamp->nanoseconds(),
                TumViFixture::kFirstTimestamp + 100'000'000 );
-    EXPECT_EQ( calibration.left.distortion_model,
-               phad::sensor::DistortionModel::kEquidistant );
-    EXPECT_DOUBLE_EQ( calibration.left.rate_hz, 20.0 );
-    EXPECT_DOUBLE_EQ( calibration.imu.rate_hz, 200.0 );
-    EXPECT_DOUBLE_EQ( calibration.imu.acc_nd, 0.0028 );
-    EXPECT_DOUBLE_EQ( calibration.imu.gyr_rw, 0.000022 );
-    EXPECT_DOUBLE_EQ( calibration.left.T_B_camera.matrix[ 3 ], -0.1 );
-    EXPECT_DOUBLE_EQ( calibration.left.T_B_camera.matrix[ 7 ], 0.2 );
-    EXPECT_DOUBLE_EQ( calibration.left.T_B_camera.matrix[ 11 ], -0.3 );
-    EXPECT_DOUBLE_EQ( calibration.imu.T_B_imu.matrix[ 0 ], 1.0 );
-    EXPECT_DOUBLE_EQ( calibration.imu.T_B_imu.matrix[ 15 ], 1.0 );
+    EXPECT_TRUE(
+        std::holds_alternative<phad::sensor::PinholeEquidistantParameters>(
+            calibration.leftCamera().modelParameters() ) );
+    EXPECT_DOUBLE_EQ( calibration.leftCamera().rateHz(), 20.0 );
+    EXPECT_DOUBLE_EQ( calibration.imu().rateHz(), 200.0 );
+    EXPECT_DOUBLE_EQ(
+        calibration.imu().accelerometerNoiseDensityMps2PerSqrtHz(), 0.0028 );
+    EXPECT_DOUBLE_EQ(
+        calibration.imu().gyroscopeBiasRandomWalkRadps2PerSqrtHz(),
+        0.000022 );
+    const auto translation =
+        calibration.T_B_left_camera().translation();
+    EXPECT_DOUBLE_EQ( translation.x(), -0.1 );
+    EXPECT_DOUBLE_EQ( translation.y(), 0.2 );
+    EXPECT_DOUBLE_EQ( translation.z(), -0.3 );
 
     auto reader = dataset.reader();
     for ( std::size_t index = 0; index < summary.imu.count; ++index )
@@ -295,12 +330,198 @@ namespace
       EXPECT_EQ( opened.error().code,
                  phad::io::dataset::DatasetErrorCode::kInvalidCalibration );
       EXPECT_EQ( opened.error().field, "T_cam_imu.bottom_row" );
+      expectCoreCalibrationCause(
+          opened.error(),
+          phad::sensor::CalibrationErrorCode::kInvalidHomogeneousRow,
+          "rigid_transform.bottom_row",
+          "bottom row must be [0, 0, 0, 1]" );
     }
     {
       TumViFixture fixture;
       fixture.writeCamchain( "radtan", false );
       auto opened = phad::io::dataset::tum_vi::open( fixture.root() );
       ASSERT_FALSE( opened.hasValue() );
+      EXPECT_EQ(
+          opened.error().code,
+          phad::io::dataset::DatasetErrorCode::kUnsupportedDistortionModel );
+    }
+  }
+
+  TEST( TumViDatasetTest, MapsEveryCoreSourceFieldWithProvenance )
+  {
+    struct MappingCase
+    {
+      const char*                        relative_path;
+      const char*                        sensor_id;
+      const char*                        original;
+      const char*                        replacement;
+      const char*                        raw_field;
+      phad::sensor::CalibrationErrorCode code;
+      const char*                        canonical_field;
+      const char*                        detail;
+    };
+    const std::array<MappingCase, 18> cases{ {
+        { "dso/camchain.yaml", "cam0", "- [1.0, 0.0, 0.0, 0.1]",
+          "- [1.0, 0.0, 0.0, .nan]", "T_cam_imu",
+          phad::sensor::CalibrationErrorCode::kNonFiniteValue,
+          "rigid_transform.matrix", "all matrix elements must be finite" },
+        { "dso/camchain.yaml", "cam0", "- [1.0, 0.0, 0.0, 0.1]",
+          "- [2.0, 0.0, 0.0, 0.1]", "T_cam_imu.rotation",
+          phad::sensor::CalibrationErrorCode::kInvalidRotation,
+          "rigid_transform.rotation",
+          "rotation must be orthogonal with determinant +1" },
+        { "dso/camchain.yaml", "cam0", "- [0.0, 0.0, 0.0, 1]",
+          "- [0.0, 0.0, 0.0, 2]", "T_cam_imu.bottom_row",
+          phad::sensor::CalibrationErrorCode::kInvalidHomogeneousRow,
+          "rigid_transform.bottom_row",
+          "bottom row must be [0, 0, 0, 1]" },
+        { "dso/camchain.yaml", "cam0",
+          "intrinsics: [190.0, 191.0, 255.0, 256.0]",
+          "intrinsics: [0.0, 191.0, 255.0, 256.0]", "intrinsics",
+          phad::sensor::CalibrationErrorCode::kNonPositiveValue,
+          "camera.model_parameters.equidistant.fx_pixels",
+          "fx_pixels must be strictly positive" },
+        { "dso/camchain.yaml", "cam0",
+          "intrinsics: [190.0, 191.0, 255.0, 256.0]",
+          "intrinsics: [190.0, 0.0, 255.0, 256.0]", "intrinsics",
+          phad::sensor::CalibrationErrorCode::kNonPositiveValue,
+          "camera.model_parameters.equidistant.fy_pixels",
+          "fy_pixels must be strictly positive" },
+        { "dso/camchain.yaml", "cam0",
+          "intrinsics: [190.0, 191.0, 255.0, 256.0]",
+          "intrinsics: [190.0, 191.0, .nan, 256.0]", "intrinsics",
+          phad::sensor::CalibrationErrorCode::kNonFiniteValue,
+          "camera.model_parameters.equidistant.cx_pixels",
+          "camera model parameter must be finite" },
+        { "dso/camchain.yaml", "cam0",
+          "intrinsics: [190.0, 191.0, 255.0, 256.0]",
+          "intrinsics: [190.0, 191.0, 255.0, .nan]", "intrinsics",
+          phad::sensor::CalibrationErrorCode::kNonFiniteValue,
+          "camera.model_parameters.equidistant.cy_pixels",
+          "camera model parameter must be finite" },
+        { "dso/camchain.yaml", "cam0",
+          "distortion_coeffs: [0.01, 0.02, 0.03, 0.04]",
+          "distortion_coeffs: [.nan, 0.02, 0.03, 0.04]",
+          "distortion_coeffs",
+          phad::sensor::CalibrationErrorCode::kNonFiniteValue,
+          "camera.model_parameters.equidistant.k1",
+          "camera model parameter must be finite" },
+        { "dso/camchain.yaml", "cam0",
+          "distortion_coeffs: [0.01, 0.02, 0.03, 0.04]",
+          "distortion_coeffs: [0.01, .nan, 0.03, 0.04]",
+          "distortion_coeffs",
+          phad::sensor::CalibrationErrorCode::kNonFiniteValue,
+          "camera.model_parameters.equidistant.k2",
+          "camera model parameter must be finite" },
+        { "dso/camchain.yaml", "cam0",
+          "distortion_coeffs: [0.01, 0.02, 0.03, 0.04]",
+          "distortion_coeffs: [0.01, 0.02, .nan, 0.04]",
+          "distortion_coeffs",
+          phad::sensor::CalibrationErrorCode::kNonFiniteValue,
+          "camera.model_parameters.equidistant.k3",
+          "camera model parameter must be finite" },
+        { "dso/camchain.yaml", "cam0",
+          "distortion_coeffs: [0.01, 0.02, 0.03, 0.04]",
+          "distortion_coeffs: [0.01, 0.02, 0.03, .nan]",
+          "distortion_coeffs",
+          phad::sensor::CalibrationErrorCode::kNonFiniteValue,
+          "camera.model_parameters.equidistant.k4",
+          "camera model parameter must be finite" },
+        { "dso/camchain.yaml", "cam0", "resolution: [4, 3]",
+          "resolution: [0, 3]", "resolution",
+          phad::sensor::CalibrationErrorCode::kNonPositiveValue,
+          "camera.image_width", "image width must be positive" },
+        { "dso/camchain.yaml", "cam0", "resolution: [4, 3]",
+          "resolution: [4, 0]", "resolution",
+          phad::sensor::CalibrationErrorCode::kNonPositiveValue,
+          "camera.image_height", "image height must be positive" },
+        { "dso/imu_config.yaml", "imu0", "update_rate: 200.0",
+          "update_rate: 0.0", "update_rate",
+          phad::sensor::CalibrationErrorCode::kNonPositiveValue,
+          "imu.rate_hz", "IMU parameter must be strictly positive" },
+        { "dso/imu_config.yaml", "imu0",
+          "accelerometer_noise_density: 0.0028",
+          "accelerometer_noise_density: 0", "accelerometer_noise_density",
+          phad::sensor::CalibrationErrorCode::kNonPositiveValue,
+          "imu.accelerometer_noise_density_mps2_per_sqrt_hz",
+          "IMU parameter must be strictly positive" },
+        { "dso/imu_config.yaml", "imu0",
+          "gyroscope_noise_density: 0.00016",
+          "gyroscope_noise_density: 0", "gyroscope_noise_density",
+          phad::sensor::CalibrationErrorCode::kNonPositiveValue,
+          "imu.gyroscope_noise_density_radps_per_sqrt_hz",
+          "IMU parameter must be strictly positive" },
+        { "dso/imu_config.yaml", "imu0",
+          "accelerometer_random_walk: 0.00086",
+          "accelerometer_random_walk: 0", "accelerometer_random_walk",
+          phad::sensor::CalibrationErrorCode::kNonPositiveValue,
+          "imu.accelerometer_bias_random_walk_mps3_per_sqrt_hz",
+          "IMU parameter must be strictly positive" },
+        { "dso/imu_config.yaml", "imu0",
+          "gyroscope_random_walk: 0.000022",
+          "gyroscope_random_walk: 0", "gyroscope_random_walk",
+          phad::sensor::CalibrationErrorCode::kNonPositiveValue,
+          "imu.gyroscope_bias_random_walk_radps2_per_sqrt_hz",
+          "IMU parameter must be strictly positive" },
+    } };
+
+    for ( const auto& test_case : cases )
+    {
+      SCOPED_TRACE( test_case.canonical_field );
+      TumViFixture fixture;
+      fixture.replaceInFile( test_case.relative_path, test_case.original,
+                             test_case.replacement );
+      auto opened = phad::io::dataset::tum_vi::open( fixture.root() );
+      ASSERT_FALSE( opened );
+      EXPECT_EQ( opened.error().code,
+                 phad::io::dataset::DatasetErrorCode::kInvalidCalibration );
+      EXPECT_EQ( opened.error().sensor_id, test_case.sensor_id );
+      EXPECT_EQ( opened.error().source_path,
+                 fixture.root() / test_case.relative_path );
+      EXPECT_EQ( opened.error().field, test_case.raw_field );
+      expectCoreCalibrationCause(
+          opened.error(), test_case.code, test_case.canonical_field,
+          test_case.detail );
+    }
+  }
+
+  TEST( TumViDatasetTest, MapsZeroBaselineWithJointProvenance )
+  {
+    TumViFixture fixture;
+    fixture.replaceInFile( "dso/camchain.yaml",
+                           "- [1.0, 0.0, 0.0, -0.1]",
+                           "- [1.0, 0.0, 0.0, 0.1]" );
+    auto opened = phad::io::dataset::tum_vi::open( fixture.root() );
+    ASSERT_FALSE( opened );
+    EXPECT_EQ( opened.error().sensor_id, "cam0/cam1" );
+    EXPECT_EQ( opened.error().source_path,
+               fixture.root() / "dso/camchain.yaml" );
+    EXPECT_EQ( opened.error().field,
+               "cam0.T_cam_imu/cam1.T_cam_imu" );
+    expectCoreCalibrationCause(
+        opened.error(),
+        phad::sensor::CalibrationErrorCode::kZeroStereoBaseline,
+        "stereo_imu_calibration.camera_centers",
+        "left and right camera centers must not coincide" );
+  }
+
+  TEST( TumViDatasetTest, PreservesUnsupportedModelCodesBeforeFactories )
+  {
+    {
+      TumViFixture fixture;
+      fixture.replaceInFile( "dso/camchain.yaml", "camera_model: pinhole",
+                             "camera_model: omnidirectional" );
+      auto opened = phad::io::dataset::tum_vi::open( fixture.root() );
+      ASSERT_FALSE( opened );
+      EXPECT_EQ(
+          opened.error().code,
+          phad::io::dataset::DatasetErrorCode::kUnsupportedCameraModel );
+    }
+    {
+      TumViFixture fixture;
+      fixture.writeCamchain( "radtan", false );
+      auto opened = phad::io::dataset::tum_vi::open( fixture.root() );
+      ASSERT_FALSE( opened );
       EXPECT_EQ(
           opened.error().code,
           phad::io::dataset::DatasetErrorCode::kUnsupportedDistortionModel );

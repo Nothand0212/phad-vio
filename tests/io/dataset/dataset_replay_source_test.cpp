@@ -127,7 +127,15 @@ namespace
     void writeCalibrations()
     {
       writeSensorFile( "cam0", cameraYaml() );
-      writeSensorFile( "cam1", cameraYaml() );
+      std::string       right    = cameraYaml();
+      const std::string identity = identityTransformYaml();
+      const std::string translated =
+          "T_BS:\n"
+          "  rows: 4\n"
+          "  cols: 4\n"
+          "  data: [1, 0, 0, 0.1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]\n";
+      right.replace( right.find( identity ), identity.size(), translated );
+      writeSensorFile( "cam1", right );
       writeSensorFile( "imu0", imuYaml() );
     }
 
@@ -196,9 +204,15 @@ namespace
     auto                 source = openReplaySource( fixture.root() );
     SensorSource&        seam   = source;
 
-    EXPECT_EQ( seam.calibration().left.resolution.width, 4 );
-    EXPECT_EQ( seam.calibration().left.resolution.height, 3 );
-    EXPECT_DOUBLE_EQ( seam.calibration().imu.rate_hz, 200.0 );
+    static_assert( std::is_same_v<
+                   decltype( seam.calibration() ),
+                   const phad::sensor::StereoImuCalibration&> );
+    const auto* first_address  = &seam.calibration();
+    const auto* second_address = &seam.calibration();
+    EXPECT_EQ( first_address, second_address );
+    EXPECT_EQ( seam.calibration().leftCamera().imageWidth(), 4U );
+    EXPECT_EQ( seam.calibration().leftCamera().imageHeight(), 3U );
+    EXPECT_DOUBLE_EQ( seam.calibration().imu().rateHz(), 200.0 );
   }
 
   TEST( DatasetReplaySourceTest,

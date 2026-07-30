@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <fstream>
 #include <limits>
+#include <sstream>
 #include <system_error>
 #include <utility>
 
@@ -155,20 +156,13 @@ namespace phad::io::dataset::internal
     }
   }
 
-  DatasetResult<double> positiveYamlScalar(
+  DatasetResult<double> yamlScalar(
       const YAML::Node& root, std::string_view key,
       const std::string& sensor_id, const fs::path& path )
   {
     try
     {
-      const double value = root[ std::string( key ) ].as<double>();
-      if ( !std::isfinite( value ) || value <= 0.0 )
-      {
-        return makeError( DatasetErrorCode::kInvalidCalibration, sensor_id, path,
-                          std::string( key ),
-                          "value must be finite and positive" );
-      }
-      return value;
+      return root[ std::string( key ) ].as<double>();
     }
     catch ( const YAML::Exception& exception )
     {
@@ -177,104 +171,35 @@ namespace phad::io::dataset::internal
     }
   }
 
-  DatasetResult<sensor::RigidTransform> validateRigidTransform(
-      sensor::RigidTransform transform, const std::string& sensor_id,
-      const fs::path& path, std::string field )
+  DatasetError mapCalibrationError(
+      const sensor::CalibrationError& error, std::string sensor_id,
+      fs::path source_path, std::string field )
   {
-    for ( const double value : transform.matrix )
-    {
-      if ( !std::isfinite( value ) )
-      {
-        return makeError( DatasetErrorCode::kInvalidCalibration, sensor_id, path,
-                          field, "transform values must be finite" );
-      }
-    }
-
-    constexpr double tolerance = 1e-6;
-    const auto&      matrix    = transform.matrix;
-    for ( std::size_t row = 0; row < 3; ++row )
-    {
-      for ( std::size_t other = 0; other < 3; ++other )
-      {
-        double dot = 0.0;
-        for ( std::size_t column = 0; column < 3; ++column )
-        {
-          dot += matrix[ row * 4 + column ] *
-                 matrix[ other * 4 + column ];
-        }
-        const double expected = row == other ? 1.0 : 0.0;
-        if ( std::abs( dot - expected ) > tolerance )
-        {
-          return makeError( DatasetErrorCode::kInvalidCalibration, sensor_id,
-                            path, field + ".rotation",
-                            "rotation is not orthonormal" );
-        }
-      }
-    }
-
-    const double determinant =
-        matrix[ 0 ] * ( matrix[ 5 ] * matrix[ 10 ] -
-                        matrix[ 6 ] * matrix[ 9 ] ) -
-        matrix[ 1 ] * ( matrix[ 4 ] * matrix[ 10 ] -
-                        matrix[ 6 ] * matrix[ 8 ] ) +
-        matrix[ 2 ] * ( matrix[ 4 ] * matrix[ 9 ] -
-                        matrix[ 5 ] * matrix[ 8 ] );
-    if ( std::abs( determinant - 1.0 ) > tolerance )
-    {
-      return makeError( DatasetErrorCode::kInvalidCalibration, sensor_id, path,
-                        field + ".rotation",
-                        "rotation determinant must be +1" );
-    }
-    if ( std::abs( matrix[ 12 ] ) > tolerance ||
-         std::abs( matrix[ 13 ] ) > tolerance ||
-         std::abs( matrix[ 14 ] ) > tolerance ||
-         std::abs( matrix[ 15 ] - 1.0 ) > tolerance )
-    {
-      return makeError( DatasetErrorCode::kInvalidCalibration, sensor_id, path,
-                        field + ".bottom_row",
-                        "homogeneous bottom row must be [0, 0, 0, 1]" );
-    }
-    return transform;
+    std::ostringstream cause;
+    cause << "core calibration error " << static_cast<int>( error.code )
+          << ", field=" << error.field_path << ": " << error.detail;
+    return makeError( DatasetErrorCode::kInvalidCalibration,
+                      std::move( sensor_id ), std::move( source_path ),
+                      std::move( field ), std::move( cause ).str() );
   }
 
-  sensor::RigidTransform invertRigidTransform(
-      const sensor::RigidTransform& transform ) noexcept
+  sensor::CalibrationResult<sensor::RigidTransform> invertRigidTransform(
+      const sensor::RigidTransform& transform )
   {
-    sensor::RigidTransform inverse;
-    const auto&            source = transform.matrix;
-    auto&                  target = inverse.matrix;
-    for ( std::size_t row = 0; row < 3; ++row )
-    {
-      for ( std::size_t column = 0; column < 3; ++column )
-      {
-        target[ row * 4 + column ] = source[ column * 4 + row ];
-      }
-      target[ row * 4 + 3 ] =
-          -( target[ row * 4 ] * source[ 3 ] +
-             target[ row * 4 + 1 ] * source[ 7 ] +
-             target[ row * 4 + 2 ] * source[ 11 ] );
-    }
-    target[ 12 ] = 0.0;
-    target[ 13 ] = 0.0;
-    target[ 14 ] = 0.0;
-    target[ 15 ] = 1.0;
-    return inverse;
+    Eigen::Matrix4d       inverse  = Eigen::Matrix4d::Identity();
+    const Eigen::Matrix3d rotation = transform.rotation();
+    inverse.block<3, 3>( 0, 0 )    = rotation.transpose();
+    inverse.block<3, 1>( 0, 3 ) =
+        -rotation.transpose() * transform.translation();
+    return sensor::RigidTransform::create( std::move( inverse ) );
   }
 
   bool isIdentity( const sensor::RigidTransform& transform ) noexcept
   {
     constexpr double tolerance = 1e-12;
-    for ( std::size_t index = 0; index < transform.matrix.size(); ++index )
-    {
-      const bool diagonal =
-          index == 0 || index == 5 || index == 10 || index == 15;
-      const double expected = diagonal ? 1.0 : 0.0;
-      if ( std::abs( transform.matrix[ index ] - expected ) > tolerance )
-      {
-        return false;
-      }
-    }
-    return true;
+    return transform.rotation().isApprox( Eigen::Matrix3d::Identity(),
+                                          tolerance ) &&
+           transform.translation().isZero( tolerance );
   }
 
   std::optional<DatasetError> validateRequiredPath( const fs::path& path,
