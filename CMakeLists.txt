@@ -90,12 +90,27 @@ target_compile_options(phad_eval PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
+add_library(phad_viz
+  phad/viz/image_window.cpp
+  phad/viz/trajectory_panel.cpp
+)
+add_library(phad::viz ALIAS phad_viz)
+target_compile_features(phad_viz PUBLIC cxx_std_20)
+target_include_directories(phad_viz PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(phad_viz
+  PUBLIC phad::common opencv_core
+  PRIVATE opencv_highgui opencv_imgproc
+)
+target_compile_options(phad_viz PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
 add_executable(phad_euroc_inspect apps/phad_euroc_inspect.cpp)
 target_link_libraries(phad_euroc_inspect PRIVATE phad::io_dataset)
 
 add_executable(phad_euroc_runner apps/phad_euroc_runner.cpp)
 target_link_libraries(phad_euroc_runner
-  PRIVATE phad::io_dataset opencv_core opencv_highgui opencv_imgproc
+  PRIVATE phad::io_dataset phad::viz opencv_core opencv_imgproc
 )
 
 add_executable(phad_euroc_gt_export apps/phad_euroc_gt_export.cpp)
@@ -152,6 +167,18 @@ if(PHAD_BUILD_TESTS)
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
   )
   gtest_discover_tests(phad_eval_tests PROPERTIES LABELS "unit")
+
+  add_executable(phad_viz_tests
+    tests/viz/trajectory_panel_test.cpp
+  )
+  target_link_libraries(phad_viz_tests PRIVATE
+    phad::viz opencv_core GTest::gtest_main
+  )
+  target_include_directories(phad_viz_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+  target_compile_options(phad_viz_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+  gtest_discover_tests(phad_viz_tests PROPERTIES LABELS "unit")
 
   add_executable(phad_io_dataset_tests
     tests/common/timestamp_test.cpp

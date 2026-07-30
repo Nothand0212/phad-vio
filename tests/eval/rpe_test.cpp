@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "tests/eval/synthetic_trajectory.hpp"
+#include "tests/common/synthetic_trajectory.hpp"
 
 namespace
 {

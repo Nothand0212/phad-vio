@@ -21,10 +21,19 @@ M1（离线 stereo-IMU 数据加载）已完成：
 - `phad_euroc_inspect` 可检查 EuRoC 数据摘要和抽样图像；
 - 默认测试使用自生成 fixture，真实数据集测试通过 CMake option 显式启用。
 
-下一个里程碑 M2 是**双目 VO 最小闭环**：先建立评估与可视化底座
-（TUM 格式轨迹导出、ATE/RPE、实时 2D 面板），再接入 OpenCV LK 前端和
-GTSAM 因子图后端，在 `MH_01_easy` 上产出第一条轨迹和第一个 ATE 数字。
-该里程碑不追求精度，只建立后续所有改动的基线。
+M2.1（评估与可视化底座）已完成：
+
+- `phad::eval` 提供 TUM 轨迹读写、时间关联、固定尺度 SE3 对齐与 ATE、RPE；
+- `phad_euroc_gt_export` 导出 EuRoC 真值，`phad_traj_eval` 比较两条轨迹并可
+  写出逐样本误差 CSV；两者的数字与 `evo` 在六位有效数字上一致；
+- `phad::viz` 提供俯视 x-y 轨迹面板与显示窗口，`phad_euroc_runner` 回放时在
+  图像旁显示真值轨迹与当前位置；
+- `scripts/` 下的 Python 脚本消费 TUM 与误差 CSV，产出 3D 轨迹与误差曲线
+  （见 [离线绘图脚本](scripts/README.md)）。
+
+M2 的其余部分是**双目 VO 最小闭环**：接入 OpenCV LK 前端和 GTSAM 因子图
+后端，在 `MH_01_easy` 上产出第一条估计轨迹和第一个 ATE 数字。该里程碑不
+追求精度，只建立后续所有改动的基线。
 
 技术路线：
 
@@ -43,6 +52,7 @@ GTSAM 因子图后端，在 `MH_01_easy` 上产出第一条轨迹和第一个 AT
 - [目标架构与模块职责](docs/architecture.md)
 - [实现里程碑与验收标准](docs/roadmap.md)
 - [ADR-0001：采用 GTSAM 构建 VIO 后端](docs/adr/0001-gtsam-vio-backend.md)
+- [离线绘图脚本](scripts/README.md)
 
 ## 第一条实现原则
 

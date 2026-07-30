@@ -5,7 +5,6 @@
 #include <iostream>
 #include <limits>
 #include <opencv2/core.hpp>
-#include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include <optional>
 #include <stdexcept>
@@ -14,17 +13,19 @@
 #include <variant>
 #include <vector>
 
+#include "phad/common/trajectory.hpp"
 #include "phad/io/dataset/dataset_replay_source.hpp"
 #include "phad/io/dataset/euroc/euroc_dataset.hpp"
+#include "phad/io/dataset/euroc/euroc_groundtruth.hpp"
 #include "phad/io/sensor_source.hpp"
 #include "phad/sensor/stereo_frame.hpp"
+#include "phad/viz/image_window.hpp"
+#include "phad/viz/trajectory_panel.hpp"
 
 namespace
 {
 
   constexpr char kWindowName[] = "phad-vio EuRoC stereo";
-  constexpr int  kEscapeKey    = 27;
-  constexpr int  kQKey         = 'q';
 
   constexpr int    kMaxCorners   = 500;
   constexpr double kQualityLevel = 0.01;
@@ -32,16 +33,6 @@ namespace
   constexpr int    kCornerRadius = 3;
   const cv::Scalar kCornerColor{ 0, 255, 0 };  // BGR
   const cv::Scalar kTextColor{ 0, 255, 0 };    // BGR
-
-  [[nodiscard]] bool isQuitKey( int key ) noexcept
-  {
-    return key == kEscapeKey || key == kQKey;
-  }
-
-  [[nodiscard]] bool windowIsOpen()
-  {
-    return cv::getWindowProperty( kWindowName, cv::WND_PROP_VISIBLE ) >= 1.0;
-  }
 
   [[nodiscard]] cv::Mat copyGrayImage( const phad::sensor::Image& image )
   {
@@ -124,7 +115,8 @@ namespace
   class PlaybackClock
   {
   public:
-    [[nodiscard]] bool waitUntil( phad::common::Timestamp timestamp )
+    [[nodiscard]] bool waitUntil( phad::common::Timestamp timestamp,
+                                  phad::viz::ImageWindow& window )
     {
       const auto now = std::chrono::steady_clock::now();
       if ( !m_first_timestamp.has_value() )
@@ -146,29 +138,44 @@ namespace
           m_first_wall_time + std::chrono::nanoseconds{ elapsed_nanoseconds };
       while ( std::chrono::steady_clock::now() < deadline )
       {
-        if ( !windowIsOpen() )
-        {
-          return false;
-        }
-
         const auto remaining = deadline - std::chrono::steady_clock::now();
         const auto remaining_ms =
             std::chrono::ceil<std::chrono::milliseconds>( remaining ).count();
         const auto bounded_ms =
             std::clamp<std::int64_t>( remaining_ms, 1,
                                       std::numeric_limits<int>::max() );
-        if ( isQuitKey( cv::waitKey( static_cast<int>( bounded_ms ) ) ) )
+        if ( !window.pump( static_cast<int>( bounded_ms ) ) )
         {
           return false;
         }
       }
-      return windowIsOpen();
+      return window.isOpen();
     }
 
   private:
     std::optional<phad::common::Timestamp> m_first_timestamp;
     std::chrono::steady_clock::time_point  m_first_wall_time;
   };
+
+  /**
+   * @brief 加载序列真值，用于俯视面板。
+   *
+   * 没有 state_groundtruth_estimate0 的序列仍然可以回放图像，因此加载失败
+   * 只关闭面板并说明原因，不中断回放。
+   */
+  [[nodiscard]] std::optional<phad::common::Trajectory> loadGroundtruth(
+      const std::filesystem::path& sequence_root )
+  {
+    auto trajectory =
+        phad::io::dataset::euroc::openGroundtruth( sequence_root );
+    if ( !trajectory )
+    {
+      std::cerr << "trajectory panel disabled: "
+                << trajectory.error().describe() << '\n';
+      return std::nullopt;
+    }
+    return std::move( trajectory ).value();
+  }
 
   [[nodiscard]] int run( const std::filesystem::path& sequence_root )
   {
@@ -182,8 +189,12 @@ namespace
     phad::io::dataset::DatasetReplaySource replay_source{ opened.value() };
     phad::io::SensorSource&                source = replay_source;
 
-    cv::namedWindow( kWindowName, cv::WINDOW_AUTOSIZE );
-    PlaybackClock playback_clock;
+    const std::optional<phad::common::Trajectory> groundtruth =
+        loadGroundtruth( sequence_root );
+    std::optional<phad::viz::TrajectoryPanel> panel;
+
+    phad::viz::ImageWindow window{ kWindowName };
+    PlaybackClock          playback_clock;
 
     while ( true )
     {
@@ -206,14 +217,29 @@ namespace
         continue;
       }
 
-      const cv::Mat canvas = renderStereo( *frame );
-      if ( !playback_clock.waitUntil( frame->timestamp ) )
+      cv::Mat canvas = renderStereo( *frame );
+      if ( groundtruth.has_value() )
+      {
+        if ( !panel.has_value() )
+        {
+          // 面板与图像等高的正方形，接在双目画面右侧。
+          panel.emplace( *groundtruth,
+                         phad::viz::TrajectoryPanelOptions{
+                             .width_px  = canvas.rows,
+                             .height_px = canvas.rows } );
+        }
+        cv::Mat composed;
+        cv::hconcat( canvas, panel->render( frame->timestamp ), composed );
+        canvas = composed;
+      }
+
+      if ( !playback_clock.waitUntil( frame->timestamp, window ) )
       {
         return 0;
       }
 
-      cv::imshow( kWindowName, canvas );
-      if ( isQuitKey( cv::waitKey( 1 ) ) || !windowIsOpen() )
+      window.show( canvas );
+      if ( !window.pump( 1 ) )
       {
         return 0;
       }
@@ -232,9 +258,7 @@ int main( int argc, char** argv )
 
   try
   {
-    const int result = run( std::filesystem::path{ argv[ 1 ] } );
-    cv::destroyAllWindows();
-    return result;
+    return run( std::filesystem::path{ argv[ 1 ] } );
   }
   catch ( const cv::Exception& exception )
   {
@@ -244,6 +268,5 @@ int main( int argc, char** argv )
   {
     std::cerr << "runner error: " << exception.what() << '\n';
   }
-  cv::destroyAllWindows();
   return 1;
 }
