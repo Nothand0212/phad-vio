@@ -49,6 +49,7 @@ add_library(phad_io_dataset
   phad/io/dataset/dataset_replay_source.cpp
   phad/io/dataset/stereo_imu_dataset.cpp
   phad/io/dataset/euroc/euroc_dataset.cpp
+  phad/io/dataset/euroc/internal/euroc_yaml.cpp
   phad/io/dataset/tum_vi/tum_vi_dataset.cpp
 )
 add_library(phad::io_dataset ALIAS phad_io_dataset)

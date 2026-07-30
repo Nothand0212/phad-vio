@@ -67,6 +67,24 @@ namespace phad::io::dataset::internal
   [[nodiscard]] std::optional<DatasetError> validateRequiredPath(
       const std::filesystem::path& path, bool directory );
 
+  void removeCarriageReturn( std::string& line );
+
+  /// 返回的 string_view 指向 line 的存储，使用期间 line 必须保持有效。
+  [[nodiscard]] std::vector<std::string_view> splitCsv( const std::string& line );
+
+  [[nodiscard]] DatasetResult<common::Timestamp> parseTimestamp(
+      std::string_view text, const std::string& sensor_id,
+      const std::filesystem::path& path, std::size_t line );
+
+  [[nodiscard]] DatasetResult<double> parseFiniteDouble(
+      std::string_view text, const std::string& sensor_id,
+      const std::filesystem::path& path, std::size_t line, std::string field );
+
+  [[nodiscard]] std::optional<DatasetError> checkIncreasing(
+      common::Timestamp previous, common::Timestamp current,
+      const std::string& sensor_id, const std::filesystem::path& path,
+      std::size_t line );
+
   [[nodiscard]] DatasetResult<std::vector<CameraRecord>> parseCameraCsv(
       const std::filesystem::path& csv_path,
       const std::filesystem::path& data_path, const std::string& sensor_id );

@@ -32,93 +32,6 @@ namespace phad::io::dataset::internal
         "w_RS_S_z [rad s^-1],a_RS_S_x [m s^-2],a_RS_S_y [m s^-2],"
         "a_RS_S_z [m s^-2]";
 
-    void removeCarriageReturn( std::string& line )
-    {
-      if ( !line.empty() && line.back() == '\r' )
-      {
-        line.pop_back();
-      }
-    }
-
-    std::vector<std::string_view> splitCsv( const std::string& line )
-    {
-      std::vector<std::string_view> fields;
-      std::size_t                   begin = 0;
-      while ( true )
-      {
-        const std::size_t comma = line.find( ',', begin );
-        if ( comma == std::string::npos )
-        {
-          fields.emplace_back( line.data() + begin, line.size() - begin );
-          return fields;
-        }
-        fields.emplace_back( line.data() + begin, comma - begin );
-        begin = comma + 1;
-      }
-    }
-
-    DatasetResult<common::Timestamp> parseTimestamp(
-        std::string_view text, const std::string& sensor_id, const fs::path& path,
-        std::size_t line )
-    {
-      std::int64_t value = 0;
-      const auto   result =
-          std::from_chars( text.data(), text.data() + text.size(), value, 10 );
-      if ( result.ec == std::errc::result_out_of_range )
-      {
-        return makeError( DatasetErrorCode::kTimestampOverflow, sensor_id, path,
-                          "timestamp", "timestamp does not fit int64_t", line );
-      }
-      if ( result.ec != std::errc{} || result.ptr != text.data() + text.size() )
-      {
-        return makeError( DatasetErrorCode::kInvalidTimestamp, sensor_id, path,
-                          "timestamp", "expected an integer nanosecond value",
-                          line );
-      }
-      return common::Timestamp{ value };
-    }
-
-    DatasetResult<double> parseFiniteDouble(
-        std::string_view text, const std::string& sensor_id, const fs::path& path,
-        std::size_t line, std::string field )
-    {
-      double     value = 0.0;
-      const auto result =
-          std::from_chars( text.data(), text.data() + text.size(), value );
-      if ( result.ec != std::errc{} || result.ptr != text.data() + text.size() )
-      {
-        return makeError( DatasetErrorCode::kInvalidField, sensor_id, path,
-                          std::move( field ), "expected a floating-point value",
-                          line );
-      }
-      if ( !std::isfinite( value ) )
-      {
-        return makeError( DatasetErrorCode::kNonFiniteMeasurement, sensor_id,
-                          path, std::move( field ),
-                          "measurement must be finite", line );
-      }
-      return value;
-    }
-
-    std::optional<DatasetError> checkIncreasing(
-        common::Timestamp previous, common::Timestamp current,
-        const std::string& sensor_id, const fs::path& path, std::size_t line )
-    {
-      if ( current == previous )
-      {
-        return makeError( DatasetErrorCode::kDuplicateTimestamp, sensor_id, path,
-                          "timestamp", "duplicate timestamp", line, current );
-      }
-      if ( current < previous )
-      {
-        return makeError( DatasetErrorCode::kOutOfOrderTimestamp, sensor_id,
-                          path, "timestamp",
-                          "timestamp is earlier than previous record", line,
-                          current );
-      }
-      return std::nullopt;
-    }
-
     bool isWithinDirectory( const fs::path& child, const fs::path& directory )
     {
       const fs::path relative = child.lexically_relative( directory );
@@ -140,6 +53,93 @@ namespace phad::io::dataset::internal
                          timestamp,
                          std::move( field ),
                          std::move( cause ) };
+  }
+
+  void removeCarriageReturn( std::string& line )
+  {
+    if ( !line.empty() && line.back() == '\r' )
+    {
+      line.pop_back();
+    }
+  }
+
+  std::vector<std::string_view> splitCsv( const std::string& line )
+  {
+    std::vector<std::string_view> fields;
+    std::size_t                   begin = 0;
+    while ( true )
+    {
+      const std::size_t comma = line.find( ',', begin );
+      if ( comma == std::string::npos )
+      {
+        fields.emplace_back( line.data() + begin, line.size() - begin );
+        return fields;
+      }
+      fields.emplace_back( line.data() + begin, comma - begin );
+      begin = comma + 1;
+    }
+  }
+
+  DatasetResult<common::Timestamp> parseTimestamp(
+      std::string_view text, const std::string& sensor_id, const fs::path& path,
+      std::size_t line )
+  {
+    std::int64_t value = 0;
+    const auto   result =
+        std::from_chars( text.data(), text.data() + text.size(), value, 10 );
+    if ( result.ec == std::errc::result_out_of_range )
+    {
+      return makeError( DatasetErrorCode::kTimestampOverflow, sensor_id, path,
+                        "timestamp", "timestamp does not fit int64_t", line );
+    }
+    if ( result.ec != std::errc{} || result.ptr != text.data() + text.size() )
+    {
+      return makeError( DatasetErrorCode::kInvalidTimestamp, sensor_id, path,
+                        "timestamp", "expected an integer nanosecond value",
+                        line );
+    }
+    return common::Timestamp{ value };
+  }
+
+  DatasetResult<double> parseFiniteDouble(
+      std::string_view text, const std::string& sensor_id, const fs::path& path,
+      std::size_t line, std::string field )
+  {
+    double     value = 0.0;
+    const auto result =
+        std::from_chars( text.data(), text.data() + text.size(), value );
+    if ( result.ec != std::errc{} || result.ptr != text.data() + text.size() )
+    {
+      return makeError( DatasetErrorCode::kInvalidField, sensor_id, path,
+                        std::move( field ), "expected a floating-point value",
+                        line );
+    }
+    if ( !std::isfinite( value ) )
+    {
+      return makeError( DatasetErrorCode::kNonFiniteMeasurement, sensor_id,
+                        path, std::move( field ), "measurement must be finite",
+                        line );
+    }
+    return value;
+  }
+
+  std::optional<DatasetError> checkIncreasing(
+      common::Timestamp previous, common::Timestamp current,
+      const std::string& sensor_id, const fs::path& path, std::size_t line )
+  {
+    if ( current == previous )
+    {
+      return makeError( DatasetErrorCode::kDuplicateTimestamp, sensor_id, path,
+                        "timestamp", "duplicate timestamp", line, current );
+    }
+    if ( current < previous )
+    {
+      return makeError( DatasetErrorCode::kOutOfOrderTimestamp, sensor_id, path,
+                        "timestamp",
+                        "timestamp is earlier than previous record", line,
+                        current );
+    }
+    return std::nullopt;
   }
 
   DatasetResult<YAML::Node> loadYaml( const fs::path&    path,
