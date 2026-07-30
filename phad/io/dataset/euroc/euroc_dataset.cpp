@@ -1,5 +1,3 @@
-#include "phad/io/dataset/euroc/euroc_dataset.hpp"
-
 #include <yaml-cpp/yaml.h>
 
 #include <Eigen/Core>
@@ -9,6 +7,7 @@
 #include <string_view>
 #include <utility>
 
+#include "phad/io/dataset/euroc/euroc_dataset.hpp"
 #include "phad/io/dataset/internal/dataset_adapter_utils.hpp"
 #include "phad/io/dataset/internal/stereo_imu_dataset_builder.hpp"
 

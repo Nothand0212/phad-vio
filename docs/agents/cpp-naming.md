@@ -13,6 +13,30 @@
 - 常量：`k` + PascalCase（如 `kCameraHeader`）
 - 命名空间：snake_case（如 `phad::io::dataset`）
 
+## 简洁与缩写
+
+优先短而清楚的名字；不要为了“自解释”把标识符拉得很长。
+
+- **能短则短**：去掉对上下文无贡献的词（单位全文、重复角色词、冗余修饰）。
+- **流行缩写优先**：机器人 / VIO / SLAM / 计算机视觉领域里通用、文献与代码里常见的缩写直接用，不要再写全称。
+  例如：`imu`、`acc` / `gyr`、`nd`（noise density）、`rw`（random walk / bias random walk）、`fx` / `fy` / `cx` / `cy`、`T_B_*`。
+- **不要自造缩写**：只有本文件、本 PR 或口头约定才懂的缩写禁止；宁可稍长，也不要歧义。
+- **单位放注释，不塞进长名字**：物理单位用简短 header / 成员注释说明即可，避免
+  `accelerometer_noise_density_mps2_per_sqrt_hz` 这类标识符。需要消歧时可用短后缀
+  （如 `rate_hz`、`accel_mps2`、`gyro_radps`），不要把完整量纲短语嵌进名字。
+- **对外格式键保持原样**：EuRoC / TUM-VI 等数据集 YAML、CSV 列名按格式原文读写；缩写只用于内部 API、成员与 `field_path`。
+- **同一概念全仓一致**：选定缩写后，参数、成员、accessor、错误路径用同一套词根（如 `acc_nd` / `m_acc_nd` / `accNd()` / `imu.acc_nd`）。
+
+```cpp
+// BAD — 过长，单位全文塞进标识符
+double accelerometer_noise_density_mps2_per_sqrt_hz;
+double accelerometerNoiseDensityMps2PerSqrtHz() const;
+
+// GOOD — 领域缩写 + 注释承载单位
+double m_acc_nd;  // m/s²/√Hz
+double accNd() const noexcept;
+```
+
 ## 坐标变换记号例外
 
 表示坐标系间刚体变换的标识符采用
