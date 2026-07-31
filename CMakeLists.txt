@@ -330,6 +330,7 @@ if(PHAD_BUILD_TESTS)
     tests/estimator/stereo_point_mapping_test.cpp
     tests/estimator/stereo_vo_estimator_test.cpp
     tests/estimator/stereo_vo_diagnostics_test.cpp
+    tests/estimator/stereo_vo_reanchor_test.cpp
   )
   target_link_libraries(phad_estimator_tests PRIVATE
     phad::estimator gtsam GTest::gtest_main
