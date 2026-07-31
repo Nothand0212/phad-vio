@@ -208,6 +208,17 @@ target_link_libraries(phad_stereo_vo_probe
   PRIVATE phad_offline_vo_session phad::eval
 )
 
+add_executable(phad_vo_bench apps/phad_vo_bench.cpp)
+target_link_libraries(phad_vo_bench
+  PRIVATE phad_offline_vo_session phad::bench phad::eval phad::io_dataset
+)
+target_compile_definitions(phad_vo_bench PRIVATE
+  PHAD_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_compile_options(phad_vo_bench PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
 add_executable(phad_euroc_gt_export apps/phad_euroc_gt_export.cpp)
 target_link_libraries(phad_euroc_gt_export PRIVATE phad::io_dataset phad::eval)
 
