@@ -40,6 +40,7 @@ target_compile_options(phad_sensor PRIVATE
 
 add_library(phad_camera
   phad/camera/camera_model.cpp
+  phad/camera/rectified_stereo_calibration.cpp
 )
 add_library(phad::camera ALIAS phad_camera)
 target_compile_features(phad_camera PUBLIC cxx_std_20)
@@ -144,6 +145,7 @@ if(PHAD_BUILD_TESTS)
   add_executable(phad_camera_tests
     tests/camera/camera_model_header_test.cpp
     tests/camera/camera_model_test.cpp
+    tests/camera/rectified_stereo_calibration_test.cpp
   )
   target_link_libraries(phad_camera_tests PRIVATE
     phad::camera GTest::gtest_main
