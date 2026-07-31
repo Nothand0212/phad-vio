@@ -1,5 +1,3 @@
-#include "phad/frontend/stereo_tracker.hpp"
-
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -10,19 +8,32 @@
 #include <utility>
 #include <vector>
 
+#include "phad/frontend/stereo_tracker.hpp"
+
 namespace phad::frontend
 {
   namespace
   {
 
+    /**
+     * @brief 描述一个跟踪。
+     *
+     * 用于描述一个跟踪，包括：
+     * - id：跟踪的特征点 ID
+     * - length：跟踪的长度
+     * - pixel：跟踪的左目像素坐标
+     * - last_disp_px：跟踪的上一帧视差
+     * - disparity_px：跟踪的视差
+     * - status：跟踪的立体匹配状态
+     */
     struct LiveTrack
     {
-      LandmarkId    id          = 0;
-      std::uint32_t length      = 0;
-      cv::Point2f   pixel       = {};
+      LandmarkId    id           = 0;
+      std::uint32_t length       = 0;
+      cv::Point2f   pixel        = {};
       float         last_disp_px = 0.0F;
       double        disparity_px = 0.0;
-      StereoStatus  status      = StereoStatus::kNoRightMatch;
+      StereoStatus  status       = StereoStatus::kNoRightMatch;
     };
 
     [[nodiscard]] bool isGrayUint8( const sensor::Image& image )
@@ -84,8 +95,8 @@ namespace phad::frontend
       std::sort( values.begin(), values.end() );
       const double position =
           fraction * static_cast<double>( values.size() - 1U );
-      const auto   lower = static_cast<std::size_t>( std::floor( position ) );
-      const auto   upper = static_cast<std::size_t>( std::ceil( position ) );
+      const auto lower = static_cast<std::size_t>( std::floor( position ) );
+      const auto upper = static_cast<std::size_t>( std::ceil( position ) );
       if ( lower == upper )
       {
         return values[ lower ];
@@ -153,17 +164,15 @@ namespace phad::frontend
         return;
       }
 
-      cv::Mat mask = cv::Mat::ones( left.size(), CV_8UC1 ) * 255;
+      cv::Mat                mask    = cv::Mat::ones( left.size(), CV_8UC1 ) * 255;
       std::vector<LiveTrack> ordered = tracks;
       std::sort( ordered.begin(), ordered.end(),
-                 []( const LiveTrack& lhs, const LiveTrack& rhs )
-                 {
+                 []( const LiveTrack& lhs, const LiveTrack& rhs ) {
                    return lhs.length > rhs.length;
                  } );
       for ( const LiveTrack& track : ordered )
       {
-        cv::circle( mask, cv::Point( cvRound( track.pixel.x ),
-                                     cvRound( track.pixel.y ) ),
+        cv::circle( mask, cv::Point( cvRound( track.pixel.x ), cvRound( track.pixel.y ) ),
                     options.mask_radius_px, cv::Scalar( 0 ), cv::FILLED );
       }
 
@@ -199,15 +208,15 @@ namespace phad::frontend
                                  track.pixel.y );
       }
 
-      const cv::Size win( options.lk_window_px, options.lk_window_px );
-      std::vector<cv::Point2f> right_pts = right_seed;
+      const cv::Size            win( options.lk_window_px, options.lk_window_px );
+      std::vector<cv::Point2f>  right_pts = right_seed;
       std::vector<std::uint8_t> forward_status;
       std::vector<float>        forward_error;
       cv::calcOpticalFlowPyrLK( left, right, left_pts, right_pts,
                                 forward_status, forward_error, win,
                                 options.lk_pyramid_levels );
 
-      std::vector<cv::Point2f> back_pts;
+      std::vector<cv::Point2f>  back_pts;
       std::vector<std::uint8_t> backward_status;
       std::vector<float>        backward_error;
       cv::calcOpticalFlowPyrLK( right, left, right_pts, back_pts,
@@ -221,7 +230,7 @@ namespace phad::frontend
 
       for ( std::size_t index = 0; index < tracks.size(); ++index )
       {
-        LiveTrack& track = tracks[ index ];
+        LiveTrack& track   = tracks[ index ];
         track.disparity_px = 0.0;
         track.status       = StereoStatus::kNoRightMatch;
 
@@ -351,16 +360,16 @@ namespace phad::frontend
         prev_pts.push_back( track.pixel );
       }
 
-      std::vector<cv::Point2f> curr_pts;
+      std::vector<cv::Point2f>  curr_pts;
       std::vector<std::uint8_t> forward_status;
       std::vector<float>        forward_error;
-      const cv::Size win( m_impl->options.lk_window_px,
-                          m_impl->options.lk_window_px );
+      const cv::Size            win( m_impl->options.lk_window_px,
+                                     m_impl->options.lk_window_px );
       cv::calcOpticalFlowPyrLK(
           m_impl->prev_left, left, prev_pts, curr_pts, forward_status,
           forward_error, win, m_impl->options.lk_pyramid_levels );
 
-      std::vector<cv::Point2f> back_pts;
+      std::vector<cv::Point2f>  back_pts;
       std::vector<std::uint8_t> backward_status;
       std::vector<float>        backward_error;
       cv::calcOpticalFlowPyrLK(
