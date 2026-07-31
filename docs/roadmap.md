@@ -164,8 +164,10 @@
 
 ## M3：让 VO 变稳
 
-M3 拆成两步：**先有可复现对照表，再谈加固**。没有 benchmark，无法判断
-后续改动是优化还是退化；因此 M3.1 阻塞 M3.2。
+M3 拆成三步：**先有可复现对照表，再修数据入口，最后谈加固**。没有
+benchmark，无法判断后续改动是优化还是退化；而 11 条 EuRoC 序列里有 3 条
+在 `open()` 阶段就打不开，多序列对照表也无从谈起。因此 M3.1 阻塞 M3.2，
+M3.2 阻塞 M3.3。
 
 ### M3.1 回归 Benchmark（已完成）
 
@@ -192,13 +194,73 @@ M3 拆成两步：**先有可复现对照表，再谈加固**。没有 benchmark
 - `completion_rate = 1.0`，`coverage_rate = 1.0`；
 - clean 树无 `--force` 拒绝覆盖（exit 3）；dirty 树覆盖并警告。
 
-v1 **只钉 MH_01**、只支持 EuRoC；多序列矩阵留给 M3.2。设计见
+v1 **只钉 MH_01**、只支持 EuRoC；多序列矩阵拆给 M3.2（先让 11 条都能打开）
+与 M3.3（序列 × 版本质量对比）。设计见
 [M3.1 VO 回归 Benchmark 设计](research/m3.1-vo-regression-benchmark-design.md)，
 实施计划见
 [M3.1 VO 回归 Benchmark](plans/2026-07-31_m3.1_vo_regression_benchmark_7c4e91a2.plan.md)。
 Issue：[#21](https://github.com/Nothand0212/phad-vio/issues/21)。
 
-### M3.2 VO 加固（依赖 M3.1）
+### M3.2 双目配对同步器（依赖 M3.1）
+
+M3.1 的全序列 bench 只有 8/11 可跑：`MH_04_difficult`、`V1_02_medium`、
+`V2_03_difficult` 在 `open()` 阶段即失败。已核实这不是本地数据损坏，而是
+官方 ASL 与 rosbag 的左右清单本身不对称，而 `joinStereo` 要求「等长 +
+下标 exact」，比任何开源实现都严。修法不是放松 loader，而是把左右配对从
+adapter 移到独立的同步器——那里同时是 M4 的 IMU 包络与未来 ROS 输入的落点，
+避免日后出现第二套配对策略。
+
+范围：
+
+- 新库 `phad::sync` 的 `StereoPairSynchronizer`（StereoOnly）：左右两队列
+  比较 front，`|tL - tR| <= tol_ns` 则配对，否则丢弃偏早一侧并计数；默认
+  `tol_ns = 0`（exact），soft 容差仅显式配置；输出用 left stamp；只提供
+  `tryPop()`，不提供回调；有界队列与 drop-oldest 溢出显式计数；
+- `phad::sensor` 新增 `CameraId` 与 `ImageFrameEvent`；`io::SensorEvent`
+  的 `StereoFrame` 换成 `ImageFrameEvent`；
+- dataset 改左右分路清单与 per-camera reader API
+  （`peekImageTimestamp` / `takeImage`），`summary` 由 `stereo` 拆成
+  `left` / `right`；`joinStereo` 与 `kStereoTimestampMismatch` 删除；
+- `DatasetReplaySource` 按时间归并单路事件（同 stamp 顺序 IMU → Left →
+  Right）；
+- `apps/StereoPairStream`（source + sync 薄组合）供 `OfflineVoSession`、
+  两个 probe、GUI runner 与真序列测试复用；`io` 与 `sync` 互不依赖。
+
+不做：`pushImu`、IMU 边界插值与 `StereoImuPacket`（M4）；ROS adapter；
+默认开启 soft 容差；frontend/estimator 算法改动。
+
+测试：
+
+- 纯内存单测：等长 exact 全配对；左首 orphan、右尾 orphan、大量右多余
+  三型（断言配对集合等于时间戳交集，无下标错配）；交错 push 顺序；
+  `tol_ns = 0` 拒绝 1 ns 差；单相机逆序/重复 → sticky error；有界队列
+  溢出计数；`flush()` 把两侧全部剩余计入丢弃；
+- adapter 回归：合成不等长序列 `open` 成功；单路非法（逆序、重复、缺
+  PNG、坏 CSV/YAML）仍硬失败；TUM VI 等长路径不变；
+- 诊断：`pushed_*`、`emitted_stereo`、`dropped_*`、`dropped_*_overflow`、
+  `max_*_queue`，结束一条 summary，首次丢弃与首次溢出各 warning 一次。
+
+出口：
+
+- `MH_01_easy` 的 `est.tum` 与 `diag.csv` 相对 M3.1 基线**逐字节相同**
+  （等长序列的配对结果不变，ATE 仍 ≈ 0.150155 m），证明未动算法；
+- 三条原失败序列 `open` 成功并产出 `summary.json`，配对与丢弃数精确匹配：
+  `MH_04` emit 2032 / drop_left 1；`V1_02` emit 1710 / drop_right 1；
+  `V2_03` emit 1921 / drop_left 1 / drop_right 415；
+- 11 条 EuRoC 序列 `open` 全过，`scripts/bench_table.py` 刷出完整的
+  序列 × 版本表（表中 VO 质量本身归 M3.3）。
+
+设计见
+[Stereo Pair Synchronizer 设计](research/stereo-pair-synchronizer-design.md)，
+根因诊断见
+[EuRoC 双目 manifest 不等长 handoff](research/euroc-stereo-manifest-asymmetry-handoff.md)，
+开源对照见
+[EuRoC stereo manifest asymmetry open source refs](research/euroc-stereo-manifest-asymmetry-open-source-refs.md)。
+实施计划见
+[M3.2 双目配对同步器](plans/2026-07-31_m3.2_stereo_pair_synchronizer_5b7d1c93.plan.md)。
+Issue：[#22](https://github.com/Nothand0212/phad-vio/issues/22)。
+
+### M3.3 VO 加固（依赖 M3.2）
 
 具体内容由 M2 暴露的失败驱动，以下为预期项而非承诺项：
 
@@ -213,8 +275,8 @@ Issue：[#21](https://github.com/Nothand0212/phad-vio/issues/21)。
 - `MH_01` 至 `MH_05` 全部跑通；
 - 每次改动用 M3.1 的 `phad_vo_bench` 产出 ATE 前后数字；无法测量的改动
   不进入本阶段；
-- ATE 相对 M2.3 / M3.1 基线单调下降，形成第一张序列 × 版本对比表
-  （扩展路径模板至 MH_02–05）。
+- ATE 相对 M2.3 / M3.1 基线单调下降，在 M3.2 已能全序列打开的基础上
+  形成第一张序列 × 版本对比表。
 
 ## M4：接入 IMU
 
@@ -223,8 +285,9 @@ Issue：[#21](https://github.com/Nothand0212/phad-vio/issues/21)。
 - IMU 输入校验与 bias 类型；
 - GTSAM preintegration 参数构造，噪声单位转换只在此处发生一次；
 - `PreintegratedCombinedMeasurements`；
-- sensor synchronizer：图像边界 IMU 线性插值、`StereoImuPacket` 构造、
-  队列长度限制与溢出显式报告；
+- 在 M3.2 的 `StereoPairSynchronizer` 上扩展 `pushImu`：图像边界 IMU 线性
+  插值与 `StereoImuPacket` 构造；队列长度限制与溢出报告沿用 M3.2，不新建
+  synchronizer；
 - 状态由 `X` 扩展为 `X/V/B`，新增 `ImuFactor` 与
   `BetweenFactor<ConstantBias>`；
 - 起始静止初始化（收集静止段 → gyro bias → 重力方向 → roll/pitch →
@@ -244,7 +307,7 @@ Issue：[#21](https://github.com/Nothand0212/phad-vio/issues/21)。
 
 出口：
 
-- `MH_01` 的 ATE 优于 M3.2 的纯 VO 结果；
+- `MH_01` 的 ATE 优于 M3.3 的纯 VO 结果；
 - 视觉短时退化时轨迹连续，不出现跳变或发散；
 - IMU bias 能从扰动初值收敛；
 - 视觉与 IMU 时间错位用例产生可检测的误差增大。
