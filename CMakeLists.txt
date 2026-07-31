@@ -14,6 +14,7 @@ find_package(OpenCV 4 REQUIRED COMPONENTS
 )
 find_package(Eigen3 3.4 REQUIRED NO_MODULE)
 find_package(yaml-cpp 0.8 REQUIRED)
+find_package(GTSAM 4.3 REQUIRED)
 
 add_library(phad_common
   phad/common/trajectory.cpp
@@ -104,7 +105,7 @@ add_library(phad::frontend ALIAS phad_frontend)
 target_compile_features(phad_frontend PUBLIC cxx_std_20)
 target_include_directories(phad_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(phad_frontend
-  PUBLIC phad::camera
+  PUBLIC phad::common phad::camera
   PRIVATE opencv_core opencv_imgproc opencv_video
 )
 target_compile_options(phad_frontend PRIVATE
@@ -126,18 +127,41 @@ target_compile_options(phad_viz PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
+add_library(phad_estimator
+  phad/estimator/stereo_vo_estimator.cpp
+)
+add_library(phad::estimator ALIAS phad_estimator)
+target_compile_features(phad_estimator PUBLIC cxx_std_20)
+target_include_directories(phad_estimator PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(phad_estimator
+  PUBLIC phad::common phad::camera
+  PRIVATE gtsam
+)
+# GTSAM headers trip -Wconversion / -Wpedantic; keep them out of our warning set.
+target_include_directories(phad_estimator SYSTEM PRIVATE
+  $<TARGET_PROPERTY:gtsam,INTERFACE_INCLUDE_DIRECTORIES>
+)
+target_compile_options(phad_estimator PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
 add_executable(phad_euroc_inspect apps/phad_euroc_inspect.cpp)
 target_link_libraries(phad_euroc_inspect PRIVATE phad::io_dataset)
 
 add_executable(phad_euroc_runner apps/phad_euroc_runner.cpp)
 target_link_libraries(phad_euroc_runner
-  PRIVATE phad::io_dataset phad::frontend phad::viz
+  PRIVATE phad::io_dataset phad::frontend phad::estimator phad::viz
           opencv_core opencv_imgproc
 )
 
 add_executable(phad_stereo_frontend_probe apps/phad_stereo_frontend_probe.cpp)
 target_link_libraries(phad_stereo_frontend_probe
   PRIVATE phad::io_dataset phad::frontend
+)
+
+add_executable(phad_stereo_vo_probe apps/phad_stereo_vo_probe.cpp)
+target_link_libraries(phad_stereo_vo_probe
+  PRIVATE phad::io_dataset phad::frontend phad::estimator phad::eval
 )
 
 add_executable(phad_euroc_gt_export apps/phad_euroc_gt_export.cpp)
@@ -210,6 +234,24 @@ if(PHAD_BUILD_TESTS)
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
   )
   gtest_discover_tests(phad_frontend_tests PROPERTIES LABELS "unit")
+
+  add_executable(phad_estimator_tests
+    tests/estimator/gtsam_smoke_test.cpp
+    tests/estimator/types_test.cpp
+    tests/estimator/stereo_point_mapping_test.cpp
+    tests/estimator/stereo_vo_estimator_test.cpp
+    tests/estimator/stereo_vo_diagnostics_test.cpp
+  )
+  target_link_libraries(phad_estimator_tests PRIVATE
+    phad::estimator gtsam GTest::gtest_main
+  )
+  target_include_directories(phad_estimator_tests SYSTEM PRIVATE
+    $<TARGET_PROPERTY:gtsam,INTERFACE_INCLUDE_DIRECTORIES>
+  )
+  target_compile_options(phad_estimator_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+  gtest_discover_tests(phad_estimator_tests PROPERTIES LABELS "unit")
 
   add_executable(phad_viz_tests
     tests/viz/trajectory_panel_test.cpp

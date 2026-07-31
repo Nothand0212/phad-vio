@@ -15,8 +15,10 @@
 #include <variant>
 #include <vector>
 
+#include "apps/stereo_vo_glue.hpp"
 #include "phad/camera/stereo_rectifier.hpp"
 #include "phad/common/trajectory.hpp"
+#include "phad/estimator/stereo_vo_estimator.hpp"
 #include "phad/frontend/stereo_tracker.hpp"
 #include "phad/io/dataset/dataset_replay_source.hpp"
 #include "phad/io/dataset/euroc/euroc_dataset.hpp"
@@ -36,6 +38,8 @@ namespace
   const cv::Scalar kInvalidColor{ 0, 165, 255 };  // BGR orange
   const cv::Scalar kMatchLineColor{ 255, 200, 0 };
   const cv::Scalar kTextColor{ 0, 255, 0 };
+  const cv::Scalar kEstimatePathColor{ 0, 220, 255 };  // BGR cyan
+  const cv::Scalar kEstimateMarkerColor{ 0, 255, 255 };
 
   [[nodiscard]] cv::Mat copyGrayImage( const phad::sensor::Image& image )
   {
@@ -63,8 +67,8 @@ namespace
   }
 
   [[nodiscard]] cv::Mat renderTracks(
-      const phad::sensor::StereoFrame&      frame,
-      const phad::frontend::FrameTracks&    tracks )
+      const phad::sensor::StereoFrame&   frame,
+      const phad::frontend::FrameTracks& tracks )
   {
     if ( frame.left.width() != frame.right.width() ||
          frame.left.height() != frame.right.height() )
@@ -85,7 +89,7 @@ namespace
     {
       const cv::Point left_pt{ cvRound( observation.left_pixel.x() ),
                                cvRound( observation.left_pixel.y() ) };
-      const bool valid =
+      const bool      valid =
           observation.status == phad::frontend::StereoStatus::kValid;
       const cv::Scalar& color = valid ? kValidColor : kInvalidColor;
       cv::circle( canvas, left_pt, kPointRadius, color, -1, cv::LINE_AA );
@@ -102,7 +106,7 @@ namespace
       }
     }
 
-    const auto& stats = tracks.stats;
+    const auto&       stats = tracks.stats;
     const std::string line1 =
         "tracks=" + std::to_string( tracks.observations.size() ) +
         " tracked=" + std::to_string( stats.tracked ) +
@@ -203,7 +207,9 @@ namespace
       std::cerr << "stereo rectifier: " << rectifier.error().detail << '\n';
       return 1;
     }
-    phad::frontend::StereoTracker tracker( rectifier.value().calibration() );
+    const auto&                        rectified_cal = rectifier.value().calibration();
+    phad::frontend::StereoTracker      tracker( rectified_cal );
+    phad::estimator::StereoVoEstimator estimator( rectified_cal );
 
     phad::io::dataset::DatasetReplaySource replay_source{ opened.value() };
     phad::io::SensorSource&                source = replay_source;
@@ -211,6 +217,7 @@ namespace
     const std::optional<phad::common::Trajectory> groundtruth =
         loadGroundtruth( sequence_root );
     std::optional<phad::viz::TrajectoryPanel> panel;
+    std::vector<cv::Point>                    estimate_path_px;
 
     phad::viz::ImageWindow window{ kWindowName };
     PlaybackClock          playback_clock;
@@ -244,6 +251,8 @@ namespace
       }
       const phad::frontend::FrameTracks tracks =
           tracker.process( rectified.value() );
+      const phad::estimator::VioUpdateResult vo =
+          estimator.update( phad::apps::toKeyframeMeasurement( tracks ) );
 
       cv::Mat canvas = renderTracks( rectified.value(), tracks );
       if ( groundtruth.has_value() )
@@ -255,8 +264,26 @@ namespace
                              .width_px  = canvas.rows,
                              .height_px = canvas.rows } );
         }
+        cv::Mat panel_image = panel->render( frame->timestamp );
+        if ( vo.status == phad::estimator::UpdateStatus::kOk &&
+             vo.estimate.has_value() )
+        {
+          estimate_path_px.push_back(
+              panel->project( vo.estimate->T_W_B.translation() ) );
+        }
+        for ( std::size_t index = 1; index < estimate_path_px.size(); ++index )
+        {
+          cv::line( panel_image, estimate_path_px[ index - 1 ],
+                    estimate_path_px[ index ], kEstimatePathColor, 1,
+                    cv::LINE_AA );
+        }
+        if ( !estimate_path_px.empty() )
+        {
+          cv::circle( panel_image, estimate_path_px.back(), 4,
+                      kEstimateMarkerColor, -1, cv::LINE_AA );
+        }
         cv::Mat composed;
-        cv::hconcat( canvas, panel->render( frame->timestamp ), composed );
+        cv::hconcat( canvas, panel_image, composed );
         canvas = composed;
       }
 

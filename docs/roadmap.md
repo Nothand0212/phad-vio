@@ -128,33 +128,36 @@
 实施计划见
 [M2.2 双目前端](plans/2026-07-31_m2.2_stereo_frontend_38ddaa97.plan.md)。
 
-### M2.3 VO 后端
+### M2.3 VO 后端（已完成）
 
 范围：
 
 - GTSAM `Cal3_S2Stereo` 与 `GenericStereoFactor`；
-- `triangulatePoint3` 建立 landmark 初值；
+- `StereoCamera::backproject` 建立 landmark 初值（单帧立体等价路径）；
 - 显式 landmark 的固定窗口 batch BA，`LevenbergMarquardtOptimizer`；
 - 窗口滑出的状态与 landmark 直接丢弃，不做边缘化；
-- 单一明确的 gauge-fixing prior。
+- 单一明确的 gauge-fixing prior（最老帧 `PriorFactor<Pose3>`）。
 
 测试：
 
 - 合成轨迹与 landmark：扰动初值后恢复 pose 与 landmark；
 - 优化后重投影 error 下降；
 - behind-camera landmark 显式报告 cheirality；
-- 错误外参用例失败，且诊断能定位到外参合同；
+- 错误外参用例产生显著位姿误差（仍为 `kOk`，不升格 `kFailed`）；
 - 按 landmark id 可汇总完整 feature track。
 
-出口：
+出口（已满足）：
 
-- `MH_01_easy` 跑完不崩，产出完整轨迹文件；
-- ATE 有限且量级合理（米级即算通过），轨迹形状目视正确；
-- **不要求精度**；该数字连同拒帧比例与重投影误差分布一起作为后续所有里程碑
-  的基线。
+- `MH_01_easy` 跑完不崩，`phad_stereo_vo_probe` 写出完整 TUM（3682 / 3682
+  `kOk`）；
+- ATE translation RMSE **0.150 m**（`< 5 m` 米级门控）；RPE(1 s) translation
+  RMSE 0.022 m；
+- 拒帧比例 **0**；`low_connectivity` 帧数 **0**；重投影 RMS after 中位数
+  **0.387 px**、p95 **1.091 px**；
+- 轨迹形状需在 `phad_euroc_runner` 上人工确认（agent 不擅自弹窗）。
 
-设计见 [M2.3 VO 后端设计](research/m2.3-vo-backend-design.md)，
-开源对照见
+该组数字为后续里程碑的对比基线。设计见
+[M2.3 VO 后端设计](research/m2.3-vo-backend-design.md)，开源对照见
 [M2.3 VO backend open source references](research/m2.3-vo-backend-open-source-refs.md)。
 实施计划见
 [M2.3 VO 后端](plans/2026-07-31_m2.3_vo_backend_dcdbfc71.plan.md)。
