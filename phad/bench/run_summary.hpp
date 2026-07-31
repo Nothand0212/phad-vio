@@ -43,6 +43,7 @@ namespace phad::bench
     std::uint64_t failed          = 0;
     double        completion_rate = 0.0;
     double        coverage_rate   = 0.0;
+    std::uint64_t segments        = 0;
   };
 
   struct SyncSummary
@@ -64,6 +65,7 @@ namespace phad::bench
     std::uint64_t failed           = 0;
     std::uint64_t low_connectivity = 0;
     std::uint64_t cheirality       = 0;
+    std::uint64_t reanchors        = 0;
   };
 
   struct StageTiming

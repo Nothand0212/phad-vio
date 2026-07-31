@@ -295,6 +295,9 @@ namespace
               estimator.prior_translation_sigma_m );
     snap.set( "estimator.use_constant_velocity_init",
               estimator.use_constant_velocity_init );
+    snap.set( "estimator.min_seed_observations",
+              static_cast<std::int64_t>( estimator.min_seed_observations ) );
+    snap.set( "estimator.enable_reanchor", estimator.enable_reanchor );
 
     snap.set( "session.dataset_format", std::string( "euroc" ) );
     if ( session.max_frames.has_value() )
@@ -502,9 +505,11 @@ namespace
             : static_cast<double>( session.counts.ok ) /
                   static_cast<double>( session.counts.image_frames );
     summary.trajectory.coverage_rate    = coverageRate( session );
+    summary.trajectory.segments         = session.counts.segments;
     summary.robustness.rejected         = session.counts.rejected;
     summary.robustness.failed           = session.counts.failed;
     summary.robustness.low_connectivity = session.counts.low_connectivity;
+    summary.robustness.reanchors        = session.counts.reanchors;
     for ( const auto& row : session.diag )
     {
       summary.robustness.cheirality += row.num_cheirality;
