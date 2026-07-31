@@ -201,11 +201,11 @@ v1 **只钉 MH_01**、只支持 EuRoC；多序列矩阵拆给 M3.2（先让 11 �
 [M3.1 VO 回归 Benchmark](plans/2026-07-31_m3.1_vo_regression_benchmark_7c4e91a2.plan.md)。
 Issue：[#21](https://github.com/Nothand0212/phad-vio/issues/21)。
 
-### M3.2 双目配对同步器（依赖 M3.1）
+### M3.2 双目配对同步器（已完成）
 
 M3.1 的全序列 bench 只有 8/11 可跑：`MH_04_difficult`、`V1_02_medium`、
 `V2_03_difficult` 在 `open()` 阶段即失败。已核实这不是本地数据损坏，而是
-官方 ASL 与 rosbag 的左右清单本身不对称，而 `joinStereo` 要求「等长 +
+官方 ASL 与 rosbag 的左右清单本身不对称，而旧 `joinStereo` 要求「等长 +
 下标 exact」，比任何开源实现都严。修法不是放松 loader，而是把左右配对从
 adapter 移到独立的同步器——那里同时是 M4 的 IMU 包络与未来 ROS 输入的落点，
 避免日后出现第二套配对策略。
@@ -240,15 +240,16 @@ adapter 移到独立的同步器——那里同时是 M4 的 IMU 包络与未来
 - 诊断：`pushed_*`、`emitted_stereo`、`dropped_*`、`dropped_*_overflow`、
   `max_*_queue`，结束一条 summary，首次丢弃与首次溢出各 warning 一次。
 
-出口：
+出口（commit `4780660` 复跑）：
 
-- `MH_01_easy` 的 `est.tum` 与 `diag.csv` 相对 M3.1 基线**逐字节相同**
-  （等长序列的配对结果不变，ATE 仍 ≈ 0.150155 m），证明未动算法；
-- 三条原失败序列 `open` 成功并产出 `summary.json`，配对与丢弃数精确匹配：
+- `MH_01_easy` 的 `est.tum` 与 `diag.csv` 相对 M3.1 基线
+  （`2b28616/default_0885385a`）**逐字节相同**，ATE 仍 ≈ 0.150155 m；
+- 三条原失败序列 `open` 成功并产出 `summary.json`，`summary.sync` 精确匹配：
   `MH_04` emit 2032 / drop_left 1；`V1_02` emit 1710 / drop_right 1；
   `V2_03` emit 1921 / drop_left 1 / drop_right 415；
-- 11 条 EuRoC 序列 `open` 全过，`scripts/bench_table.py` 刷出完整的
-  序列 × 版本表（表中 VO 质量本身归 M3.3）。
+- 11 条 EuRoC 序列全部产出 `summary.json`（`scripts/bench_table.py` 可刷
+  序列 × 版本表）；表中 VO 质量差（如 `V2_03` completion ≈ 0.03、
+  `MH_02` / `V1_03` / `V2_02` 低 completion）归 M3.3。
 
 设计见
 [Stereo Pair Synchronizer 设计](research/stereo-pair-synchronizer-design.md)，
