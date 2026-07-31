@@ -34,7 +34,7 @@ namespace phad::estimator
     int    min_landmark_observations  = 2;
     int    min_shared_landmarks       = 10;
     double stereo_sigma_px            = 1.0;
-    double huber_k_px                 = 3.0;
+    double huber_k_px                 = 3.0;  // <= 0 disables Robust wrapper
     double prior_rotation_sigma_rad   = 1e-4;
     double prior_translation_sigma_m  = 1e-4;
     bool   use_constant_velocity_init = true;
@@ -60,6 +60,8 @@ namespace phad::estimator
     std::uint32_t num_shared              = 0;  // new frame ∩ window landmark table
     std::uint32_t num_cheirality          = 0;
     std::uint32_t lm_iterations           = 0;
+    std::uint32_t window_size             = 0;
+    std::uint64_t prior_key               = 0;  // Symbol('x', k) index k
     double        reproj_rms_before_px    = 0.0;
     double        reproj_rms_after_px     = 0.0;
     double        max_window_pose_shift_m = 0.0;

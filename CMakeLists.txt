@@ -128,7 +128,7 @@ target_compile_options(phad_viz PRIVATE
 )
 
 add_library(phad_estimator
-  phad/estimator/gtsam_link_stub.cpp
+  phad/estimator/stereo_vo_estimator.cpp
 )
 add_library(phad::estimator ALIAS phad_estimator)
 target_compile_features(phad_estimator PUBLIC cxx_std_20)
@@ -233,6 +233,8 @@ if(PHAD_BUILD_TESTS)
   add_executable(phad_estimator_tests
     tests/estimator/gtsam_smoke_test.cpp
     tests/estimator/types_test.cpp
+    tests/estimator/stereo_point_mapping_test.cpp
+    tests/estimator/stereo_vo_estimator_test.cpp
   )
   target_link_libraries(phad_estimator_tests PRIVATE
     phad::estimator gtsam GTest::gtest_main
