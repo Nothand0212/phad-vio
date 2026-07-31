@@ -16,7 +16,8 @@ include 标 SYSTEM）。
 |---|---|
 | 固定窗口 pose / landmark / 窗口内观测 | 关键帧决策、feature track 生命周期 |
 | `GenericStereoFactor` + LM、最老帧 Prior gauge | 边缘化、smart factor、IMU |
-| 共视 / cheirality / 重投影诊断 | ATE（`phad::eval`） |
+| 重叠断裂时 re-anchor（`enable_reanchor`） | 分段 TUM / Atlas 式多轨迹 |
+| 共视 / cheirality / 重投影 / `segment_id` 诊断 | ATE（`phad::eval`） |
 | `body_P_sensor = T_B_left_rectified` | 未校正左目外参 |
 
 ## 文件布局
@@ -45,6 +46,39 @@ apps/stereo_vo_glue.hpp  ── filter kValid ──► KeyframeMeasurement
                           TUM + diag CSV                  估计轨迹叠加
 ```
 
+## 段生命周期（M3.3）
+
+`update()` 在已初始化且 `num_shared == 0`（新帧 landmark id 与窗口内
+`landmarks_W` 无交集）时视为**重叠断裂**，不再永久拒帧：
+
+| 条件 | 结果 |
+|---|---|
+| `enable_reanchor == false` | `kRejected`（M3.2 旧行为，A/B 对照用） |
+| `num_obs < min_seed_observations` | `kRejected`，**不污染**窗口 / landmark / `segment_id` |
+| 否则 | `seedSegment(anchor)`，`segment_id` 递增，继续 `kOk` |
+
+`seedSegment` 初始化与 re-anchor **共用**：清空 `window` 与 `landmarks_W`，
+只保留本帧；`track_times` 与 `next_frame_index` 继续累积（保证
+`prior_key` 在图里唯一）。首段 anchor 为 `Identity()`；re-anchor 的 anchor
+为 `poseInitialValue()`（`use_constant_velocity_init` 开则恒速外推，关则
+沿用上一位姿）。
+
+**re-anchor 帧的位姿是预测值**（等于 anchor），不是测量值：新段窗口只有一帧，
+prior 与由该帧 backproject 得到的 landmark 初值自洽，优化不会移动它。
+该帧仍记 `kOk`；段边界靠 `segment_id` 跳变表达，`UpdateStatus` 不加新枚举。
+
+`min_seed_observations`（默认 10）首段初始化与 re-anchor **共用**，避免
+「1 个观测建窗口」或「输出等于 anchor 的假位姿」刷高 completion。
+
+## `segment_id` 语义
+
+- `UpdateDiagnostics.segment_id`：当前帧所属段；首段为 `0`，每次成功
+  re-anchor 后递增。
+- 正常帧：`segment_id` 不变。
+- re-anchor 成功帧：`segment_id` 比上一接受帧大 1。
+- `kRejected` / `kFailed`：诊断里的 `segment_id` 反映**回滚后**的状态
+  （seed 门限拒帧时不递增）。
+
 ## 诊断 CSV 合同（probe）
 
 ```bash
@@ -56,11 +90,13 @@ phad_stereo_vo_probe <sequence-root> --tum <path> [--diag-csv <path>]
 ```text
 timestamp_ns,status,num_obs,num_landmarks,num_shared,low_connectivity,
 window_size,prior_key,reproj_rms_before_px,reproj_rms_after_px,
-num_cheirality,lm_iterations,max_window_pose_shift_m
+num_cheirality,lm_iterations,max_window_pose_shift_m,segment_id
 ```
 
+共 **14 列**（M3.3 在 M2.3 的 13 列尾部追加 `segment_id`，有意的契约变更）。
 `status` 为 `ok` / `rejected` / `failed`。stdout summary 含帧数、各状态计数、
-拒帧比例、`low_connectivity` 帧数、重投影 RMS 中位数与 p95。
+拒帧比例、`low_connectivity` 帧数、重投影 RMS 中位数与 p95；session 还会在
+`warnings` 里汇总 `segments` / `reanchors` / `seed_rejected`（见 `apps/AGENTS.md`）。
 
 ## 相关入口
 

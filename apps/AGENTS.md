@@ -10,3 +10,13 @@
 - `FrameTracks` → `KeyframeMeasurement` 经 `stereo_vo_glue.hpp` 组装
 - `phad_stereo_vo_probe` 与 `phad_vo_bench` 共用 session，保证 diag 列合同一致
 - 行为保持型重构：先在当前 commit 产出仓库外参考产物，再改代码并以逐字节 diff 验收
+
+## `diag.csv` 合同（M3.3）
+
+M3.3 **有意**将 `diag.csv` 从 **13 列扩到 14 列**：在既有列尾追加
+`segment_id`（与 `UpdateDiagnostics.segment_id` 一致）。这不是格式漂移——
+bench / probe 共用 `writeDiagCsv()`，旧 13 列参考产物不再适用于 M3.3 及之后。
+
+健康序列（如 MH_01）仍应 `segment_id` 全程为 0；断裂序列上段边界表现为
+该列跳变。`summary.json` 侧对应 `robustness.reanchors` 与
+`trajectory.segments`（见 `phad/bench/README.md`）。
