@@ -1,7 +1,7 @@
-# 离线绘图脚本
+# 离线脚本
 
-消费 C++ 侧导出的轨迹与误差文件，产出静态图。脚本不参与 CMake 构建，也不进
-CI；依赖装在本地 venv 里。
+消费 C++ 侧导出的轨迹、误差与 bench `summary.json`。脚本不参与 CMake 构建，
+也不进 CI；绘图依赖装在本地 venv 里，`bench_table.py` 只依赖标准库。
 
 ## 环境
 
@@ -55,3 +55,18 @@ phad_stereo_frontend_probe /path/to/MH_01_easy \
 ```
 
 列合同见 `phad/frontend/README.md`。
+
+## `bench_table.py`
+
+递归扫描 `phad_vo_bench` 的 `bench_root`，把各 run 的 `summary.json` 拼成
+对比表。默认 Markdown；`--csv` 输出 CSV。无第三方依赖，可在系统 python3
+或 venv 下直接跑。
+
+```bash
+export PHAD_BENCH_ROOT=/home/lin/Projects/data/phad-bench
+python3 scripts/bench_table.py "$PHAD_BENCH_ROOT"
+python3 scripts/bench_table.py "$PHAD_BENCH_ROOT" --csv > /tmp/bench.csv
+```
+
+主列：sequence、commit、dirty、config（`label_hash8`）、status、
+ATE/RPE trans RMSE、completion_rate、coverage_rate、rtf、wall_s。

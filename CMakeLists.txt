@@ -15,6 +15,7 @@ find_package(OpenCV 4 REQUIRED COMPONENTS
 find_package(Eigen3 3.4 REQUIRED NO_MODULE)
 find_package(yaml-cpp 0.8 REQUIRED)
 find_package(GTSAM 4.3 REQUIRED)
+find_package(nlohmann_json 3.11 REQUIRED)
 
 add_library(phad_common
   phad/common/trajectory.cpp
@@ -145,6 +146,49 @@ target_compile_options(phad_estimator PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
+add_library(phad_bench
+  phad/bench/code_identity.cpp
+  phad/bench/config_snapshot.cpp
+  phad/bench/run_paths.cpp
+  phad/bench/run_summary.cpp
+)
+add_library(phad::bench ALIAS phad_bench)
+target_compile_features(phad_bench PUBLIC cxx_std_20)
+target_include_directories(phad_bench PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(phad_bench PRIVATE nlohmann_json::nlohmann_json)
+target_compile_definitions(phad_bench PRIVATE
+  PHAD_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_compile_options(phad_bench PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
+# phad::bench must stay free of phad::eval (and other phad::* libs).
+get_target_property( _phad_bench_link_libs phad_bench LINK_LIBRARIES )
+if( _phad_bench_link_libs MATCHES "phad_eval|phad::eval" )
+  message( FATAL_ERROR "phad_bench must not link phad_eval" )
+endif()
+unset( _phad_bench_link_libs )
+
+add_library(phad_offline_vo_session STATIC apps/offline_vo_session.cpp)
+target_compile_features(phad_offline_vo_session PUBLIC cxx_std_20)
+target_include_directories(phad_offline_vo_session PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_link_libraries(phad_offline_vo_session
+  PUBLIC phad::io_dataset phad::camera phad::frontend phad::estimator
+)
+target_compile_options(phad_offline_vo_session PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
+get_target_property( _phad_session_link_libs phad_offline_vo_session
+  LINK_LIBRARIES )
+if( _phad_session_link_libs MATCHES "phad_eval|phad::eval" )
+  message( FATAL_ERROR "phad_offline_vo_session must not link phad_eval" )
+endif()
+unset( _phad_session_link_libs )
+
 add_executable(phad_euroc_inspect apps/phad_euroc_inspect.cpp)
 target_link_libraries(phad_euroc_inspect PRIVATE phad::io_dataset)
 
@@ -161,7 +205,18 @@ target_link_libraries(phad_stereo_frontend_probe
 
 add_executable(phad_stereo_vo_probe apps/phad_stereo_vo_probe.cpp)
 target_link_libraries(phad_stereo_vo_probe
-  PRIVATE phad::io_dataset phad::frontend phad::estimator phad::eval
+  PRIVATE phad_offline_vo_session phad::eval
+)
+
+add_executable(phad_vo_bench apps/phad_vo_bench.cpp)
+target_link_libraries(phad_vo_bench
+  PRIVATE phad_offline_vo_session phad::bench phad::eval phad::io_dataset
+)
+target_compile_definitions(phad_vo_bench PRIVATE
+  PHAD_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_compile_options(phad_vo_bench PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
 add_executable(phad_euroc_gt_export apps/phad_euroc_gt_export.cpp)
@@ -264,6 +319,31 @@ if(PHAD_BUILD_TESTS)
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
   )
   gtest_discover_tests(phad_viz_tests PROPERTIES LABELS "unit")
+
+  add_executable(phad_bench_tests
+    tests/bench/code_identity_test.cpp
+    tests/bench/config_snapshot_test.cpp
+    tests/bench/run_paths_test.cpp
+    tests/bench/run_summary_test.cpp
+  )
+  target_link_libraries(phad_bench_tests PRIVATE
+    phad::bench GTest::gtest_main nlohmann_json::nlohmann_json
+  )
+  target_compile_options(phad_bench_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+  gtest_discover_tests(phad_bench_tests PROPERTIES LABELS "unit")
+
+  add_executable(phad_apps_tests
+    tests/apps/offline_vo_session_test.cpp
+  )
+  target_link_libraries(phad_apps_tests PRIVATE
+    phad_offline_vo_session GTest::gtest_main
+  )
+  target_compile_options(phad_apps_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+  gtest_discover_tests(phad_apps_tests PROPERTIES LABELS "unit")
 
   add_executable(phad_io_dataset_tests
     tests/common/timestamp_test.cpp
