@@ -269,6 +269,38 @@ namespace phad::estimator
       return Eigen::Vector3d( point_W.x(), point_W.y(), point_W.z() );
     }
 
+    // 返回 false 表示 backproject 失败（调用方回滚并 kRejected）
+    bool seedSegment( const Eigen::Isometry3d&   anchor_T_W_B,
+                      const KeyframeMeasurement& measurement )
+    {
+      WindowFrame candidate;
+      candidate.frame_index  = next_frame_index;
+      candidate.timestamp    = measurement.timestamp;
+      candidate.observations = measurement.observations;
+      candidate.T_W_B        = anchor_T_W_B;
+
+      for ( const StereoObservation& observation : measurement.observations )
+      {
+        const Eigen::Vector3d point_W =
+            backprojectWorld( candidate.T_W_B, observation );
+        const gtsam::Pose3 T_W_left =
+            toPose3( candidate.T_W_B ) * body_P_sensor;
+        const gtsam::Point3 point_left = T_W_left.transformTo( gtsam::Point3(
+            point_W.x(), point_W.y(), point_W.z() ) );
+        if ( !isFinite( point_W ) || point_left.z() <= 0.0 )
+        {
+          return false;
+        }
+        landmarks_W[ observation.id ] = point_W;
+        track_times[ observation.id ].push_back( measurement.timestamp );
+      }
+
+      window.clear();
+      window.push_back( std::move( candidate ) );
+      ++next_frame_index;
+      return true;
+    }
+
     [[nodiscard]] Eigen::Isometry3d poseInitialValue() const
     {
       if ( !last_accepted_T_W_B.has_value() )
@@ -548,36 +580,24 @@ namespace phad::estimator
       m_impl->initialized         = initialized_backup;
     };
 
-    WindowFrame candidate;
-    candidate.frame_index  = m_impl->next_frame_index;
-    candidate.timestamp    = measurement.timestamp;
-    candidate.observations = measurement.observations;
-
     if ( !m_impl->initialized )
     {
-      candidate.T_W_B = Eigen::Isometry3d::Identity();
-      for ( const StereoObservation& observation : measurement.observations )
+      if ( !m_impl->seedSegment( Eigen::Isometry3d::Identity(),
+                                 measurement ) )
       {
-        const Eigen::Vector3d point_W =
-            m_impl->backprojectWorld( candidate.T_W_B, observation );
-        const gtsam::Pose3 T_W_left =
-            toPose3( candidate.T_W_B ) * m_impl->body_P_sensor;
-        const gtsam::Point3 point_left = T_W_left.transformTo( gtsam::Point3(
-            point_W.x(), point_W.y(), point_W.z() ) );
-        if ( !isFinite( point_W ) || point_left.z() <= 0.0 )
-        {
-          restore();
-          result.status  = UpdateStatus::kRejected;
-          result.message = "failed to backproject landmark on first frame";
-          return result;
-        }
-        m_impl->landmarks_W[ observation.id ] = point_W;
-        m_impl->track_times[ observation.id ].push_back(
-            measurement.timestamp );
+        restore();
+        result.status  = UpdateStatus::kRejected;
+        result.message = "failed to backproject landmark on first frame";
+        return result;
       }
     }
     else
     {
+      WindowFrame candidate;
+      candidate.frame_index  = m_impl->next_frame_index;
+      candidate.timestamp    = measurement.timestamp;
+      candidate.observations = measurement.observations;
+
       candidate.T_W_B = m_impl->poseInitialValue();
       if ( !isFinite( candidate.T_W_B ) )
       {
@@ -608,10 +628,11 @@ namespace phad::estimator
         }
         m_impl->landmarks_W[ observation.id ] = point_W;
       }
+
+      m_impl->window.push_back( std::move( candidate ) );
+      ++m_impl->next_frame_index;
     }
 
-    m_impl->window.push_back( std::move( candidate ) );
-    ++m_impl->next_frame_index;
     while ( static_cast<int>( m_impl->window.size() ) >
             m_impl->options.window_size )
     {
