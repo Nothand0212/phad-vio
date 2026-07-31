@@ -164,7 +164,45 @@
 
 ## M3：让 VO 变稳
 
-本里程碑的具体内容由 M2 暴露的失败驱动，以下为预期项而非承诺项：
+M3 拆成两步：**先有可复现对照表，再谈加固**。没有 benchmark，无法判断
+后续改动是优化还是退化；因此 M3.1 阻塞 M3.2。
+
+### M3.1 回归 Benchmark（进行中）
+
+范围：
+
+- 新增纯逻辑库 `phad::bench`（run 身份、config 快照与 hash、路径模板、
+  summary schema），零 `phad::*` 依赖；
+- 抽出 `apps/offline_vo_session`（只跑 pipeline，不算 ATE/RPE、不落盘，
+  返回轨迹与时间跨度）；
+- `phad_stereo_vo_probe` 与新建 `phad_vo_bench` 共用 session；
+- `phad_vo_bench` 作为 composition root：session + `phad::eval` + 落盘；
+- run 身份：`code`（运行时 git commit / dirty，dirty 只看 tracked）+ 完整
+  `config` 快照 + `config_hash`（FNV-1a 64 前 8 hex）；
+- 路径模板：
+  `<bench_root>/<sequence>/<commit_short>[_dirty]/<config_label>_<hash8>/`；
+- `summary.json` 主表字段：ATE trans RMSE、RPE(1 s) trans RMSE、
+  completion_rate、coverage_rate、wall-clock / RTF；附带拒帧与阶段 timing；
+- `scripts/bench_table.py` 把多个 `summary.json` 拼成对比表。
+
+测试与出口：
+
+- `phad::bench` 与 session 都不依赖 `phad::eval`；
+- probe 迁移前后 `est.tum` 与 `diag.csv` 逐字节相同；
+- `MH_01_easy` 上 `phad_vo_bench` 写出完整产物；ATE 与 M2.3 基线一致
+  （translation RMSE ≈ 0.150 m）；
+- clean 树同路径无 `--force` 时拒绝覆盖（dirty 树覆盖并警告）；身份字段、
+  `config_hash` 稳定性与路径模板可单测。
+
+v1 **只钉 MH_01**、只支持 EuRoC；多序列矩阵留给 M3.2。设计见
+[M3.1 VO 回归 Benchmark 设计](research/m3.1-vo-regression-benchmark-design.md)，
+实施计划见
+[M3.1 VO 回归 Benchmark](plans/2026-07-31_m3.1_vo_regression_benchmark_7c4e91a2.plan.md)。
+Issue：[#21](https://github.com/Nothand0212/phad-vio/issues/21)。
+
+### M3.2 VO 加固（依赖 M3.1）
+
+具体内容由 M2 暴露的失败驱动，以下为预期项而非承诺项：
 
 - `findEssentialMat` + RANSAC 几何验证；
 - `solvePnPRansac` 提供位姿初值；
@@ -175,8 +213,10 @@
 出口：
 
 - `MH_01` 至 `MH_05` 全部跑通；
-- ATE 相对 M2.3 基线单调下降，形成第一张序列 × 版本的对比表；
-- 每次改动都有对应的 ATE 前后数字，无法测量的改动不进入本里程碑。
+- 每次改动用 M3.1 的 `phad_vo_bench` 产出 ATE 前后数字；无法测量的改动
+  不进入本阶段；
+- ATE 相对 M2.3 / M3.1 基线单调下降，形成第一张序列 × 版本对比表
+  （扩展路径模板至 MH_02–05）。
 
 ## M4：接入 IMU
 
@@ -206,7 +246,7 @@
 
 出口：
 
-- `MH_01` 的 ATE 优于 M3 的纯 VO 结果；
+- `MH_01` 的 ATE 优于 M3.2 的纯 VO 结果；
 - 视觉短时退化时轨迹连续，不出现跳变或发散；
 - IMU bias 能从扰动初值收敛；
 - 视觉与 IMU 时间错位用例产生可检测的误差增大。
