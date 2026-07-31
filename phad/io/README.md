@@ -17,8 +17,8 @@ ROS 等来源转成与格式无关的 `phad::sensor` 测量与标定。数据集
 | 做 | 不做 |
 |---|---|
 | 解析 EuRoC / TUM VI 目录与标定，产出 `StereoImuDataset` | ATE / RPE / TUM 轨迹评估（归 `phad::eval`） |
-| 加载 EuRoC 真值为 `common::Trajectory`（`T_W_B`） | IMU 分段、边界插值、`StereoImuPacket`（归 synchronizer） |
-| `SensorSource` / `DatasetReplaySource` 按时间拉事件 | 特征跟踪、估计、可视化 |
+| 加载 EuRoC 真值为 `common::Trajectory`（`T_W_B`） | 左右配对、IMU 分段、边界插值、`StereoImuPacket`（归 `phad::sync`） |
+| `SensorSource` / `DatasetReplaySource` 按时间拉**单路**事件 | 特征跟踪、估计、可视化 |
 | 单位、轴、外参方向规范化到 `docs/conventions.md` | 猜测序列格式；调用方显式选 `euroc::open` 或 `tum_vi::open` |
 
 测量与标定类型本身在 `phad::sensor`；本目录只负责「从磁盘/设备读出并适配」。
@@ -47,14 +47,18 @@ phad/io/
 sequence_root
       │
       ├─ euroc::open / tum_vi::open ──► StereoImuDataset  (immutable handle)
-      │                                      │
+      │                                      │  summary: imu / left / right
       │                         reader() ──► StereoImuDatasetReader
-      │                                      │  takeImu / peekStereoTimestamp / takeStereo
+      │                                      │  takeImu
+      │                                      │  peekImageTimestamp(CameraId)
+      │                                      │  takeImage(CameraId)
       │                                      ▼
       │                         DatasetReplaySource ──► SensorSource::next()
-      │                                      │
+      │                                      │  同 stamp：IMU → Left → Right
       │                                      ▼
-      │                              SensorEvent (IMU | StereoFrame)
+      │                              SensorEvent (IMU | ImageFrameEvent)
+      │                                      │
+      │                    apps::StereoPairStream + phad::sync ──► StereoFrame
       │
       └─ euroc::openGroundtruth ──► common::Trajectory   (评估侧消费)
 ```
@@ -83,25 +87,33 @@ auto gt = phad::io::dataset::euroc::openGroundtruth(sequence_root);
 
 ### `StereoImuDataset`
 
-- 打开时完整校验 metadata、路径与标定；校验后的实现放在共享只读 impl。
-- 对外按值提供 `calibration()` 与 `summary()`；每次 `reader()` 得到独立的
-  move-only、single-pass reader。
-- `peekStereoTimestamp()` 不触发图像 I/O；`takeStereo()` 才惰性解码。
+- 打开时完整校验**单路** metadata、路径与标定（严格递增、无重复、PNG 存在
+  等）；校验后的实现放在共享只读 impl。左右不等长允许 `open` 成功。
+- 对外按值提供 `calibration()` 与 `summary()`（`imu` / `left` / `right`）；
+  每次 `reader()` 得到独立的 move-only、single-pass reader。
+- `peekImageTimestamp(CameraId)` 不触发图像 I/O；`takeImage(CameraId)` 才
+  惰性解码。解码失败对该相机 sticky，不阻塞另一路。
+- `exactTimestampIntersectionCount()` 仅作诊断（exact 交集大小），不是配对
+  策略；配对在 `phad::sync`。
 - `Image` 保留原始无符号灰度深度（EuRoC：`uint8_t`；TUM VI：`uint16_t`），
   调用方须用与 `PixelType` 一致的 typed view，禁止静默截断。
 
 ### `SensorSource`
 
 来源无关的 pull-based seam：只公开稳定标定与 `next()`。
-`DatasetReplaySource` 自持 calibration、一条 IMU lookahead 与 terminal
-state；timestamp 相同时先输出 IMU，仅在 stereo 成为下一事件时解码图像。
+`SensorEvent` 为 `ImuMeasurement | ImageFrameEvent`（已配对 `StereoFrame`
+不经此 seam）。`DatasetReplaySource` 自持 calibration、一条 IMU lookahead
+与 terminal state；按时间归并三路，同 stamp 顺序 **IMU → Left → Right**。
 正常耗尽（`EndOfStream`）与读取失败（`SensorSourceError`）是不同 terminal。
+
+离线 VO 在 composition root 用 `apps::StereoPairStream` 把事件推进
+`phad::sync::StereoPairSynchronizer` 再取出 `StereoFrame`。
 
 ### 错误类型
 
 | 类型 | 何时用 |
 |---|---|
-| `DatasetError` / `DatasetResult` | 打开序列 / 真值失败（缺文件、坏 CSV/YAML、标定不支持等） |
+| `DatasetError` / `DatasetResult` | 打开序列 / 真值失败（缺文件、坏 CSV/YAML、标定不支持等）；**不再**因左右不等长失败（旧 `kStereoTimestampMismatch` 已删） |
 | `DatasetReaderError` | 回放中图像解码失败或格式不符 |
 | `SensorSourceError` | `SensorSource::next` 路径上的读取失败 |
 

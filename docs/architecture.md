@@ -132,13 +132,15 @@ phad::io
 等条件分支。
 
 离线双目惯性数据统一产出可廉价复制的不可变 `StereoImuDataset` handle。
-完整校验后的 IMU 与双目 metadata、filesystem path、预期 pixel type 和
-解码配置只存在于共享只读 implementation。dataset 对外按值提供 calibration
-和 summary，并为每次回放创建 move-only、single-pass 的独立 reader。
-reader 拥有自己的双流消费位置与 sticky terminal error，通过 `takeImu()`、
-`peekStereoTimestamp()` 和 `takeStereo()` 顺序消费；观察 timestamp 不触发
-图像 I/O，取得 stereo 时才惰性解码。EuRoC 与 TUM VI adapter 只负责格式
-专属的目录、CSV/YAML 字段、外参方向和像素类型转换，并只通过各自 concrete
+完整校验后的 IMU 与**分路**图像 metadata、filesystem path、预期 pixel type
+和解码配置只存在于共享只读 implementation。dataset 对外按值提供
+calibration 和 summary（`imu` / `left` / `right`），并为每次回放创建
+move-only、single-pass 的独立 reader。reader 拥有 IMU 与左右相机各自的
+消费位置及 per-camera sticky terminal error，通过 `takeImu()`、
+`peekImageTimestamp(CameraId)` 和 `takeImage(CameraId)` 顺序消费；观察
+timestamp 不触发图像 I/O，`takeImage` 才惰性解码。左右不等长不是 open
+错误；配对不在 adapter 内完成。EuRoC 与 TUM VI adapter 只负责格式专属的
+目录、CSV/YAML 字段、外参方向和像素类型转换，并只通过各自 concrete
 `open()` 产生通用 dataset handle。格式由调用方显式选择，不进行目录猜测，
 也不通过虚基类或转发 facade 暴露 parser 生命周期。
 
@@ -147,32 +149,35 @@ reader 拥有自己的双流消费位置与 sticky terminal error，通过 `take
 静默截断为 8-bit。
 
 `SensorSource` 是来源无关的 pull-based 输入 seam，只公开稳定标定和下一个
-规范化 sensor event。`DatasetReplaySource` 从 dataset 创建并拥有独立
-reader，同时自持有 calibration、一条 IMU lookahead 和 terminal state；
-它比较 lookahead 与 reader 观察到的下一帧 stereo timestamp，timestamp
-相同时先输出 IMU，并仅在 stereo 成为下一事件时解码图像。正常耗尽与读取
-失败是不同的 terminal 状态。该 seam 不执行 IMU 分段、边界插值或 packet
-构造。
+规范化 sensor event（`ImuMeasurement` | `ImageFrameEvent`）。
+`DatasetReplaySource` 从 dataset 创建并拥有独立 reader，同时自持有
+calibration、一条 IMU lookahead 和 terminal state；它按时间归并 IMU /
+Left / Right，同 stamp 顺序为 **IMU → Left → Right**，并仅在取图像事件时
+解码。正常耗尽与读取失败是不同的 terminal 状态。该 seam 不执行左右配对、
+IMU 分段、边界插值或 packet 构造。
 
 ### 3.2 Sensor synchronizer
 
-对外接口应保持小而完整，例如：
+落点为独立库 `phad::sync`（只依赖 `phad::sensor` / `phad::common`，不依赖
+`phad::io`）。M3.2 落地 StereoOnly：
 
 ```cpp
-SyncResult pushImu(ImuMeasurement);
-SyncResult pushStereo(StereoFrame);
+PushStatus pushImage(ImageFrameEvent);   // 校验结果；丢弃进计数器
+std::optional<StereoFrame> tryPop();     // 无回调
+void flush();                            // 剩余全部计入 dropped_*
+// M4：pushImu / 图像边界插值 / StereoImuPacket
 ```
 
 内部负责：
 
-- 缓冲和顺序检查；
-- 双目图像配对检查；
-- 图像边界 IMU 插值；
-- 构造无间断的 `StereoImuPacket`；
-- 限制队列长度并显式报告溢出。
+- 左右两队列 B 族配对（默认 `tol_ns = 0` exact；soft 仅显式配置）；
+- 单相机单调性 sticky 错误；
+- 有界队列与 drop-oldest 溢出计数；
+- （M4）缓冲 IMU、图像边界插值、构造无间断 `StereoImuPacket`。
 
-调用方不应自行从 IMU 队列切片；否则时间边界逻辑会散落到数据集、
-frontend 和测试中。
+离线 VO 由 composition root 的 `apps::StereoPairStream` 组合
+`SensorSource` + `StereoPairSynchronizer`；调用方不应自行从 IMU 队列切片，
+也不应在 adapter 内再写第二套配对策略。
 
 ### 3.3 Visual-inertial frontend
 

@@ -251,12 +251,12 @@ max_left_queue / max_right_queue
 
 ### 4.4 完成清单
 
-- [ ] `StereoPairSynchronizer` 单测绿  
-- [ ] MH_01 `est.tum` / `diag.csv` 逐字节不回归  
-- [ ] 三条原失败序列产出 `summary.json`，emit / drop 精确匹配 §4.3  
-- [ ] 诊断可见 dropped_* / emitted  
-- [ ] architecture §3.2 / `phad/io` README / `phad/sync` README 合同更新  
-- [ ] 未改 frontend/estimator 算法  
+- [x] `StereoPairSynchronizer` 单测绿  
+- [x] MH_01 `est.tum` / `diag.csv` 逐字节不回归（相对 `2b28616/default_0885385a`）  
+- [x] 三条原失败序列产出 `summary.json`，emit / drop 精确匹配 §4.3  
+- [x] 诊断可见 dropped_* / emitted（`summary.sync` + 首次 drop warning）  
+- [x] architecture §3.2 / `phad/io` README / `phad/sync` README 合同更新  
+- [x] 未改 frontend/estimator 算法  
 
 ---
 
