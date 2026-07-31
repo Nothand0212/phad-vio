@@ -8,8 +8,10 @@
 #include <string>
 #include <variant>
 
+#include "apps/stereo_pair_stream.hpp"
 #include "phad/camera/stereo_rectifier.hpp"
 #include "phad/frontend/stereo_tracker.hpp"
+#include "phad/io/dataset/dataset_replay_source.hpp"
 #include "phad/io/dataset/euroc/euroc_dataset.hpp"
 #include "phad/io/dataset/stereo_imu_dataset.hpp"
 
@@ -62,8 +64,9 @@ namespace
         phad::camera::StereoRectifier::create( opened.value().calibration() );
     ASSERT_TRUE( rectifier ) << rectifier.error().detail;
 
-    StereoTracker tracker( rectifier.value().calibration() );
-    auto          reader = opened.value().reader();
+    StereoTracker                          tracker( rectifier.value().calibration() );
+    phad::io::dataset::DatasetReplaySource source{ opened.value() };
+    phad::apps::StereoPairStream           stream{ source };
 
     std::set<LandmarkId> seen_ids;
     std::uint64_t        frame_count = 0;
@@ -71,17 +74,16 @@ namespace
 
     while ( true )
     {
-      auto loaded = reader.takeStereo();
-      if ( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
-               loaded ) )
+      auto loaded = stream.next();
+      if ( std::holds_alternative<phad::io::EndOfStream>( loaded ) )
       {
         break;
       }
       ASSERT_TRUE( std::holds_alternative<phad::sensor::StereoFrame>( loaded ) )
-          << "stereo reader failed mid-sequence";
+          << "stereo stream failed mid-sequence";
 
-      const auto& raw = std::get<phad::sensor::StereoFrame>( loaded );
-      auto rectified  = rectifier.value().rectify( raw );
+      const auto& raw       = std::get<phad::sensor::StereoFrame>( loaded );
+      auto        rectified = rectifier.value().rectify( raw );
       ASSERT_TRUE( rectified ) << rectified.error().detail;
 
       const auto tracks = tracker.process( rectified.value() );

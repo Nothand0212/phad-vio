@@ -1,5 +1,7 @@
 #include "phad/io/dataset/euroc/euroc_dataset.hpp"
 
+#include "phad/sensor/camera_id.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -212,13 +214,20 @@ namespace
                expected );
   }
 
+  phad::sensor::CameraId cameraFromSensorId( const std::string& sensor_id )
+  {
+    return sensor_id == "right_camera" ? phad::sensor::CameraId::kRight
+                                       : phad::sensor::CameraId::kLeft;
+  }
+
   void expectStickyTerminalError(
       phad::io::dataset::StereoImuDatasetReader&   reader,
       const phad::io::dataset::DatasetReaderError& expected )
   {
-    expectReaderError( reader.takeImu(), expected );
-    expectReaderError( reader.peekStereoTimestamp(), expected );
-    expectReaderError( reader.takeStereo(), expected );
+    const auto camera = cameraFromSensorId( expected.sensor_id );
+    expectReaderError( reader.peekImageTimestamp( camera ), expected );
+    expectReaderError( reader.takeImage( camera ), expected );
+    expectReaderError( reader.takeImage( camera ), expected );
   }
 
   TEST( EurocInspectTest, PrintsCalibrationAndSummaryWithoutDecodingImages )
@@ -262,10 +271,14 @@ namespace
         "imu_gyr_nd: 0.0001\n"
         "imu_acc_rw: 0.003\n"
         "imu_gyr_rw: 1e-05\n"
-        "stereo_frames: 3\n"
+        "cam0_frames: 3\n"
+        "cam1_frames: 3\n"
+        "stereo_intersection_frames: 3\n"
         "imu_measurements: 4\n"
-        "stereo_first_ns: 1403636579763555584\n"
-        "stereo_last_ns: 1403636579863555584\n"
+        "cam0_first_ns: 1403636579763555584\n"
+        "cam0_last_ns: 1403636579863555584\n"
+        "cam1_first_ns: 1403636579763555584\n"
+        "cam1_last_ns: 1403636579863555584\n"
         "imu_first_ns: 1403636579758555584\n"
         "imu_last_ns: 1403636579773555584\n";
     EXPECT_EQ( readFile( stdout_path ), expected_output );
@@ -315,7 +328,8 @@ namespace
     EXPECT_DOUBLE_EQ( calibration.imu().gyrNd(), 0.0001 );
     EXPECT_DOUBLE_EQ( calibration.imu().accRw(), 0.003 );
     EXPECT_EQ( summary.imu.count, 4U );
-    EXPECT_EQ( summary.stereo.count, 3U );
+    EXPECT_EQ( summary.left.count, 3U );
+    EXPECT_EQ( summary.right.count, 3U );
 
     struct ExpectedImu
     {
@@ -346,34 +360,44 @@ namespace
       }
       previous_imu_timestamp = measurement.timestamp;
     }
-    const std::array<std::array<std::int64_t, 3>, 3> expected_stereo{
+    const std::array<std::array<std::int64_t, 3>, 3> expected_frames{
         std::array<std::int64_t, 3>{
             EurocFixture::kFirstTimestamp, 11, 21 },
         std::array<std::int64_t, 3>{
             EurocFixture::kFirstTimestamp + 50'000'000, 12, 22 },
         std::array<std::int64_t, 3>{
             EurocFixture::kFirstTimestamp + 100'000'000, 13, 23 } };
-    std::optional<phad::common::Timestamp> previous_stereo_timestamp;
-    for ( const auto& expected : expected_stereo )
+    std::optional<phad::common::Timestamp> previous_image_timestamp;
+    for ( const auto& expected : expected_frames )
     {
-      const auto stereo_result = reader.takeStereo();
-      ASSERT_TRUE( std::holds_alternative<phad::sensor::StereoFrame>(
-          stereo_result ) );
-      const auto& frame =
-          std::get<phad::sensor::StereoFrame>( stereo_result );
-      EXPECT_EQ( frame.timestamp.nanoseconds(), expected[ 0 ] );
-      if ( previous_stereo_timestamp.has_value() )
+      const auto left_result = reader.takeImage( phad::sensor::CameraId::kLeft );
+      ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+          left_result ) );
+      const auto& left_event =
+          std::get<phad::sensor::ImageFrameEvent>( left_result );
+      EXPECT_EQ( left_event.timestamp.nanoseconds(), expected[ 0 ] );
+      EXPECT_EQ( left_event.camera, phad::sensor::CameraId::kLeft );
+      if ( previous_image_timestamp.has_value() )
       {
-        EXPECT_LT( *previous_stereo_timestamp, frame.timestamp );
+        EXPECT_LT( *previous_image_timestamp, left_event.timestamp );
       }
-      previous_stereo_timestamp = frame.timestamp;
-      EXPECT_EQ( frame.left.pixelType(), phad::sensor::PixelType::kUint8 );
-      EXPECT_EQ( frame.right.pixelType(), phad::sensor::PixelType::kUint8 );
-      const auto left_pixels  = frame.left.pixels<std::uint8_t>();
-      const auto right_pixels = frame.right.pixels<std::uint8_t>();
+      previous_image_timestamp = left_event.timestamp;
+      EXPECT_EQ( left_event.image.pixelType(), phad::sensor::PixelType::kUint8 );
+      const auto left_pixels = left_event.image.pixels<std::uint8_t>();
       ASSERT_TRUE( left_pixels.has_value() );
-      ASSERT_TRUE( right_pixels.has_value() );
       EXPECT_EQ( left_pixels->front(), expected[ 1 ] );
+
+      const auto right_result =
+          reader.takeImage( phad::sensor::CameraId::kRight );
+      ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+          right_result ) );
+      const auto& right_event =
+          std::get<phad::sensor::ImageFrameEvent>( right_result );
+      EXPECT_EQ( right_event.timestamp.nanoseconds(), expected[ 0 ] );
+      EXPECT_EQ( right_event.camera, phad::sensor::CameraId::kRight );
+      EXPECT_EQ( right_event.image.pixelType(), phad::sensor::PixelType::kUint8 );
+      const auto right_pixels = right_event.image.pixels<std::uint8_t>();
+      ASSERT_TRUE( right_pixels.has_value() );
       EXPECT_EQ( right_pixels->front(), expected[ 2 ] );
     }
     EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
@@ -381,11 +405,13 @@ namespace
     EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
         reader.takeImu() ) );
     EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
-        reader.peekStereoTimestamp() ) );
+        reader.peekImageTimestamp( phad::sensor::CameraId::kLeft ) ) );
     EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
-        reader.takeStereo() ) );
+        reader.peekImageTimestamp( phad::sensor::CameraId::kRight ) ) );
     EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
-        reader.takeStereo() ) );
+        reader.takeImage( phad::sensor::CameraId::kLeft ) ) );
+    EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
+        reader.takeImage( phad::sensor::CameraId::kRight ) ) );
   }
 
   TEST( EurocAdapterTest, CopiedHandleReturnsCalibrationAndSummaryByValue )
@@ -409,12 +435,19 @@ namespace
                EurocFixture::kFirstTimestamp - 5'000'000 );
     EXPECT_EQ( summary.imu.last_timestamp->nanoseconds(),
                EurocFixture::kFirstTimestamp + 10'000'000 );
-    EXPECT_EQ( summary.stereo.count, 3U );
-    ASSERT_TRUE( summary.stereo.first_timestamp.has_value() );
-    ASSERT_TRUE( summary.stereo.last_timestamp.has_value() );
-    EXPECT_EQ( summary.stereo.first_timestamp->nanoseconds(),
+    EXPECT_EQ( summary.left.count, 3U );
+    ASSERT_TRUE( summary.left.first_timestamp.has_value() );
+    ASSERT_TRUE( summary.left.last_timestamp.has_value() );
+    EXPECT_EQ( summary.left.first_timestamp->nanoseconds(),
                EurocFixture::kFirstTimestamp );
-    EXPECT_EQ( summary.stereo.last_timestamp->nanoseconds(),
+    EXPECT_EQ( summary.left.last_timestamp->nanoseconds(),
+               EurocFixture::kFirstTimestamp + 100'000'000 );
+    EXPECT_EQ( summary.right.count, 3U );
+    ASSERT_TRUE( summary.right.first_timestamp.has_value() );
+    ASSERT_TRUE( summary.right.last_timestamp.has_value() );
+    EXPECT_EQ( summary.right.first_timestamp->nanoseconds(),
+               EurocFixture::kFirstTimestamp );
+    EXPECT_EQ( summary.right.last_timestamp->nanoseconds(),
                EurocFixture::kFirstTimestamp + 100'000'000 );
   }
 
@@ -438,7 +471,7 @@ namespace
                EurocFixture::kFirstTimestamp - 5'000'000 );
   }
 
-  TEST( EurocAdapterTest, RepeatedStereoPeekDoesNotDecodeOrAdvance )
+  TEST( EurocAdapterTest, RepeatedLeftImagePeekDoesNotDecodeOrAdvance )
   {
     EurocFixture fixture;
     auto         opened = phad::io::dataset::euroc::open( fixture.root() );
@@ -451,8 +484,9 @@ namespace
     }
     auto reader = opened.value().reader();
 
-    const auto first  = reader.peekStereoTimestamp();
-    const auto second = reader.peekStereoTimestamp();
+    const auto first = reader.peekImageTimestamp( phad::sensor::CameraId::kLeft );
+    const auto second =
+        reader.peekImageTimestamp( phad::sensor::CameraId::kLeft );
     ASSERT_TRUE( std::holds_alternative<phad::common::Timestamp>( first ) );
     ASSERT_TRUE( std::holds_alternative<phad::common::Timestamp>( second ) );
     EXPECT_EQ( std::get<phad::common::Timestamp>( first ).nanoseconds(),
@@ -461,25 +495,27 @@ namespace
                std::get<phad::common::Timestamp>( first ) );
   }
 
-  TEST( EurocAdapterTest, TakeStereoDecodesOwnedFrameThenAdvances )
+  TEST( EurocAdapterTest, TakeImageDecodesOwnedFrameThenAdvances )
   {
     EurocFixture fixture;
     auto         opened = phad::io::dataset::euroc::open( fixture.root() );
     ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
     auto reader = opened.value().reader();
 
-    auto taken = reader.takeStereo();
+    auto taken = reader.takeImage( phad::sensor::CameraId::kLeft );
     ASSERT_TRUE(
-        std::holds_alternative<phad::sensor::StereoFrame>( taken ) );
-    const auto& frame = std::get<phad::sensor::StereoFrame>( taken );
-    EXPECT_EQ( frame.timestamp.nanoseconds(),
+        std::holds_alternative<phad::sensor::ImageFrameEvent>( taken ) );
+    const auto& event = std::get<phad::sensor::ImageFrameEvent>( taken );
+    EXPECT_EQ( event.timestamp.nanoseconds(),
                EurocFixture::kFirstTimestamp );
-    EXPECT_EQ( frame.left.pixelType(), phad::sensor::PixelType::kUint8 );
-    const auto left_pixels = frame.left.pixels<std::uint8_t>();
+    EXPECT_EQ( event.camera, phad::sensor::CameraId::kLeft );
+    EXPECT_EQ( event.image.pixelType(), phad::sensor::PixelType::kUint8 );
+    const auto left_pixels = event.image.pixels<std::uint8_t>();
     ASSERT_TRUE( left_pixels.has_value() );
     EXPECT_EQ( left_pixels->front(), 11 );
 
-    const auto next = reader.peekStereoTimestamp();
+    const auto next =
+        reader.peekImageTimestamp( phad::sensor::CameraId::kLeft );
     ASSERT_TRUE( std::holds_alternative<phad::common::Timestamp>( next ) );
     EXPECT_EQ( std::get<phad::common::Timestamp>( next ).nanoseconds(),
                EurocFixture::kFirstTimestamp + 50'000'000 );
@@ -508,25 +544,25 @@ namespace
             .timestamp.nanoseconds(),
         EurocFixture::kFirstTimestamp );
 
-    auto first_stereo  = first_reader.takeStereo();
-    auto second_stereo = second_reader.takeStereo();
+    auto first_left  = first_reader.takeImage( phad::sensor::CameraId::kLeft );
+    auto second_left = second_reader.takeImage( phad::sensor::CameraId::kLeft );
     ASSERT_TRUE(
-        std::holds_alternative<phad::sensor::StereoFrame>( first_stereo ) );
+        std::holds_alternative<phad::sensor::ImageFrameEvent>( first_left ) );
     ASSERT_TRUE(
-        std::holds_alternative<phad::sensor::StereoFrame>( second_stereo ) );
+        std::holds_alternative<phad::sensor::ImageFrameEvent>( second_left ) );
     const auto first_pixels =
-        std::get<phad::sensor::StereoFrame>( first_stereo )
-            .left.pixels<std::uint8_t>();
+        std::get<phad::sensor::ImageFrameEvent>( first_left )
+            .image.pixels<std::uint8_t>();
     const auto second_pixels =
-        std::get<phad::sensor::StereoFrame>( second_stereo )
-            .left.pixels<std::uint8_t>();
+        std::get<phad::sensor::ImageFrameEvent>( second_left )
+            .image.pixels<std::uint8_t>();
     ASSERT_TRUE( first_pixels.has_value() );
     ASSERT_TRUE( second_pixels.has_value() );
     EXPECT_EQ( first_pixels->front(), second_pixels->front() );
     EXPECT_NE( first_pixels->data(), second_pixels->data() );
   }
 
-  TEST( EurocAdapterTest, ImuAndStereoStreamsEndIndependentlyAndStably )
+  TEST( EurocAdapterTest, ImuAndImageStreamsEndIndependentlyAndStably )
   {
     EurocFixture fixture;
     auto         opened = phad::io::dataset::euroc::open( fixture.root() );
@@ -535,13 +571,19 @@ namespace
 
     for ( std::size_t index = 0; index < 3; ++index )
     {
-      ASSERT_TRUE( std::holds_alternative<phad::sensor::StereoFrame>(
-          reader.takeStereo() ) );
+      ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+          reader.takeImage( phad::sensor::CameraId::kLeft ) ) );
+      ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+          reader.takeImage( phad::sensor::CameraId::kRight ) ) );
     }
     EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
-        reader.peekStereoTimestamp() ) );
+        reader.peekImageTimestamp( phad::sensor::CameraId::kLeft ) ) );
     EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
-        reader.takeStereo() ) );
+        reader.peekImageTimestamp( phad::sensor::CameraId::kRight ) ) );
+    EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
+        reader.takeImage( phad::sensor::CameraId::kLeft ) ) );
+    EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
+        reader.takeImage( phad::sensor::CameraId::kRight ) ) );
     EXPECT_TRUE( std::holds_alternative<phad::sensor::ImuMeasurement>(
         reader.takeImu() ) );
 
@@ -573,9 +615,12 @@ namespace
       EXPECT_EQ( summary.imu.count, 0U );
       EXPECT_FALSE( summary.imu.first_timestamp.has_value() );
       EXPECT_FALSE( summary.imu.last_timestamp.has_value() );
-      EXPECT_EQ( summary.stereo.count, 0U );
-      EXPECT_FALSE( summary.stereo.first_timestamp.has_value() );
-      EXPECT_FALSE( summary.stereo.last_timestamp.has_value() );
+      EXPECT_EQ( summary.left.count, 0U );
+      EXPECT_FALSE( summary.left.first_timestamp.has_value() );
+      EXPECT_FALSE( summary.left.last_timestamp.has_value() );
+      EXPECT_EQ( summary.right.count, 0U );
+      EXPECT_FALSE( summary.right.first_timestamp.has_value() );
+      EXPECT_FALSE( summary.right.last_timestamp.has_value() );
     }
     {
       EurocFixture fixture;
@@ -592,13 +637,14 @@ namespace
       const auto summary = opened.value().summary();
       EXPECT_EQ( summary.imu.count, 1U );
       EXPECT_EQ( summary.imu.first_timestamp, summary.imu.last_timestamp );
-      EXPECT_EQ( summary.stereo.count, 1U );
-      EXPECT_EQ( summary.stereo.first_timestamp,
-                 summary.stereo.last_timestamp );
+      EXPECT_EQ( summary.left.count, 1U );
+      EXPECT_EQ( summary.left.first_timestamp, summary.left.last_timestamp );
+      EXPECT_EQ( summary.right.count, 1U );
+      EXPECT_EQ( summary.right.first_timestamp, summary.right.last_timestamp );
     }
   }
 
-  TEST( EurocAdapterTest, StereoFailureIsStickyAndLocalToReader )
+  TEST( EurocAdapterTest, RightImageFailureIsStickyAndLocalToReader )
   {
     EurocFixture fixture;
     auto         opened = phad::io::dataset::euroc::open( fixture.root() );
@@ -612,7 +658,10 @@ namespace
       corrupt << "not a png";
     }
 
-    const auto failed = failed_reader.takeStereo();
+    ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+        failed_reader.takeImage( phad::sensor::CameraId::kLeft ) ) );
+    const auto failed =
+        failed_reader.takeImage( phad::sensor::CameraId::kRight );
     ASSERT_TRUE(
         std::holds_alternative<phad::io::dataset::DatasetReaderError>(
             failed ) );
@@ -631,8 +680,10 @@ namespace
 
     fixture.writeImage( "cam1", "right-a.png", 21 );
     expectStickyTerminalError( failed_reader, error );
-    EXPECT_TRUE( std::holds_alternative<phad::sensor::StereoFrame>(
-        other_reader.takeStereo() ) );
+    ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+        other_reader.takeImage( phad::sensor::CameraId::kLeft ) ) );
+    ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+        other_reader.takeImage( phad::sensor::CameraId::kRight ) ) );
   }
 
   TEST( EurocAdapterTest, ReaderReportsImageFormatMismatchWithoutPath )
@@ -643,7 +694,8 @@ namespace
     fixture.writeImage( "cam0", "left-a.png", 11, 5, 3 );
 
     auto       reader = opened.value().reader();
-    const auto failed = reader.takeStereo();
+    const auto failed =
+        reader.takeImage( phad::sensor::CameraId::kLeft );
     ASSERT_TRUE(
         std::holds_alternative<phad::io::dataset::DatasetReaderError>(
             failed ) );
@@ -691,8 +743,10 @@ namespace
     ASSERT_TRUE( second.hasValue() ) << second.error().describe();
     EXPECT_EQ( first.value().summary().imu.count,
                second.value().summary().imu.count );
-    EXPECT_EQ( first.value().summary().stereo.count,
-               second.value().summary().stereo.count );
+    EXPECT_EQ( first.value().summary().left.count,
+               second.value().summary().left.count );
+    EXPECT_EQ( first.value().summary().right.count,
+               second.value().summary().right.count );
 
     auto first_reader  = first.value().reader();
     auto second_reader = second.value().reader();
@@ -713,35 +767,50 @@ namespace
                  std::get<phad::sensor::ImuMeasurement>( second_imu ).gyro_radps );
     }
     for ( std::size_t consumed = 0;
-          consumed < first.value().summary().stereo.count; ++consumed )
+          consumed < first.value().summary().left.count; ++consumed )
     {
-      const auto first_stereo  = first_reader.takeStereo();
-      const auto second_stereo = second_reader.takeStereo();
-      ASSERT_TRUE( std::holds_alternative<phad::sensor::StereoFrame>(
-          first_stereo ) );
-      ASSERT_TRUE( std::holds_alternative<phad::sensor::StereoFrame>(
-          second_stereo ) );
-      const auto& first_frame =
-          std::get<phad::sensor::StereoFrame>( first_stereo );
-      const auto& second_frame =
-          std::get<phad::sensor::StereoFrame>( second_stereo );
-      EXPECT_EQ( first_frame.timestamp, second_frame.timestamp );
-      ASSERT_EQ( first_frame.left.pixelType(),
+      const auto first_left  = first_reader.takeImage(
+          phad::sensor::CameraId::kLeft );
+      const auto second_left = second_reader.takeImage(
+          phad::sensor::CameraId::kLeft );
+      const auto first_right  = first_reader.takeImage(
+          phad::sensor::CameraId::kRight );
+      const auto second_right = second_reader.takeImage(
+          phad::sensor::CameraId::kRight );
+      ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+          first_left ) );
+      ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+          second_left ) );
+      ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+          first_right ) );
+      ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+          second_right ) );
+      const auto& first_left_event =
+          std::get<phad::sensor::ImageFrameEvent>( first_left );
+      const auto& second_left_event =
+          std::get<phad::sensor::ImageFrameEvent>( second_left );
+      const auto& first_right_event =
+          std::get<phad::sensor::ImageFrameEvent>( first_right );
+      const auto& second_right_event =
+          std::get<phad::sensor::ImageFrameEvent>( second_right );
+      EXPECT_EQ( first_left_event.timestamp, second_left_event.timestamp );
+      EXPECT_EQ( first_right_event.timestamp, second_right_event.timestamp );
+      ASSERT_EQ( first_left_event.image.pixelType(),
                  phad::sensor::PixelType::kUint8 );
-      ASSERT_EQ( first_frame.right.pixelType(),
+      ASSERT_EQ( first_right_event.image.pixelType(),
                  phad::sensor::PixelType::kUint8 );
-      ASSERT_EQ( second_frame.left.pixelType(),
+      ASSERT_EQ( second_left_event.image.pixelType(),
                  phad::sensor::PixelType::kUint8 );
-      ASSERT_EQ( second_frame.right.pixelType(),
+      ASSERT_EQ( second_right_event.image.pixelType(),
                  phad::sensor::PixelType::kUint8 );
       const auto first_left_pixels =
-          first_frame.left.pixels<std::uint8_t>();
+          first_left_event.image.pixels<std::uint8_t>();
       const auto first_right_pixels =
-          first_frame.right.pixels<std::uint8_t>();
+          first_right_event.image.pixels<std::uint8_t>();
       const auto second_left_pixels =
-          second_frame.left.pixels<std::uint8_t>();
+          second_left_event.image.pixels<std::uint8_t>();
       const auto second_right_pixels =
-          second_frame.right.pixels<std::uint8_t>();
+          second_right_event.image.pixels<std::uint8_t>();
       ASSERT_TRUE( first_left_pixels.has_value() );
       ASSERT_TRUE( first_right_pixels.has_value() );
       ASSERT_TRUE( second_left_pixels.has_value() );
@@ -754,7 +823,7 @@ namespace
   }
 
   TEST( EurocAdapterTest,
-        DefersCorruptPngFailureUntilSequentialStereoConsumption )
+        DefersCorruptPngFailureUntilSequentialRightImageConsumption )
   {
     EurocFixture fixture;
     {
@@ -765,14 +834,20 @@ namespace
 
     auto opened = phad::io::dataset::euroc::open( fixture.root() );
     ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
-    EXPECT_EQ( opened.value().summary().stereo.count, 3U );
+    EXPECT_EQ( opened.value().summary().left.count, 3U );
+    EXPECT_EQ( opened.value().summary().right.count, 3U );
     auto reader = opened.value().reader();
     EXPECT_TRUE( std::holds_alternative<phad::common::Timestamp>(
-        reader.peekStereoTimestamp() ) );
-    EXPECT_TRUE( std::holds_alternative<phad::sensor::StereoFrame>(
-        reader.takeStereo() ) );
+        reader.peekImageTimestamp( phad::sensor::CameraId::kLeft ) ) );
+    ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+        reader.takeImage( phad::sensor::CameraId::kLeft ) ) );
+    ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+        reader.takeImage( phad::sensor::CameraId::kRight ) ) );
+    ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+        reader.takeImage( phad::sensor::CameraId::kLeft ) ) );
 
-    const auto failed = reader.takeStereo();
+    const auto failed =
+        reader.takeImage( phad::sensor::CameraId::kRight );
     ASSERT_TRUE(
         std::holds_alternative<phad::io::dataset::DatasetReaderError>(
             failed ) );
@@ -958,7 +1033,7 @@ namespace
     }
   }
 
-  TEST( EurocAdapterTest, RejectsMissingOrMismatchedStereoRecords )
+  TEST( EurocAdapterTest, AcceptsUnequalLengthCameraManifests )
   {
     {
       EurocFixture fixture;
@@ -967,10 +1042,11 @@ namespace
           "#timestamp [ns],filename\n"
           "1403636579763555584,right-a.png\n"
           "1403636579813555584,right-b.png\n" );
-      expectOpenError(
-          fixture.root(),
-          phad::io::dataset::DatasetErrorCode::kStereoTimestampMismatch,
-          "cam0/cam1", "timestamp" );
+      auto opened = phad::io::dataset::euroc::open( fixture.root() );
+      ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
+      const auto summary = opened.value().summary();
+      EXPECT_EQ( summary.left.count, 3U );
+      EXPECT_EQ( summary.right.count, 2U );
     }
     {
       EurocFixture fixture;
@@ -980,10 +1056,11 @@ namespace
           "1403636579763555584,right-a.png\n"
           "1403636579813555585,right-b.png\n"
           "1403636579863555584,right-c.png\n" );
-      expectOpenError(
-          fixture.root(),
-          phad::io::dataset::DatasetErrorCode::kStereoTimestampMismatch,
-          "cam0/cam1", "timestamp" );
+      auto opened = phad::io::dataset::euroc::open( fixture.root() );
+      ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
+      const auto summary = opened.value().summary();
+      EXPECT_EQ( summary.left.count, 3U );
+      EXPECT_EQ( summary.right.count, 3U );
     }
   }
 
@@ -1324,10 +1401,13 @@ namespace
     auto opened = phad::io::dataset::euroc::open( fixture.root() );
     ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
     auto reader = opened.value().reader();
-    ASSERT_TRUE( std::holds_alternative<phad::sensor::StereoFrame>(
-        reader.takeStereo() ) );
+    ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+        reader.takeImage( phad::sensor::CameraId::kLeft ) ) );
+    ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+        reader.takeImage( phad::sensor::CameraId::kRight ) ) );
 
-    const auto failed = reader.takeStereo();
+    const auto failed =
+        reader.takeImage( phad::sensor::CameraId::kLeft );
     ASSERT_TRUE(
         std::holds_alternative<phad::io::dataset::DatasetReaderError>(
             failed ) );
@@ -1412,24 +1492,32 @@ namespace
     ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
     auto reader = opened.value().reader();
     {
-      const auto warmup = reader.takeStereo();
-      ASSERT_TRUE( std::holds_alternative<phad::sensor::StereoFrame>(
+      const auto warmup =
+          reader.takeImage( phad::sensor::CameraId::kLeft );
+      ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
           warmup ) );
+      ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+          reader.takeImage( phad::sensor::CameraId::kRight ) ) );
     }
     const std::size_t resident_after_warmup = CurrentResidentBytes();
     for ( std::size_t consumed = 1; consumed < kFrameCount; ++consumed )
     {
-      const auto loaded = reader.takeStereo();
-      ASSERT_TRUE( std::holds_alternative<phad::sensor::StereoFrame>(
-          loaded ) );
-      const auto pixels =
-          std::get<phad::sensor::StereoFrame>( loaded )
-              .left.pixels<std::uint8_t>();
-      ASSERT_TRUE( pixels.has_value() );
-      EXPECT_EQ( pixels->front(), static_cast<std::uint8_t>( consumed ) );
+      const auto left_loaded =
+          reader.takeImage( phad::sensor::CameraId::kLeft );
+      ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+          left_loaded ) );
+      const auto left_pixels =
+          std::get<phad::sensor::ImageFrameEvent>( left_loaded )
+              .image.pixels<std::uint8_t>();
+      ASSERT_TRUE( left_pixels.has_value() );
+      EXPECT_EQ( left_pixels->front(), static_cast<std::uint8_t>( consumed ) );
+      ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+          reader.takeImage( phad::sensor::CameraId::kRight ) ) );
     }
     EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
-        reader.takeStereo() ) );
+        reader.takeImage( phad::sensor::CameraId::kLeft ) ) );
+    EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
+        reader.takeImage( phad::sensor::CameraId::kRight ) ) );
     const std::size_t resident_after_traversal = CurrentResidentBytes();
 
     // A retained cache would hold roughly 24 MiB for this fixture. Allow 8 MiB

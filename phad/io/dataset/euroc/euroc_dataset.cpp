@@ -317,13 +317,6 @@ namespace phad::io::dataset
     {
       return imu_measurements.error();
     }
-    auto stereo_index = adapter::joinStereo(
-        left_records.value(), right_records.value(), mav0 );
-    if ( !stereo_index )
-    {
-      return stereo_index.error();
-    }
-
     auto calibration = sensor::StereoImuCalibration::create(
         left_calibration.value().parameters,
         right_calibration.value().parameters, imu_calibration.value(),
@@ -339,8 +332,9 @@ namespace phad::io::dataset
     return adapter::StereoImuDatasetBuilder::build(
         std::move( calibration ).value(),
         std::move( imu_measurements ).value(),
-        std::move( stereo_index ).value(), sensor::PixelType::kUint8,
-        sensor::PixelType::kUint8 );
+        adapter::toImageManifest( left_records.value() ),
+        adapter::toImageManifest( right_records.value() ),
+        sensor::PixelType::kUint8, sensor::PixelType::kUint8 );
   }
 
 }  // namespace phad::io::dataset

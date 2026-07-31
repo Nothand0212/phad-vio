@@ -14,14 +14,16 @@ CMake target：`phad_sensor`（alias `phad::sensor`），公开依赖 Eigen。
 |---|---|
 | IMU / 双目测量、图像缓冲、标定 POD | 从磁盘读 CSV/YAML（归 `phad::io`） |
 | 标定参数校验工厂与 `CalibrationError` | 投影 / 反投影几何（归 `phad::camera`） |
-| `RigidTransform`、`StereoImuCalibration` | 时间同步、packet 构造 |
+| `CameraId`、`ImageFrameEvent`（未配对单路） | 时间同步、packet 构造（归 `phad::sync`） |
+| `RigidTransform`、`StereoImuCalibration` | 数据集路径 / adapter |
 
 ## 文件布局
 
 | 文件 | 作用 |
 |---|---|
 | `imu_measurement.hpp` | 时间戳 + `accel_mps2` / `gyro_radps`（`std::array`） |
-| `stereo_frame.hpp` | `Image`（uint8/uint16）+ `StereoFrame` |
+| `stereo_frame.hpp` | `Image`（uint8/uint16）+ 已配对 `StereoFrame` |
+| `camera_id.hpp` | `CameraId`、`ImageFrameEvent`（单路、未配对） |
 | `camera_parameters.hpp` | 针孔 + radtan / equidistant 参数 |
 | `imu_parameters.hpp` | 采样率与噪声密度 / 随机游走 |
 | `rigid_transform.hpp` | 校验过的 4×4 刚体变换 |

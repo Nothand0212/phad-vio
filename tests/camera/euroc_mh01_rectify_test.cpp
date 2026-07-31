@@ -10,7 +10,9 @@
 #include <variant>
 #include <vector>
 
+#include "apps/stereo_pair_stream.hpp"
 #include "phad/camera/stereo_rectifier.hpp"
+#include "phad/io/dataset/dataset_replay_source.hpp"
 #include "phad/io/dataset/euroc/euroc_dataset.hpp"
 
 /**
@@ -83,14 +85,15 @@ namespace
     EXPECT_GT( rectifier.value().calibration().baselineM(), 0.05 );
     EXPECT_LT( rectifier.value().calibration().baselineM(), 0.20 );
 
-    auto reader = opened.value().reader();
-    constexpr int kFramesToCheck = 5;
-    constexpr int kMaxCorners    = 400;
-    std::vector<double> frame_medians;
+    phad::io::dataset::DatasetReplaySource source{ opened.value() };
+    phad::apps::StereoPairStream           stream{ source };
+    constexpr int                          kFramesToCheck = 5;
+    constexpr int                          kMaxCorners    = 400;
+    std::vector<double>                    frame_medians;
 
     for ( int frame_index = 0; frame_index < kFramesToCheck; ++frame_index )
     {
-      const auto loaded = reader.takeStereo();
+      const auto loaded = stream.next();
       ASSERT_TRUE( std::holds_alternative<StereoFrame>( loaded ) )
           << "failed to load stereo frame " << frame_index;
       const auto& raw = std::get<StereoFrame>( loaded );
@@ -105,7 +108,7 @@ namespace
       cv::goodFeaturesToTrack( left, left_corners, kMaxCorners, 0.01, 12.0 );
       ASSERT_GE( left_corners.size(), 50U );
 
-      std::vector<cv::Point2f> right_corners;
+      std::vector<cv::Point2f>  right_corners;
       std::vector<std::uint8_t> status;
       std::vector<float>        error;
       cv::calcOpticalFlowPyrLK( left, right, left_corners, right_corners,

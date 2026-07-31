@@ -21,24 +21,27 @@ namespace phad::io::dataset
     {
     public:
       StereoImuDatasetImpl(
-          sensor::StereoImuCalibration          calibration,
-          std::vector<sensor::ImuMeasurement>   imu_measurements,
-          std::vector<StereoFrameManifestEntry> stereo_manifest,
-          sensor::PixelType                     left_pixel_type,
-          sensor::PixelType                     right_pixel_type )
+          sensor::StereoImuCalibration         calibration,
+          std::vector<sensor::ImuMeasurement>  imu_measurements,
+          std::vector<ImageFrameManifestEntry> left_manifest,
+          std::vector<ImageFrameManifestEntry> right_manifest,
+          sensor::PixelType                    left_pixel_type,
+          sensor::PixelType                    right_pixel_type )
           : m_calibration( std::move( calibration ) ),
             m_imu_measurements( std::move( imu_measurements ) ),
-            m_stereo_manifest( std::move( stereo_manifest ) ),
+            m_left_manifest( std::move( left_manifest ) ),
+            m_right_manifest( std::move( right_manifest ) ),
             m_left_pixel_type( left_pixel_type ),
             m_right_pixel_type( right_pixel_type )
       {
       }
 
-      sensor::StereoImuCalibration          m_calibration;
-      std::vector<sensor::ImuMeasurement>   m_imu_measurements;
-      std::vector<StereoFrameManifestEntry> m_stereo_manifest;
-      sensor::PixelType                     m_left_pixel_type;
-      sensor::PixelType                     m_right_pixel_type;
+      sensor::StereoImuCalibration         m_calibration;
+      std::vector<sensor::ImuMeasurement>  m_imu_measurements;
+      std::vector<ImageFrameManifestEntry> m_left_manifest;
+      std::vector<ImageFrameManifestEntry> m_right_manifest;
+      sensor::PixelType                    m_left_pixel_type;
+      sensor::PixelType                    m_right_pixel_type;
     };
 
     class StereoImuDatasetReaderImpl
@@ -51,9 +54,11 @@ namespace phad::io::dataset
       }
 
       std::shared_ptr<const StereoImuDatasetImpl> m_dataset;
-      std::size_t                                 m_next_imu_index    = 0;
-      std::size_t                                 m_next_stereo_index = 0;
-      std::optional<DatasetReaderError>           m_terminal_error;
+      std::size_t                                 m_next_imu_index   = 0;
+      std::size_t                                 m_next_left_index  = 0;
+      std::size_t                                 m_next_right_index = 0;
+      std::optional<DatasetReaderError>           m_terminal_left;
+      std::optional<DatasetReaderError>           m_terminal_right;
     };
 
   }  // namespace internal
@@ -161,49 +166,25 @@ namespace phad::io::dataset
                                  record_number, std::move( cause ) };
     }
 
-    DatasetResult<sensor::StereoFrame> decodeStereo(
-        const internal::StereoFrameManifestEntry& reference,
-        const sensor::StereoImuCalibration&       calibration,
-        sensor::PixelType                         left_pixel_type,
-        sensor::PixelType                         right_pixel_type,
-        const std::string&                        left_sensor_id,
-        const std::string&                        right_sensor_id,
-        std::size_t                               record_index )
+    [[nodiscard]] bool isLeft( sensor::CameraId camera ) noexcept
     {
-      auto left = decodeImage(
-          reference.left_path, left_sensor_id, record_index,
-          reference.timestamp, calibration.leftCamera().imageWidth(),
-          calibration.leftCamera().imageHeight(), left_pixel_type );
-      if ( !left )
-      {
-        return left.error();
-      }
-      auto right = decodeImage(
-          reference.right_path, right_sensor_id, record_index,
-          reference.timestamp, calibration.rightCamera().imageWidth(),
-          calibration.rightCamera().imageHeight(), right_pixel_type );
-      if ( !right )
-      {
-        return right.error();
-      }
-      return sensor::StereoFrame{ reference.timestamp,
-                                  std::move( left ).value(),
-                                  std::move( right ).value() };
+      return camera == sensor::CameraId::kLeft;
     }
 
   }  // namespace
 
   StereoImuDataset internal::StereoImuDatasetBuilder::build(
-      sensor::StereoImuCalibration          calibration,
-      std::vector<sensor::ImuMeasurement>   imu_measurements,
-      std::vector<StereoFrameManifestEntry> stereo_manifest,
-      sensor::PixelType                     left_pixel_type,
-      sensor::PixelType                     right_pixel_type )
+      sensor::StereoImuCalibration         calibration,
+      std::vector<sensor::ImuMeasurement>  imu_measurements,
+      std::vector<ImageFrameManifestEntry> left_manifest,
+      std::vector<ImageFrameManifestEntry> right_manifest,
+      sensor::PixelType                    left_pixel_type,
+      sensor::PixelType                    right_pixel_type )
   {
-    return StereoImuDataset{
-        std::make_shared<const StereoImuDatasetImpl>(
-            std::move( calibration ), std::move( imu_measurements ),
-            std::move( stereo_manifest ), left_pixel_type, right_pixel_type ) };
+    return StereoImuDataset{ std::make_shared<const StereoImuDatasetImpl>(
+        std::move( calibration ), std::move( imu_measurements ),
+        std::move( left_manifest ), std::move( right_manifest ),
+        left_pixel_type, right_pixel_type ) };
   }
 
   StereoImuDataset::StereoImuDataset(
@@ -229,7 +210,36 @@ namespace phad::io::dataset
       return result;
     };
     return StereoImuDatasetSummary{ summarize( m_impl->m_imu_measurements ),
-                                    summarize( m_impl->m_stereo_manifest ) };
+                                    summarize( m_impl->m_left_manifest ),
+                                    summarize( m_impl->m_right_manifest ) };
+  }
+
+  std::size_t StereoImuDataset::exactTimestampIntersectionCount()
+      const noexcept
+  {
+    const auto& left  = m_impl->m_left_manifest;
+    const auto& right = m_impl->m_right_manifest;
+    std::size_t i     = 0;
+    std::size_t j     = 0;
+    std::size_t count = 0;
+    while ( i < left.size() && j < right.size() )
+    {
+      if ( left[ i ].timestamp == right[ j ].timestamp )
+      {
+        ++count;
+        ++i;
+        ++j;
+      }
+      else if ( left[ i ].timestamp < right[ j ].timestamp )
+      {
+        ++i;
+      }
+      else
+      {
+        ++j;
+      }
+    }
+    return count;
   }
 
   StereoImuDatasetReader StereoImuDataset::reader() const
@@ -255,10 +265,6 @@ namespace phad::io::dataset
   DatasetReaderResult<sensor::ImuMeasurement>
   StereoImuDatasetReader::takeImu()
   {
-    if ( m_impl->m_terminal_error.has_value() )
-    {
-      return *m_impl->m_terminal_error;
-    }
     if ( m_impl->m_next_imu_index >=
          m_impl->m_dataset->m_imu_measurements.size() )
     {
@@ -269,53 +275,70 @@ namespace phad::io::dataset
   }
 
   DatasetReaderResult<common::Timestamp>
-  StereoImuDatasetReader::peekStereoTimestamp()
+  StereoImuDatasetReader::peekImageTimestamp( sensor::CameraId camera )
   {
-    if ( m_impl->m_terminal_error.has_value() )
+    const bool  left = isLeft( camera );
+    const auto& terminal =
+        left ? m_impl->m_terminal_left : m_impl->m_terminal_right;
+    if ( terminal.has_value() )
     {
-      return *m_impl->m_terminal_error;
+      return *terminal;
     }
-    if ( m_impl->m_next_stereo_index >=
-         m_impl->m_dataset->m_stereo_manifest.size() )
+    const auto& manifest =
+        left ? m_impl->m_dataset->m_left_manifest
+             : m_impl->m_dataset->m_right_manifest;
+    const std::size_t index =
+        left ? m_impl->m_next_left_index : m_impl->m_next_right_index;
+    if ( index >= manifest.size() )
     {
       return DatasetReaderEnd{};
     }
-    return m_impl
-        ->m_dataset->m_stereo_manifest[ m_impl->m_next_stereo_index ]
-        .timestamp;
+    return manifest[ index ].timestamp;
   }
 
-  DatasetReaderResult<sensor::StereoFrame>
-  StereoImuDatasetReader::takeStereo()
+  DatasetReaderResult<sensor::ImageFrameEvent>
+  StereoImuDatasetReader::takeImage( sensor::CameraId camera )
   {
-    if ( m_impl->m_terminal_error.has_value() )
+    const bool left = isLeft( camera );
+    auto&      terminal =
+        left ? m_impl->m_terminal_left : m_impl->m_terminal_right;
+    if ( terminal.has_value() )
     {
-      return *m_impl->m_terminal_error;
+      return *terminal;
     }
-    if ( m_impl->m_next_stereo_index >=
-         m_impl->m_dataset->m_stereo_manifest.size() )
+
+    const auto& manifest =
+        left ? m_impl->m_dataset->m_left_manifest
+             : m_impl->m_dataset->m_right_manifest;
+    std::size_t& index =
+        left ? m_impl->m_next_left_index : m_impl->m_next_right_index;
+    if ( index >= manifest.size() )
     {
       return DatasetReaderEnd{};
     }
 
-    const auto& reference =
-        m_impl->m_dataset
-            ->m_stereo_manifest[ m_impl->m_next_stereo_index ];
-    const std::size_t record_number = m_impl->m_next_stereo_index + 1;
-    auto              decoded       = decodeStereo(
-        reference, m_impl->m_dataset->m_calibration,
-        m_impl->m_dataset->m_left_pixel_type,
-        m_impl->m_dataset->m_right_pixel_type, "left_camera", "right_camera",
-        m_impl->m_next_stereo_index );
+    const auto&       reference     = manifest[ index ];
+    const std::size_t record_number = index + 1;
+    const auto&       calibration   = m_impl->m_dataset->m_calibration;
+    const auto        decoded       = decodeImage(
+        reference.image_path, left ? "left_camera" : "right_camera", index,
+        reference.timestamp,
+        left ? calibration.leftCamera().imageWidth()
+                          : calibration.rightCamera().imageWidth(),
+        left ? calibration.leftCamera().imageHeight()
+                          : calibration.rightCamera().imageHeight(),
+        left ? m_impl->m_dataset->m_left_pixel_type
+                          : m_impl->m_dataset->m_right_pixel_type );
     if ( !decoded )
     {
-      m_impl->m_terminal_error =
+      terminal =
           makeReaderError( decoded.error(), record_number, reference.timestamp );
-      return *m_impl->m_terminal_error;
+      return *terminal;
     }
 
-    ++m_impl->m_next_stereo_index;
-    return std::move( decoded ).value();
+    ++index;
+    return sensor::ImageFrameEvent{ camera, reference.timestamp,
+                                    std::move( decoded ).value() };
   }
 
 }  // namespace phad::io::dataset

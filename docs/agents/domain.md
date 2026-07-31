@@ -16,12 +16,19 @@
 
 ```text
 /
+├── AGENTS.md                 # 根：skills、跨库偏好/事实、模块索引
 ├── CONTEXT.md
 ├── docs/
+│   ├── AGENTS.md             # docs 工作流约定
 │   ├── adr/
-│   └── agents/
-└── src/
+│   └── agents/               # 跨库 agent 规则（naming/style 等）
+├── phad/<lib>/AGENTS.md      # 模块作用域 agent 提示
+├── apps/AGENTS.md
+├── tests/AGENTS.md
+└── scripts/AGENTS.md
 ```
+
+模块细节写在对应目录 `AGENTS.md`，勿堆进根 `AGENTS.md`。
 
 ## 领域词汇
 

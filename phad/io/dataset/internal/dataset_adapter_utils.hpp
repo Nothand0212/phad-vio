@@ -92,9 +92,7 @@ namespace phad::io::dataset::internal
   [[nodiscard]] DatasetResult<std::vector<sensor::ImuMeasurement>> parseImuCsv(
       const std::filesystem::path& csv_path, const std::string& sensor_id );
 
-  [[nodiscard]] DatasetResult<std::vector<StereoFrameManifestEntry>> joinStereo(
-      const std::vector<CameraRecord>& left_records,
-      const std::vector<CameraRecord>& right_records,
-      const std::filesystem::path&     source_path );
+  [[nodiscard]] std::vector<ImageFrameManifestEntry> toImageManifest(
+      const std::vector<CameraRecord>& records );
 
 }  // namespace phad::io::dataset::internal

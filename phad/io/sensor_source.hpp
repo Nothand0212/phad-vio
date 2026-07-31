@@ -6,15 +6,15 @@
 #include <variant>
 
 #include "phad/common/timestamp.hpp"
+#include "phad/sensor/camera_id.hpp"
 #include "phad/sensor/imu_measurement.hpp"
-#include "phad/sensor/stereo_frame.hpp"
 #include "phad/sensor/stereo_imu_calibration.hpp"
 
 namespace phad::io
 {
 
   using SensorEvent =
-      std::variant<sensor::ImuMeasurement, sensor::StereoFrame>;
+      std::variant<sensor::ImuMeasurement, sensor::ImageFrameEvent>;
 
   struct EndOfStream
   {

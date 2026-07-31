@@ -12,8 +12,10 @@
 #include <variant>
 #include <vector>
 
+#include "apps/stereo_pair_stream.hpp"
 #include "phad/camera/stereo_rectifier.hpp"
 #include "phad/frontend/stereo_tracker.hpp"
+#include "phad/io/dataset/dataset_replay_source.hpp"
 #include "phad/io/dataset/euroc/euroc_dataset.hpp"
 #include "phad/io/dataset/stereo_imu_dataset.hpp"
 
@@ -38,9 +40,9 @@ namespace
 
   struct LiveRecord
   {
-    std::int64_t    first_timestamp_ns = 0;
-    std::int64_t    last_timestamp_ns  = 0;
-    std::uint32_t   length             = 0;
+    std::int64_t  first_timestamp_ns = 0;
+    std::int64_t  last_timestamp_ns  = 0;
+    std::uint32_t length             = 0;
   };
 
   [[nodiscard]] bool parseArguments( int argc, char** argv,
@@ -79,9 +81,9 @@ namespace
   }
 
   void writeDeadTracks(
-      std::ofstream&                                           tracks_out,
+      std::ofstream&                                              tracks_out,
       std::unordered_map<phad::frontend::LandmarkId, LiveRecord>& live,
-      const phad::frontend::FrameTracks&                       current )
+      const phad::frontend::FrameTracks&                          current )
   {
     std::unordered_map<phad::frontend::LandmarkId, LiveRecord> next;
     next.reserve( current.observations.size() );
@@ -115,7 +117,7 @@ namespace
   }
 
   void flushLiveTracks(
-      std::ofstream&                                                 tracks_out,
+      std::ofstream&                                                    tracks_out,
       const std::unordered_map<phad::frontend::LandmarkId, LiveRecord>& live )
   {
     for ( const auto& [ id, record ] : live )
@@ -169,40 +171,40 @@ namespace
       tracks_out << "id,first_timestamp_ns,last_timestamp_ns,length\n";
     }
 
-    auto reader = opened.value().reader();
+    phad::io::dataset::DatasetReplaySource                     source{ opened.value() };
+    phad::apps::StereoPairStream                               stream{ source };
     std::unordered_map<phad::frontend::LandmarkId, LiveRecord> live;
 
-    std::uint64_t frame_count      = 0;
-    std::uint64_t min_tracks       = 0;
-    bool          have_min_tracks  = false;
-    std::uint64_t sum_obs          = 0;
-    std::uint64_t sum_valid        = 0;
-    std::uint64_t sum_no_right     = 0;
-    std::uint64_t sum_invalid_disp = 0;
-    std::uint64_t sum_depth        = 0;
-    std::uint64_t sum_fb           = 0;
-    std::uint64_t sum_tracked      = 0;
-    std::uint64_t sum_detected     = 0;
+    std::uint64_t       frame_count      = 0;
+    std::uint64_t       min_tracks       = 0;
+    bool                have_min_tracks  = false;
+    std::uint64_t       sum_obs          = 0;
+    std::uint64_t       sum_valid        = 0;
+    std::uint64_t       sum_no_right     = 0;
+    std::uint64_t       sum_invalid_disp = 0;
+    std::uint64_t       sum_depth        = 0;
+    std::uint64_t       sum_fb           = 0;
+    std::uint64_t       sum_tracked      = 0;
+    std::uint64_t       sum_detected     = 0;
     std::vector<double> epipolar_medians;
     std::vector<double> epipolar_p95s;
 
     while ( true )
     {
-      auto loaded = reader.takeStereo();
-      if ( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
-               loaded ) )
+      auto loaded = stream.next();
+      if ( std::holds_alternative<phad::io::EndOfStream>( loaded ) )
       {
         break;
       }
       if ( const auto* error =
-               std::get_if<phad::io::dataset::DatasetReaderError>( &loaded ) )
+               std::get_if<phad::apps::StreamError>( &loaded ) )
       {
-        std::cerr << "reader error at record " << error->record_number << '\n';
+        std::cerr << "stereo stream error: " << error->detail << '\n';
         return 1;
       }
 
-      const auto& raw = std::get<phad::sensor::StereoFrame>( loaded );
-      auto rectified  = rectifier.value().rectify( raw );
+      const auto& raw       = std::get<phad::sensor::StereoFrame>( loaded );
+      auto        rectified = rectifier.value().rectify( raw );
       if ( !rectified )
       {
         std::cerr << "rectify failed: " << rectified.error().detail << '\n';
@@ -212,10 +214,10 @@ namespace
       const phad::frontend::FrameTracks tracks =
           tracker.process( rectified.value() );
 
-      std::uint32_t valid = 0;
-      std::uint32_t no_right = 0;
+      std::uint32_t valid        = 0;
+      std::uint32_t no_right     = 0;
       std::uint32_t invalid_disp = 0;
-      std::uint32_t depth = 0;
+      std::uint32_t depth        = 0;
       for ( const auto& observation : tracks.observations )
       {
         switch ( observation.status )
@@ -273,8 +275,7 @@ namespace
       flushLiveTracks( tracks_out, live );
     }
 
-    const auto percentile = []( std::vector<double> values, double q )
-    {
+    const auto percentile = []( std::vector<double> values, double q ) {
       if ( values.empty() )
       {
         return 0.0;

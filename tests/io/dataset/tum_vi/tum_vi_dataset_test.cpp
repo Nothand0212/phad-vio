@@ -1,5 +1,7 @@
 #include "phad/io/dataset/tum_vi/tum_vi_dataset.hpp"
 
+#include "phad/sensor/camera_id.hpp"
+
 #include <gtest/gtest.h>
 
 #include <array>
@@ -158,6 +160,12 @@ namespace
     fs::path m_root;
   };
 
+  phad::sensor::CameraId cameraFromSensorId( const std::string& sensor_id )
+  {
+    return sensor_id == "right_camera" ? phad::sensor::CameraId::kRight
+                                       : phad::sensor::CameraId::kLeft;
+  }
+
   void expectStickyTerminalError(
       phad::io::dataset::StereoImuDatasetReader&   reader,
       const phad::io::dataset::DatasetReaderError& expected )
@@ -170,26 +178,27 @@ namespace
           std::get<phad::io::dataset::DatasetReaderError>( result ),
           expected );
     };
-    expect_error( reader.takeImu() );
-    expect_error( reader.peekStereoTimestamp() );
-    expect_error( reader.takeStereo() );
-    expect_error( reader.takeStereo() );
+    const auto camera = cameraFromSensorId( expected.sensor_id );
+    expect_error( reader.peekImageTimestamp( camera ) );
+    expect_error( reader.takeImage( camera ) );
+    expect_error( reader.takeImage( camera ) );
   }
 
-  void expectLazyStickyStereoError(
+  void expectLazyStickyImageError(
       phad::io::dataset::StereoImuDatasetReader& reader,
       phad::io::dataset::DatasetReaderErrorCode  expected_code,
       const std::string&                         expected_sensor_id,
       std::int64_t expected_timestamp, std::size_t expected_record_number,
       const fs::path& fixture_root )
   {
-    const auto peeked = reader.peekStereoTimestamp();
+    const auto camera = cameraFromSensorId( expected_sensor_id );
+    const auto peeked = reader.peekImageTimestamp( camera );
     ASSERT_TRUE(
         std::holds_alternative<phad::common::Timestamp>( peeked ) );
     EXPECT_EQ( std::get<phad::common::Timestamp>( peeked ).nanoseconds(),
                expected_timestamp );
 
-    const auto failed = reader.takeStereo();
+    const auto failed = reader.takeImage( camera );
     ASSERT_TRUE(
         std::holds_alternative<phad::io::dataset::DatasetReaderError>(
             failed ) );
@@ -221,7 +230,7 @@ namespace
     EXPECT_NE( error.cause.find( ": " + detail ), std::string::npos );
   }
 
-  TEST( TumViDatasetTest, OpensNormalizedCalibrationImuAndUint16Stereo )
+  TEST( TumViDatasetTest, OpensNormalizedCalibrationImuAndUint16Images )
   {
     TumViFixture fixture;
     auto         opened = phad::io::dataset::tum_vi::open( fixture.root() );
@@ -237,12 +246,19 @@ namespace
                TumViFixture::kFirstTimestamp - 5'000'000 );
     EXPECT_EQ( summary.imu.last_timestamp->nanoseconds(),
                TumViFixture::kFirstTimestamp + 10'000'000 );
-    ASSERT_EQ( summary.stereo.count, 3U );
-    ASSERT_TRUE( summary.stereo.first_timestamp.has_value() );
-    ASSERT_TRUE( summary.stereo.last_timestamp.has_value() );
-    EXPECT_EQ( summary.stereo.first_timestamp->nanoseconds(),
+    ASSERT_EQ( summary.left.count, 3U );
+    ASSERT_TRUE( summary.left.first_timestamp.has_value() );
+    ASSERT_TRUE( summary.left.last_timestamp.has_value() );
+    EXPECT_EQ( summary.left.first_timestamp->nanoseconds(),
                TumViFixture::kFirstTimestamp );
-    EXPECT_EQ( summary.stereo.last_timestamp->nanoseconds(),
+    EXPECT_EQ( summary.left.last_timestamp->nanoseconds(),
+               TumViFixture::kFirstTimestamp + 100'000'000 );
+    ASSERT_EQ( summary.right.count, 3U );
+    ASSERT_TRUE( summary.right.first_timestamp.has_value() );
+    ASSERT_TRUE( summary.right.last_timestamp.has_value() );
+    EXPECT_EQ( summary.right.first_timestamp->nanoseconds(),
+               TumViFixture::kFirstTimestamp );
+    EXPECT_EQ( summary.right.last_timestamp->nanoseconds(),
                TumViFixture::kFirstTimestamp + 100'000'000 );
     EXPECT_TRUE(
         std::holds_alternative<phad::sensor::PinholeEquidistantParameters>(
@@ -279,42 +295,55 @@ namespace
     EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
         reader.takeImu() ) );
 
-    for ( std::size_t index = 0; index < summary.stereo.count; ++index )
+    for ( std::size_t index = 0; index < summary.left.count; ++index )
     {
       const auto expected_timestamp =
           TumViFixture::kFirstTimestamp +
           static_cast<std::int64_t>( index ) * 50'000'000;
-      const auto peeked = reader.peekStereoTimestamp();
+      const auto peeked =
+          reader.peekImageTimestamp( phad::sensor::CameraId::kLeft );
       ASSERT_TRUE(
           std::holds_alternative<phad::common::Timestamp>( peeked ) );
       EXPECT_EQ( std::get<phad::common::Timestamp>( peeked ).nanoseconds(),
                  expected_timestamp );
 
-      const auto taken = reader.takeStereo();
+      const auto left_taken =
+          reader.takeImage( phad::sensor::CameraId::kLeft );
       ASSERT_TRUE(
-          std::holds_alternative<phad::sensor::StereoFrame>( taken ) );
-      const auto& frame = std::get<phad::sensor::StereoFrame>( taken );
-      EXPECT_EQ( frame.timestamp.nanoseconds(), expected_timestamp );
-      EXPECT_EQ( frame.left.pixelType(), phad::sensor::PixelType::kUint16 );
-      EXPECT_EQ( frame.right.pixelType(), phad::sensor::PixelType::kUint16 );
-      const auto left_pixels  = frame.left.pixels<std::uint16_t>();
-      const auto right_pixels = frame.right.pixels<std::uint16_t>();
+          std::holds_alternative<phad::sensor::ImageFrameEvent>( left_taken ) );
+      const auto& left_event =
+          std::get<phad::sensor::ImageFrameEvent>( left_taken );
+      EXPECT_EQ( left_event.timestamp.nanoseconds(), expected_timestamp );
+      EXPECT_EQ( left_event.camera, phad::sensor::CameraId::kLeft );
+      EXPECT_EQ( left_event.image.pixelType(), phad::sensor::PixelType::kUint16 );
+      const auto left_pixels = left_event.image.pixels<std::uint16_t>();
       ASSERT_TRUE( left_pixels.has_value() );
-      ASSERT_TRUE( right_pixels.has_value() );
       EXPECT_EQ( left_pixels->size(), 12U );
       EXPECT_EQ( left_pixels->front(), 1000U + index );
+      EXPECT_FALSE( left_event.image.pixels<std::uint8_t>().has_value() );
+
+      const auto right_taken =
+          reader.takeImage( phad::sensor::CameraId::kRight );
+      ASSERT_TRUE(
+          std::holds_alternative<phad::sensor::ImageFrameEvent>( right_taken ) );
+      const auto& right_event =
+          std::get<phad::sensor::ImageFrameEvent>( right_taken );
+      EXPECT_EQ( right_event.timestamp.nanoseconds(), expected_timestamp );
+      EXPECT_EQ( right_event.camera, phad::sensor::CameraId::kRight );
+      EXPECT_EQ( right_event.image.pixelType(), phad::sensor::PixelType::kUint16 );
+      const auto right_pixels = right_event.image.pixels<std::uint16_t>();
+      ASSERT_TRUE( right_pixels.has_value() );
       EXPECT_EQ( right_pixels->front(), 2000U + index );
-      EXPECT_FALSE( frame.left.pixels<std::uint8_t>().has_value() );
-      EXPECT_FALSE( frame.right.pixels<std::uint8_t>().has_value() );
+      EXPECT_FALSE( right_event.image.pixels<std::uint8_t>().has_value() );
     }
     EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
-        reader.peekStereoTimestamp() ) );
+        reader.peekImageTimestamp( phad::sensor::CameraId::kLeft ) ) );
     EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
-        reader.peekStereoTimestamp() ) );
+        reader.peekImageTimestamp( phad::sensor::CameraId::kRight ) ) );
     EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
-        reader.takeStereo() ) );
+        reader.takeImage( phad::sensor::CameraId::kLeft ) ) );
     EXPECT_TRUE( std::holds_alternative<phad::io::dataset::DatasetReaderEnd>(
-        reader.takeStereo() ) );
+        reader.takeImage( phad::sensor::CameraId::kRight ) ) );
   }
 
   TEST( TumViDatasetTest, RejectsInvalidKalibrTransformAndDistortion )
@@ -521,7 +550,7 @@ namespace
     }
   }
 
-  TEST( TumViDatasetTest, RejectsStereoMismatch )
+  TEST( TumViDatasetTest, AcceptsUnequalLengthCameraManifests )
   {
     TumViFixture fixture;
     fixture.writeCameraCsv(
@@ -529,10 +558,10 @@ namespace
         "#timestamp [ns],filename\n"
         "1520531829251142059,1520531829251142058.png\n" );
     auto opened = phad::io::dataset::tum_vi::open( fixture.root() );
-    ASSERT_FALSE( opened.hasValue() );
-    EXPECT_EQ(
-        opened.error().code,
-        phad::io::dataset::DatasetErrorCode::kStereoTimestampMismatch );
+    ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
+    const auto summary = opened.value().summary();
+    EXPECT_EQ( summary.left.count, 3U );
+    EXPECT_EQ( summary.right.count, 1U );
   }
 
   TEST( TumViDatasetTest, WrongPixelDepthFailsLazilyAndIsSticky )
@@ -542,12 +571,15 @@ namespace
                         CV_8UC1 );
     auto opened = phad::io::dataset::tum_vi::open( fixture.root() );
     ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
-    EXPECT_EQ( opened.value().summary().stereo.count, 3U );
+    EXPECT_EQ( opened.value().summary().left.count, 3U );
+    EXPECT_EQ( opened.value().summary().right.count, 3U );
 
     auto reader = opened.value().reader();
-    EXPECT_TRUE( std::holds_alternative<phad::sensor::StereoFrame>(
-        reader.takeStereo() ) );
-    expectLazyStickyStereoError(
+    ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+        reader.takeImage( phad::sensor::CameraId::kLeft ) ) );
+    ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+        reader.takeImage( phad::sensor::CameraId::kRight ) ) );
+    expectLazyStickyImageError(
         reader,
         phad::io::dataset::DatasetReaderErrorCode::kImageFormatMismatch,
         "left_camera", TumViFixture::kFirstTimestamp + 50'000'000, 2U,
@@ -560,12 +592,15 @@ namespace
     fixture.writeCorruptImage( "cam1", "1520531829301142058.png" );
     auto opened = phad::io::dataset::tum_vi::open( fixture.root() );
     ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
-    EXPECT_EQ( opened.value().summary().stereo.count, 3U );
+    EXPECT_EQ( opened.value().summary().left.count, 3U );
+    EXPECT_EQ( opened.value().summary().right.count, 3U );
 
     auto reader = opened.value().reader();
-    EXPECT_TRUE( std::holds_alternative<phad::sensor::StereoFrame>(
-        reader.takeStereo() ) );
-    expectLazyStickyStereoError(
+    ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+        reader.takeImage( phad::sensor::CameraId::kLeft ) ) );
+    ASSERT_TRUE( std::holds_alternative<phad::sensor::ImageFrameEvent>(
+        reader.takeImage( phad::sensor::CameraId::kRight ) ) );
+    expectLazyStickyImageError(
         reader, phad::io::dataset::DatasetReaderErrorCode::kImageDecodeFailed,
         "right_camera", TumViFixture::kFirstTimestamp + 50'000'000, 2U,
         fixture.root() );
@@ -578,10 +613,11 @@ namespace
                         CV_16UC1, 5, 3 );
     auto opened = phad::io::dataset::tum_vi::open( fixture.root() );
     ASSERT_TRUE( opened.hasValue() ) << opened.error().describe();
-    EXPECT_EQ( opened.value().summary().stereo.count, 3U );
+    EXPECT_EQ( opened.value().summary().left.count, 3U );
+    EXPECT_EQ( opened.value().summary().right.count, 3U );
 
     auto reader = opened.value().reader();
-    expectLazyStickyStereoError(
+    expectLazyStickyImageError(
         reader,
         phad::io::dataset::DatasetReaderErrorCode::kImageFormatMismatch,
         "left_camera", TumViFixture::kFirstTimestamp, 1U, fixture.root() );
