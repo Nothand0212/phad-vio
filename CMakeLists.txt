@@ -97,6 +97,20 @@ target_compile_options(phad_eval PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
+add_library(phad_frontend
+  phad/frontend/stereo_tracker.cpp
+)
+add_library(phad::frontend ALIAS phad_frontend)
+target_compile_features(phad_frontend PUBLIC cxx_std_20)
+target_include_directories(phad_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(phad_frontend
+  PUBLIC phad::camera
+  PRIVATE opencv_core opencv_imgproc opencv_video
+)
+target_compile_options(phad_frontend PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
 add_library(phad_viz
   phad/viz/image_window.cpp
   phad/viz/trajectory_panel.cpp
@@ -176,6 +190,20 @@ if(PHAD_BUILD_TESTS)
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
   )
   gtest_discover_tests(phad_eval_tests PROPERTIES LABELS "unit")
+
+  add_executable(phad_frontend_tests
+    tests/frontend/stereo_tracker_test.cpp
+  )
+  target_link_libraries(phad_frontend_tests PRIVATE
+    phad::frontend GTest::gtest_main
+  )
+  target_include_directories(phad_frontend_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_compile_options(phad_frontend_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+  gtest_discover_tests(phad_frontend_tests PROPERTIES LABELS "unit")
 
   add_executable(phad_viz_tests
     tests/viz/trajectory_panel_test.cpp
