@@ -42,6 +42,17 @@ target_compile_options(phad_sensor PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
+add_library(phad_sync
+  phad/sync/stereo_pair_synchronizer.cpp
+)
+add_library(phad::sync ALIAS phad_sync)
+target_compile_features(phad_sync PUBLIC cxx_std_20)
+target_include_directories(phad_sync PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(phad_sync PUBLIC phad::sensor phad::common)
+target_compile_options(phad_sync PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
 add_library(phad_camera
   phad/camera/camera_model.cpp
   phad/camera/rectified_stereo_calibration.cpp
@@ -246,6 +257,17 @@ if(PHAD_BUILD_TESTS)
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
   )
   gtest_discover_tests(phad_sensor_tests PROPERTIES LABELS "unit")
+
+  add_executable(phad_sync_tests
+    tests/sync/stereo_pair_synchronizer_test.cpp
+  )
+  target_link_libraries(phad_sync_tests PRIVATE
+    phad::sync GTest::gtest_main
+  )
+  target_compile_options(phad_sync_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+  gtest_discover_tests(phad_sync_tests PROPERTIES LABELS "unit")
 
   add_executable(phad_camera_tests
     tests/camera/camera_model_header_test.cpp

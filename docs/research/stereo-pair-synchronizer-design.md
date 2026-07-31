@@ -35,6 +35,15 @@
 | 输出获取 | 只有 `tryPop()`，不提供回调 |
 | 错误码清理 | 删除 `DatasetErrorCode::kStereoTimestampMismatch`（退役后无触发者） |
 
+实施前对齐补充（2026-07-31，写入计划）：
+
+| 项 | 选择 |
+|---|---|
+| `summary.json` sync 段 | `schema_version` 保持 1；新增可选 `"sync"`（字段对齐 `StereoPairDiagnostics`）；`bench_table.py` 不读 |
+| 首次 drop / overflow warning | `sync` 只计数；stream/session 写入 `summary.warnings` / `meta.warnings`；库不接日志 |
+| emit=0 | `StereoPairStream::next()` → `EndOfStream`；零配对由 session / `summary.sync` 体现 |
+| MH_01 逐字节参考 | 既有 M3.1 产物 `…/MH_01_easy/2b28616/default_0885385a/{est.tum,diag.csv}` |
+
 根因回顾：`MH_04` / `V1_02` / `V2_03` 官方 ASL 与 bag 左右清单本身不对称；旧 `joinStereo`（等长 + 下标 exact）过严，且 index-zip 在 `V2_03` 上会静默错配。详见 handoff 与开源对照。
 
 ---
@@ -288,3 +297,4 @@ max_left_queue / max_right_queue
 | 6 | 验收用「≈」「≥」，且 `flush()` 只算 front 会漏掉尾部 orphan | §4.3 精确表；§2.3 改为全部剩余计入 |
 | 7 | `kStereoTimestampMismatch` 退役后成为死码，现有用例仍断言它 | §1.3 删枚举；§4.2 改写用例 |
 | 8 | soft tol 的贪心配对未标注为限制 | §5.1 |
+| 9 | `summary.json` sync 字段、warning 落点、emit=0、MH_01 参考路径未钉死 | §0 实施前对齐表；计划正文已收紧 |
