@@ -167,32 +167,30 @@
 M3 拆成两步：**先有可复现对照表，再谈加固**。没有 benchmark，无法判断
 后续改动是优化还是退化；因此 M3.1 阻塞 M3.2。
 
-### M3.1 回归 Benchmark（进行中）
+### M3.1 回归 Benchmark（已完成）
 
 范围：
 
-- 新增纯逻辑库 `phad::bench`（run 身份、config 快照与 hash、路径模板、
+- 纯逻辑库 `phad::bench`（run 身份、config 快照与 hash、路径模板、
   summary schema），零 `phad::*` 依赖；
-- 抽出 `apps/offline_vo_session`（只跑 pipeline，不算 ATE/RPE、不落盘，
-  返回轨迹与时间跨度）；
-- `phad_stereo_vo_probe` 与新建 `phad_vo_bench` 共用 session；
+- `apps/offline_vo_session` 静态库（只跑 pipeline，不算 ATE/RPE、不落盘）；
+- `phad_stereo_vo_probe` 与 `phad_vo_bench` 共用 session；
 - `phad_vo_bench` 作为 composition root：session + `phad::eval` + 落盘；
-- run 身份：`code`（运行时 git commit / dirty，dirty 只看 tracked）+ 完整
-  `config` 快照 + `config_hash`（FNV-1a 64 前 8 hex）；
+- run 身份：运行时 git（dirty 只看 tracked）+ 完整 `config` 快照 +
+  `config_hash`（FNV-1a 64 前 8 hex）；
 - 路径模板：
   `<bench_root>/<sequence>/<commit_short>[_dirty]/<config_label>_<hash8>/`；
-- `summary.json` 主表字段：ATE trans RMSE、RPE(1 s) trans RMSE、
-  completion_rate、coverage_rate、wall-clock / RTF；附带拒帧与阶段 timing；
-- `scripts/bench_table.py` 把多个 `summary.json` 拼成对比表。
+- `summary.json`：ATE / RPE(1 s) trans RMSE、completion_rate、coverage_rate、
+  wall-clock / RTF；附带拒帧与阶段 timing；
+- `scripts/bench_table.py` 把多个 `summary.json` 拼成 Markdown/CSV 对比表。
 
-测试与出口：
+出口（MH_01_easy 复跑）：
 
-- `phad::bench` 与 session 都不依赖 `phad::eval`；
-- probe 迁移前后 `est.tum` 与 `diag.csv` 逐字节相同；
-- `MH_01_easy` 上 `phad_vo_bench` 写出完整产物；ATE 与 M2.3 基线一致
-  （translation RMSE ≈ 0.150 m）；
-- clean 树同路径无 `--force` 时拒绝覆盖（dirty 树覆盖并警告）；身份字段、
-  `config_hash` 稳定性与路径模板可单测。
+- probe 迁移前后 `est.tum` / `diag.csv` 逐字节相同；
+- `phad_vo_bench` ATE translation RMSE ≈ **0.150155 m**（与 M2.3 基线
+  ≈ 0.150 m 一致；`phad_traj_eval` 交叉验证同值）；
+- `completion_rate = 1.0`，`coverage_rate = 1.0`；
+- clean 树无 `--force` 拒绝覆盖（exit 3）；dirty 树覆盖并警告。
 
 v1 **只钉 MH_01**、只支持 EuRoC；多序列矩阵留给 M3.2。设计见
 [M3.1 VO 回归 Benchmark 设计](research/m3.1-vo-regression-benchmark-design.md)，
