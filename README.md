@@ -64,13 +64,39 @@ M2 的其余部分是**双目 VO 最小闭环**：接入 OpenCV LK 前端和 GTS
 
 当前构建所需：
 
-- OpenCV 4（`core`、`highgui`、`imgcodecs`、`imgproc`）
-- Eigen 3.4
+- OpenCV 4（`core`、`highgui`、`imgcodecs`、`imgproc`、`calib3d`、`video`）
+- Eigen 3.4（须与构建 GTSAM 时使用的同一份 Eigen，避免 ODR 问题）
 - yaml-cpp 0.8
+- GTSAM 4.3（`find_package(GTSAM 4.3 REQUIRED)`；本仓库用系统/前缀安装，不
+  把源码放进 git）
 - GoogleTest 1.14（`PHAD_BUILD_TESTS=ON` 时）
 
-已在本地 `thirdparty/`（gitignore）准备、但尚未接入 `CMakeLists.txt`，
-将在 M2.3 引入后端时接入：
+已在本地 `thirdparty/`（gitignore）准备、但尚未接入 `CMakeLists.txt`：
 
-- GTSAM 4.3a1
 - spdlog 1.17.0
+
+### 安装 GTSAM 4.3
+
+`thirdparty/` 被 gitignore，不能默认别人机器上已有安装。推荐从
+[borglab/gtsam](https://github.com/borglab/gtsam) 的 4.3 发布标签构建并安装到
+`/usr/local`（或任意 CMAKE_PREFIX_PATH）：
+
+```bash
+git clone --depth 1 --branch 4.3a1 https://github.com/borglab/gtsam.git
+cmake -S gtsam -B gtsam/build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DGTSAM_USE_SYSTEM_EIGEN=ON \
+  -DGTSAM_BUILD_PYTHON=OFF \
+  -DGTSAM_BUILD_TESTS=OFF \
+  -DGTSAM_BUILD_EXAMPLES_ALWAYS=OFF
+cmake --build gtsam/build -j"$(nproc)"
+sudo cmake --install gtsam/build
+```
+
+要点：
+
+- `GTSAM_USE_SYSTEM_EIGEN=ON`，与本仓库的 `Eigen3::Eigen` 3.4 对齐；
+- 若 GTSAM 带 `-march=native` 构建，跨机器分发可能有对齐/ABI 问题；本项目
+  当前只在本机构建与验收；
+- 配置本仓库时若 GTSAM 不在默认前缀：  
+  `cmake -S . -B build -DCMAKE_PREFIX_PATH=/path/to/gtsam/prefix`。
