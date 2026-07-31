@@ -251,6 +251,11 @@ namespace phad::estimator
         throw std::invalid_argument(
             "EstimatorOptions.min_landmark_observations must be >= 1" );
       }
+      if ( options.min_seed_observations < 1 )
+      {
+        throw std::invalid_argument(
+            "EstimatorOptions.min_seed_observations must be >= 1" );
+      }
       if ( options.stereo_sigma_px <= 0.0 )
       {
         throw std::invalid_argument(
