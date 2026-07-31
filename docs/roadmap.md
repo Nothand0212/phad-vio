@@ -72,7 +72,7 @@ frontend，也不产出 `KeyframeMeasurement`。
 本里程碑的目标是拿到**第一个真实 ATE 数字**，不追求精度。拆为三个各自
 产出可观察行为的小步。
 
-### M2.1 评估与可视化底座
+### M2.1 评估与可视化底座（已完成）
 
 范围：
 
@@ -81,7 +81,7 @@ frontend，也不产出 `KeyframeMeasurement`。
 - TUM 格式（`timestamp tx ty tz qx qy qz qw`）轨迹导出；
 - 估计轨迹与真值的时间关联（最近邻 + 最大时间差阈值）；
 - SE3 对齐（Umeyama，双目尺度已知故不估 scale）与 ATE RMSE；
-- 固定时间/距离间隔的 RPE；
+- 固定时间间隔的 RPE（默认 1 s）；距离间隔 RPE 有意不做，后续按需再加；
 - OpenCV highgui 实时 2D 面板：俯视 x-y 轨迹叠加真值、图像窗口；
 - Python 离线脚本：3D 轨迹、误差随时间曲线。
 
@@ -93,11 +93,14 @@ frontend，也不产出 `KeyframeMeasurement`。
 - 时间关联失败路径：估计时间戳超出真值范围、间隔过大、数量为零；
 - 与 `evo` 的交叉验证（离线，非 CI）：同一对轨迹的 ATE RMSE 一致。
 
-出口：
+出口（已满足）：
 
 - 真值自比 ATE 为 0；
 - 轨迹文件可被 `evo` 直接读取；
 - 实时面板可在回放 `MH_01_easy` 时显示真值轨迹与当前图像。
+
+实施计划见
+[M2.1 评估可视化底座](plans/2026-07-30_m2.1_eval_visualization_baseline_d818d653.plan.md)。
 
 ### M2.2 双目前端
 
