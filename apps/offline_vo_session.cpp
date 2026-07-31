@@ -5,7 +5,9 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -27,6 +29,12 @@ namespace phad::apps
 {
   namespace
   {
+
+    // Must match phad::estimator::StereoVoEstimator::update reject messages.
+    constexpr std::string_view kSeedRejectedNewSegment =
+        "insufficient observations to seed new segment";
+    constexpr std::string_view kSeedRejectedFirstSegment =
+        "insufficient observations to seed first segment";
 
     [[nodiscard]] double percentile( std::vector<double> values, double q )
     {
@@ -101,6 +109,11 @@ namespace phad::apps
     std::vector<double>            estimator_s;
     std::vector<double>            total_s;
 
+    std::optional<std::uint32_t> last_segment_id;
+    bool                          any_segment_established = false;
+    bool                          warned_reanchor          = false;
+    std::vector<std::string>     segment_warnings;
+
     const auto                       wall_begin = std::chrono::steady_clock::now();
     io::dataset::DatasetReplaySource source{ opened.value() };
     StereoPairStream                 stream{ source };
@@ -122,6 +135,9 @@ namespace phad::apps
         result.error    = SessionError{ error->detail };
         result.sync     = stream.diagnostics();
         result.warnings = stream.warnings();
+        result.warnings.insert( result.warnings.end(),
+                                segment_warnings.begin(),
+                                segment_warnings.end() );
         return result;
       }
 
@@ -165,6 +181,11 @@ namespace phad::apps
           break;
         case estimator::UpdateStatus::kRejected:
           ++result.counts.rejected;
+          if ( update.message == kSeedRejectedNewSegment ||
+               update.message == kSeedRejectedFirstSegment )
+          {
+            ++result.counts.seed_rejected;
+          }
           break;
         case estimator::UpdateStatus::kFailed:
           ++result.counts.failed;
@@ -182,6 +203,22 @@ namespace phad::apps
         pose.timestamp = update.estimate->timestamp;
         pose.T_W_B     = update.estimate->T_W_B;
         poses.push_back( pose );
+
+        const std::uint32_t segment_id = update.diagnostics.segment_id;
+        if ( last_segment_id.has_value() && segment_id > *last_segment_id )
+        {
+          ++result.counts.reanchors;
+          if ( !warned_reanchor )
+          {
+            segment_warnings.push_back(
+                "vo re-anchored: ts=" +
+                std::to_string( tracks.timestamp.nanoseconds() ) +
+                " segment_id=" + std::to_string( segment_id ) );
+            warned_reanchor = true;
+          }
+        }
+        any_segment_established = true;
+        last_segment_id          = segment_id;
       }
 
       const auto& d = update.diagnostics;
@@ -199,6 +236,7 @@ namespace phad::apps
           .num_cheirality          = d.num_cheirality,
           .lm_iterations           = d.lm_iterations,
           .max_window_pose_shift_m = d.max_window_pose_shift_m,
+          .segment_id              = d.segment_id,
       } );
 
       if ( options.collect_timing )
@@ -228,7 +266,17 @@ namespace phad::apps
     result.reproj.median_px = percentile( rms_after, 0.5 );
     result.reproj.p95_px    = percentile( rms_after, 0.95 );
     result.sync             = stream.diagnostics();
-    result.warnings         = stream.warnings();
+    result.counts.segments =
+        any_segment_established ? result.counts.reanchors + 1U : 0U;
+
+    result.warnings = stream.warnings();
+    result.warnings.insert( result.warnings.end(), segment_warnings.begin(),
+                            segment_warnings.end() );
+    result.warnings.push_back(
+        "vo segments summary: segments=" +
+        std::to_string( result.counts.segments ) +
+        " reanchors=" + std::to_string( result.counts.reanchors ) +
+        " seed_rejected=" + std::to_string( result.counts.seed_rejected ) );
 
     if ( poses.empty() )
     {
@@ -259,7 +307,7 @@ namespace phad::apps
     out << "timestamp_ns,status,num_obs,num_landmarks,num_shared,"
            "low_connectivity,window_size,prior_key,"
            "reproj_rms_before_px,reproj_rms_after_px,num_cheirality,"
-           "lm_iterations,max_window_pose_shift_m\n";
+           "lm_iterations,max_window_pose_shift_m,segment_id\n";
 
     for ( const VoDiagRow& row : rows )
     {
@@ -271,7 +319,8 @@ namespace phad::apps
           << row.window_size << ',' << row.prior_key << ',' << std::fixed
           << std::setprecision( 6 ) << row.reproj_rms_before_px << ','
           << row.reproj_rms_after_px << ',' << row.num_cheirality << ','
-          << row.lm_iterations << ',' << row.max_window_pose_shift_m << '\n';
+          << row.lm_iterations << ',' << row.max_window_pose_shift_m << ','
+          << row.segment_id << '\n';
     }
 
     if ( !out )

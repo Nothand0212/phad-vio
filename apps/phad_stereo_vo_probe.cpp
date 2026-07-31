@@ -113,6 +113,9 @@ namespace
               << "reject_rate=" << reject_rate << '\n'
               << "low_connectivity_frames=" << result.counts.low_connectivity
               << '\n'
+              << "segments=" << result.counts.segments << '\n'
+              << "reanchors=" << result.counts.reanchors << '\n'
+              << "seed_rejected=" << result.counts.seed_rejected << '\n'
               << "reproj_rms_after_median_px=" << result.reproj.median_px
               << '\n'
               << "reproj_rms_after_p95_px=" << result.reproj.p95_px << '\n'
