@@ -150,7 +150,14 @@
 
 - `MH_01_easy` 跑完不崩，产出完整轨迹文件；
 - ATE 有限且量级合理（米级即算通过），轨迹形状目视正确；
-- **不要求精度**；该数字作为后续所有里程碑的基线。
+- **不要求精度**；该数字连同拒帧比例与重投影误差分布一起作为后续所有里程碑
+  的基线。
+
+设计见 [M2.3 VO 后端设计](research/m2.3-vo-backend-design.md)，
+开源对照见
+[M2.3 VO backend open source references](research/m2.3-vo-backend-open-source-refs.md)。
+实施计划见
+[M2.3 VO 后端](plans/2026-07-31_m2.3_vo_backend_dcdbfc71.plan.md)。
 
 ## M3：让 VO 变稳
 
