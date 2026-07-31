@@ -136,6 +136,83 @@ namespace phad::estimator
       return std::sqrt( sum_sq / static_cast<double>( count ) );
     }
 
+    // GenericStereoFactor returns 2*fx on each residual axis when the point is
+    // behind the camera (throwCheirality=false).
+    [[nodiscard]] std::uint32_t countCheiralityFactors(
+        const gtsam::NonlinearFactorGraph& graph, const gtsam::Values& values,
+        double fx_pixels )
+    {
+      const double  sentinel = 2.0 * fx_pixels;
+      std::uint32_t count    = 0;
+      for ( const auto& factor : graph )
+      {
+        if ( factor == nullptr )
+        {
+          continue;
+        }
+        const auto* stereo =
+            dynamic_cast<const gtsam::GenericStereoFactor<gtsam::Pose3,
+                                                          gtsam::Point3>*>(
+                factor.get() );
+        if ( stereo == nullptr )
+        {
+          continue;
+        }
+        const gtsam::Vector error = stereo->unwhitenedError( values );
+        if ( error.size() == 3 &&
+             std::abs( error( 0 ) - sentinel ) < 1e-6 &&
+             std::abs( error( 1 ) - sentinel ) < 1e-6 &&
+             std::abs( error( 2 ) - sentinel ) < 1e-6 )
+        {
+          ++count;
+        }
+      }
+      return count;
+    }
+
+    [[nodiscard]] std::uint32_t countBehindCameraLandmarks(
+        const std::deque<WindowFrame>&                         window,
+        const std::unordered_map<LandmarkId, Eigen::Vector3d>& landmarks_W,
+        const gtsam::Pose3&                                    body_P_sensor,
+        const gtsam::Values&                                   values )
+    {
+      std::uint32_t count = 0;
+      for ( const auto& [ id, point_W ] : landmarks_W )
+      {
+        const gtsam::Key key = L( id );
+        if ( !values.exists( key ) )
+        {
+          continue;
+        }
+        const gtsam::Point3 point = values.at<gtsam::Point3>( key );
+        for ( const WindowFrame& frame : window )
+        {
+          bool observes = false;
+          for ( const StereoObservation& observation : frame.observations )
+          {
+            if ( observation.id == id )
+            {
+              observes = true;
+              break;
+            }
+          }
+          if ( !observes || !values.exists( X( frame.frame_index ) ) )
+          {
+            continue;
+          }
+          const gtsam::Pose3 T_W_left =
+              values.at<gtsam::Pose3>( X( frame.frame_index ) ) *
+              body_P_sensor;
+          if ( T_W_left.transformTo( point ).z() <= 0.0 )
+          {
+            ++count;
+            break;
+          }
+        }
+      }
+      return count;
+    }
+
   }  // namespace
 
   struct StereoVoEstimator::Impl
@@ -217,7 +294,7 @@ namespace phad::estimator
       {
         if ( live.find( it->first ) == live.end() )
         {
-          track_times.erase( it->first );
+          // Keep track_times for diagnostics across the whole run.
           it = landmarks_W.erase( it );
         }
         else
@@ -348,7 +425,6 @@ namespace phad::estimator
       for ( const LandmarkId id : to_drop )
       {
         landmarks_W.erase( id );
-        track_times.erase( id );
         ++dropped;
       }
       return dropped;
@@ -370,6 +446,17 @@ namespace phad::estimator
 
   StereoVoEstimator& StereoVoEstimator::operator=(
       StereoVoEstimator&& ) noexcept = default;
+
+  std::vector<common::Timestamp> StereoVoEstimator::observationTimestamps(
+      LandmarkId id ) const
+  {
+    const auto it = m_impl->track_times.find( id );
+    if ( it == m_impl->track_times.end() )
+    {
+      return {};
+    }
+    return it->second;
+  }
 
   VioUpdateResult StereoVoEstimator::update(
       const KeyframeMeasurement& measurement )
@@ -532,7 +619,11 @@ namespace phad::estimator
         static_cast<std::uint32_t>( m_impl->window.size() );
     result.diagnostics.reproj_rms_before_px =
         stereoReprojRms( graph, values );
-
+    const std::uint32_t cheirality_before = std::max(
+        countCheiralityFactors(
+            graph, values, m_impl->calibration.fxPixels() ),
+        countBehindCameraLandmarks( m_impl->window, m_impl->landmarks_W,
+                                    m_impl->body_P_sensor, values ) );
     std::unordered_map<std::uint64_t, Eigen::Vector3d> poses_before;
     for ( const WindowFrame& frame : m_impl->window )
     {
@@ -620,10 +711,12 @@ namespace phad::estimator
       }
     }
 
-    result.diagnostics.num_cheirality =
+    const std::uint32_t cheirality_after = countCheiralityFactors(
+        graph, optimized, m_impl->calibration.fxPixels() );
+    const std::uint32_t dropped =
         m_impl->dropCheiralityLandmarks( optimized );
-    // Rebuild graph values after cheirality drops for after-RMS on accepted
-    // poses/landmarks still in the optimized Values.
+    result.diagnostics.num_cheirality =
+        std::max( cheirality_before, std::max( cheirality_after, dropped ) );
     result.diagnostics.reproj_rms_after_px =
         stereoReprojRms( graph, optimized );
     result.diagnostics.max_window_pose_shift_m = max_shift_m;

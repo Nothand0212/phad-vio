@@ -1,8 +1,10 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include "phad/camera/rectified_stereo_calibration.hpp"
+#include "phad/common/timestamp.hpp"
 #include "phad/estimator/types.hpp"
 
 namespace phad::estimator
@@ -22,6 +24,11 @@ namespace phad::estimator
 
     [[nodiscard]] VioUpdateResult update(
         const KeyframeMeasurement& measurement );
+
+    /// Timestamps of accepted frames that observed `id` (diagnostic; survives
+    /// window/landmark pruning).
+    [[nodiscard]] std::vector<common::Timestamp> observationTimestamps(
+        LandmarkId id ) const;
 
   private:
     struct Impl;
