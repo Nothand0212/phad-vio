@@ -40,3 +40,18 @@ CSV 的列合同由 `apps/phad_traj_eval.cpp` 定义：
 ```text
 timestamp_ns,dt_ns,err_trans_m,err_rot_deg,est_x,est_y,est_z,gt_x,gt_y,gt_z
 ```
+
+## `plot_tracks.py`
+
+画 `phad_stereo_frontend_probe` 的帧级与 track 生命表：track 数随时间、
+track 长度直方图、epipolar error 直方图。
+
+```bash
+phad_stereo_frontend_probe /path/to/MH_01_easy \
+  --frames-csv /tmp/mh01_frames.csv --tracks-csv /tmp/mh01_tracks.csv
+.venv/bin/python scripts/plot_tracks.py \
+  --frames-csv /tmp/mh01_frames.csv --tracks-csv /tmp/mh01_tracks.csv \
+  --out /tmp/mh01_tracks.png
+```
+
+列合同见 `phad/frontend/README.md`。

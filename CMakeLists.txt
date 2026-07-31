@@ -131,7 +131,13 @@ target_link_libraries(phad_euroc_inspect PRIVATE phad::io_dataset)
 
 add_executable(phad_euroc_runner apps/phad_euroc_runner.cpp)
 target_link_libraries(phad_euroc_runner
-  PRIVATE phad::io_dataset phad::viz opencv_core opencv_imgproc
+  PRIVATE phad::io_dataset phad::frontend phad::viz
+          opencv_core opencv_imgproc
+)
+
+add_executable(phad_stereo_frontend_probe apps/phad_stereo_frontend_probe.cpp)
+target_link_libraries(phad_stereo_frontend_probe
+  PRIVATE phad::io_dataset phad::frontend
 )
 
 add_executable(phad_euroc_gt_export apps/phad_euroc_gt_export.cpp)
@@ -258,6 +264,14 @@ if(PHAD_BUILD_TESTS)
               opencv_core opencv_imgproc opencv_video
     )
     gtest_discover_tests(phad_camera_mh01_test PROPERTIES LABELS "mh01")
+
+    add_executable(phad_frontend_mh01_test
+      tests/frontend/euroc_mh01_frontend_test.cpp
+    )
+    target_link_libraries(phad_frontend_mh01_test
+      PRIVATE phad::frontend phad::io_dataset GTest::gtest_main
+    )
+    gtest_discover_tests(phad_frontend_mh01_test PROPERTIES LABELS "mh01")
   endif()
 
   if(PHAD_ENABLE_TUMVI_CORRIDOR1_TESTS)
