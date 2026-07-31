@@ -250,6 +250,8 @@ adapter 移到独立的同步器——那里同时是 M4 的 IMU 包络与未来
 - 11 条 EuRoC 序列全部产出 `summary.json`（`scripts/bench_table.py` 可刷
   序列 × 版本表）；表中 VO 质量差（如 `V2_03` completion ≈ 0.03、
   `MH_02` / `V1_03` / `V2_02` 低 completion）归 M3.3。
+- 全序列数字快照见
+  [M3.2 EuRoC 全序列基线](research/m3.2-euroc-baseline.md)（钉 `4780660`）。
 
 设计见
 [Stereo Pair Synchronizer 设计](research/stereo-pair-synchronizer-design.md)，
