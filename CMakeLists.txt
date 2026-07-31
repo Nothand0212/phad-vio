@@ -9,7 +9,9 @@ option(PHAD_ENABLE_MH01_TESTS "Enable local EuRoC MH_01 integration tests" OFF)
 option(PHAD_ENABLE_TUMVI_CORRIDOR1_TESTS
   "Enable local TUM VI corridor1 integration tests" OFF)
 
-find_package(OpenCV 4 REQUIRED COMPONENTS core highgui imgcodecs imgproc)
+find_package(OpenCV 4 REQUIRED COMPONENTS
+  core highgui imgcodecs imgproc calib3d video
+)
 find_package(Eigen3 3.4 REQUIRED NO_MODULE)
 find_package(yaml-cpp 0.8 REQUIRED)
 
@@ -40,11 +42,16 @@ target_compile_options(phad_sensor PRIVATE
 
 add_library(phad_camera
   phad/camera/camera_model.cpp
+  phad/camera/rectified_stereo_calibration.cpp
+  phad/camera/stereo_rectifier.cpp
 )
 add_library(phad::camera ALIAS phad_camera)
 target_compile_features(phad_camera PUBLIC cxx_std_20)
 target_include_directories(phad_camera PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(phad_camera PUBLIC phad::sensor)
+target_link_libraries(phad_camera
+  PUBLIC phad::sensor
+  PRIVATE opencv_core opencv_imgproc opencv_calib3d
+)
 target_compile_options(phad_camera PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
@@ -90,6 +97,20 @@ target_compile_options(phad_eval PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
+add_library(phad_frontend
+  phad/frontend/stereo_tracker.cpp
+)
+add_library(phad::frontend ALIAS phad_frontend)
+target_compile_features(phad_frontend PUBLIC cxx_std_20)
+target_include_directories(phad_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(phad_frontend
+  PUBLIC phad::camera
+  PRIVATE opencv_core opencv_imgproc opencv_video
+)
+target_compile_options(phad_frontend PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
 add_library(phad_viz
   phad/viz/image_window.cpp
   phad/viz/trajectory_panel.cpp
@@ -110,7 +131,13 @@ target_link_libraries(phad_euroc_inspect PRIVATE phad::io_dataset)
 
 add_executable(phad_euroc_runner apps/phad_euroc_runner.cpp)
 target_link_libraries(phad_euroc_runner
-  PRIVATE phad::io_dataset phad::viz opencv_core opencv_imgproc
+  PRIVATE phad::io_dataset phad::frontend phad::viz
+          opencv_core opencv_imgproc
+)
+
+add_executable(phad_stereo_frontend_probe apps/phad_stereo_frontend_probe.cpp)
+target_link_libraries(phad_stereo_frontend_probe
+  PRIVATE phad::io_dataset phad::frontend
 )
 
 add_executable(phad_euroc_gt_export apps/phad_euroc_gt_export.cpp)
@@ -144,6 +171,8 @@ if(PHAD_BUILD_TESTS)
   add_executable(phad_camera_tests
     tests/camera/camera_model_header_test.cpp
     tests/camera/camera_model_test.cpp
+    tests/camera/rectified_stereo_calibration_test.cpp
+    tests/camera/stereo_rectifier_test.cpp
   )
   target_link_libraries(phad_camera_tests PRIVATE
     phad::camera GTest::gtest_main
@@ -167,6 +196,20 @@ if(PHAD_BUILD_TESTS)
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
   )
   gtest_discover_tests(phad_eval_tests PROPERTIES LABELS "unit")
+
+  add_executable(phad_frontend_tests
+    tests/frontend/stereo_tracker_test.cpp
+  )
+  target_link_libraries(phad_frontend_tests PRIVATE
+    phad::frontend GTest::gtest_main
+  )
+  target_include_directories(phad_frontend_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_compile_options(phad_frontend_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+  gtest_discover_tests(phad_frontend_tests PROPERTIES LABELS "unit")
 
   add_executable(phad_viz_tests
     tests/viz/trajectory_panel_test.cpp
@@ -212,6 +255,23 @@ if(PHAD_BUILD_TESTS)
       PRIVATE phad::io_dataset phad::eval GTest::gtest_main
     )
     gtest_discover_tests(phad_eval_mh01_test PROPERTIES LABELS "mh01")
+
+    add_executable(phad_camera_mh01_test
+      tests/camera/euroc_mh01_rectify_test.cpp
+    )
+    target_link_libraries(phad_camera_mh01_test
+      PRIVATE phad::camera phad::io_dataset GTest::gtest_main
+              opencv_core opencv_imgproc opencv_video
+    )
+    gtest_discover_tests(phad_camera_mh01_test PROPERTIES LABELS "mh01")
+
+    add_executable(phad_frontend_mh01_test
+      tests/frontend/euroc_mh01_frontend_test.cpp
+    )
+    target_link_libraries(phad_frontend_mh01_test
+      PRIVATE phad::frontend phad::io_dataset GTest::gtest_main
+    )
+    gtest_discover_tests(phad_frontend_mh01_test PROPERTIES LABELS "mh01")
   endif()
 
   if(PHAD_ENABLE_TUMVI_CORRIDOR1_TESTS)

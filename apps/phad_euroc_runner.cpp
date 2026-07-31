@@ -2,18 +2,22 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <variant>
 #include <vector>
 
+#include "phad/camera/stereo_rectifier.hpp"
 #include "phad/common/trajectory.hpp"
+#include "phad/frontend/stereo_tracker.hpp"
 #include "phad/io/dataset/dataset_replay_source.hpp"
 #include "phad/io/dataset/euroc/euroc_dataset.hpp"
 #include "phad/io/dataset/euroc/euroc_groundtruth.hpp"
@@ -27,12 +31,11 @@ namespace
 
   constexpr char kWindowName[] = "phad-vio EuRoC stereo";
 
-  constexpr int    kMaxCorners   = 500;
-  constexpr double kQualityLevel = 0.01;
-  constexpr double kMinDistance  = 20.0;
-  constexpr int    kCornerRadius = 3;
-  const cv::Scalar kCornerColor{ 0, 255, 0 };  // BGR
-  const cv::Scalar kTextColor{ 0, 255, 0 };    // BGR
+  constexpr int    kPointRadius = 2;
+  const cv::Scalar kValidColor{ 0, 255, 0 };      // BGR
+  const cv::Scalar kInvalidColor{ 0, 165, 255 };  // BGR orange
+  const cv::Scalar kMatchLineColor{ 255, 200, 0 };
+  const cv::Scalar kTextColor{ 0, 255, 0 };
 
   [[nodiscard]] cv::Mat copyGrayImage( const phad::sensor::Image& image )
   {
@@ -59,36 +62,14 @@ namespace
     return result;
   }
 
-  [[nodiscard]] std::vector<cv::Point2f> detectCorners( const cv::Mat& gray )
-  {
-    std::vector<cv::Point2f> corners;
-    cv::goodFeaturesToTrack( gray, corners, kMaxCorners, kQualityLevel,
-                             kMinDistance );
-    return corners;
-  }
-
-  void drawCorners( cv::Mat& canvas, const std::vector<cv::Point2f>& corners,
-                    int x_offset )
-  {
-    for ( const cv::Point2f& corner : corners )
-    {
-      const cv::Point center{ cvRound( corner.x ) + x_offset,
-                              cvRound( corner.y ) };
-      cv::circle( canvas, center, kCornerRadius, kCornerColor, 1,
-                  cv::LINE_AA );
-    }
-  }
-
-  [[nodiscard]] cv::Mat renderStereo(
-      const phad::sensor::StereoFrame& frame )
+  [[nodiscard]] cv::Mat renderTracks(
+      const phad::sensor::StereoFrame&      frame,
+      const phad::frontend::FrameTracks&    tracks )
   {
     if ( frame.left.width() != frame.right.width() ||
-         frame.left.height() != frame.right.height() ||
-         frame.left.channels() != frame.right.channels() ||
-         frame.left.pixelType() != frame.right.pixelType() )
+         frame.left.height() != frame.right.height() )
     {
-      throw std::runtime_error(
-          "left and right images have incompatible shapes or pixel types" );
+      throw std::runtime_error( "left and right images have incompatible sizes" );
     }
 
     const cv::Mat left  = copyGrayImage( frame.left );
@@ -98,17 +79,52 @@ namespace
     cv::hconcat( left, right, stitched );
     cv::Mat canvas;
     cv::cvtColor( stitched, canvas, cv::COLOR_GRAY2BGR );
+    const int right_offset = left.cols;
 
-    const std::vector<cv::Point2f> left_corners  = detectCorners( left );
-    const std::vector<cv::Point2f> right_corners = detectCorners( right );
-    drawCorners( canvas, left_corners, 0 );
-    drawCorners( canvas, right_corners, left.cols );
+    for ( const auto& observation : tracks.observations )
+    {
+      const cv::Point left_pt{ cvRound( observation.left_pixel.x() ),
+                               cvRound( observation.left_pixel.y() ) };
+      const bool valid =
+          observation.status == phad::frontend::StereoStatus::kValid;
+      const cv::Scalar& color = valid ? kValidColor : kInvalidColor;
+      cv::circle( canvas, left_pt, kPointRadius, color, -1, cv::LINE_AA );
 
-    const std::string count_text =
-        "L:" + std::to_string( left_corners.size() ) +
-        " R:" + std::to_string( right_corners.size() );
-    cv::putText( canvas, count_text, cv::Point( 10, 24 ),
-                 cv::FONT_HERSHEY_SIMPLEX, 0.7, kTextColor, 1, cv::LINE_AA );
+      if ( valid )
+      {
+        const cv::Point right_pt{
+            cvRound( observation.left_pixel.x() - observation.disparity_px ) +
+                right_offset,
+            cvRound( observation.left_pixel.y() ) };
+        cv::circle( canvas, right_pt, kPointRadius, kValidColor, -1,
+                    cv::LINE_AA );
+        cv::line( canvas, left_pt, right_pt, kMatchLineColor, 1, cv::LINE_AA );
+      }
+    }
+
+    const auto& stats = tracks.stats;
+    const std::string line1 =
+        "tracks=" + std::to_string( tracks.observations.size() ) +
+        " tracked=" + std::to_string( stats.tracked ) +
+        " detected=" + std::to_string( stats.detected );
+    const std::string line2 =
+        "fb=" + std::to_string( stats.forward_backward_rejected ) +
+        " epi=" + std::to_string( stats.epipolar_rejected ) +
+        " disp=" + std::to_string( stats.disparity_rejected ) +
+        " depth=" + std::to_string( stats.depth_rejected );
+    std::ostringstream line3_stream;
+    line3_stream << std::fixed << std::setprecision( 2 )
+                 << "epi_med=" << stats.epipolar_median_px
+                 << " epi_p95=" << stats.epipolar_p95_px
+                 << " len_med=" << stats.track_length_median;
+    const std::string line3 = line3_stream.str();
+
+    cv::putText( canvas, line1, cv::Point( 10, 22 ),
+                 cv::FONT_HERSHEY_SIMPLEX, 0.55, kTextColor, 1, cv::LINE_AA );
+    cv::putText( canvas, line2, cv::Point( 10, 44 ),
+                 cv::FONT_HERSHEY_SIMPLEX, 0.55, kTextColor, 1, cv::LINE_AA );
+    cv::putText( canvas, line3, cv::Point( 10, 66 ),
+                 cv::FONT_HERSHEY_SIMPLEX, 0.55, kTextColor, 1, cv::LINE_AA );
     return canvas;
   }
 
@@ -157,12 +173,6 @@ namespace
     std::chrono::steady_clock::time_point  m_first_wall_time;
   };
 
-  /**
-   * @brief 加载序列真值，用于俯视面板。
-   *
-   * 没有 state_groundtruth_estimate0 的序列仍然可以回放图像，因此加载失败
-   * 只关闭面板并说明原因，不中断回放。
-   */
   [[nodiscard]] std::optional<phad::common::Trajectory> loadGroundtruth(
       const std::filesystem::path& sequence_root )
   {
@@ -185,6 +195,15 @@ namespace
       std::cerr << opened.error().describe() << '\n';
       return 1;
     }
+
+    auto rectifier =
+        phad::camera::StereoRectifier::create( opened.value().calibration() );
+    if ( !rectifier )
+    {
+      std::cerr << "stereo rectifier: " << rectifier.error().detail << '\n';
+      return 1;
+    }
+    phad::frontend::StereoTracker tracker( rectifier.value().calibration() );
 
     phad::io::dataset::DatasetReplaySource replay_source{ opened.value() };
     phad::io::SensorSource&                source = replay_source;
@@ -217,12 +236,20 @@ namespace
         continue;
       }
 
-      cv::Mat canvas = renderStereo( *frame );
+      auto rectified = rectifier.value().rectify( *frame );
+      if ( !rectified )
+      {
+        std::cerr << "rectify failed: " << rectified.error().detail << '\n';
+        return 1;
+      }
+      const phad::frontend::FrameTracks tracks =
+          tracker.process( rectified.value() );
+
+      cv::Mat canvas = renderTracks( rectified.value(), tracks );
       if ( groundtruth.has_value() )
       {
         if ( !panel.has_value() )
         {
-          // 面板与图像等高的正方形，接在双目画面右侧。
           panel.emplace( *groundtruth,
                          phad::viz::TrajectoryPanelOptions{
                              .width_px  = canvas.rows,

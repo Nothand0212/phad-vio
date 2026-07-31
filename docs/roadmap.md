@@ -64,9 +64,6 @@
 详细设计与证据见
 [EuRoC 数据集加载器设计调研](research/euroc-dataset-loader-design.md)。
 
-`phad_euroc_runner` 中的 GFTT 角点叠加是 M2.2 的前身探针，当前不构成
-frontend，也不产出 `KeyframeMeasurement`。
-
 ## M2：双目 VO 最小闭环
 
 本里程碑的目标是拿到**第一个真实 ATE 数字**，不追求精度。拆为三个各自
@@ -102,30 +99,34 @@ frontend，也不产出 `KeyframeMeasurement`。
 实施计划见
 [M2.1 评估可视化底座](plans/2026-07-30_m2.1_eval_visualization_baseline_d818d653.plan.md)。
 
-### M2.2 双目前端
+### M2.2 双目前端（已完成）
 
 范围：
 
-- `goodFeaturesToTrack` 特征检测与均匀化补点；
-- `calcOpticalFlowPyrLK` 双目左右匹配与时序跟踪；
-- 前后向光流一致性检查；
+- 前置整幅立体校正（`StereoRectifier` + `RectifiedStereoCalibration`）；
+- `goodFeaturesToTrack` 特征检测与按 track 长度涂 mask 补点；
+- 左目时序 `calcOpticalFlowPyrLK` 与右目每帧重匹配；
+- 前后向光流一致性与几何门限（行差 / 视差 / 深度）；
 - 稳定且不复用的 `LandmarkId`；
-- track 叠加可视化。
+- track 叠加可视化与无窗口 probe CSV。
 
 指标与测试：
 
 - track 数量随时间曲线，全序列不出现归零；
-- track 长度分布；
+- track 长度分布（`--tracks-csv` 生命表）；
 - 左右目匹配的 epipolar error 分布；
 - 前后向一致性剔除率；
 - `LandmarkId` 不复用；
 - 低纹理与快速旋转片段的行为被记录，而不是被静默处理。
 
-出口：
+出口（已满足）：
 
-- `MH_01_easy` 全序列跟踪不中断；
-- 上述指标可从运行输出中直接读出；
+- `MH_01_easy` 全序列跟踪不中断（门控 `phad_frontend_mh01_test`）；
+- 上述指标可从 `phad_stereo_frontend_probe` 输出中直接读出；
 - 尚不产出位姿。
+
+实施计划见
+[M2.2 双目前端](plans/2026-07-31_m2.2_stereo_frontend_38ddaa97.plan.md)。
 
 ### M2.3 VO 后端
 
