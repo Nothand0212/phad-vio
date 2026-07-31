@@ -181,13 +181,25 @@ if( _phad_bench_link_libs MATCHES "phad_eval|phad::eval" )
 endif()
 unset( _phad_bench_link_libs )
 
+add_library(phad_stereo_pair_stream STATIC apps/stereo_pair_stream.cpp)
+target_compile_features(phad_stereo_pair_stream PUBLIC cxx_std_20)
+target_include_directories(phad_stereo_pair_stream PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_link_libraries(phad_stereo_pair_stream
+  PUBLIC phad::io_dataset phad::sync
+)
+target_compile_options(phad_stereo_pair_stream PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
 add_library(phad_offline_vo_session STATIC apps/offline_vo_session.cpp)
 target_compile_features(phad_offline_vo_session PUBLIC cxx_std_20)
 target_include_directories(phad_offline_vo_session PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 target_link_libraries(phad_offline_vo_session
-  PUBLIC phad::io_dataset phad::camera phad::frontend phad::estimator
+  PUBLIC phad_stereo_pair_stream phad::camera phad::frontend phad::estimator
 )
 target_compile_options(phad_offline_vo_session PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
@@ -205,13 +217,13 @@ target_link_libraries(phad_euroc_inspect PRIVATE phad::io_dataset)
 
 add_executable(phad_euroc_runner apps/phad_euroc_runner.cpp)
 target_link_libraries(phad_euroc_runner
-  PRIVATE phad::io_dataset phad::frontend phad::estimator phad::viz
+  PRIVATE phad_stereo_pair_stream phad::frontend phad::estimator phad::viz
           opencv_core opencv_imgproc
 )
 
 add_executable(phad_stereo_frontend_probe apps/phad_stereo_frontend_probe.cpp)
 target_link_libraries(phad_stereo_frontend_probe
-  PRIVATE phad::io_dataset phad::frontend
+  PRIVATE phad_stereo_pair_stream phad::frontend
 )
 
 add_executable(phad_stereo_vo_probe apps/phad_stereo_vo_probe.cpp)
@@ -404,7 +416,7 @@ if(PHAD_BUILD_TESTS)
       tests/camera/euroc_mh01_rectify_test.cpp
     )
     target_link_libraries(phad_camera_mh01_test
-      PRIVATE phad::camera phad::io_dataset GTest::gtest_main
+      PRIVATE phad::camera phad_stereo_pair_stream GTest::gtest_main
               opencv_core opencv_imgproc opencv_video
     )
     gtest_discover_tests(phad_camera_mh01_test PROPERTIES LABELS "mh01")
@@ -413,7 +425,7 @@ if(PHAD_BUILD_TESTS)
       tests/frontend/euroc_mh01_frontend_test.cpp
     )
     target_link_libraries(phad_frontend_mh01_test
-      PRIVATE phad::frontend phad::io_dataset GTest::gtest_main
+      PRIVATE phad::frontend phad_stereo_pair_stream GTest::gtest_main
     )
     gtest_discover_tests(phad_frontend_mh01_test PROPERTIES LABELS "mh01")
   endif()

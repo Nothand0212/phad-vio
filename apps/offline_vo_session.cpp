@@ -10,9 +10,11 @@
 #include <variant>
 #include <vector>
 
+#include "apps/stereo_pair_stream.hpp"
 #include "apps/stereo_vo_glue.hpp"
 #include "phad/camera/stereo_rectifier.hpp"
 #include "phad/estimator/stereo_vo_estimator.hpp"
+#include "phad/io/dataset/dataset_replay_source.hpp"
 #include "phad/io/dataset/euroc/euroc_dataset.hpp"
 #include "phad/sensor/stereo_frame.hpp"
 
@@ -99,8 +101,9 @@ namespace phad::apps
     std::vector<double>            estimator_s;
     std::vector<double>            total_s;
 
-    const auto wall_begin = std::chrono::steady_clock::now();
-    auto       reader     = opened.value().reader();
+    const auto                       wall_begin = std::chrono::steady_clock::now();
+    io::dataset::DatasetReplaySource source{ opened.value() };
+    StereoPairStream                 stream{ source };
     while ( true )
     {
       if ( options.max_frames.has_value() &&
@@ -109,16 +112,16 @@ namespace phad::apps
         break;
       }
 
-      auto loaded = reader.takeStereo();
-      if ( std::holds_alternative<io::dataset::DatasetReaderEnd>( loaded ) )
+      auto loaded = stream.next();
+      if ( std::holds_alternative<io::EndOfStream>( loaded ) )
       {
         break;
       }
-      if ( const auto* error =
-               std::get_if<io::dataset::DatasetReaderError>( &loaded ) )
+      if ( const auto* error = std::get_if<StreamError>( &loaded ) )
       {
-        result.error = SessionError{ "reader error at record " +
-                                     std::to_string( error->record_number ) };
+        result.error    = SessionError{ error->detail };
+        result.sync     = stream.diagnostics();
+        result.warnings = stream.warnings();
         return result;
       }
 
@@ -224,6 +227,8 @@ namespace phad::apps
 
     result.reproj.median_px = percentile( rms_after, 0.5 );
     result.reproj.p95_px    = percentile( rms_after, 0.95 );
+    result.sync             = stream.diagnostics();
+    result.warnings         = stream.warnings();
 
     if ( poses.empty() )
     {

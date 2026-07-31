@@ -17,22 +17,22 @@
 namespace phad::io::dataset::internal
 {
 
-  struct StereoFrameManifestEntry
+  struct ImageFrameManifestEntry
   {
     common::Timestamp     timestamp;
-    std::filesystem::path left_path;
-    std::filesystem::path right_path;
+    std::filesystem::path image_path;
   };
 
   class StereoImuDatasetBuilder
   {
   public:
     [[nodiscard]] static StereoImuDataset build(
-        sensor::StereoImuCalibration          calibration,
-        std::vector<sensor::ImuMeasurement>   imu_measurements,
-        std::vector<StereoFrameManifestEntry> stereo_manifest,
-        sensor::PixelType                     left_pixel_type,
-        sensor::PixelType                     right_pixel_type );
+        sensor::StereoImuCalibration         calibration,
+        std::vector<sensor::ImuMeasurement>  imu_measurements,
+        std::vector<ImageFrameManifestEntry> left_manifest,
+        std::vector<ImageFrameManifestEntry> right_manifest,
+        sensor::PixelType                    left_pixel_type,
+        sensor::PixelType                    right_pixel_type );
   };
 
 }  // namespace phad::io::dataset::internal

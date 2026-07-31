@@ -1,9 +1,12 @@
 #include "phad/io/dataset/dataset_replay_source.hpp"
 
+#include <cstdint>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <variant>
+
+#include "phad/sensor/camera_id.hpp"
 
 namespace phad::io::dataset
 {
@@ -41,34 +44,90 @@ namespace phad::io::dataset
       }
     }
 
-    auto stereo_timestamp_result = m_reader.peekStereoTimestamp();
+    auto left_timestamp_result =
+        m_reader.peekImageTimestamp( sensor::CameraId::kLeft );
     if ( auto* error =
-             std::get_if<DatasetReaderError>( &stereo_timestamp_result ) )
+             std::get_if<DatasetReaderError>( &left_timestamp_result ) )
+    {
+      return fail( *error );
+    }
+    auto right_timestamp_result =
+        m_reader.peekImageTimestamp( sensor::CameraId::kRight );
+    if ( auto* error =
+             std::get_if<DatasetReaderError>( &right_timestamp_result ) )
     {
       return fail( *error );
     }
 
-    const auto* stereo_timestamp =
-        std::get_if<common::Timestamp>( &stereo_timestamp_result );
-    if ( m_imu_lookahead.has_value() &&
-         ( stereo_timestamp == nullptr ||
-           m_imu_lookahead->timestamp <= *stereo_timestamp ) )
+    const auto* left_timestamp =
+        std::get_if<common::Timestamp>( &left_timestamp_result );
+    const auto* right_timestamp =
+        std::get_if<common::Timestamp>( &right_timestamp_result );
+
+    enum class Stream : std::uint8_t
     {
-      sensor::ImuMeasurement measurement = std::move( *m_imu_lookahead );
-      m_imu_lookahead.reset();
-      return io::SensorEvent{ std::move( measurement ) };
+      kImu = 0,
+      kLeft,
+      kRight
+    };
+
+    std::optional<Stream>            chosen;
+    std::optional<common::Timestamp> chosen_ts;
+
+    const auto consider = [ & ]( Stream stream, common::Timestamp ts ) {
+      const auto rank = static_cast<std::uint8_t>( stream );
+      if ( !chosen.has_value() || ts < *chosen_ts ||
+           ( ts == *chosen_ts &&
+             rank < static_cast<std::uint8_t>( *chosen ) ) )
+      {
+        chosen    = stream;
+        chosen_ts = ts;
+      }
+    };
+
+    if ( m_imu_lookahead.has_value() )
+    {
+      consider( Stream::kImu, m_imu_lookahead->timestamp );
+    }
+    if ( left_timestamp != nullptr )
+    {
+      consider( Stream::kLeft, *left_timestamp );
+    }
+    if ( right_timestamp != nullptr )
+    {
+      consider( Stream::kRight, *right_timestamp );
     }
 
-    if ( stereo_timestamp != nullptr )
+    if ( !chosen.has_value() )
     {
-      auto stereo_result = m_reader.takeStereo();
-      if ( auto* error = std::get_if<DatasetReaderError>( &stereo_result ) )
+      return finish();
+    }
+
+    switch ( *chosen )
+    {
+      case Stream::kImu:
       {
-        return fail( *error );
+        sensor::ImuMeasurement measurement = std::move( *m_imu_lookahead );
+        m_imu_lookahead.reset();
+        return io::SensorEvent{ std::move( measurement ) };
       }
-      if ( auto* stereo = std::get_if<sensor::StereoFrame>( &stereo_result ) )
+      case Stream::kLeft:
+      case Stream::kRight:
       {
-        return io::SensorEvent{ std::move( *stereo ) };
+        const sensor::CameraId camera       = *chosen == Stream::kLeft
+                                                  ? sensor::CameraId::kLeft
+                                                  : sensor::CameraId::kRight;
+        auto                   image_result = m_reader.takeImage( camera );
+        if ( auto* error = std::get_if<DatasetReaderError>( &image_result ) )
+        {
+          return fail( *error );
+        }
+        if ( auto* image =
+                 std::get_if<sensor::ImageFrameEvent>( &image_result ) )
+        {
+          return io::SensorEvent{ std::move( *image ) };
+        }
+        return finish();
       }
     }
 

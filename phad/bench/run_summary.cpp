@@ -171,7 +171,21 @@ namespace phad::bench
     {
       timing_json[ "rtf" ] = nullptr;
     }
-    root[ "timing" ]   = timing_json;
+    root[ "timing" ] = timing_json;
+    if ( sync.has_value() )
+    {
+      root[ "sync" ] = json{
+          { "pushed_left", sync->pushed_left },
+          { "pushed_right", sync->pushed_right },
+          { "emitted_stereo", sync->emitted_stereo },
+          { "dropped_left", sync->dropped_left },
+          { "dropped_right", sync->dropped_right },
+          { "dropped_left_overflow", sync->dropped_left_overflow },
+          { "dropped_right_overflow", sync->dropped_right_overflow },
+          { "max_left_queue", sync->max_left_queue },
+          { "max_right_queue", sync->max_right_queue },
+      };
+    }
     root[ "warnings" ] = warnings;
     return root.dump( 2 );
   }

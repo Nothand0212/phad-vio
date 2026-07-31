@@ -111,10 +111,15 @@ int main( int argc, char** argv )
             << "imu_gyr_nd: " << calibration.imu().gyrNd() << '\n'
             << "imu_acc_rw: " << calibration.imu().accRw() << '\n'
             << "imu_gyr_rw: " << calibration.imu().gyrRw() << '\n'
-            << "stereo_frames: " << summary.stereo.count << '\n'
+            << "cam0_frames: " << summary.left.count << '\n'
+            << "cam1_frames: " << summary.right.count << '\n'
+            << "stereo_intersection_frames: "
+            << dataset.exactTimestampIntersectionCount() << '\n'
             << "imu_measurements: " << summary.imu.count << '\n';
-  printTimestamp( "stereo_first_ns", summary.stereo.first_timestamp );
-  printTimestamp( "stereo_last_ns", summary.stereo.last_timestamp );
+  printTimestamp( "cam0_first_ns", summary.left.first_timestamp );
+  printTimestamp( "cam0_last_ns", summary.left.last_timestamp );
+  printTimestamp( "cam1_first_ns", summary.right.first_timestamp );
+  printTimestamp( "cam1_last_ns", summary.right.last_timestamp );
   printTimestamp( "imu_first_ns", summary.imu.first_timestamp );
   printTimestamp( "imu_last_ns", summary.imu.last_timestamp );
   return 0;

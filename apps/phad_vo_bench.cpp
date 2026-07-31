@@ -471,12 +471,25 @@ namespace
         phad::apps::runOfflineVoSession( session_options );
 
     phad::bench::RunSummary summary;
-    summary.sequence                = sequence;
-    summary.git_commit_short        = code.git_commit_short;
-    summary.git_dirty               = code.git_dirty;
-    summary.config_label            = arguments.config_label;
-    summary.config_hash             = config_hash;
-    summary.warnings                = warnings;
+    summary.sequence         = sequence;
+    summary.git_commit_short = code.git_commit_short;
+    summary.git_dirty        = code.git_dirty;
+    summary.config_label     = arguments.config_label;
+    summary.config_hash      = config_hash;
+    summary.warnings         = warnings;
+    summary.warnings.insert( summary.warnings.end(), session.warnings.begin(),
+                             session.warnings.end() );
+    summary.sync = phad::bench::SyncSummary{
+        session.sync.pushed_left,
+        session.sync.pushed_right,
+        session.sync.emitted_stereo,
+        session.sync.dropped_left,
+        session.sync.dropped_right,
+        session.sync.dropped_left_overflow,
+        session.sync.dropped_right_overflow,
+        session.sync.max_left_queue,
+        session.sync.max_right_queue,
+    };
     summary.trajectory.image_frames = session.counts.image_frames;
     summary.trajectory.ok           = session.counts.ok;
     summary.trajectory.rejected     = session.counts.rejected;

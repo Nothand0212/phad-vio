@@ -1,5 +1,7 @@
 #include "phad/io/dataset/dataset_replay_source.hpp"
 
+#include "phad/sensor/camera_id.hpp"
+
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -192,10 +194,40 @@ namespace
     return DatasetReplaySource{ dataset };
   }
 
+  enum class ObservedEventKind : std::uint8_t
+  {
+    kImu   = 0,
+    kLeft  = 1,
+    kRight = 2
+  };
+
   const SensorEvent& expectEvent( const SensorReadResult& result )
   {
     EXPECT_TRUE( std::holds_alternative<SensorEvent>( result ) );
     return std::get<SensorEvent>( result );
+  }
+
+  ObservedEventKind observedKind( const SensorEvent& event )
+  {
+    if ( std::holds_alternative<phad::sensor::ImuMeasurement>( event ) )
+    {
+      return ObservedEventKind::kImu;
+    }
+    const auto& image = std::get<phad::sensor::ImageFrameEvent>( event );
+    return image.camera == phad::sensor::CameraId::kLeft
+               ? ObservedEventKind::kLeft
+               : ObservedEventKind::kRight;
+  }
+
+  std::int64_t observedTimestamp( const SensorEvent& event )
+  {
+    if ( const auto* imu =
+             std::get_if<phad::sensor::ImuMeasurement>( &event ) )
+    {
+      return imu->timestamp.nanoseconds();
+    }
+    return std::get<phad::sensor::ImageFrameEvent>( event )
+        .timestamp.nanoseconds();
   }
 
   TEST( DatasetReplaySourceTest, ExposesCalibrationThroughSensorSourceSeam )
@@ -222,7 +254,7 @@ namespace
     auto                 source = openReplaySource( fixture.root() );
     SensorSource&        seam   = source;
 
-    std::vector<std::pair<std::int64_t, bool>> observed;
+    std::vector<std::pair<std::int64_t, ObservedEventKind>> observed;
     while ( true )
     {
       const SensorReadResult result = seam.next();
@@ -231,26 +263,23 @@ namespace
         break;
       }
       const SensorEvent& event = expectEvent( result );
-      if ( const auto* imu =
-               std::get_if<phad::sensor::ImuMeasurement>( &event ) )
-      {
-        observed.emplace_back( imu->timestamp.nanoseconds(), true );
-      }
-      else
-      {
-        const auto& stereo = std::get<phad::sensor::StereoFrame>( event );
-        observed.emplace_back( stereo.timestamp.nanoseconds(), false );
-      }
+      observed.emplace_back( observedTimestamp( event ), observedKind( event ) );
     }
 
     EXPECT_EQ(
         observed,
-        ( std::vector<std::pair<std::int64_t, bool>>{
-            { ReplayDatasetFixture::kFirstTimestamp - 5'000'000, true },
-            { ReplayDatasetFixture::kFirstTimestamp, true },
-            { ReplayDatasetFixture::kFirstTimestamp, false },
-            { ReplayDatasetFixture::kFirstTimestamp + 5'000'000, true },
-            { ReplayDatasetFixture::kFirstTimestamp + 10'000'000, false } } ) );
+        ( std::vector<std::pair<std::int64_t, ObservedEventKind>>{
+            { ReplayDatasetFixture::kFirstTimestamp - 5'000'000,
+              ObservedEventKind::kImu },
+            { ReplayDatasetFixture::kFirstTimestamp, ObservedEventKind::kImu },
+            { ReplayDatasetFixture::kFirstTimestamp, ObservedEventKind::kLeft },
+            { ReplayDatasetFixture::kFirstTimestamp, ObservedEventKind::kRight },
+            { ReplayDatasetFixture::kFirstTimestamp + 5'000'000,
+              ObservedEventKind::kImu },
+            { ReplayDatasetFixture::kFirstTimestamp + 10'000'000,
+              ObservedEventKind::kLeft },
+            { ReplayDatasetFixture::kFirstTimestamp + 10'000'000,
+              ObservedEventKind::kRight } } ) );
     EXPECT_TRUE( std::holds_alternative<EndOfStream>( seam.next() ) );
     EXPECT_TRUE( std::holds_alternative<EndOfStream>( seam.next() ) );
   }
@@ -262,7 +291,7 @@ namespace
     fixture.corruptSecondRightImage();
     SensorSource& seam = source;
 
-    for ( int index = 0; index < 4; ++index )
+    for ( int index = 0; index < 6; ++index )
     {
       const SensorReadResult result = seam.next();
       ASSERT_TRUE( std::holds_alternative<SensorEvent>( result ) );
@@ -293,7 +322,7 @@ namespace
   }
 
   TEST( DatasetReplaySourceTest,
-        OwnsReaderAndStereoPixelsAfterDatasetHandleDestruction )
+        OwnsReaderAndImagePixelsAfterDatasetHandleDestruction )
   {
     static_assert( !std::is_copy_constructible_v<DatasetReplaySource> );
     static_assert( std::is_move_constructible_v<DatasetReplaySource> );
@@ -304,14 +333,22 @@ namespace
 
     static_cast<void>( seam.next() );
     static_cast<void>( seam.next() );
-    const SensorReadResult stereo_result = seam.next();
-    const SensorEvent&     event         = expectEvent( stereo_result );
-    const auto&            stereo        = std::get<phad::sensor::StereoFrame>( event );
-    const auto             left_pixels   = stereo.left.pixels<std::uint8_t>();
-    const auto             right_pixels  = stereo.right.pixels<std::uint8_t>();
+    const SensorReadResult left_result = seam.next();
+    const SensorEvent&     left_event  = expectEvent( left_result );
+    const auto&            left_frame =
+        std::get<phad::sensor::ImageFrameEvent>( left_event );
+    const auto left_pixels = left_frame.image.pixels<std::uint8_t>();
     ASSERT_TRUE( left_pixels.has_value() );
-    ASSERT_TRUE( right_pixels.has_value() );
+    EXPECT_EQ( left_frame.camera, phad::sensor::CameraId::kLeft );
     EXPECT_EQ( left_pixels->front(), 11 );
+
+    const SensorReadResult right_result = seam.next();
+    const SensorEvent&     right_event  = expectEvent( right_result );
+    const auto&            right_frame =
+        std::get<phad::sensor::ImageFrameEvent>( right_event );
+    const auto right_pixels = right_frame.image.pixels<std::uint8_t>();
+    ASSERT_TRUE( right_pixels.has_value() );
+    EXPECT_EQ( right_frame.camera, phad::sensor::CameraId::kRight );
     EXPECT_EQ( right_pixels->front(), 21 );
   }
 

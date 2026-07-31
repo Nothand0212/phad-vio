@@ -402,35 +402,17 @@ namespace phad::io::dataset::internal
     return measurements;
   }
 
-  DatasetResult<std::vector<StereoFrameManifestEntry>> joinStereo(
-      const std::vector<CameraRecord>& left_records,
-      const std::vector<CameraRecord>& right_records,
-      const fs::path&                  source_path )
+  std::vector<ImageFrameManifestEntry> toImageManifest(
+      const std::vector<CameraRecord>& records )
   {
-    if ( left_records.size() != right_records.size() )
+    std::vector<ImageFrameManifestEntry> manifest;
+    manifest.reserve( records.size() );
+    for ( const auto& record : records )
     {
-      return makeError( DatasetErrorCode::kStereoTimestampMismatch,
-                        "cam0/cam1", source_path, "timestamp",
-                        "camera manifests have different record counts" );
+      manifest.push_back(
+          ImageFrameManifestEntry{ record.timestamp, record.image_path } );
     }
-
-    std::vector<StereoFrameManifestEntry> stereo_manifest;
-    stereo_manifest.reserve( left_records.size() );
-    for ( std::size_t index = 0; index < left_records.size(); ++index )
-    {
-      const auto& left  = left_records[ index ];
-      const auto& right = right_records[ index ];
-      if ( left.timestamp != right.timestamp )
-      {
-        return makeError( DatasetErrorCode::kStereoTimestampMismatch,
-                          "cam0/cam1", source_path, "timestamp",
-                          "camera timestamps do not match exactly", index,
-                          left.timestamp );
-      }
-      stereo_manifest.push_back( StereoFrameManifestEntry{
-          left.timestamp, left.image_path, right.image_path } );
-    }
-    return stereo_manifest;
+    return manifest;
   }
 
 }  // namespace phad::io::dataset::internal

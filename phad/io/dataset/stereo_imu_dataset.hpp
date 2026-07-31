@@ -8,8 +8,8 @@
 #include <string>
 #include <variant>
 
+#include "phad/sensor/camera_id.hpp"
 #include "phad/sensor/imu_measurement.hpp"
-#include "phad/sensor/stereo_frame.hpp"
 #include "phad/sensor/stereo_imu_calibration.hpp"
 
 namespace phad::io::dataset
@@ -25,7 +25,8 @@ namespace phad::io::dataset
   struct StereoImuDatasetSummary
   {
     DatasetStreamSummary imu;
-    DatasetStreamSummary stereo;
+    DatasetStreamSummary left;
+    DatasetStreamSummary right;
   };
 
   struct DatasetReaderEnd
@@ -72,9 +73,10 @@ namespace phad::io::dataset
     StereoImuDatasetReader& operator=( StereoImuDatasetReader&& ) noexcept;
 
     [[nodiscard]] DatasetReaderResult<sensor::ImuMeasurement> takeImu();
-    [[nodiscard]] DatasetReaderResult<common::Timestamp>
-                                                           peekStereoTimestamp();
-    [[nodiscard]] DatasetReaderResult<sensor::StereoFrame> takeStereo();
+    [[nodiscard]] DatasetReaderResult<common::Timestamp>      peekImageTimestamp(
+             sensor::CameraId camera );
+    [[nodiscard]] DatasetReaderResult<sensor::ImageFrameEvent> takeImage(
+        sensor::CameraId camera );
 
   private:
     friend class StereoImuDataset;
@@ -91,7 +93,10 @@ namespace phad::io::dataset
     [[nodiscard]] sensor::StereoImuCalibration calibration() const;
 
     [[nodiscard]] StereoImuDatasetSummary summary() const noexcept;
-    [[nodiscard]] StereoImuDatasetReader  reader() const;
+    /// Left/right 时间戳 exact 交集大小（诊断用；不解码、不做容差配对）。
+    [[nodiscard]] std::size_t exactTimestampIntersectionCount()
+        const noexcept;
+    [[nodiscard]] StereoImuDatasetReader reader() const;
 
   private:
     friend class internal::StereoImuDatasetBuilder;

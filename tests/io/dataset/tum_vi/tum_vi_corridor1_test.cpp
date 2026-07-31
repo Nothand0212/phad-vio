@@ -7,6 +7,7 @@
 #include <variant>
 
 #include "phad/io/dataset/tum_vi/tum_vi_dataset.hpp"
+#include "phad/sensor/camera_id.hpp"
 
 namespace
 {
@@ -27,15 +28,22 @@ namespace
     const auto& dataset = opened.value();
     const auto  summary = dataset.summary();
 
-    ASSERT_EQ( summary.stereo.count, 5990U );
+    ASSERT_EQ( summary.left.count, 5990U );
+    ASSERT_EQ( summary.right.count, 5990U );
     ASSERT_EQ( summary.imu.count, 59721U );
-    ASSERT_TRUE( summary.stereo.first_timestamp.has_value() );
-    ASSERT_TRUE( summary.stereo.last_timestamp.has_value() );
+    ASSERT_TRUE( summary.left.first_timestamp.has_value() );
+    ASSERT_TRUE( summary.left.last_timestamp.has_value() );
+    ASSERT_TRUE( summary.right.first_timestamp.has_value() );
+    ASSERT_TRUE( summary.right.last_timestamp.has_value() );
     ASSERT_TRUE( summary.imu.first_timestamp.has_value() );
     ASSERT_TRUE( summary.imu.last_timestamp.has_value() );
-    EXPECT_EQ( summary.stereo.first_timestamp->nanoseconds(),
+    EXPECT_EQ( summary.left.first_timestamp->nanoseconds(),
                1'520'531'829'251'142'058 );
-    EXPECT_EQ( summary.stereo.last_timestamp->nanoseconds(),
+    EXPECT_EQ( summary.left.last_timestamp->nanoseconds(),
+               1'520'532'128'710'396'829 );
+    EXPECT_EQ( summary.right.first_timestamp->nanoseconds(),
+               1'520'531'829'251'142'058 );
+    EXPECT_EQ( summary.right.last_timestamp->nanoseconds(),
                1'520'532'128'710'396'829 );
     EXPECT_EQ( summary.imu.first_timestamp->nanoseconds(),
                1'520'531'829'221'612'058 );
@@ -43,23 +51,35 @@ namespace
                1'520'532'128'752'735'058 );
 
     auto       reader = dataset.reader();
-    const auto taken  = reader.takeStereo();
+    const auto left_taken =
+        reader.takeImage( phad::sensor::CameraId::kLeft );
     ASSERT_TRUE(
-        std::holds_alternative<phad::sensor::StereoFrame>( taken ) );
-    const auto& frame = std::get<phad::sensor::StereoFrame>( taken );
-    EXPECT_EQ( frame.timestamp, *summary.stereo.first_timestamp );
-    EXPECT_EQ( frame.left.width(), 512 );
-    EXPECT_EQ( frame.left.height(), 512 );
-    EXPECT_EQ( frame.left.channels(), 1 );
-    EXPECT_EQ( frame.left.pixelType(), phad::sensor::PixelType::kUint16 );
-    EXPECT_EQ( frame.right.width(), 512 );
-    EXPECT_EQ( frame.right.height(), 512 );
-    EXPECT_EQ( frame.right.channels(), 1 );
-    EXPECT_EQ( frame.right.pixelType(), phad::sensor::PixelType::kUint16 );
-    EXPECT_TRUE( frame.left.pixels<std::uint16_t>().has_value() );
-    EXPECT_TRUE( frame.right.pixels<std::uint16_t>().has_value() );
-    EXPECT_FALSE( frame.left.pixels<std::uint8_t>().has_value() );
-    EXPECT_FALSE( frame.right.pixels<std::uint8_t>().has_value() );
+        std::holds_alternative<phad::sensor::ImageFrameEvent>( left_taken ) );
+    const auto& left_event =
+        std::get<phad::sensor::ImageFrameEvent>( left_taken );
+    EXPECT_EQ( left_event.timestamp, *summary.left.first_timestamp );
+    EXPECT_EQ( left_event.camera, phad::sensor::CameraId::kLeft );
+    EXPECT_EQ( left_event.image.width(), 512 );
+    EXPECT_EQ( left_event.image.height(), 512 );
+    EXPECT_EQ( left_event.image.channels(), 1 );
+    EXPECT_EQ( left_event.image.pixelType(), phad::sensor::PixelType::kUint16 );
+    EXPECT_TRUE( left_event.image.pixels<std::uint16_t>().has_value() );
+    EXPECT_FALSE( left_event.image.pixels<std::uint8_t>().has_value() );
+
+    const auto right_taken =
+        reader.takeImage( phad::sensor::CameraId::kRight );
+    ASSERT_TRUE(
+        std::holds_alternative<phad::sensor::ImageFrameEvent>( right_taken ) );
+    const auto& right_event =
+        std::get<phad::sensor::ImageFrameEvent>( right_taken );
+    EXPECT_EQ( right_event.timestamp, *summary.right.first_timestamp );
+    EXPECT_EQ( right_event.camera, phad::sensor::CameraId::kRight );
+    EXPECT_EQ( right_event.image.width(), 512 );
+    EXPECT_EQ( right_event.image.height(), 512 );
+    EXPECT_EQ( right_event.image.channels(), 1 );
+    EXPECT_EQ( right_event.image.pixelType(), phad::sensor::PixelType::kUint16 );
+    EXPECT_TRUE( right_event.image.pixels<std::uint16_t>().has_value() );
+    EXPECT_FALSE( right_event.image.pixels<std::uint8_t>().has_value() );
   }
 
 }  // namespace

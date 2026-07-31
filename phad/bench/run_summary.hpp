@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -42,6 +43,19 @@ namespace phad::bench
     std::uint64_t failed          = 0;
     double        completion_rate = 0.0;
     double        coverage_rate   = 0.0;
+  };
+
+  struct SyncSummary
+  {
+    std::uint64_t pushed_left            = 0;
+    std::uint64_t pushed_right           = 0;
+    std::uint64_t emitted_stereo         = 0;
+    std::uint64_t dropped_left           = 0;
+    std::uint64_t dropped_right          = 0;
+    std::uint64_t dropped_left_overflow  = 0;
+    std::uint64_t dropped_right_overflow = 0;
+    std::size_t   max_left_queue         = 0;
+    std::size_t   max_right_queue        = 0;
   };
 
   struct RobustnessSummary
@@ -113,6 +127,7 @@ namespace phad::bench
     std::optional<MetricReport> rpe;
     RobustnessSummary           robustness;
     TimingSummary               timing;
+    std::optional<SyncSummary>  sync;
     std::vector<std::string>    warnings;
 
     [[nodiscard]] std::string toJson() const;

@@ -10,6 +10,7 @@
 #include "phad/common/trajectory.hpp"
 #include "phad/estimator/types.hpp"
 #include "phad/frontend/stereo_tracker.hpp"
+#include "phad/sync/stereo_pair_synchronizer.hpp"
 
 /**
  * @file offline_vo_session.hpp
@@ -87,6 +88,8 @@ namespace phad::apps
     std::optional<common::Trajectory> trajectory;
     std::vector<VoDiagRow>            diag;
     FrameCounts                       counts;
+    sync::StereoPairDiagnostics       sync;
+    std::vector<std::string>          warnings;
     common::Timestamp                 first_image_ts;
     common::Timestamp                 last_image_ts;
     double                            wall_s = 0.0;

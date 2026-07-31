@@ -15,6 +15,7 @@
 #include <variant>
 #include <vector>
 
+#include "apps/stereo_pair_stream.hpp"
 #include "apps/stereo_vo_glue.hpp"
 #include "phad/camera/stereo_rectifier.hpp"
 #include "phad/common/trajectory.hpp"
@@ -222,28 +223,24 @@ namespace
     phad::viz::ImageWindow window{ kWindowName };
     PlaybackClock          playback_clock;
 
+    phad::apps::StereoPairStream stream{ source };
     while ( true )
     {
-      phad::io::SensorReadResult result = source.next();
+      phad::apps::StereoPairReadResult result = stream.next();
       if ( std::holds_alternative<phad::io::EndOfStream>( result ) )
       {
         return 0;
       }
       if ( const auto* error =
-               std::get_if<phad::io::SensorSourceError>( &result ) )
+               std::get_if<phad::apps::StreamError>( &result ) )
       {
-        std::cerr << "sensor source error: " << error->cause << '\n';
+        std::cerr << "stereo stream error: " << error->detail << '\n';
         return 1;
       }
 
-      auto& event = std::get<phad::io::SensorEvent>( result );
-      auto* frame = std::get_if<phad::sensor::StereoFrame>( &event );
-      if ( frame == nullptr )
-      {
-        continue;
-      }
+      const auto& frame = std::get<phad::sensor::StereoFrame>( result );
 
-      auto rectified = rectifier.value().rectify( *frame );
+      auto rectified = rectifier.value().rectify( frame );
       if ( !rectified )
       {
         std::cerr << "rectify failed: " << rectified.error().detail << '\n';
@@ -264,7 +261,7 @@ namespace
                              .width_px  = canvas.rows,
                              .height_px = canvas.rows } );
         }
-        cv::Mat panel_image = panel->render( frame->timestamp );
+        cv::Mat panel_image = panel->render( frame.timestamp );
         if ( vo.status == phad::estimator::UpdateStatus::kOk &&
              vo.estimate.has_value() )
         {
@@ -287,7 +284,7 @@ namespace
         canvas = composed;
       }
 
-      if ( !playback_clock.waitUntil( frame->timestamp, window ) )
+      if ( !playback_clock.waitUntil( frame.timestamp, window ) )
       {
         return 0;
       }
