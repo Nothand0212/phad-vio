@@ -17,9 +17,12 @@ namespace phad::frontend
 
     struct LiveTrack
     {
-      LandmarkId    id;
-      std::uint32_t length;
-      cv::Point2f   pixel;
+      LandmarkId    id          = 0;
+      std::uint32_t length      = 0;
+      cv::Point2f   pixel       = {};
+      float         last_disp_px = 0.0F;
+      double        disparity_px = 0.0;
+      StereoStatus  status      = StereoStatus::kNoRightMatch;
     };
 
     [[nodiscard]] bool isGrayUint8( const sensor::Image& image )
@@ -34,7 +37,7 @@ namespace phad::frontend
       if ( !isGrayUint8( image ) )
       {
         throw std::runtime_error(
-            "StereoTracker expects single-channel uint8 left images" );
+            "StereoTracker expects single-channel uint8 images" );
       }
       const auto pixels = image.pixels<std::uint8_t>();
       if ( !pixels.has_value() )
@@ -71,6 +74,26 @@ namespace phad::frontend
       return *mid;
     }
 
+    [[nodiscard]] double percentileSorted( std::vector<double> values,
+                                           double              fraction )
+    {
+      if ( values.empty() )
+      {
+        return 0.0;
+      }
+      std::sort( values.begin(), values.end() );
+      const double position =
+          fraction * static_cast<double>( values.size() - 1U );
+      const auto   lower = static_cast<std::size_t>( std::floor( position ) );
+      const auto   upper = static_cast<std::size_t>( std::ceil( position ) );
+      if ( lower == upper )
+      {
+        return values[ lower ];
+      }
+      const double weight = position - static_cast<double>( lower );
+      return values[ lower ] * ( 1.0 - weight ) + values[ upper ] * weight;
+    }
+
   }  // namespace
 
   struct StereoTracker::Impl
@@ -79,7 +102,7 @@ namespace phad::frontend
     StereoTrackerOptions               options;
     cv::Mat                            prev_left;
     std::vector<LiveTrack>             tracks;
-    LandmarkId                         next_id = 1;
+    LandmarkId                         next_id  = 1;
     bool                               has_prev = false;
 
     explicit Impl( camera::RectifiedStereoCalibration calib,
@@ -106,6 +129,18 @@ namespace phad::frontend
       if ( !( options.forward_backward_px > 0.0 ) )
       {
         throw std::invalid_argument( "forward_backward_px must be positive" );
+      }
+      if ( !( options.max_epipolar_px > 0.0 ) ||
+           !( options.min_disparity_px > 0.0 ) )
+      {
+        throw std::invalid_argument(
+            "max_epipolar_px and min_disparity_px must be positive" );
+      }
+      if ( !( options.min_depth_m > 0.0 ) ||
+           !( options.max_depth_m > options.min_depth_m ) )
+      {
+        throw std::invalid_argument(
+            "depth range must satisfy 0 < min_depth_m < max_depth_m" );
       }
     }
 
@@ -143,10 +178,112 @@ namespace phad::frontend
       }
     }
 
-    [[nodiscard]] FrameTracks makeOutput( common::Timestamp timestamp ) const
+    void matchRight( const cv::Mat& left, const cv::Mat& right,
+                     FrameStats& stats )
+    {
+      if ( tracks.empty() )
+      {
+        stats.epipolar_median_px = 0.0;
+        stats.epipolar_p95_px    = 0.0;
+        return;
+      }
+
+      std::vector<cv::Point2f> left_pts;
+      std::vector<cv::Point2f> right_seed;
+      left_pts.reserve( tracks.size() );
+      right_seed.reserve( tracks.size() );
+      for ( const LiveTrack& track : tracks )
+      {
+        left_pts.push_back( track.pixel );
+        right_seed.emplace_back( track.pixel.x - track.last_disp_px,
+                                 track.pixel.y );
+      }
+
+      const cv::Size win( options.lk_window_px, options.lk_window_px );
+      std::vector<cv::Point2f> right_pts = right_seed;
+      std::vector<std::uint8_t> forward_status;
+      std::vector<float>        forward_error;
+      cv::calcOpticalFlowPyrLK( left, right, left_pts, right_pts,
+                                forward_status, forward_error, win,
+                                options.lk_pyramid_levels );
+
+      std::vector<cv::Point2f> back_pts;
+      std::vector<std::uint8_t> backward_status;
+      std::vector<float>        backward_error;
+      cv::calcOpticalFlowPyrLK( right, left, right_pts, back_pts,
+                                backward_status, backward_error, win,
+                                options.lk_pyramid_levels );
+
+      const double fb_limit_sq =
+          options.forward_backward_px * options.forward_backward_px;
+      std::vector<double> epipolar_errors;
+      epipolar_errors.reserve( tracks.size() );
+
+      for ( std::size_t index = 0; index < tracks.size(); ++index )
+      {
+        LiveTrack& track = tracks[ index ];
+        track.disparity_px = 0.0;
+        track.status       = StereoStatus::kNoRightMatch;
+
+        if ( forward_status[ index ] == 0 || backward_status[ index ] == 0 ||
+             !inBounds( right_pts[ index ], right.cols, right.rows ) )
+        {
+          continue;
+        }
+        const float bdx = back_pts[ index ].x - left_pts[ index ].x;
+        const float bdy = back_pts[ index ].y - left_pts[ index ].y;
+        if ( ( static_cast<double>( bdx ) * static_cast<double>( bdx ) +
+               static_cast<double>( bdy ) * static_cast<double>( bdy ) ) >
+             fb_limit_sq )
+        {
+          continue;
+        }
+
+        const double abs_dy = std::abs( static_cast<double>(
+            left_pts[ index ].y - right_pts[ index ].y ) );
+        epipolar_errors.push_back( abs_dy );
+
+        const double disparity = static_cast<double>( left_pts[ index ].x -
+                                                      right_pts[ index ].x );
+        track.last_disp_px =
+            static_cast<float>( disparity );  // seed next frame even if rejected
+
+        if ( abs_dy > options.max_epipolar_px )
+        {
+          track.status = StereoStatus::kInvalidDisparity;
+          ++stats.epipolar_rejected;
+          continue;
+        }
+        if ( disparity <= options.min_disparity_px )
+        {
+          track.status = StereoStatus::kInvalidDisparity;
+          ++stats.disparity_rejected;
+          continue;
+        }
+
+        const double depth_m =
+            calibration.fxPixels() * calibration.baselineM() / disparity;
+        if ( depth_m < options.min_depth_m || depth_m > options.max_depth_m )
+        {
+          track.status = StereoStatus::kDepthOutOfRange;
+          ++stats.depth_rejected;
+          continue;
+        }
+
+        track.status       = StereoStatus::kValid;
+        track.disparity_px = disparity;
+      }
+
+      stats.epipolar_median_px = percentileSorted( epipolar_errors, 0.5 );
+      stats.epipolar_p95_px    = percentileSorted( epipolar_errors, 0.95 );
+    }
+
+    [[nodiscard]] FrameTracks makeOutput( common::Timestamp timestamp,
+                                          const FrameStats& stats ) const
     {
       FrameTracks output;
       output.timestamp = timestamp;
+      output.stats     = stats;
       output.observations.reserve( tracks.size() );
 
       std::vector<std::uint32_t> lengths;
@@ -157,23 +294,16 @@ namespace phad::frontend
         output.observations.push_back( TrackObservation{
             track.id,
             Eigen::Vector2d{ track.pixel.x, track.pixel.y },
-            0.0,
-            StereoStatus::kNoRightMatch,
+            track.disparity_px,
+            track.status,
             track.length } );
         lengths.push_back( track.length );
         length_max = std::max( length_max, track.length );
       }
 
-      output.stats.tracked                   = 0U;
-      output.stats.detected                  = 0U;
-      output.stats.forward_backward_rejected = 0U;
-      output.stats.epipolar_rejected         = 0U;
-      output.stats.disparity_rejected        = 0U;
-      output.stats.depth_rejected            = 0U;
-      output.stats.epipolar_median_px        = 0.0;
-      output.stats.epipolar_p95_px           = 0.0;
-      output.stats.track_length_median = medianLength( std::move( lengths ) );
-      output.stats.track_length_max    = length_max;
+      output.stats.track_length_median =
+          medianLength( std::move( lengths ) );
+      output.stats.track_length_max = length_max;
       return output;
     }
   };
@@ -194,16 +324,17 @@ namespace phad::frontend
   FrameTracks StereoTracker::process( const sensor::StereoFrame& rectified )
   {
     if ( rectified.left.width() != m_impl->calibration.imageWidth() ||
-         rectified.left.height() != m_impl->calibration.imageHeight() )
+         rectified.left.height() != m_impl->calibration.imageHeight() ||
+         rectified.right.width() != m_impl->calibration.imageWidth() ||
+         rectified.right.height() != m_impl->calibration.imageHeight() )
     {
       throw std::invalid_argument(
-          "rectified left image size does not match tracker calibration" );
+          "rectified stereo frame size does not match tracker calibration" );
     }
 
-    const cv::Mat left = toGrayMat( rectified.left );
+    const cv::Mat left  = toGrayMat( rectified.left );
+    const cv::Mat right = toGrayMat( rectified.right );
     FrameStats    stats{};
-    stats.epipolar_median_px = 0.0;
-    stats.epipolar_p95_px    = 0.0;
 
     if ( !m_impl->has_prev || m_impl->tracks.empty() )
     {
@@ -263,20 +394,15 @@ namespace phad::frontend
         ++track.length;
         survivors.push_back( track );
       }
-      m_impl->tracks  = std::move( survivors );
-      stats.tracked   = static_cast<std::uint32_t>( m_impl->tracks.size() );
+      m_impl->tracks = std::move( survivors );
+      stats.tracked  = static_cast<std::uint32_t>( m_impl->tracks.size() );
       m_impl->detectNewTracks( left, stats.detected );
     }
 
+    m_impl->matchRight( left, right, stats );
     m_impl->prev_left = left.clone();
     m_impl->has_prev  = true;
-
-    FrameTracks output = m_impl->makeOutput( rectified.timestamp );
-    output.stats.tracked                   = stats.tracked;
-    output.stats.detected                  = stats.detected;
-    output.stats.forward_backward_rejected =
-        stats.forward_backward_rejected;
-    return output;
+    return m_impl->makeOutput( rectified.timestamp, stats );
   }
 
 }  // namespace phad::frontend

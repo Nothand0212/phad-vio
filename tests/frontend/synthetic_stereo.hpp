@@ -106,6 +106,13 @@ namespace phad::testing
             static_cast<std::size_t>( width * height ), 0U ) };
   }
 
+  struct StereoRenderOptions
+  {
+    double              sigma_px           = 2.0;
+    double              right_v_offset_px  = 0.0;
+    std::vector<bool>   paint_right;  // empty => paint all; else per-point
+  };
+
   /**
    * @brief Render a rectified stereo pair from points in the left camera frame.
    */
@@ -113,7 +120,7 @@ namespace phad::testing
       const camera::RectifiedStereoCalibration& calibration,
       const std::vector<Eigen::Vector3d>&       points_left,
       common::Timestamp                         timestamp,
-      double                                    sigma_px = 2.0 )
+      StereoRenderOptions                       options = {} )
   {
     const int width  = calibration.imageWidth();
     const int height = calibration.imageHeight();
@@ -122,8 +129,9 @@ namespace phad::testing
     std::vector<std::uint8_t> right_pixels(
         static_cast<std::size_t>( width * height ), 0U );
 
-    for ( const Eigen::Vector3d& point : points_left )
+    for ( std::size_t index = 0; index < points_left.size(); ++index )
     {
+      const Eigen::Vector3d& point = points_left[ index ];
       if ( !( point.z() > 0.0 ) || !point.allFinite() )
       {
         continue;
@@ -131,15 +139,32 @@ namespace phad::testing
       const Eigen::Vector2d left_uv  = projectLeft( calibration, point );
       const Eigen::Vector2d right_uv = projectRight( calibration, point );
       paintGaussianBlob( left_pixels, width, height, left_uv.x(), left_uv.y(),
-                         sigma_px );
-      paintGaussianBlob( right_pixels, width, height, right_uv.x(),
-                         right_uv.y(), sigma_px );
+                         options.sigma_px );
+      const bool paint_right =
+          options.paint_right.empty() ||
+          ( index < options.paint_right.size() && options.paint_right[ index ] );
+      if ( paint_right )
+      {
+        paintGaussianBlob( right_pixels, width, height, right_uv.x(),
+                           right_uv.y() + options.right_v_offset_px,
+                           options.sigma_px );
+      }
     }
 
     return sensor::StereoFrame{
         timestamp,
         sensor::Image{ width, height, 1, std::move( left_pixels ) },
         sensor::Image{ width, height, 1, std::move( right_pixels ) } };
+  }
+
+  [[nodiscard]] inline sensor::StereoFrame renderStereo(
+      const camera::RectifiedStereoCalibration& calibration,
+      const std::vector<Eigen::Vector3d>&       points_left,
+      common::Timestamp                         timestamp, double sigma_px )
+  {
+    StereoRenderOptions options;
+    options.sigma_px = sigma_px;
+    return renderStereo( calibration, points_left, timestamp, options );
   }
 
   /**

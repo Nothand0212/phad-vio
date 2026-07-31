@@ -4,7 +4,9 @@
 
 #include <Eigen/Core>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <optional>
 #include <set>
 #include <utility>
 #include <vector>
@@ -19,10 +21,12 @@ namespace
   using phad::frontend::StereoStatus;
   using phad::frontend::StereoTracker;
   using phad::frontend::StereoTrackerOptions;
+  using phad::testing::StereoRenderOptions;
   using phad::testing::kStereoEpochNs;
   using phad::testing::kStereoStepNs;
   using phad::testing::makePointGrid;
   using phad::testing::makeRectifiedCalibration;
+  using phad::testing::projectLeft;
   using phad::testing::renderStereo;
 
   StereoTrackerOptions testOptions( int max_tracks )
@@ -35,6 +39,10 @@ namespace
     options.lk_window_px        = 21;
     options.lk_pyramid_levels   = 2;
     options.forward_backward_px = 1.0;
+    options.max_epipolar_px     = 1.5;
+    options.min_disparity_px    = 0.5;
+    options.min_depth_m         = 0.3;
+    options.max_depth_m         = 40.0;
     return options;
   }
 
@@ -46,6 +54,24 @@ namespace
       ids.insert( observation.id );
     }
     return ids;
+  }
+
+  [[nodiscard]] std::optional<phad::frontend::TrackObservation> nearestTrack(
+      const FrameTracks& tracks, const Eigen::Vector2d& pixel,
+      double max_dist_px = 4.0 )
+  {
+    std::optional<phad::frontend::TrackObservation> best;
+    double best_dist = max_dist_px;
+    for ( const auto& observation : tracks.observations )
+    {
+      const double dist = ( observation.left_pixel - pixel ).norm();
+      if ( dist < best_dist )
+      {
+        best_dist = dist;
+        best      = observation;
+      }
+    }
+    return best;
   }
 
   TEST( StereoTrackerTest, SurvivesPureTranslationWithStableIds )
@@ -78,11 +104,16 @@ namespace
       const FrameTracks tracks = tracker.process( stereo );
 
       ASSERT_FALSE( tracks.observations.empty() );
+      std::size_t valid_count = 0;
       for ( const auto& observation : tracks.observations )
       {
-        EXPECT_EQ( observation.status, StereoStatus::kNoRightMatch );
-        EXPECT_DOUBLE_EQ( observation.disparity_px, 0.0 );
+        if ( observation.status == StereoStatus::kValid )
+        {
+          ++valid_count;
+          EXPECT_GT( observation.disparity_px, 0.0 );
+        }
       }
+      EXPECT_GE( valid_count, points.size() / 2U );
 
       if ( frame == 0 )
       {
@@ -125,7 +156,6 @@ namespace
       max_id = std::max( max_id, observation.id );
     }
 
-    // Sweep points far to the left so they leave the image.
     for ( Eigen::Vector3d& point : points )
     {
       point.x() -= 2.5;
@@ -135,7 +165,6 @@ namespace
         phad::common::Timestamp{ kStereoEpochNs + kStereoStepNs }, 2.5 );
     (void)tracker.process( empty_frame );
 
-    // Bring a fresh grid back into view.
     const std::vector<Eigen::Vector3d> refill =
         makePointGrid( calibration, 2, 3 );
     const auto refill_frame = renderStereo(
@@ -178,6 +207,131 @@ namespace
                ( kMaxTracks * 3 ) / 4 );
     EXPECT_LE( static_cast<int>( refilled.observations.size() ), kMaxTracks );
     EXPECT_GT( refilled.stats.detected, 0U );
+  }
+
+  TEST( StereoTrackerTest, ValidDisparityMatchesGeometry )
+  {
+    const auto calibration = makeRectifiedCalibration();
+    constexpr double kDepth = 3.0;
+    const std::vector<Eigen::Vector3d> points =
+        makePointGrid( calibration, 3, 4, kDepth );
+    StereoTracker tracker( calibration,
+                           testOptions( static_cast<int>( points.size() ) ) );
+
+    const FrameTracks tracks = tracker.process( renderStereo(
+        calibration, points, phad::common::Timestamp{ kStereoEpochNs },
+        2.5 ) );
+
+    const double expected_disp =
+        calibration.fxPixels() * calibration.baselineM() / kDepth;
+    std::size_t valid_count = 0;
+    for ( const auto& observation : tracks.observations )
+    {
+      if ( observation.status != StereoStatus::kValid )
+      {
+        continue;
+      }
+      ++valid_count;
+      EXPECT_NEAR( observation.disparity_px, expected_disp, 0.75 );
+    }
+    ASSERT_GE( valid_count, points.size() / 2U );
+    EXPECT_LT( tracks.stats.epipolar_median_px, 1.0 );
+  }
+
+  TEST( StereoTrackerTest, MissingRightBlobBecomesNoRightMatch )
+  {
+    const auto calibration = makeRectifiedCalibration();
+    std::vector<Eigen::Vector3d> points = {
+        { -0.3, -0.2, 2.5 },
+        { 0.3, -0.2, 2.5 },
+        { -0.3, 0.2, 2.5 },
+        { 0.3, 0.2, 2.5 },
+    };
+    StereoTrackerOptions options = testOptions( 8 );
+    options.min_distance_px      = 8.0;
+    options.mask_radius_px       = 8;
+    StereoTracker tracker( calibration, options );
+
+    // Seed tracks with a complete stereo pair.
+    (void)tracker.process( renderStereo(
+        calibration, points, phad::common::Timestamp{ kStereoEpochNs },
+        2.5 ) );
+
+    StereoRenderOptions render;
+    render.sigma_px = 2.5;
+    render.paint_right.assign( points.size(), true );
+    render.paint_right[ 0 ] = false;
+
+    const FrameTracks tracks = tracker.process( renderStereo(
+        calibration, points,
+        phad::common::Timestamp{ kStereoEpochNs + kStereoStepNs }, render ) );
+
+    const Eigen::Vector2d target = projectLeft( calibration, points[ 0 ] );
+    const auto            hit    = nearestTrack( tracks, target, 6.0 );
+    ASSERT_TRUE( hit.has_value() );
+    EXPECT_EQ( hit->status, StereoStatus::kNoRightMatch );
+    EXPECT_DOUBLE_EQ( hit->disparity_px, 0.0 );
+    // Track is retained even without a right match.
+    EXPECT_GE( hit->length, 1U );
+  }
+
+  TEST( StereoTrackerTest, FarPointBecomesDepthOutOfRange )
+  {
+    const auto calibration = makeRectifiedCalibration();
+    StereoTrackerOptions options = testOptions( 4 );
+    options.max_depth_m          = 5.0;
+    options.min_distance_px      = 8.0;
+    options.mask_radius_px       = 8;
+    StereoTracker tracker( calibration, options );
+
+    const std::vector<Eigen::Vector3d> points{ { 0.0, 0.0, 12.0 } };
+    const FrameTracks tracks = tracker.process( renderStereo(
+        calibration, points, phad::common::Timestamp{ kStereoEpochNs },
+        3.0 ) );
+
+    ASSERT_FALSE( tracks.observations.empty() );
+    bool saw_depth = false;
+    for ( const auto& observation : tracks.observations )
+    {
+      if ( observation.status == StereoStatus::kDepthOutOfRange )
+      {
+        saw_depth = true;
+        EXPECT_DOUBLE_EQ( observation.disparity_px, 0.0 );
+      }
+    }
+    EXPECT_TRUE( saw_depth );
+    EXPECT_GE( tracks.stats.depth_rejected, 1U );
+  }
+
+  TEST( StereoTrackerTest, VerticalRightOffsetBecomesInvalidDisparity )
+  {
+    const auto calibration = makeRectifiedCalibration();
+    const std::vector<Eigen::Vector3d> points =
+        makePointGrid( calibration, 2, 3, 3.0 );
+    StereoTrackerOptions options = testOptions( 12 );
+    options.max_epipolar_px      = 1.0;
+    StereoTracker tracker( calibration, options );
+
+    StereoRenderOptions render;
+    render.sigma_px          = 2.5;
+    render.right_v_offset_px = 4.0;
+
+    const FrameTracks tracks = tracker.process( renderStereo(
+        calibration, points, phad::common::Timestamp{ kStereoEpochNs },
+        render ) );
+
+    ASSERT_FALSE( tracks.observations.empty() );
+    std::size_t invalid = 0;
+    for ( const auto& observation : tracks.observations )
+    {
+      if ( observation.status == StereoStatus::kInvalidDisparity )
+      {
+        ++invalid;
+        EXPECT_DOUBLE_EQ( observation.disparity_px, 0.0 );
+      }
+    }
+    EXPECT_GE( invalid, 1U );
+    EXPECT_GE( tracks.stats.epipolar_rejected, 1U );
   }
 
 }  // namespace
