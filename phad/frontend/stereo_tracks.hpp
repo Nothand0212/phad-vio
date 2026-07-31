@@ -4,12 +4,13 @@
 #include <cstdint>
 #include <vector>
 
+#include "phad/common/landmark_id.hpp"
 #include "phad/common/timestamp.hpp"
 
 namespace phad::frontend
 {
 
-  using LandmarkId = std::uint64_t;
+  using LandmarkId = common::LandmarkId;
 
   /**
    * @brief 描述观测的立体匹配状态。

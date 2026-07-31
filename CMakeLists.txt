@@ -105,7 +105,7 @@ add_library(phad::frontend ALIAS phad_frontend)
 target_compile_features(phad_frontend PUBLIC cxx_std_20)
 target_include_directories(phad_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(phad_frontend
-  PUBLIC phad::camera
+  PUBLIC phad::common phad::camera
   PRIVATE opencv_core opencv_imgproc opencv_video
 )
 target_compile_options(phad_frontend PRIVATE
@@ -232,6 +232,7 @@ if(PHAD_BUILD_TESTS)
 
   add_executable(phad_estimator_tests
     tests/estimator/gtsam_smoke_test.cpp
+    tests/estimator/types_test.cpp
   )
   target_link_libraries(phad_estimator_tests PRIVATE
     phad::estimator gtsam GTest::gtest_main
