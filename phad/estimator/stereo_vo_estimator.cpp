@@ -236,6 +236,7 @@ namespace phad::estimator
     std::optional<Eigen::Isometry3d> prev_accepted_T_W_B;
     std::uint64_t                    next_frame_index = 0;
     bool                             initialized      = false;
+    std::uint32_t                    segment_id       = 0;
 
     explicit Impl( camera::RectifiedStereoCalibration calibration_in,
                    EstimatorOptions                   options_in )
@@ -278,6 +279,8 @@ namespace phad::estimator
     bool seedSegment( const Eigen::Isometry3d&   anchor_T_W_B,
                       const KeyframeMeasurement& measurement )
     {
+      landmarks_W.clear();
+
       WindowFrame candidate;
       candidate.frame_index  = next_frame_index;
       candidate.timestamp    = measurement.timestamp;
@@ -512,6 +515,7 @@ namespace phad::estimator
     VioUpdateResult result;
     result.diagnostics.num_observations =
         static_cast<std::uint32_t>( measurement.observations.size() );
+    result.diagnostics.segment_id = m_impl->segment_id;
 
     if ( measurement.observations.empty() )
     {
@@ -549,10 +553,26 @@ namespace phad::estimator
     }
     result.diagnostics.num_shared = num_shared;
 
-    if ( m_impl->initialized && num_shared == 0 )
+    const bool overlap_broken = m_impl->initialized && num_shared == 0;
+
+    if ( overlap_broken && !m_impl->options.enable_reanchor )
     {
       result.status  = UpdateStatus::kRejected;
       result.message = "zero shared landmarks with window";
+      result.diagnostics.window_size =
+          static_cast<std::uint32_t>( m_impl->window.size() );
+      if ( !m_impl->window.empty() )
+      {
+        result.diagnostics.prior_key = m_impl->window.front().frame_index;
+      }
+      return result;
+    }
+    if ( overlap_broken &&
+         static_cast<int>( measurement.observations.size() ) <
+             m_impl->options.min_seed_observations )
+    {
+      result.status  = UpdateStatus::kRejected;
+      result.message = "insufficient observations to seed new segment";
       result.diagnostics.window_size =
           static_cast<std::uint32_t>( m_impl->window.size() );
       if ( !m_impl->window.empty() )
@@ -574,6 +594,7 @@ namespace phad::estimator
     const auto prev_backup        = m_impl->prev_accepted_T_W_B;
     const auto next_index_backup  = m_impl->next_frame_index;
     const bool initialized_backup = m_impl->initialized;
+    const auto segment_id_backup  = m_impl->segment_id;
 
     auto restore = [ & ]() {
       m_impl->window              = window_backup;
@@ -583,6 +604,7 @@ namespace phad::estimator
       m_impl->prev_accepted_T_W_B = prev_backup;
       m_impl->next_frame_index    = next_index_backup;
       m_impl->initialized         = initialized_backup;
+      m_impl->segment_id          = segment_id_backup;
     };
 
     if ( !m_impl->initialized )
@@ -595,6 +617,26 @@ namespace phad::estimator
         result.message = "failed to backproject landmark on first frame";
         return result;
       }
+    }
+    else if ( overlap_broken )
+    {
+      const Eigen::Isometry3d anchor = m_impl->poseInitialValue();
+      if ( !isFinite( anchor ) )
+      {
+        restore();
+        result.status  = UpdateStatus::kFailed;
+        result.message = "non-finite pose initial value";
+        return result;
+      }
+      if ( !m_impl->seedSegment( anchor, measurement ) )
+      {
+        restore();
+        result.status  = UpdateStatus::kRejected;
+        result.message = "failed to backproject landmark on re-anchor frame";
+        return result;
+      }
+      ++m_impl->segment_id;
+      result.diagnostics.segment_id = m_impl->segment_id;
     }
     else
     {
