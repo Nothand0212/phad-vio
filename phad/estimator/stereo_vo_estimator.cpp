@@ -586,6 +586,15 @@ namespace phad::estimator
         num_shared > 0 &&
         static_cast<int>( num_shared ) < m_impl->options.min_shared_landmarks;
 
+    if ( !m_impl->initialized &&
+         static_cast<int>( measurement.observations.size() ) <
+             m_impl->options.min_seed_observations )
+    {
+      result.status  = UpdateStatus::kRejected;
+      result.message = "insufficient observations to seed first segment";
+      return result;
+    }
+
     // Snapshot for transactional rollback.
     const auto window_backup      = m_impl->window;
     const auto landmarks_backup   = m_impl->landmarks_W;
