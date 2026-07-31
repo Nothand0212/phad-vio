@@ -4,10 +4,12 @@
 
 本目录在校正后图像上做左目时序 LK 跟踪与右目每帧重匹配，产出带
 `LandmarkId` 的 track 表与帧级指标。不判断关键帧、不产出位姿、不定义
-`KeyframeMeasurement`（留给 M2.3 estimator）。
+`KeyframeMeasurement`。M2.3 由 `apps/stereo_vo_glue.hpp` 消费
+`FrameTracks`，仍不在 frontend 内定义估计器测量类型。
 
 CMake target：`phad_frontend`（alias `phad::frontend`），公开依赖
-`phad::camera`；OpenCV（`core` / `imgproc` / `video`）为 PRIVATE。
+`phad::common`、`phad::camera`；OpenCV（`core` / `imgproc` / `video`）为
+PRIVATE。
 
 ## 职责边界
 
@@ -39,8 +41,12 @@ StereoFrame (rectified) ──► StereoTracker::process
                                 │
               ┌─────────────────┴─────────────────┐
               ▼                                   ▼
-   phad_stereo_frontend_probe              phad_euroc_runner
-        CSV + summary                         track overlay
+   phad_stereo_frontend_probe         apps/stereo_vo_glue.hpp
+        CSV + summary                  KeyframeMeasurement
+                                              │
+                              ┌───────────────┴───────────────┐
+                              ▼                               ▼
+                   phad_stereo_vo_probe                phad_euroc_runner
 ```
 
 ## `StereoStatus`

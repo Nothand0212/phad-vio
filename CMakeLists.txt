@@ -150,13 +150,18 @@ target_link_libraries(phad_euroc_inspect PRIVATE phad::io_dataset)
 
 add_executable(phad_euroc_runner apps/phad_euroc_runner.cpp)
 target_link_libraries(phad_euroc_runner
-  PRIVATE phad::io_dataset phad::frontend phad::viz
+  PRIVATE phad::io_dataset phad::frontend phad::estimator phad::viz
           opencv_core opencv_imgproc
 )
 
 add_executable(phad_stereo_frontend_probe apps/phad_stereo_frontend_probe.cpp)
 target_link_libraries(phad_stereo_frontend_probe
   PRIVATE phad::io_dataset phad::frontend
+)
+
+add_executable(phad_stereo_vo_probe apps/phad_stereo_vo_probe.cpp)
+target_link_libraries(phad_stereo_vo_probe
+  PRIVATE phad::io_dataset phad::frontend phad::estimator phad::eval
 )
 
 add_executable(phad_euroc_gt_export apps/phad_euroc_gt_export.cpp)

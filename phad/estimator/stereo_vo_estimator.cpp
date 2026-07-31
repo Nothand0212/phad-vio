@@ -39,8 +39,13 @@ namespace phad::estimator
 
     [[nodiscard]] Eigen::Isometry3d toIsometry( const gtsam::Pose3& pose )
     {
+      // GTSAM Rot3 matrices can drift slightly off SO(3); Trajectory::create
+      // and constant-velocity init both require a proper rotation.
+      Eigen::Quaterniond rotation( pose.rotation().matrix() );
+      rotation.normalize();
       Eigen::Isometry3d T_a_b = Eigen::Isometry3d::Identity();
-      T_a_b.matrix()          = pose.matrix();
+      T_a_b.linear()          = rotation.toRotationMatrix();
+      T_a_b.translation()     = pose.translation();
       return T_a_b;
     }
 
@@ -277,7 +282,13 @@ namespace phad::estimator
       }
       const Eigen::Isometry3d& T_prev     = *last_accepted_T_W_B;
       const Eigen::Isometry3d& T_prevprev = *prev_accepted_T_W_B;
-      return T_prev * ( T_prevprev.inverse() * T_prev );
+      const Eigen::Isometry3d  predicted =
+          T_prev * ( T_prevprev.inverse() * T_prev );
+      if ( !isFinite( predicted ) )
+      {
+        return T_prev;
+      }
+      return predicted;
     }
 
     void pruneLandmarksNotInWindow()

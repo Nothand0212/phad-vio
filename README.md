@@ -31,9 +31,9 @@ M2.1（评估与可视化底座）已完成：
 - `scripts/` 下的 Python 脚本消费 TUM 与误差 CSV，产出 3D 轨迹与误差曲线
   （见 [离线绘图脚本](scripts/README.md)）。
 
-M2 的其余部分是**双目 VO 最小闭环**：接入 OpenCV LK 前端和 GTSAM 因子图
-后端，在 `MH_01_easy` 上产出第一条估计轨迹和第一个 ATE 数字。该里程碑不
-追求精度，只建立后续所有改动的基线。
+M2.2（双目前端）与 M2.3（VO 后端）已完成：`phad_stereo_vo_probe` 在
+`MH_01_easy` 上写出完整估计轨迹；ATE translation RMSE 约 0.15 m（基线，
+不追求精度）。详见 [roadmap M2.3](docs/roadmap.md)。
 
 技术路线：
 
