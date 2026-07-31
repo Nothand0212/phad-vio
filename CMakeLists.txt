@@ -373,7 +373,7 @@ if(PHAD_BUILD_TESTS)
     tests/apps/offline_vo_session_test.cpp
   )
   target_link_libraries(phad_apps_tests PRIVATE
-    phad_offline_vo_session GTest::gtest_main
+    phad_offline_vo_session GTest::gtest_main opencv_imgcodecs
   )
   target_compile_options(phad_apps_tests PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>

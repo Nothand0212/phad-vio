@@ -117,6 +117,25 @@ namespace phad::apps
     const auto                       wall_begin = std::chrono::steady_clock::now();
     io::dataset::DatasetReplaySource source{ opened.value() };
     StereoPairStream                 stream{ source };
+
+    // Shared by the success path and every mid-loop error return so the
+    // "vo segments summary: ..." line and segment_warnings are never lost.
+    const auto finalizeSegmentsAndWarnings =
+        [ &result, &stream, &segment_warnings, &any_segment_established ]() {
+          result.counts.segments =
+              any_segment_established ? result.counts.reanchors + 1U : 0U;
+          result.warnings = stream.warnings();
+          result.warnings.insert( result.warnings.end(),
+                                  segment_warnings.begin(),
+                                  segment_warnings.end() );
+          result.warnings.push_back(
+              "vo segments summary: segments=" +
+              std::to_string( result.counts.segments ) +
+              " reanchors=" + std::to_string( result.counts.reanchors ) +
+              " seed_rejected=" +
+              std::to_string( result.counts.seed_rejected ) );
+        };
+
     while ( true )
     {
       if ( options.max_frames.has_value() &&
@@ -132,12 +151,9 @@ namespace phad::apps
       }
       if ( const auto* error = std::get_if<StreamError>( &loaded ) )
       {
-        result.error    = SessionError{ error->detail };
-        result.sync     = stream.diagnostics();
-        result.warnings = stream.warnings();
-        result.warnings.insert( result.warnings.end(),
-                                segment_warnings.begin(),
-                                segment_warnings.end() );
+        result.error = SessionError{ error->detail };
+        result.sync  = stream.diagnostics();
+        finalizeSegmentsAndWarnings();
         return result;
       }
 
@@ -151,6 +167,8 @@ namespace phad::apps
       {
         result.error =
             SessionError{ "rectify failed: " + rectified.error().detail };
+        result.sync = stream.diagnostics();
+        finalizeSegmentsAndWarnings();
         return result;
       }
 
@@ -266,17 +284,7 @@ namespace phad::apps
     result.reproj.median_px = percentile( rms_after, 0.5 );
     result.reproj.p95_px    = percentile( rms_after, 0.95 );
     result.sync             = stream.diagnostics();
-    result.counts.segments =
-        any_segment_established ? result.counts.reanchors + 1U : 0U;
-
-    result.warnings = stream.warnings();
-    result.warnings.insert( result.warnings.end(), segment_warnings.begin(),
-                            segment_warnings.end() );
-    result.warnings.push_back(
-        "vo segments summary: segments=" +
-        std::to_string( result.counts.segments ) +
-        " reanchors=" + std::to_string( result.counts.reanchors ) +
-        " seed_rejected=" + std::to_string( result.counts.seed_rejected ) );
+    finalizeSegmentsAndWarnings();
 
     if ( poses.empty() )
     {
