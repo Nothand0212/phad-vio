@@ -597,14 +597,15 @@ namespace phad::estimator
     const auto segment_id_backup  = m_impl->segment_id;
 
     auto restore = [ & ]() {
-      m_impl->window              = window_backup;
-      m_impl->landmarks_W         = landmarks_backup;
-      m_impl->track_times         = track_times_backup;
-      m_impl->last_accepted_T_W_B = last_backup;
-      m_impl->prev_accepted_T_W_B = prev_backup;
-      m_impl->next_frame_index    = next_index_backup;
-      m_impl->initialized         = initialized_backup;
-      m_impl->segment_id          = segment_id_backup;
+      m_impl->window                = window_backup;
+      m_impl->landmarks_W           = landmarks_backup;
+      m_impl->track_times           = track_times_backup;
+      m_impl->last_accepted_T_W_B   = last_backup;
+      m_impl->prev_accepted_T_W_B   = prev_backup;
+      m_impl->next_frame_index      = next_index_backup;
+      m_impl->initialized           = initialized_backup;
+      m_impl->segment_id            = segment_id_backup;
+      result.diagnostics.segment_id = m_impl->segment_id;
     };
 
     if ( !m_impl->initialized )
