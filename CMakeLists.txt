@@ -9,7 +9,9 @@ option(PHAD_ENABLE_MH01_TESTS "Enable local EuRoC MH_01 integration tests" OFF)
 option(PHAD_ENABLE_TUMVI_CORRIDOR1_TESTS
   "Enable local TUM VI corridor1 integration tests" OFF)
 
-find_package(OpenCV 4 REQUIRED COMPONENTS core highgui imgcodecs imgproc)
+find_package(OpenCV 4 REQUIRED COMPONENTS
+  core highgui imgcodecs imgproc calib3d video
+)
 find_package(Eigen3 3.4 REQUIRED NO_MODULE)
 find_package(yaml-cpp 0.8 REQUIRED)
 
@@ -41,11 +43,15 @@ target_compile_options(phad_sensor PRIVATE
 add_library(phad_camera
   phad/camera/camera_model.cpp
   phad/camera/rectified_stereo_calibration.cpp
+  phad/camera/stereo_rectifier.cpp
 )
 add_library(phad::camera ALIAS phad_camera)
 target_compile_features(phad_camera PUBLIC cxx_std_20)
 target_include_directories(phad_camera PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(phad_camera PUBLIC phad::sensor)
+target_link_libraries(phad_camera
+  PUBLIC phad::sensor
+  PRIVATE opencv_core opencv_imgproc opencv_calib3d
+)
 target_compile_options(phad_camera PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
@@ -146,6 +152,7 @@ if(PHAD_BUILD_TESTS)
     tests/camera/camera_model_header_test.cpp
     tests/camera/camera_model_test.cpp
     tests/camera/rectified_stereo_calibration_test.cpp
+    tests/camera/stereo_rectifier_test.cpp
   )
   target_link_libraries(phad_camera_tests PRIVATE
     phad::camera GTest::gtest_main
@@ -214,6 +221,15 @@ if(PHAD_BUILD_TESTS)
       PRIVATE phad::io_dataset phad::eval GTest::gtest_main
     )
     gtest_discover_tests(phad_eval_mh01_test PROPERTIES LABELS "mh01")
+
+    add_executable(phad_camera_mh01_test
+      tests/camera/euroc_mh01_rectify_test.cpp
+    )
+    target_link_libraries(phad_camera_mh01_test
+      PRIVATE phad::camera phad::io_dataset GTest::gtest_main
+              opencv_core opencv_imgproc opencv_video
+    )
+    gtest_discover_tests(phad_camera_mh01_test PROPERTIES LABELS "mh01")
   endif()
 
   if(PHAD_ENABLE_TUMVI_CORRIDOR1_TESTS)
