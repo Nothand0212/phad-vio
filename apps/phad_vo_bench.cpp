@@ -280,6 +280,11 @@ namespace
     snap.set( "tracker.min_disparity_px", tracker.min_disparity_px );
     snap.set( "tracker.min_depth_m", tracker.min_depth_m );
     snap.set( "tracker.max_depth_m", tracker.max_depth_m );
+    snap.set( "tracker.stereo_sad_half_win_px",
+              static_cast<std::int64_t>( tracker.stereo_sad_half_win_px ) );
+    snap.set( "tracker.stereo_row_tol_px",
+              static_cast<std::int64_t>( tracker.stereo_row_tol_px ) );
+    snap.set( "tracker.stereo_bidir_px", tracker.stereo_bidir_px );
 
     snap.set( "estimator.window_size",
               static_cast<std::int64_t>( estimator.window_size ) );
