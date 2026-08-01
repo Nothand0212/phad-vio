@@ -1135,9 +1135,19 @@ namespace phad::estimator
     // Full-graph RMS (includes factors for just-culled ids) = pre-cull quality.
     result.diagnostics.reproj_rms_after_px =
         stereoReprojRms( graph, optimized );
-    result.diagnostics.reproj_rms_after_cull_px =
-        stereoReprojRmsSkippingMissingLandmarks( graph, optimized,
-                                                 m_impl->landmarks_W );
+    // When mean-reproj cull is off, after_cull must mirror after (even if
+    // cheirality erased ids). Skip-missing is only for the post-cull view.
+    if ( m_impl->options.enable_outlier_cull )
+    {
+      result.diagnostics.reproj_rms_after_cull_px =
+          stereoReprojRmsSkippingMissingLandmarks( graph, optimized,
+                                                   m_impl->landmarks_W );
+    }
+    else
+    {
+      result.diagnostics.reproj_rms_after_cull_px =
+          result.diagnostics.reproj_rms_after_px;
+    }
     result.diagnostics.max_window_pose_shift_m = max_shift_m;
 
     m_impl->initialized         = true;

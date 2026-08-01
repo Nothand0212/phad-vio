@@ -388,12 +388,14 @@ TEST( StereoVoOutlierCullTest, CheiralityClearsWindowObservations )
   // Same scene as StereoVoDiagnostics.BehindCameraCountedAndSequenceContinues.
   // Confirms cheirality drop (which clears window obs via the shared helper)
   // leaves the sequence healthy — no failed updates / mean-reproj side effects.
+  // Cull off: after_cull RMS must equal after RMS even when cheirality erases.
   const auto       calibration = makeCalibration();
   EstimatorOptions options;
   options.window_size               = 8;
   options.min_shared_landmarks      = 2;
   options.min_landmark_observations = 2;
   options.huber_k_px                = 0.0;
+  options.enable_outlier_cull       = false;
 
   const std::vector<Eigen::Vector3d> far_landmarks{
       { 0.4, 0.1, 5.0 },
@@ -450,6 +452,8 @@ TEST( StereoVoOutlierCullTest, CheiralityClearsWindowObservations )
       saw_cheirality = true;
     }
     EXPECT_EQ( result.diagnostics.outliers_culled, 0U );
+    EXPECT_NEAR( result.diagnostics.reproj_rms_after_cull_px,
+                 result.diagnostics.reproj_rms_after_px, 1e-12 );
   }
   EXPECT_TRUE( saw_cheirality );
 }
