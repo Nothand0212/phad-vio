@@ -82,7 +82,11 @@ namespace
         makePointGrid( calibration, 3, 4 );
     const int max_tracks = static_cast<int>( points.size() );
 
-    StereoTracker tracker( calibration, testOptions( max_tracks ) );
+    // Identical synthetic blobs are SAD-ambiguous; disable bidir uniqueness path.
+    StereoTrackerOptions options = testOptions( max_tracks );
+    options.stereo_uniq_ratio    = 0.0;
+    options.stereo_check_bidir   = false;
+    StereoTracker tracker( calibration, options );
     constexpr int kFrames = 5;
     std::set<LandmarkId> first_ids;
 
@@ -214,10 +218,12 @@ namespace
   {
     const auto calibration = makeRectifiedCalibration();
     constexpr double kDepth = 3.0;
-    const std::vector<Eigen::Vector3d> points =
-        makePointGrid( calibration, 3, 4, kDepth );
-    StereoTracker tracker( calibration,
-                           testOptions( static_cast<int>( points.size() ) ) );
+    // Single blob avoids identical-template ambiguity under global SAD.
+    const std::vector<Eigen::Vector3d> points{ { 0.0, 0.0, kDepth } };
+    StereoTrackerOptions options = testOptions( 4 );
+    options.stereo_uniq_ratio    = 0.0;
+    options.stereo_check_bidir   = false;
+    StereoTracker tracker( calibration, options );
 
     const FrameTracks tracks = tracker.process( renderStereo(
         calibration, points, phad::common::Timestamp{ kStereoEpochNs },
@@ -333,6 +339,15 @@ namespace
         std::invalid_argument );
   }
 
+  TEST( StereoTrackerTest, RejectsNegativeUniqRatio )
+  {
+    auto options = testOptions( 4 );
+    options.stereo_uniq_ratio = -0.1;
+    EXPECT_THROW(
+        ( StereoTracker{ makeRectifiedCalibration(), options } ),
+        std::invalid_argument );
+  }
+
   TEST( StereoTrackerTest, VerticalOffsetWithZeroRowTolIsNoRightMatch )
   {
     const auto calibration = makeRectifiedCalibration();
@@ -372,6 +387,9 @@ namespace
     StereoTrackerOptions options = testOptions( 12 );
     options.stereo_row_tol_px    = 4;
     options.max_epipolar_px      = 4.5;
+    // Identical synthetic blobs: uniqueness/bidir reject twins across rows.
+    options.stereo_uniq_ratio    = 0.0;
+    options.stereo_check_bidir   = false;
     StereoTracker tracker( calibration, options );
 
     StereoRenderOptions render;

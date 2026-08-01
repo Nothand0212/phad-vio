@@ -55,7 +55,7 @@ StereoFrame (rectified) ──► StereoTracker::process
 | 值 | 含义 |
 |---|---|
 | `kValid` | 右目匹配通过全部几何门限；`disparity_px` 有效 |
-| `kNoRightMatch` | 无 SAD 峰 / 贴边 / 亚像素失败 / 同行反向不一致；track 保留 |
+| `kNoRightMatch` | 无 SAD 峰 / 贴边 / 唯一性失败 / 亚像素失败 / 同行反向不一致；track 保留 |
 | `kInvalidDisparity` | 行差超限或视差非正 / 过小 |
 | `kDepthOutOfRange` | `z = fx * baseline / disparity` 越界 |
 
@@ -63,18 +63,20 @@ StereoFrame (rectified) ──► StereoTracker::process
 
 左目 LK 之后，对每个存活 track 在右图 `[u_l - d_max, u_l - d_min]` 水平带内
 （`d_min` / `d_max` 由 `min_disparity_px` / `min_depth_m` / `max_depth_m` 与
-`fx * baseline` 导出）做 **1D SAD**：在 `stereo_row_tol_px` 行容差内枚举候选行，
-收集非端点局部 SAD 极小值，按 SAD 升序尝试亚像素细化，再用同行反向 1D SAD
-校验左目位置（阈值 `stereo_bidir_px`）。不依赖上一帧视差种子。几何门限：
-`max_epipolar_px`、`min_disparity_px`、深度区间。
+`fx * baseline` 导出）做 **1D SAD**：在 `stereo_row_tol_px` 行容差内取**全局**
+SAD **全局**最小峰（单峰，不做多峰级联），再按 `stereo_uniq_ratio` 做次优裕度检验，
+然后抛物线亚像素 + 同行反向 1D SAD（阈值 `stereo_bidir_px`）。不依赖上一帧
+视差种子。几何门限：`max_epipolar_px`、`min_disparity_px`、深度区间。
 
 ## `StereoTrackerOptions`（立体相关）
 
 | 字段 | 默认 | 含义 |
 |---|---:|---|
-| `stereo_sad_half_win_px` | 5 | SAD 窗口半宽（像素） |
+| `stereo_sad_half_win_px` | 7 | SAD 窗口半宽（像素） |
 | `stereo_row_tol_px` | 0 | 右图候选行相对左图行的 ±容差 |
 | `stereo_bidir_px` | 0.5 | 同行反向匹配允许偏差（像素） |
+| `stereo_uniq_ratio` | 0.5 | 相对次优裕度；次优排除峰位 `u±1` 邻居 |
+| `stereo_check_bidir` | true | 是否启用同行反向一致性 |
 
 其余选项见 `stereo_tracker.hpp`（GFTT / LK / 深度与视差门限等）。
 

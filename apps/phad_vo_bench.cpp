@@ -285,6 +285,8 @@ namespace
     snap.set( "tracker.stereo_row_tol_px",
               static_cast<std::int64_t>( tracker.stereo_row_tol_px ) );
     snap.set( "tracker.stereo_bidir_px", tracker.stereo_bidir_px );
+    snap.set( "tracker.stereo_uniq_ratio", tracker.stereo_uniq_ratio );
+    snap.set( "tracker.stereo_check_bidir", tracker.stereo_check_bidir );
 
     snap.set( "estimator.window_size",
               static_cast<std::int64_t>( estimator.window_size ) );
