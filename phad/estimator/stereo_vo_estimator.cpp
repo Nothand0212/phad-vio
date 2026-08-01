@@ -146,8 +146,8 @@ namespace phad::estimator
     // Same RMS as stereoReprojRms but skips factors whose landmark is no longer
     // in landmarks_W (cheirality / mean-reproj cull). Does not rebuild the graph.
     [[nodiscard]] double stereoReprojRmsSkippingMissingLandmarks(
-        const gtsam::NonlinearFactorGraph&                       graph,
-        const gtsam::Values&                                     values,
+        const gtsam::NonlinearFactorGraph&                     graph,
+        const gtsam::Values&                                   values,
         const std::unordered_map<LandmarkId, Eigen::Vector3d>& landmarks_W )
     {
       double      sum_sq = 0.0;
@@ -166,8 +166,8 @@ namespace phad::estimator
         {
           continue;
         }
-        const gtsam::Key  lkey = stereo->key2();
-        const LandmarkId  id =
+        const gtsam::Key lkey = stereo->key2();
+        const LandmarkId id =
             static_cast<LandmarkId>( gtsam::Symbol( lkey ).index() );
         if ( landmarks_W.find( id ) == landmarks_W.end() )
         {
@@ -335,7 +335,7 @@ namespace phad::estimator
       {
         auto& obs = frame.observations;
         obs.erase( std::remove_if( obs.begin(), obs.end(),
-                                   [id]( const StereoObservation& o ) {
+                                   [ id ]( const StereoObservation& o ) {
                                      return o.id == id;
                                    } ),
                    obs.end() );
@@ -1091,7 +1091,7 @@ namespace phad::estimator
       }
       for ( const LandmarkId id : candidate_ids )
       {
-        double      sum_norm = 0.0;
+        double      sum_norm  = 0.0;
         std::size_t n_factors = 0;
         for ( const auto& factor : graph )
         {
@@ -1137,20 +1137,95 @@ namespace phad::estimator
     // Full-graph RMS (includes factors for just-culled ids) = pre-cull quality.
     result.diagnostics.reproj_rms_after_px =
         stereoReprojRms( graph, optimized );
-    // When mean-reproj cull is off, after_cull must mirror after (even if
-    // cheirality erased ids). Skip-missing is only for the post-cull view.
+    // Slice ④ after_cull initial value (final when reopt is skipped / fails).
+    double after_cull = result.diagnostics.reproj_rms_after_px;
     if ( m_impl->options.enable_outlier_cull )
     {
-      result.diagnostics.reproj_rms_after_cull_px =
-          stereoReprojRmsSkippingMissingLandmarks( graph, optimized,
-                                                   m_impl->landmarks_W );
+      after_cull = stereoReprojRmsSkippingMissingLandmarks(
+          graph, optimized, m_impl->landmarks_W );
     }
-    else
+
+    bool outlier_reopt        = false;
+    bool outlier_reopt_failed = false;
+    if ( m_impl->options.enable_outlier_reopt && outliers_culled >= 4U )
     {
-      result.diagnostics.reproj_rms_after_cull_px =
-          result.diagnostics.reproj_rms_after_px;
+      // Local snapshot: LM₂ failure rolls back to LM₁ write-back + cull only.
+      const auto window_after_cull    = m_impl->window;
+      const auto landmarks_after_cull = m_impl->landmarks_W;
+
+      gtsam::NonlinearFactorGraph graph2;
+      gtsam::Values               values2;
+      std::uint64_t               prior_key2     = 0;
+      std::uint32_t               num_landmarks2 = 0;
+      m_impl->buildGraph( graph2, values2, prior_key2, num_landmarks2 );
+      (void)prior_key2;
+      (void)num_landmarks2;
+
+      try
+      {
+        gtsam::LevenbergMarquardtOptimizer optimizer2( graph2, values2 );
+        const gtsam::Values                optimized2 = optimizer2.optimize();
+
+        for ( const WindowFrame& frame : m_impl->window )
+        {
+          if ( !optimized2.exists( X( frame.frame_index ) ) )
+          {
+            throw std::runtime_error( "optimized values missing a window pose" );
+          }
+          const Eigen::Isometry3d T_W_B =
+              toIsometry( optimized2.at<gtsam::Pose3>( X( frame.frame_index ) ) );
+          if ( !isFinite( T_W_B ) )
+          {
+            throw std::runtime_error( "non-finite optimized pose" );
+          }
+        }
+
+        for ( WindowFrame& frame : m_impl->window )
+        {
+          frame.T_W_B = toIsometry(
+              optimized2.at<gtsam::Pose3>( X( frame.frame_index ) ) );
+        }
+
+        for ( auto& [ id, point_W ] : m_impl->landmarks_W )
+        {
+          const gtsam::Key key = L( id );
+          if ( !optimized2.exists( key ) )
+          {
+            continue;
+          }
+          const gtsam::Point3 point = optimized2.at<gtsam::Point3>( key );
+          point_W                   = Eigen::Vector3d( point.x(), point.y(), point.z() );
+          if ( !isFinite( point_W ) )
+          {
+            throw std::runtime_error( "non-finite optimized landmark" );
+          }
+        }
+
+        result.diagnostics.lm_iterations +=
+            static_cast<std::uint32_t>( optimizer2.iterations() );
+        outlier_reopt = true;
+        after_cull    = stereoReprojRms( graph2, optimized2 );
+      }
+      catch ( const gtsam::IndeterminantLinearSystemException& )
+      {
+        m_impl->window       = window_after_cull;
+        m_impl->landmarks_W  = landmarks_after_cull;
+        outlier_reopt        = false;
+        outlier_reopt_failed = true;
+      }
+      catch ( const std::exception& )
+      {
+        m_impl->window       = window_after_cull;
+        m_impl->landmarks_W  = landmarks_after_cull;
+        outlier_reopt        = false;
+        outlier_reopt_failed = true;
+      }
     }
-    result.diagnostics.max_window_pose_shift_m = max_shift_m;
+
+    result.diagnostics.reproj_rms_after_cull_px = after_cull;
+    result.diagnostics.outlier_reopt            = outlier_reopt;
+    result.diagnostics.outlier_reopt_failed     = outlier_reopt_failed;
+    result.diagnostics.max_window_pose_shift_m  = max_shift_m;
 
     m_impl->initialized         = true;
     m_impl->prev_accepted_T_W_B = m_impl->last_accepted_T_W_B;
