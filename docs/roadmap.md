@@ -284,8 +284,9 @@ M3.2 全序列基线暴露的主导失败不是精度，而是一个**吸收态*
   RANSAC 外点掩码；失败回退恒速/上一帧且不 cull；选项与诊断进 `config_hash` /
   `diag.csv`（16 列）/ `summary.json`；
 - **④ 外点剔除（部分完成 / needs-reopt）**：VINS 型平均重投影永久删点、不重优
-  已编码；MH_05 诊断门判定 **不够**（ATE 43.3 m，未回到 &lt;1 m）→ 停止全序列，
-  需回头讨论本帧二次 LM（设计 B/C）；
+  已编码；MH_05 诊断门判定 **不够**（ATE 43.3 m）→ 停止全序列；
+- **④b 剔点后二次 LM（待做）**：`outliers_culled >= 4` 时 rebuild + LM₂；
+  设计见 [Slice ④b](research/m3.3-slice4b-outlier-reopt-design.md)；
 - **⑤** 关键帧策略（视差、跟踪数、时间间隔）。会改 `est.tum` 的输出语义且与 M4 的
   IMU 预积分边界耦合，开工前单独对齐。
 
@@ -351,7 +352,8 @@ Slice ④ MH_05 诊断门（commit `b6fbcb6` / `default_bc8b10e2`，对照 `b712
 [M3.3 VO 加固设计](research/m3.3-vo-hardening-design.md)、
 [M3.3 Slice ② 右目匹配设计](research/m3.3-slice2-right-match-design.md)、
 [M3.3 Slice ③ PnP 设计](research/m3.3-slice3-pnp-design.md)、
-[M3.3 Slice ④ 外点剔除设计](research/m3.3-slice4-outlier-cull-design.md)，
+[M3.3 Slice ④ 外点剔除设计](research/m3.3-slice4-outlier-cull-design.md)、
+[M3.3 Slice ④b 二次 LM 设计](research/m3.3-slice4b-outlier-reopt-design.md)，
 根因诊断见
 [M3.3 VO 崩溃根因诊断](research/m3.3-vo-collapse-diagnosis.md)，开源对照见
 [M3.3 VO 加固：开源实现对照](research/m3.3-vo-hardening-open-source-refs.md)、
