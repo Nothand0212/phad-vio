@@ -283,7 +283,8 @@ M3.2 全序列基线暴露的主导失败不是精度，而是一个**吸收态*
 - **③ PnP 初值（已完成）**：正常路径 `solvePnPRansac` 位姿初值 + 本帧 shared
   RANSAC 外点掩码；失败回退恒速/上一帧且不 cull；选项与诊断进 `config_hash` /
   `diag.csv`（16 列）/ `summary.json`；
-- **④** 优化后 chi2 外点剔除与 landmark 生命周期；
+- **④** 优化后外点剔除与 landmark 生命周期（设计已对齐：VINS 型平均重投影
+  永久删点、不重优；编码后先跑 MH_05 诊断）；
 - **⑤** 关键帧策略（视差、跟踪数、时间间隔）。会改 `est.tum` 的输出语义且与 M4 的
   IMU 预积分边界耦合，开工前单独对齐。
 
@@ -338,16 +339,19 @@ Slice ③ 出口（commit `b712c91` / `default_8a9236e0`，对照 `764d3b2`；
 设计见
 [M3.3 VO 加固设计](research/m3.3-vo-hardening-design.md)、
 [M3.3 Slice ② 右目匹配设计](research/m3.3-slice2-right-match-design.md)、
-[M3.3 Slice ③ PnP 设计](research/m3.3-slice3-pnp-design.md)，
+[M3.3 Slice ③ PnP 设计](research/m3.3-slice3-pnp-design.md)、
+[M3.3 Slice ④ 外点剔除设计](research/m3.3-slice4-outlier-cull-design.md)，
 根因诊断见
 [M3.3 VO 崩溃根因诊断](research/m3.3-vo-collapse-diagnosis.md)，开源对照见
 [M3.3 VO 加固：开源实现对照](research/m3.3-vo-hardening-open-source-refs.md)、
 [Slice ② 开源对照](research/m3.3-slice2-right-match-open-source-refs.md)、
-[Slice ③ 开源对照](research/m3.3-slice3-pnp-open-source-refs.md)。
+[Slice ③ 开源对照](research/m3.3-slice3-pnp-open-source-refs.md)、
+[Slice ④ 开源对照](research/m3.3-slice4-outlier-cull-open-source-refs.md)。
 实施计划见
 [M3.3 VO 加固 Slice ①](plans/2026-07-31_m3.3_vo_hardening_a3f7d2e9.plan.md)、
 [M3.3 Slice ②](plans/2026-08-01_m3.3_slice2_right_match_c8e74511.plan.md)、
-[M3.3 Slice ③](plans/2026-08-01_m3.3_slice3_pnp_0154cd20.plan.md)。
+[M3.3 Slice ③](plans/2026-08-01_m3.3_slice3_pnp_0154cd20.plan.md)、
+[M3.3 Slice ④](plans/2026-08-01_m3.3_slice4_outlier_cull_840bf39c.plan.md)。
 Issue：[#23](https://github.com/Nothand0212/phad-vio/issues/23)。
 
 ## M4：接入 IMU
