@@ -262,6 +262,21 @@ namespace phad::estimator
         throw std::invalid_argument(
             "EstimatorOptions.stereo_sigma_px must be > 0" );
       }
+      if ( !( options.pnp_reproj_px > 0.0 ) )
+      {
+        throw std::invalid_argument(
+            "EstimatorOptions.pnp_reproj_px must be > 0" );
+      }
+      if ( !( options.pnp_confidence > 0.0 && options.pnp_confidence < 1.0 ) )
+      {
+        throw std::invalid_argument(
+            "EstimatorOptions.pnp_confidence must be in (0, 1)" );
+      }
+      if ( options.min_pnp_inliers < 4 )
+      {
+        throw std::invalid_argument(
+            "EstimatorOptions.min_pnp_inliers must be >= 4" );
+      }
     }
 
     [[nodiscard]] Eigen::Vector3d backprojectWorld(

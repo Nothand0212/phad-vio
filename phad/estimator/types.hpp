@@ -40,6 +40,10 @@ namespace phad::estimator
     double prior_translation_sigma_m  = 1e-4;
     bool   use_constant_velocity_init = true;
     bool   enable_reanchor            = true;  // false reproduces M3.2 permanent reject
+    bool   enable_pnp_init            = true;
+    double pnp_reproj_px              = 2.0;
+    double pnp_confidence             = 0.99;
+    int    min_pnp_inliers            = 10;
   };
 
   enum class UpdateStatus : std::uint8_t
@@ -69,6 +73,8 @@ namespace phad::estimator
     double        reproj_rms_after_px     = 0.0;
     double        max_window_pose_shift_m = 0.0;
     bool          low_connectivity        = false;
+    bool          pnp_success             = false;
+    std::uint32_t pnp_inliers             = 0;
   };
 
   struct VioUpdateResult
