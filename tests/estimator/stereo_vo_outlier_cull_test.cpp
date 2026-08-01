@@ -8,6 +8,7 @@
 
 #include "phad/camera/rectified_stereo_calibration.hpp"
 #include "phad/estimator/stereo_vo_estimator.hpp"
+#include "phad/estimator/types.hpp"
 #include "phad/sensor/rigid_transform.hpp"
 
 namespace
@@ -19,6 +20,7 @@ namespace
   using phad::estimator::LandmarkId;
   using phad::estimator::StereoObservation;
   using phad::estimator::StereoVoEstimator;
+  using phad::estimator::UpdateDiagnostics;
   using phad::estimator::UpdateStatus;
   using phad::sensor::RigidTransform;
 
@@ -150,6 +152,15 @@ namespace
   }
 
 }  // namespace
+
+TEST( StereoVoOutlierReoptTest, DefaultsEnableReoptAndDiagFlagsOff )
+{
+  EstimatorOptions options;
+  EXPECT_TRUE( options.enable_outlier_reopt );
+  UpdateDiagnostics d;
+  EXPECT_FALSE( d.outlier_reopt );
+  EXPECT_FALSE( d.outlier_reopt_failed );
+}
 
 TEST( StereoVoOutlierCullTest, RejectsNonPositiveOutlierAvgReproj )
 {

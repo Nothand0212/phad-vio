@@ -808,6 +808,7 @@ namespace phad::estimator
     const auto next_index_backup  = m_impl->next_frame_index;
     const bool initialized_backup = m_impl->initialized;
     const auto segment_id_backup  = m_impl->segment_id;
+    const auto culled_ids_backup  = m_impl->culled_ids_;
 
     auto restore = [ & ]() {
       m_impl->window                = window_backup;
@@ -818,6 +819,7 @@ namespace phad::estimator
       m_impl->next_frame_index      = next_index_backup;
       m_impl->initialized           = initialized_backup;
       m_impl->segment_id            = segment_id_backup;
+      m_impl->culled_ids_           = culled_ids_backup;
       result.diagnostics.segment_id = m_impl->segment_id;
     };
 
