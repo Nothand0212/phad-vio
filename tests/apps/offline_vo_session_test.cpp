@@ -164,6 +164,7 @@ namespace
     EXPECT_EQ( counts.pnp_fallbacks, 0U );
     EXPECT_EQ( counts.outliers_culled, 0U );
     EXPECT_EQ( counts.outliers_culled_unique, 0U );
+    EXPECT_EQ( counts.outlier_reopts, 0U );
   }
 
   TEST( OfflineVoSessionTest,

@@ -103,26 +103,42 @@ prior 与由该帧 backproject 得到的 landmark 初值自洽，优化不会移
 `pnp_successes` / `pnp_fallbacks`（仅正常路径；seed / re-anchor 不计
 fallback）。详见 `docs/research/m3.3-slice3-pnp-design.md`。
 
-## 外点剔除（M3.3 Slice ④）
+## 外点剔除与二次重优（M3.3 Slice ④ / ④b）
 
-LM 收敛写回位姿后、返回 `kOk` 前，可选按 landmark **平均 stereo 重投影**
+LM₁ 收敛写回位姿后、返回 `kOk` 前，可选按 landmark **平均 stereo 重投影**
 （`||unwhitenedError||` 均值，≥4 观测）从 `landmarks_W` 删除高误差点，并经
-共用 helper 清窗口观测。**不重优**：本帧 `estimate.T_W_B` 仍为剔点前 BA
-结果；`reproj_rms_after_px` 仍是剔前 graph RMS。
+共用 helper 清窗口观测。`reproj_rms_after_px` **始终**是 LM₁ 后、mean-cull
+**前** 的全图 RMS。
+
+若本帧 `outliers_culled >= 4` 且 `enable_outlier_reopt`，则用剩余窗口观测与
+`landmarks_W` **重建 factor graph** 再跑 **一趟** LM₂ 并写回位姿与点。LM₂
+失败则回退到「LM₁ 写回 + cull 后」状态，仍返回 `kOk`（`outlier_reopt=false`、
+`outlier_reopt_failed=true`）。`enable_outlier_reopt=false` 复现 Slice ④
+只 cull（`b6fbcb6`）。
 
 | 选项 | 语义 |
 |---|---|
-| `enable_outlier_cull`（默认 `true`） | `false` **只关** mean-reproj 剔点；cheirality 清窗口观测 helper 仍生效 |
+| `enable_outlier_cull`（默认 `true`） | `false` **只关** mean-reproj 剔点；cheirality 清窗口观测 helper 仍生效；无剔点则自然不触发 reopt |
 | `outlier_avg_reproj_px`（默认 `3.0`） | 均值阈值（像素）；构造时须 `> 0` |
+| `enable_outlier_reopt`（默认 `true`） | `false` → 只 cull 不重优；触发条件另需 `outliers_culled >= 4` |
 
 **伪永久**：无拒绝名单；被删 id 的 `track_times` /
 `observationTimestamps()` **保留**；frontend 再喂同 id → 按新点
 backproject。Impl 侧 `culled_ids_` 仅用于去重统计。
 
-诊断：`outliers_culled` / `outliers_culled_unique` /
-`reproj_rms_after_cull_px`（剔后跳过被删 id 的 graph RMS，不重建图；
-`enable_outlier_cull=false` 时等于 `reproj_rms_after_px`）。详见
-`docs/research/m3.3-slice4-outlier-cull-design.md`。
+诊断：
+
+| 字段 | 语义 |
+|---|---|
+| `outliers_culled` / `outliers_culled_unique` | 本帧 mean-reproj 删点数 / 去重 id |
+| `lm_iterations` | LM₁ +（成功时）LM₂ 迭代累加 |
+| `reproj_rms_after_cull_px` | **有成功 reopt**：LM₂ 后 graph RMS；**无 reopt / LM₂ 失败**：Slice ④ 语义（cull 关时 `== reproj_rms_after_px`；cull 开时跳过已删 id 的 graph RMS） |
+| `outlier_reopt` / `outlier_reopt_failed` | 本帧是否成功跑了 LM₂ / LM₂ 失败已回退；**不**进 `diag.csv` |
+
+session 累计成功 reopt 为 `FrameCounts.outlier_reopts` →
+`summary.json` 的 `robustness.outlier_reopts`。详见
+`docs/research/m3.3-slice4-outlier-cull-design.md` 与
+`docs/research/m3.3-slice4b-outlier-reopt-design.md`。
 
 ## 诊断 CSV 合同（probe）
 
@@ -145,10 +161,11 @@ pnp_success,pnp_inliers,outliers_culled,reproj_rms_after_cull_px
 `pnp_success` 为 `0/1` 整数。`status` 为 `ok` / `rejected` / `failed`。
 stdout summary 含帧数、各状态计数、拒帧比例、`low_connectivity` 帧数、
 `pnp_successes` / `pnp_fallbacks`、`outliers_culled` /
-`outliers_culled_unique`、重投影 RMS 中位数与 p95；session 还会在
-`warnings` 里按需汇总 `segments` / `reanchors` / `seed_rejected` 与 PnP
-summary（剔点累计只进 `FrameCounts` / `summary.json` robustness，不进
-`warnings`；见 `apps/AGENTS.md`）。
+`outliers_culled_unique`、`outlier_reopts`、重投影 RMS 中位数与 p95；
+session 还会在 `warnings` 里按需汇总 `segments` / `reanchors` /
+`seed_rejected` 与 PnP summary（剔点 / reopt 累计只进 `FrameCounts` /
+`summary.json` robustness，不进 `warnings`；见 `apps/AGENTS.md`）。
+`diag.csv` **保持 18 列**（不追加 `outlier_reopt`）。
 
 ## 相关入口
 

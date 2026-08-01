@@ -72,6 +72,7 @@ namespace phad::apps
     std::uint64_t pnp_fallbacks          = 0;
     std::uint64_t outliers_culled        = 0;
     std::uint64_t outliers_culled_unique = 0;
+    std::uint64_t outlier_reopts         = 0;
   };
 
   struct StageTiming

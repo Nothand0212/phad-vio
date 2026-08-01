@@ -95,6 +95,7 @@ namespace
     EXPECT_EQ( root.at( "robustness" ).at( "pnp_fallbacks" ), 0 );
     EXPECT_EQ( root.at( "robustness" ).at( "outliers_culled" ), 0 );
     EXPECT_EQ( root.at( "robustness" ).at( "outliers_culled_unique" ), 0 );
+    EXPECT_EQ( root.at( "robustness" ).at( "outlier_reopts" ), 0 );
   }
 
   TEST( RunSummaryTest, SegmentsAndReanchorsSerialize )
@@ -134,6 +135,18 @@ namespace
     const json root = json::parse( summary.toJson() );
     EXPECT_EQ( root.at( "robustness" ).at( "outliers_culled" ), 42 );
     EXPECT_EQ( root.at( "robustness" ).at( "outliers_culled_unique" ), 30 );
+  }
+
+  TEST( RunSummaryTest, OutlierReoptCounterSerialize )
+  {
+    RunSummary summary;
+    summary.status                    = RunStatus::kCompleted;
+    summary.sequence                  = "MH_05_difficult";
+    summary.robustness.outlier_reopts = 7;
+
+    const json root = json::parse( summary.toJson() );
+    EXPECT_EQ( root.at( "robustness" ).at( "outlier_reopts" ), 7 );
+    EXPECT_EQ( root.at( "schema_version" ), 1 );
   }
 
   TEST( RunMetaTest, SerializesCodeConfigAndPaths )

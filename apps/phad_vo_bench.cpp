@@ -313,6 +313,8 @@ namespace
     snap.set( "estimator.enable_outlier_cull", estimator.enable_outlier_cull );
     snap.set( "estimator.outlier_avg_reproj_px",
               estimator.outlier_avg_reproj_px );
+    snap.set( "estimator.enable_outlier_reopt",
+              estimator.enable_outlier_reopt );
 
     snap.set( "session.dataset_format", std::string( "euroc" ) );
     if ( session.max_frames.has_value() )
@@ -530,6 +532,7 @@ namespace
     summary.robustness.outliers_culled        = session.counts.outliers_culled;
     summary.robustness.outliers_culled_unique =
         session.counts.outliers_culled_unique;
+    summary.robustness.outlier_reopts = session.counts.outlier_reopts;
     for ( const auto& row : session.diag )
     {
       summary.robustness.cheirality += row.num_cheirality;
