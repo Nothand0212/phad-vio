@@ -1,14 +1,15 @@
+#include "phad/frontend/stereo_tracker.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/video/tracking.hpp>
 #include <stdexcept>
 #include <utility>
 #include <vector>
-
-#include "phad/frontend/stereo_tracker.hpp"
 
 namespace phad::frontend
 {
@@ -101,6 +102,104 @@ namespace phad::frontend
       }
       const double weight = position - static_cast<double>( lower );
       return values[ lower ] * ( 1.0 - weight ) + values[ upper ] * weight;
+    }
+
+    [[nodiscard]] bool patchInBounds( const cv::Mat& image, int u, int v,
+                                      int half )
+    {
+      return u - half >= 0 && u + half < image.cols && v - half >= 0 &&
+             v + half < image.rows;
+    }
+
+    [[nodiscard]] int sadPatch( const cv::Mat& left, const cv::Mat& right,
+                                int u_l, int v_l, int u_r, int v_r, int half )
+    {
+      int sad = 0;
+      for ( int dy = -half; dy <= half; ++dy )
+      {
+        const auto* lrow = left.ptr<std::uint8_t>( v_l + dy );
+        const auto* rrow = right.ptr<std::uint8_t>( v_r + dy );
+        for ( int dx = -half; dx <= half; ++dx )
+        {
+          sad += std::abs( static_cast<int>( lrow[ u_l + dx ] ) -
+                           static_cast<int>( rrow[ u_r + dx ] ) );
+        }
+      }
+      return sad;
+    }
+
+    struct SadPeak
+    {
+      int  u   = 0;
+      int  sad = 0;
+      bool ok  = false;
+    };
+
+    [[nodiscard]] SadPeak searchRow( const cv::Mat& left, const cv::Mat& right,
+                                     int u_l, int v_l, int v_r, int u_lo,
+                                     int u_hi, int half )
+    {
+      SadPeak peak;
+      if ( u_lo > u_hi || !patchInBounds( left, u_l, v_l, half ) )
+      {
+        return peak;
+      }
+
+      int  best_u   = u_lo;
+      int  best_sad = std::numeric_limits<int>::max();
+      bool found    = false;
+      for ( int u_r = u_lo; u_r <= u_hi; ++u_r )
+      {
+        if ( !patchInBounds( right, u_r, v_r, half ) )
+        {
+          continue;
+        }
+        const int sad =
+            sadPatch( left, right, u_l, v_l, u_r, v_r, half );
+        if ( !found || sad < best_sad )
+        {
+          found    = true;
+          best_sad = sad;
+          best_u   = u_r;
+        }
+      }
+      if ( !found || best_u == u_lo || best_u == u_hi )
+      {
+        return peak;
+      }
+      peak.u   = best_u;
+      peak.sad = best_sad;
+      peak.ok  = true;
+      return peak;
+    }
+
+    [[nodiscard]] bool refineSubpixel( const cv::Mat& left, const cv::Mat& right,
+                                       int u_l, int v_l, int u_r, int v_r,
+                                       int half, double& u_r_sub )
+    {
+      if ( !patchInBounds( left, u_l, v_l, half ) ||
+           !patchInBounds( right, u_r - 1, v_r, half ) ||
+           !patchInBounds( right, u_r + 1, v_r, half ) )
+      {
+        return false;
+      }
+      const int    s0 = sadPatch( left, right, u_l, v_l, u_r - 1, v_r, half );
+      const int    s1 = sadPatch( left, right, u_l, v_l, u_r, v_r, half );
+      const int    s2 = sadPatch( left, right, u_l, v_l, u_r + 1, v_r, half );
+      const double denom =
+          static_cast<double>( s0 - 2 * s1 + s2 );
+      if ( std::abs( denom ) < 1e-12 )
+      {
+        return false;
+      }
+      const double delta =
+          0.5 * static_cast<double>( s0 - s2 ) / denom;
+      if ( std::abs( delta ) > 1.0 )
+      {
+        return false;
+      }
+      u_r_sub = static_cast<double>( u_r ) + delta;
+      return true;
     }
 
   }  // namespace
@@ -207,59 +306,140 @@ namespace phad::frontend
         return;
       }
 
-      std::vector<cv::Point2f> left_pts;
-      left_pts.reserve( tracks.size() );
-      for ( const LiveTrack& track : tracks )
-      {
-        left_pts.push_back( track.pixel );
-      }
-
-      const cv::Size            win( options.lk_window_px, options.lk_window_px );
-      std::vector<cv::Point2f>  right_pts = left_pts;
-      std::vector<std::uint8_t> forward_status;
-      std::vector<float>        forward_error;
-      cv::calcOpticalFlowPyrLK( left, right, left_pts, right_pts,
-                                forward_status, forward_error, win,
-                                options.lk_pyramid_levels );
-
-      std::vector<cv::Point2f>  back_pts;
-      std::vector<std::uint8_t> backward_status;
-      std::vector<float>        backward_error;
-      cv::calcOpticalFlowPyrLK( right, left, right_pts, back_pts,
-                                backward_status, backward_error, win,
-                                options.lk_pyramid_levels );
-
-      const double fb_limit_sq =
-          options.forward_backward_px * options.forward_backward_px;
+      const double fx_b =
+          calibration.fxPixels() * calibration.baselineM();
+      const int           half = options.stereo_sad_half_win_px;
       std::vector<double> epipolar_errors;
       epipolar_errors.reserve( tracks.size() );
 
-      for ( std::size_t index = 0; index < tracks.size(); ++index )
+      for ( LiveTrack& track : tracks )
       {
-        LiveTrack& track   = tracks[ index ];
         track.disparity_px = 0.0;
         track.status       = StereoStatus::kNoRightMatch;
 
-        if ( forward_status[ index ] == 0 || backward_status[ index ] == 0 ||
-             !inBounds( right_pts[ index ], right.cols, right.rows ) )
-        {
-          continue;
-        }
-        const float bdx = back_pts[ index ].x - left_pts[ index ].x;
-        const float bdy = back_pts[ index ].y - left_pts[ index ].y;
-        if ( ( static_cast<double>( bdx ) * static_cast<double>( bdx ) +
-               static_cast<double>( bdy ) * static_cast<double>( bdy ) ) >
-             fb_limit_sq )
+        const double d_min = std::max( options.min_disparity_px,
+                                       fx_b / options.max_depth_m );
+        const double d_max = fx_b / options.min_depth_m;
+        if ( d_max < d_min )
         {
           continue;
         }
 
-        const double abs_dy = std::abs( static_cast<double>(
-            left_pts[ index ].y - right_pts[ index ].y ) );
+        const int u_l = cvRound( track.pixel.x );
+        const int v_l = cvRound( track.pixel.y );
+        const int u_lo =
+            u_l - static_cast<int>( std::floor( d_max ) );
+        const int u_hi =
+            u_l - static_cast<int>( std::ceil( d_min ) );
+
+        // Collect non-endpoint local SAD minima, try lowest-SAD first;
+        // reverse consistency picks the correct blob when several share a row.
+        struct RankedPeak
+        {
+          int u   = 0;
+          int v_r = 0;
+          int sad = 0;
+        };
+        std::vector<RankedPeak> ranked;
+        if ( patchInBounds( left, u_l, v_l, half ) )
+        {
+          for ( int v_r = v_l - options.stereo_row_tol_px;
+                v_r <= v_l + options.stereo_row_tol_px; ++v_r )
+          {
+            const int count = u_hi - u_lo + 1;
+            if ( count < 3 )
+            {
+              continue;
+            }
+            std::vector<int> sad(
+                static_cast<std::size_t>( count ),
+                std::numeric_limits<int>::max() );
+            std::vector<char> valid( static_cast<std::size_t>( count ), 0 );
+            for ( int u_r = u_lo; u_r <= u_hi; ++u_r )
+            {
+              if ( !patchInBounds( right, u_r, v_r, half ) )
+              {
+                continue;
+              }
+              const auto index = static_cast<std::size_t>( u_r - u_lo );
+              sad[ index ] =
+                  sadPatch( left, right, u_l, v_l, u_r, v_r, half );
+              valid[ index ] = 1;
+            }
+            for ( int u_r = u_lo + 1; u_r <= u_hi - 1; ++u_r )
+            {
+              const auto index = static_cast<std::size_t>( u_r - u_lo );
+              if ( valid[ index ] == 0 || valid[ index - 1U ] == 0 ||
+                   valid[ index + 1U ] == 0 )
+              {
+                continue;
+              }
+              if ( sad[ index ] <= sad[ index - 1U ] &&
+                   sad[ index ] <= sad[ index + 1U ] )
+              {
+                ranked.push_back(
+                    RankedPeak{ u_r, v_r, sad[ index ] } );
+              }
+            }
+          }
+        }
+        std::sort( ranked.begin(), ranked.end(),
+                   []( const RankedPeak& a, const RankedPeak& b ) {
+                     if ( a.sad != b.sad )
+                     {
+                       return a.sad < b.sad;
+                     }
+                     if ( a.v_r != b.v_r )
+                     {
+                       return a.v_r < b.v_r;
+                     }
+                     return a.u < b.u;
+                   } );
+
+        bool   found   = false;
+        int    best_v  = v_l;
+        double u_r_sub = 0.0;
+        for ( const RankedPeak& peak : ranked )
+        {
+          double refined = 0.0;
+          if ( !refineSubpixel( left, right, u_l, v_l, peak.u, peak.v_r, half,
+                                refined ) )
+          {
+            continue;
+          }
+
+          // Reverse 1D SAD on the same row; do not touch
+          // forward_backward_rejected (temporal FB only).
+          const int back_lo =
+              peak.u + static_cast<int>( std::ceil( d_min ) );
+          const int back_hi =
+              peak.u + static_cast<int>( std::floor( d_max ) );
+          const SadPeak back =
+              searchRow( right, left, peak.u, peak.v_r, peak.v_r, back_lo,
+                         back_hi, half );
+          if ( !back.ok ||
+               std::abs( static_cast<double>( back.u - u_l ) ) >
+                   options.stereo_bidir_px )
+          {
+            continue;
+          }
+
+          found   = true;
+          best_v  = peak.v_r;
+          u_r_sub = refined;
+          break;
+        }
+        if ( !found )
+        {
+          continue;
+        }
+
+        const double abs_dy =
+            std::abs( static_cast<double>( v_l - best_v ) );
         epipolar_errors.push_back( abs_dy );
 
-        const double disparity = static_cast<double>( left_pts[ index ].x -
-                                                      right_pts[ index ].x );
+        const double disparity =
+            static_cast<double>( track.pixel.x ) - u_r_sub;
 
         if ( abs_dy > options.max_epipolar_px )
         {
@@ -274,8 +454,7 @@ namespace phad::frontend
           continue;
         }
 
-        const double depth_m =
-            calibration.fxPixels() * calibration.baselineM() / disparity;
+        const double depth_m = fx_b / disparity;
         if ( depth_m < options.min_depth_m || depth_m > options.max_depth_m )
         {
           track.status = StereoStatus::kDepthOutOfRange;
