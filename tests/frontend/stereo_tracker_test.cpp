@@ -27,6 +27,7 @@ namespace
   using phad::testing::makePointGrid;
   using phad::testing::makeRectifiedCalibration;
   using phad::testing::projectLeft;
+  using phad::testing::projectRight;
   using phad::testing::renderStereo;
 
   StereoTrackerOptions testOptions( int max_tracks )
@@ -275,7 +276,9 @@ namespace
     EXPECT_GE( hit->length, 1U );
   }
 
-  TEST( StereoTrackerTest, FarPointBecomesDepthOutOfRange )
+  // True disparity falls below d_min = fx*baseline/max_depth_m, so 1D search
+  // never sees the right blob → kNoRightMatch (not kDepthOutOfRange).
+  TEST( StereoTrackerTest, FarPointOutsideSearchIsNoRightMatch )
   {
     const auto calibration = makeRectifiedCalibration();
     StereoTrackerOptions options = testOptions( 4 );
@@ -290,17 +293,17 @@ namespace
         3.0 ) );
 
     ASSERT_FALSE( tracks.observations.empty() );
-    bool saw_depth = false;
+    bool saw_no_match = false;
     for ( const auto& observation : tracks.observations )
     {
-      if ( observation.status == StereoStatus::kDepthOutOfRange )
+      if ( observation.status == StereoStatus::kNoRightMatch )
       {
-        saw_depth = true;
+        saw_no_match = true;
         EXPECT_DOUBLE_EQ( observation.disparity_px, 0.0 );
       }
     }
-    EXPECT_TRUE( saw_depth );
-    EXPECT_GE( tracks.stats.depth_rejected, 1U );
+    EXPECT_TRUE( saw_no_match );
+    EXPECT_EQ( tracks.stats.depth_rejected, 0U );
   }
 
   TEST( StereoTrackerTest, RejectsNonPositiveStereoBidir )
@@ -330,13 +333,13 @@ namespace
         std::invalid_argument );
   }
 
-  TEST( StereoTrackerTest, VerticalRightOffsetBecomesInvalidDisparity )
+  TEST( StereoTrackerTest, VerticalOffsetWithZeroRowTolIsNoRightMatch )
   {
     const auto calibration = makeRectifiedCalibration();
     const std::vector<Eigen::Vector3d> points =
         makePointGrid( calibration, 2, 3, 3.0 );
     StereoTrackerOptions options = testOptions( 12 );
-    options.max_epipolar_px      = 1.0;
+    options.stereo_row_tol_px    = 0;
     StereoTracker tracker( calibration, options );
 
     StereoRenderOptions render;
@@ -348,17 +351,96 @@ namespace
         render ) );
 
     ASSERT_FALSE( tracks.observations.empty() );
-    std::size_t invalid = 0;
+    std::size_t no_match = 0;
     for ( const auto& observation : tracks.observations )
     {
-      if ( observation.status == StereoStatus::kInvalidDisparity )
+      if ( observation.status == StereoStatus::kNoRightMatch )
       {
-        ++invalid;
+        ++no_match;
         EXPECT_DOUBLE_EQ( observation.disparity_px, 0.0 );
       }
     }
-    EXPECT_GE( invalid, 1U );
-    EXPECT_GE( tracks.stats.epipolar_rejected, 1U );
+    EXPECT_GE( no_match, 1U );
+    EXPECT_EQ( tracks.stats.epipolar_rejected, 0U );
+  }
+
+  TEST( StereoTrackerTest, VerticalOffsetWithinRowTolCanBeValid )
+  {
+    const auto calibration = makeRectifiedCalibration();
+    const std::vector<Eigen::Vector3d> points =
+        makePointGrid( calibration, 2, 3, 3.0 );
+    StereoTrackerOptions options = testOptions( 12 );
+    options.stereo_row_tol_px    = 4;
+    options.max_epipolar_px      = 4.5;
+    StereoTracker tracker( calibration, options );
+
+    StereoRenderOptions render;
+    render.sigma_px          = 2.5;
+    render.right_v_offset_px = 4.0;
+
+    const FrameTracks tracks = tracker.process( renderStereo(
+        calibration, points, phad::common::Timestamp{ kStereoEpochNs },
+        render ) );
+
+    ASSERT_FALSE( tracks.observations.empty() );
+    std::size_t valid = 0;
+    for ( const auto& observation : tracks.observations )
+    {
+      if ( observation.status == StereoStatus::kValid )
+      {
+        ++valid;
+      }
+    }
+    EXPECT_GE( valid, 1U );
+  }
+
+  // Seed a track on a clean pair, then add a same-row left decoy so forward SAD
+  // still hits the right blob but reverse 1D search prefers the decoy.
+  TEST( StereoTrackerTest, ReverseConsistencyFailureIsNoRightMatch )
+  {
+    const auto     calibration = makeRectifiedCalibration();
+    constexpr double kDepth    = 3.0;
+    const Eigen::Vector3d primary{ 0.0, 0.0, kDepth };
+    const Eigen::Vector2d left_uv  = projectLeft( calibration, primary );
+    const Eigen::Vector2d right_uv = projectRight( calibration, primary );
+
+    StereoTrackerOptions options = testOptions( 4 );
+    options.min_distance_px      = 8.0;
+    options.mask_radius_px       = 8;
+    StereoTracker tracker( calibration, options );
+
+    (void)tracker.process( renderStereo(
+        calibration, std::vector<Eigen::Vector3d>{ primary },
+        phad::common::Timestamp{ kStereoEpochNs }, 2.5 ) );
+
+    const int width  = calibration.imageWidth();
+    const int height = calibration.imageHeight();
+    std::vector<std::uint8_t> left_pixels(
+        static_cast<std::size_t>( width * height ), 0U );
+    std::vector<std::uint8_t> right_pixels(
+        static_cast<std::size_t>( width * height ), 0U );
+    constexpr double kSigma = 2.0;
+    // Weaker primary keeps temporal LK on the seeded track; brighter decoy
+    // inside the reverse window [u_r+d_min, u_r+d_max] steals searchRow.
+    phad::testing::paintGaussianBlob( left_pixels, width, height, left_uv.x(),
+                                      left_uv.y(), kSigma, 180.0 );
+    phad::testing::paintGaussianBlob( left_pixels, width, height,
+                                      left_uv.x() + 14.0, left_uv.y(), kSigma,
+                                      255.0 );
+    phad::testing::paintGaussianBlob( right_pixels, width, height,
+                                      right_uv.x(), right_uv.y(), kSigma,
+                                      255.0 );
+
+    const phad::sensor::StereoFrame stereo{
+        phad::common::Timestamp{ kStereoEpochNs + kStereoStepNs },
+        phad::sensor::Image{ width, height, 1, std::move( left_pixels ) },
+        phad::sensor::Image{ width, height, 1, std::move( right_pixels ) } };
+    const FrameTracks tracks = tracker.process( stereo );
+
+    const auto hit = nearestTrack( tracks, left_uv, 6.0 );
+    ASSERT_TRUE( hit.has_value() );
+    EXPECT_EQ( hit->status, StereoStatus::kNoRightMatch );
+    EXPECT_DOUBLE_EQ( hit->disparity_px, 0.0 );
   }
 
 }  // namespace
