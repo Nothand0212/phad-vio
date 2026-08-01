@@ -263,23 +263,54 @@ adapter 移到独立的同步器——那里同时是 M4 的 IMU 包络与未来
 [M3.2 双目配对同步器](plans/2026-07-31_m3.2_stereo_pair_synchronizer_5b7d1c93.plan.md)。
 Issue：[#22](https://github.com/Nothand0212/phad-vio/issues/22)。
 
-### M3.3 VO 加固（依赖 M3.2）
+### M3.3 VO 加固（依赖 M3.2；Slice ① 已完成）
 
-具体内容由 M2 暴露的失败驱动，以下为预期项而非承诺项：
+M3.2 全序列基线暴露的主导失败不是精度，而是一个**吸收态**：估计器一旦因
+`num_shared == 0` 拒帧，事务回滚会冻结窗口与 landmark 表，而前端跟踪断裂后
+重新检测会发放全新 `LandmarkId`，此后交集恒为空、永久拒帧。V1_03 上一帧异常
+废掉了随后 1906 帧。因此本阶段按失败驱动排序，恢复先于精度。
 
-- `findEssentialMat` + RANSAC 几何验证；
-- `solvePnPRansac` 提供位姿初值；
-- 关键帧策略（视差、跟踪数、时间间隔）；
-- landmark 生命周期与外点剔除；
-- 退化三角化（低视差、rank deficiency）处理。
+范围（五片，Slice ① 已落地；②–⑤ 的范围按 ① 的 bench 数字推进）：
 
-出口：
+- **① 恢复（已完成）**：去掉 `num_shared == 0` 拒帧门，重叠断裂即以新 id 重建窗口，
+  prior 打在最后一个被接受的位姿上（anchor 复用现有恒速位姿初值规则）；
+  新增 `min_seed_observations`（初始化与 re-anchor 共用）与 `enable_reanchor`；
+  `segment_id` 进 `diag.csv`，`reanchors` / `segments` 进 `summary.json`；
+- **②** 前端右目匹配加固（约 25% `no_right_match` 的全局常态、坏视差写回
+  `last_disp_px` 的种子中毒、新 track 零种子、单帧 LK 全灭）；
+- **③** `solvePnPRansac` 位姿初值取代恒速初值 + 几何验证剔时序外点；
+- **④** 优化后 chi2 外点剔除与 landmark 生命周期；
+- **⑤** 关键帧策略（视差、跟踪数、时间间隔）。会改 `est.tum` 的输出语义且与 M4 的
+  IMU 预积分边界耦合，开工前单独对齐。
 
-- `MH_01` 至 `MH_05` 全部跑通；
-- 每次改动用 M3.1 的 `phad_vo_bench` 产出 ATE 前后数字；无法测量的改动
-  不进入本阶段；
-- ATE 相对 M2.3 / M3.1 基线单调下降，在 M3.2 已能全序列打开的基础上
-  形成第一张序列 × 版本对比表。
+Slice ① 出口（commit `0b0cd34` / `default_030a0197`，对照 `4780660`）：
+
+- `MH_01_easy`：`segments=1`、`reanchors=0`；`est.tum` 相对
+  `4780660/default_0885385a` **逐字节相同**；ATE 仍 ≈ 0.150155 m；
+- completion 显著恢复：`MH_02` 0.131→0.997、`V1_03` 0.113→0.993、
+  `V2_02` 0.113→0.980、`V2_01` 保持 0.952；`V2_03` 0.032→0.485（不门控）；
+- `V1_02` completion 由 1.000 降至 0.946：新增的首段 seed 门限（默认
+  `min_seed_observations=10`）拒掉了前 93 帧观测不足的帧；这是有意的
+  门限行为，不是回归。真正对齐 M3.2 的 A/B 需要**同时**设
+  `enable_reanchor=false` **与** `min_seed_observations=1`（只关
+  `enable_reanchor` 不够，因为首段初始化也共用该门限）；
+- ATE **只记录不门控**；跨 coverage 不可直接比较（如 V1_03 / V2_02）；
+- 全序列数字快照见
+  [M3.3 Slice ① 基线](research/m3.3-slice1-baseline.md)。
+
+后续切片出口（不变）：
+
+- 每次改动用 `phad_vo_bench` 产出前后数字；无法测量的改动不进入本阶段；
+- **同等 coverage 下 ATE 不劣化**，`MH_01` 作不回归锚（不劣于 0.150155 m）；
+- Slice ② 优先盯 `reanchors` 次数与每帧观测数，而不是再修吸收态。
+
+设计见
+[M3.3 VO 加固设计](research/m3.3-vo-hardening-design.md)，根因诊断见
+[M3.3 VO 崩溃根因诊断](research/m3.3-vo-collapse-diagnosis.md)，开源对照见
+[M3.3 VO 加固：开源实现对照](research/m3.3-vo-hardening-open-source-refs.md)。
+实施计划见
+[M3.3 VO 加固](plans/2026-07-31_m3.3_vo_hardening_a3f7d2e9.plan.md)。
+Issue：[#23](https://github.com/Nothand0212/phad-vio/issues/23)。
 
 ## M4：接入 IMU
 

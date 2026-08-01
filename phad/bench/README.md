@@ -67,3 +67,17 @@ RunMeta / RunSummary   ──toJson──► meta.json / summary.json 文本
 - `ate` / `rpe` 缺失时序列化为 JSON `null`（不写假 0）
 - `status`：`completed` / `completed_with_failures` /
   `completed_with_warnings` / `eval_failed` / `failed`
+
+M3.3 在 `summary.json` 追加段可观测性字段（`schema_version` 仍为 1）：
+
+| 路径 | 含义 |
+|---|---|
+| `trajectory.segments` | 轨迹段数；有序列接受位姿时为 `reanchors + 1`，否则 `0` |
+| `robustness.reanchors` | `segment_id` 跳变次数（每次成功 re-anchor 计 1） |
+
+二者由 `OfflineVoSession` 统计后经 `phad_vo_bench` 写入；`bench_table.py`
+可据此区分「算法变好」与「re-anchor 变多」。`est.tum` 仍为单条连续轨迹，
+不含段号列。
+
+`config_hash` 在 M3.3 起纳入 `estimator.min_seed_observations` 与
+`estimator.enable_reanchor`（apps 侧 `flattenConfig` 展平）；新配置落新目录。

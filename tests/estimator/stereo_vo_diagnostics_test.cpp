@@ -97,6 +97,10 @@ namespace
       { 0.6, -0.1, 5.5 },
       { -0.5, -0.2, 4.8 },
       { 0.0, 0.3, 5.2 },
+      { 0.35, -0.05, 5.3 },
+      { -0.15, 0.25, 4.6 },
+      { 0.5, 0.05, 5.8 },
+      { -0.45, -0.15, 5.1 },
   };
 
   std::vector<LandmarkId> sequentialIds( std::size_t count, LandmarkId start = 1 )
@@ -121,6 +125,8 @@ TEST( StereoVoDiagnostics, ZeroSharedRejectsWithoutMutatingWindow )
   EstimatorOptions options;
   options.window_size          = 5;
   options.min_shared_landmarks = 3;
+  // This test targets the permanent zero-overlap reject, not re-anchoring.
+  options.enable_reanchor = false;
 
   StereoVoEstimator estimator( calibration, options );
   ASSERT_EQ( estimator
@@ -160,6 +166,8 @@ TEST( StereoVoDiagnostics, RejectedFrameSkippedByConstantVelocity )
   options.window_size                = 5;
   options.min_shared_landmarks       = 3;
   options.use_constant_velocity_init = true;
+  // This test targets the permanent zero-overlap reject, not re-anchoring.
+  options.enable_reanchor = false;
 
   auto run_clean = [ & ]() {
     StereoVoEstimator                           estimator( calibration, options );
@@ -226,6 +234,10 @@ TEST( StereoVoDiagnostics, BehindCameraCountedAndSequenceContinues )
       { 0.1, -0.25, 6.0 },
       { 0.6, -0.1, 5.5 },
       { -0.5, -0.2, 4.8 },
+      { 0.0, 0.3, 5.2 },
+      { 0.35, -0.05, 5.3 },
+      { -0.15, 0.25, 4.6 },
+      { 0.5, 0.05, 5.8 },
   };
   const Eigen::Vector3d near_landmark{ 0.15, 0.0, 1.0 };
   const auto            far_ids = sequentialIds( far_landmarks.size(), 1 );

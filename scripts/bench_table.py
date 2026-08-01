@@ -28,6 +28,8 @@ class RunRow:
     rpe_trans_rmse: Optional[float]
     completion_rate: Optional[float]
     coverage_rate: Optional[float]
+    segments: Optional[int]
+    reanchors: Optional[int]
     rtf: Optional[float]
     wall_s: Optional[float]
     path: Path
@@ -59,6 +61,15 @@ def _as_float(value: Any) -> Optional[float]:
         return None
 
 
+def _as_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def load_summary(path: Path) -> Optional[RunRow]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -72,6 +83,9 @@ def load_summary(path: Path) -> Optional[RunRow]:
     code = data.get("code") if isinstance(data.get("code"), dict) else {}
     traj = data.get("trajectory") if isinstance(data.get("trajectory"), dict) else {}
     timing = data.get("timing") if isinstance(data.get("timing"), dict) else {}
+    robustness = (
+        data.get("robustness") if isinstance(data.get("robustness"), dict) else {}
+    )
 
     sequence = str(data.get("sequence") or "")
     commit = str(code.get("git_commit_short") or data.get("git_commit_short") or "unknown")
@@ -90,6 +104,8 @@ def load_summary(path: Path) -> Optional[RunRow]:
         rpe_trans_rmse=_as_float(_nested_get(data, "rpe", "trans", "rmse")),
         completion_rate=_as_float(traj.get("completion_rate")),
         coverage_rate=_as_float(traj.get("coverage_rate")),
+        segments=_as_int(traj.get("segments")),
+        reanchors=_as_int(robustness.get("reanchors")),
         rtf=_as_float(timing.get("rtf")),
         wall_s=_as_float(timing.get("wall_s")),
         path=path,
@@ -112,6 +128,12 @@ def _fmt(value: Optional[float], digits: int = 6) -> str:
     return f"{value:.{digits}g}"
 
 
+def _fmt_int(value: Optional[int]) -> str:
+    if value is None:
+        return ""
+    return str(value)
+
+
 def write_markdown(rows: Iterable[RunRow], out) -> None:
     headers = [
         "sequence",
@@ -123,6 +145,8 @@ def write_markdown(rows: Iterable[RunRow], out) -> None:
         "rpe_trans_rmse",
         "completion_rate",
         "coverage_rate",
+        "segments",
+        "reanchors",
         "rtf",
         "wall_s",
     ]
@@ -139,6 +163,8 @@ def write_markdown(rows: Iterable[RunRow], out) -> None:
             _fmt(row.rpe_trans_rmse),
             _fmt(row.completion_rate),
             _fmt(row.coverage_rate),
+            _fmt_int(row.segments),
+            _fmt_int(row.reanchors),
             _fmt(row.rtf),
             _fmt(row.wall_s),
         ]
@@ -159,6 +185,8 @@ def write_csv(rows: Iterable[RunRow], out) -> None:
             "rpe_trans_rmse",
             "completion_rate",
             "coverage_rate",
+            "segments",
+            "reanchors",
             "rtf",
             "wall_s",
             "summary_path",
@@ -177,6 +205,8 @@ def write_csv(rows: Iterable[RunRow], out) -> None:
                 _fmt(row.rpe_trans_rmse),
                 _fmt(row.completion_rate),
                 _fmt(row.coverage_rate),
+                _fmt_int(row.segments),
+                _fmt_int(row.reanchors),
                 _fmt(row.rtf),
                 _fmt(row.wall_s),
                 str(row.path),

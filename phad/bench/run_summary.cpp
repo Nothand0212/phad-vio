@@ -130,6 +130,7 @@ namespace phad::bench
           { "failed", trajectory.failed },
           { "completion_rate", trajectory.completion_rate },
           { "coverage_rate", trajectory.coverage_rate },
+          { "segments", trajectory.segments },
     };
 
     if ( ate.has_value() )
@@ -154,6 +155,7 @@ namespace phad::bench
         { "failed", robustness.failed },
         { "low_connectivity", robustness.low_connectivity },
         { "cheirality", robustness.cheirality },
+        { "reanchors", robustness.reanchors },
     };
 
     json timing_json = json{

@@ -236,6 +236,7 @@ namespace phad::estimator
     std::optional<Eigen::Isometry3d> prev_accepted_T_W_B;
     std::uint64_t                    next_frame_index = 0;
     bool                             initialized      = false;
+    std::uint32_t                    segment_id       = 0;
 
     explicit Impl( camera::RectifiedStereoCalibration calibration_in,
                    EstimatorOptions                   options_in )
@@ -250,6 +251,11 @@ namespace phad::estimator
       {
         throw std::invalid_argument(
             "EstimatorOptions.min_landmark_observations must be >= 1" );
+      }
+      if ( options.min_seed_observations < 1 )
+      {
+        throw std::invalid_argument(
+            "EstimatorOptions.min_seed_observations must be >= 1" );
       }
       if ( options.stereo_sigma_px <= 0.0 )
       {
@@ -267,6 +273,40 @@ namespace phad::estimator
       const gtsam::Point3       point_W =
           camera.backproject( toStereoPoint( observation ) );
       return Eigen::Vector3d( point_W.x(), point_W.y(), point_W.z() );
+    }
+
+    // 返回 false 表示 backproject 失败（调用方回滚并 kRejected）
+    bool seedSegment( const Eigen::Isometry3d&   anchor_T_W_B,
+                      const KeyframeMeasurement& measurement )
+    {
+      landmarks_W.clear();
+
+      WindowFrame candidate;
+      candidate.frame_index  = next_frame_index;
+      candidate.timestamp    = measurement.timestamp;
+      candidate.observations = measurement.observations;
+      candidate.T_W_B        = anchor_T_W_B;
+
+      for ( const StereoObservation& observation : measurement.observations )
+      {
+        const Eigen::Vector3d point_W =
+            backprojectWorld( candidate.T_W_B, observation );
+        const gtsam::Pose3 T_W_left =
+            toPose3( candidate.T_W_B ) * body_P_sensor;
+        const gtsam::Point3 point_left = T_W_left.transformTo( gtsam::Point3(
+            point_W.x(), point_W.y(), point_W.z() ) );
+        if ( !isFinite( point_W ) || point_left.z() <= 0.0 )
+        {
+          return false;
+        }
+        landmarks_W[ observation.id ] = point_W;
+        track_times[ observation.id ].push_back( measurement.timestamp );
+      }
+
+      window.clear();
+      window.push_back( std::move( candidate ) );
+      ++next_frame_index;
+      return true;
     }
 
     [[nodiscard]] Eigen::Isometry3d poseInitialValue() const
@@ -475,6 +515,7 @@ namespace phad::estimator
     VioUpdateResult result;
     result.diagnostics.num_observations =
         static_cast<std::uint32_t>( measurement.observations.size() );
+    result.diagnostics.segment_id = m_impl->segment_id;
 
     if ( measurement.observations.empty() )
     {
@@ -512,10 +553,26 @@ namespace phad::estimator
     }
     result.diagnostics.num_shared = num_shared;
 
-    if ( m_impl->initialized && num_shared == 0 )
+    const bool overlap_broken = m_impl->initialized && num_shared == 0;
+
+    if ( overlap_broken && !m_impl->options.enable_reanchor )
     {
       result.status  = UpdateStatus::kRejected;
       result.message = "zero shared landmarks with window";
+      result.diagnostics.window_size =
+          static_cast<std::uint32_t>( m_impl->window.size() );
+      if ( !m_impl->window.empty() )
+      {
+        result.diagnostics.prior_key = m_impl->window.front().frame_index;
+      }
+      return result;
+    }
+    if ( overlap_broken &&
+         static_cast<int>( measurement.observations.size() ) <
+             m_impl->options.min_seed_observations )
+    {
+      result.status  = UpdateStatus::kRejected;
+      result.message = "insufficient observations to seed new segment";
       result.diagnostics.window_size =
           static_cast<std::uint32_t>( m_impl->window.size() );
       if ( !m_impl->window.empty() )
@@ -529,6 +586,15 @@ namespace phad::estimator
         num_shared > 0 &&
         static_cast<int>( num_shared ) < m_impl->options.min_shared_landmarks;
 
+    if ( !m_impl->initialized &&
+         static_cast<int>( measurement.observations.size() ) <
+             m_impl->options.min_seed_observations )
+    {
+      result.status  = UpdateStatus::kRejected;
+      result.message = "insufficient observations to seed first segment";
+      return result;
+    }
+
     // Snapshot for transactional rollback.
     const auto window_backup      = m_impl->window;
     const auto landmarks_backup   = m_impl->landmarks_W;
@@ -537,47 +603,58 @@ namespace phad::estimator
     const auto prev_backup        = m_impl->prev_accepted_T_W_B;
     const auto next_index_backup  = m_impl->next_frame_index;
     const bool initialized_backup = m_impl->initialized;
+    const auto segment_id_backup  = m_impl->segment_id;
 
     auto restore = [ & ]() {
-      m_impl->window              = window_backup;
-      m_impl->landmarks_W         = landmarks_backup;
-      m_impl->track_times         = track_times_backup;
-      m_impl->last_accepted_T_W_B = last_backup;
-      m_impl->prev_accepted_T_W_B = prev_backup;
-      m_impl->next_frame_index    = next_index_backup;
-      m_impl->initialized         = initialized_backup;
+      m_impl->window                = window_backup;
+      m_impl->landmarks_W           = landmarks_backup;
+      m_impl->track_times           = track_times_backup;
+      m_impl->last_accepted_T_W_B   = last_backup;
+      m_impl->prev_accepted_T_W_B   = prev_backup;
+      m_impl->next_frame_index      = next_index_backup;
+      m_impl->initialized           = initialized_backup;
+      m_impl->segment_id            = segment_id_backup;
+      result.diagnostics.segment_id = m_impl->segment_id;
     };
-
-    WindowFrame candidate;
-    candidate.frame_index  = m_impl->next_frame_index;
-    candidate.timestamp    = measurement.timestamp;
-    candidate.observations = measurement.observations;
 
     if ( !m_impl->initialized )
     {
-      candidate.T_W_B = Eigen::Isometry3d::Identity();
-      for ( const StereoObservation& observation : measurement.observations )
+      if ( !m_impl->seedSegment( Eigen::Isometry3d::Identity(),
+                                 measurement ) )
       {
-        const Eigen::Vector3d point_W =
-            m_impl->backprojectWorld( candidate.T_W_B, observation );
-        const gtsam::Pose3 T_W_left =
-            toPose3( candidate.T_W_B ) * m_impl->body_P_sensor;
-        const gtsam::Point3 point_left = T_W_left.transformTo( gtsam::Point3(
-            point_W.x(), point_W.y(), point_W.z() ) );
-        if ( !isFinite( point_W ) || point_left.z() <= 0.0 )
-        {
-          restore();
-          result.status  = UpdateStatus::kRejected;
-          result.message = "failed to backproject landmark on first frame";
-          return result;
-        }
-        m_impl->landmarks_W[ observation.id ] = point_W;
-        m_impl->track_times[ observation.id ].push_back(
-            measurement.timestamp );
+        restore();
+        result.status  = UpdateStatus::kRejected;
+        result.message = "failed to backproject landmark on first frame";
+        return result;
       }
+    }
+    else if ( overlap_broken )
+    {
+      const Eigen::Isometry3d anchor = m_impl->poseInitialValue();
+      if ( !isFinite( anchor ) )
+      {
+        restore();
+        result.status  = UpdateStatus::kFailed;
+        result.message = "non-finite pose initial value";
+        return result;
+      }
+      if ( !m_impl->seedSegment( anchor, measurement ) )
+      {
+        restore();
+        result.status  = UpdateStatus::kRejected;
+        result.message = "failed to backproject landmark on re-anchor frame";
+        return result;
+      }
+      ++m_impl->segment_id;
+      result.diagnostics.segment_id = m_impl->segment_id;
     }
     else
     {
+      WindowFrame candidate;
+      candidate.frame_index  = m_impl->next_frame_index;
+      candidate.timestamp    = measurement.timestamp;
+      candidate.observations = measurement.observations;
+
       candidate.T_W_B = m_impl->poseInitialValue();
       if ( !isFinite( candidate.T_W_B ) )
       {
@@ -608,10 +685,11 @@ namespace phad::estimator
         }
         m_impl->landmarks_W[ observation.id ] = point_W;
       }
+
+      m_impl->window.push_back( std::move( candidate ) );
+      ++m_impl->next_frame_index;
     }
 
-    m_impl->window.push_back( std::move( candidate ) );
-    ++m_impl->next_frame_index;
     while ( static_cast<int>( m_impl->window.size() ) >
             m_impl->options.window_size )
     {
