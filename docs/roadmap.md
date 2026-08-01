@@ -263,7 +263,7 @@ adapter 移到独立的同步器——那里同时是 M4 的 IMU 包络与未来
 [M3.2 双目配对同步器](plans/2026-07-31_m3.2_stereo_pair_synchronizer_5b7d1c93.plan.md)。
 Issue：[#22](https://github.com/Nothand0212/phad-vio/issues/22)。
 
-### M3.3 VO 加固（依赖 M3.2；Slice ①②③ 已完成；④ 部分完成 / needs-reopt；⑤ 待做）
+### M3.3 VO 加固（依赖 M3.2；Slice ①②③ 已完成；④/④b 不够；⑤ 待做）
 
 M3.2 全序列基线暴露的主导失败不是精度，而是一个**吸收态**：估计器一旦因
 `num_shared == 0` 拒帧，事务回滚会冻结窗口与 landmark 表，而前端跟踪断裂后
@@ -283,9 +283,11 @@ M3.2 全序列基线暴露的主导失败不是精度，而是一个**吸收态*
 - **③ PnP 初值（已完成）**：正常路径 `solvePnPRansac` 位姿初值 + 本帧 shared
   RANSAC 外点掩码；失败回退恒速/上一帧且不 cull；选项与诊断进 `config_hash` /
   `diag.csv`（16 列）/ `summary.json`；
-- **④ 外点剔除（部分完成 / needs-reopt）**：VINS 型平均重投影永久删点、不重优
-  已编码；MH_05 诊断门判定 **不够**（ATE 43.3 m）→ 停止全序列；
-- **④b 剔点后二次 LM（待做）**：`outliers_culled >= 4` 时 rebuild + LM₂；
+- **④ 外点剔除（不够）**：VINS 型平均重投影永久删点、不重优已编码；MH_05
+  诊断门判定 **不够**（ATE 43.3 m）→ 停止全序列；
+- **④b 剔点后二次 LM（不够 / 停止）**：`outliers_culled >= 4` 时 rebuild + LM₂
+  已编码；MH_05 诊断门仍 **不够**（ATE **3.45** m，未 &lt;1 m；reopt 有效：
+  大剔后 RMS 0.18/0.26 px）→ **不**跑其余 10 条；需多轮或其它手段；
   设计见 [Slice ④b](research/m3.3-slice4b-outlier-reopt-design.md)；
 - **⑤** 关键帧策略（视差、跟踪数、时间间隔）。会改 `est.tum` 的输出语义且与 M4 的
   IMU 预积分边界耦合，开工前单独对齐。
@@ -338,8 +340,15 @@ Slice ④ MH_05 诊断门（commit `b6fbcb6` / `default_bc8b10e2`，对照 `b712
 - 判定 **不够**：ATE 未回到 &lt;1 m；大剔后 `reproj_rms_after_cull_px` 仍可
   60–337 px，随后长 failed 簇（completion 0.884）——「只删不重优」不足；
 - **停止**其余 10 条；基线见
-  [M3.3 Slice ④ 基线](research/m3.3-slice4-baseline.md)（部分完成 /
-  needs-reopt）；待二次 LM 后再开全序列出口。
+  [M3.3 Slice ④ 基线](research/m3.3-slice4-baseline.md)。
+
+Slice ④b MH_05 诊断门（commit `3855395` / `default_65273570`，对照 `b6fbcb6`）：
+
+- ATE 43.29→**3.45** m（仍 ≥1 m → **不够**）；`cheirality` 151→**47**；
+  `outlier_reopts=2`；大剔后 LM₂ `after_cull` **0.18 / 0.26** px（对照 60/154/337）；
+  failed 257→**0**，completion 0.884→**0.998**，`reanchors=0`；
+- reopt **有效**但 ATE 硬门槛未过 → **停止**其余 10 条；需多轮或其它手段；
+- 数字见 [M3.3 Slice ④ / ④b 基线](research/m3.3-slice4-baseline.md) §6。
 
 后续切片出口：
 
@@ -364,8 +373,9 @@ Slice ④ MH_05 诊断门（commit `b6fbcb6` / `default_bc8b10e2`，对照 `b712
 [M3.3 VO 加固 Slice ①](plans/2026-07-31_m3.3_vo_hardening_a3f7d2e9.plan.md)、
 [M3.3 Slice ②](plans/2026-08-01_m3.3_slice2_right_match_c8e74511.plan.md)、
 [M3.3 Slice ③](plans/2026-08-01_m3.3_slice3_pnp_0154cd20.plan.md)、
-[M3.3 Slice ④](plans/2026-08-01_m3.3_slice4_outlier_cull_840bf39c.plan.md)。
-Issue：[#23](https://github.com/Nothand0212/phad-vio/issues/23)（M3.3 总图）； Slice ④：[#24](https://github.com/Nothand0212/phad-vio/issues/24)。
+[M3.3 Slice ④](plans/2026-08-01_m3.3_slice4_outlier_cull_840bf39c.plan.md)、
+[M3.3 Slice ④b](plans/2026-08-01_m3.3_slice4b_outlier_reopt_4d57d1fc.plan.md)。
+Issue：[#23](https://github.com/Nothand0212/phad-vio/issues/23)（M3.3 总图）； Slice ④/④b：[#24](https://github.com/Nothand0212/phad-vio/issues/24)。
 
 ## M4：接入 IMU
 
