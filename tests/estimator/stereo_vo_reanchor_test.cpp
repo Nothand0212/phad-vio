@@ -38,9 +38,9 @@ namespace
       const Eigen::Isometry3d& T_W_B, LandmarkId id,
       const Eigen::Vector3d& point_W )
   {
-    Eigen::Isometry3d T_B_C     = Eigen::Isometry3d::Identity();
-    T_B_C.linear()              = calibration.T_B_left_rectified().rotation();
-    T_B_C.translation()         = calibration.T_B_left_rectified().translation();
+    Eigen::Isometry3d T_B_C          = Eigen::Isometry3d::Identity();
+    T_B_C.linear()                   = calibration.T_B_left_rectified().rotation();
+    T_B_C.translation()              = calibration.T_B_left_rectified().translation();
     const Eigen::Vector3d point_left = ( T_W_B * T_B_C ).inverse() * point_W;
     const double          z          = point_left.z();
     EXPECT_GT( z, 0.0 );
@@ -158,8 +158,8 @@ TEST( StereoVoReanchor, RecoversAfterLandmarkIdTurnover )
              static_cast<std::size_t>( options.min_seed_observations ) );
 
   StereoVoEstimator estimator( calibration, options );
-  const auto         poses    = translatingPoses( 4, 0.05 );
-  const auto         accepted = runNormalSegment( estimator, calibration, poses, ids_a );
+  const auto        poses    = translatingPoses( 4, 0.05 );
+  const auto        accepted = runNormalSegment( estimator, calibration, poses, ids_a );
 
   const Eigen::Isometry3d& T_prev = accepted[ accepted.size() - 2 ];
   const Eigen::Isometry3d& T_last = accepted.back();
@@ -179,8 +179,8 @@ TEST( StereoVoReanchor, RecoversAfterLandmarkIdTurnover )
       expected_anchor.matrix(), 1e-6 ) );
 
   // The new segment must keep accepting normal frames afterward.
-  Eigen::Isometry3d next_pose  = expected_anchor;
-  next_pose.translation()     += Eigen::Vector3d( 0.05, 0.0, 0.0 );
+  Eigen::Isometry3d next_pose = expected_anchor;
+  next_pose.translation() += Eigen::Vector3d( 0.05, 0.0, 0.0 );
   const auto continued = estimator.update(
       makeFrame( calibration, next_pose, 300'000'000, kLandmarksB, ids_b ) );
   EXPECT_EQ( continued.status, UpdateStatus::kOk ) << continued.message;
@@ -195,24 +195,25 @@ TEST( StereoVoReanchor, SeedGateRejectsWithoutPoisoningState )
   const auto ids_b       = sequentialIds( kLandmarksB.size(), 1000 );
 
   EstimatorOptions options;
-  options.window_size          = 5;
-  options.min_shared_landmarks = 3;
+  options.window_size           = 5;
+  options.min_shared_landmarks  = 3;
   options.min_seed_observations = 10;
 
   StereoVoEstimator estimator( calibration, options );
-  const auto poses = translatingPoses( 4, 0.05 );
+  const auto        poses = translatingPoses( 4, 0.05 );
   runNormalSegment( estimator, calibration, poses, ids_a );
 
   // Too few observations to seed a new segment (< min_seed_observations).
   const std::vector<Eigen::Vector3d> sparse_landmarks(
       kLandmarksB.begin(), kLandmarksB.begin() + 3 );
   const std::vector<LandmarkId> sparse_ids( ids_b.begin(), ids_b.begin() + 3 );
-  const auto starved = estimator.update( makeFrame(
+  const auto                    starved = estimator.update( makeFrame(
       calibration, Eigen::Isometry3d::Identity(), 250'000'000,
       sparse_landmarks, sparse_ids ) );
   EXPECT_EQ( starved.status, UpdateStatus::kRejected );
   EXPECT_FALSE( starved.estimate.has_value() );
   EXPECT_EQ( starved.diagnostics.segment_id, 0U );
+  EXPECT_EQ( starved.message, "insufficient observations to seed new segment" );
 
   // State must be untouched: a fully-observed break frame right after
   // still seeds a fresh segment successfully.
@@ -235,7 +236,7 @@ TEST( StereoVoReanchor, ReanchorDisabledReproducesLegacyReject )
   options.enable_reanchor      = false;
 
   StereoVoEstimator estimator( calibration, options );
-  const auto poses = translatingPoses( 4, 0.05 );
+  const auto        poses = translatingPoses( 4, 0.05 );
   runNormalSegment( estimator, calibration, poses, ids_a );
 
   const auto first_break = estimator.update( makeFrame(
@@ -269,11 +270,13 @@ TEST( StereoVoReanchor, FirstSegmentSeedGate )
   const std::vector<Eigen::Vector3d> sparse_landmarks(
       kLandmarksA.begin(), kLandmarksA.begin() + 3 );
   const std::vector<LandmarkId> sparse_ids( ids_a.begin(), ids_a.begin() + 3 );
-  const auto starved = estimator.update( makeFrame(
+  const auto                    starved = estimator.update( makeFrame(
       calibration, Eigen::Isometry3d::Identity(), 50'000'000, sparse_landmarks,
       sparse_ids ) );
   EXPECT_EQ( starved.status, UpdateStatus::kRejected );
   EXPECT_FALSE( starved.estimate.has_value() );
+  EXPECT_EQ( starved.message,
+             "insufficient observations to seed first segment" );
 
   const auto seeded = estimator.update( makeFrame(
       calibration, Eigen::Isometry3d::Identity(), 100'000'000, kLandmarksA,
@@ -296,7 +299,7 @@ TEST( StereoVoReanchor, AnchorFollowsConstantVelocityOption )
     options.use_constant_velocity_init = use_cv;
 
     StereoVoEstimator estimator( calibration, options );
-    const auto accepted = runNormalSegment( estimator, calibration, poses, ids_a );
+    const auto        accepted = runNormalSegment( estimator, calibration, poses, ids_a );
 
     const Eigen::Isometry3d& T_prev = accepted[ accepted.size() - 2 ];
     const Eigen::Isometry3d& T_last = accepted.back();

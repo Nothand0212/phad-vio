@@ -8,4 +8,4 @@
 - 本地 EuRoC：`/home/lin/Projects/data/thidparty/euroc/native/<sequence>`
 - MH_01 门控：`PHAD_ENABLE_MH01_TESTS=ON` + `PHAD_EUROC_MH01_PATH` → `-L mh01`
 - VO / bench 产物常用 `/home/lin/Projects/data/phad-bench`（`PHAD_BENCH_ROOT`）
-- MH_01 行为对拍参考：`/home/lin/Projects/data/phad-bench/MH_01_easy/2b28616/default_0885385a/{est.tum,diag.csv}`
+- MH_01 行为对拍参考：`/home/lin/Projects/data/phad-bench/MH_01_easy/0b0cd34/default_030a0197/{est.tum,diag.csv}`

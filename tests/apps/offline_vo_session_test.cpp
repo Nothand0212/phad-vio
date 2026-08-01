@@ -163,7 +163,7 @@ namespace
   }
 
   TEST( OfflineVoSessionTest,
-        StreamErrorMidLoopStillEmitsSegmentsSummaryWarning )
+        StreamErrorMidLoopFinalizesCountsWithoutSpuriousSummaryWarning )
   {
     TinyEurocFixture fixture;
     fixture.corruptSecondRightImage();
@@ -175,14 +175,17 @@ namespace
     ASSERT_TRUE( result.error.has_value() );
     EXPECT_EQ( result.counts.image_frames, 1U );
 
-    const std::string expected_summary =
-        "vo segments summary: segments=" +
-        std::to_string( result.counts.segments ) +
-        " reanchors=" + std::to_string( result.counts.reanchors ) +
-        " seed_rejected=" + std::to_string( result.counts.seed_rejected );
-    EXPECT_NE( std::find( result.warnings.begin(), result.warnings.end(),
-                         expected_summary ),
-              result.warnings.end() );
+    // Mid-loop stream errors still run segment finalization, but a run
+    // with no re-anchors and no seed-gate rejections is clean: no
+    // "vo segments summary" warning should be emitted.
+    EXPECT_EQ( result.counts.reanchors, 0U );
+    EXPECT_EQ( result.counts.seed_rejected, 0U );
+    const bool has_summary_warning =
+        std::any_of( result.warnings.begin(), result.warnings.end(),
+                     []( const std::string& warning ) {
+                       return warning.rfind( "vo segments summary:", 0 ) == 0;
+                     } );
+    EXPECT_FALSE( has_summary_warning );
   }
 
   TEST( OfflineVoSessionTest, WriteDiagCsvMatchesProbeContract )
@@ -216,7 +219,7 @@ namespace
     const std::string text = oss.str();
     EXPECT_NE( text.find( "timestamp_ns,status,num_obs," ), std::string::npos );
     EXPECT_NE( text.find( "max_window_pose_shift_m,segment_id" ),
-              std::string::npos );
+               std::string::npos );
     EXPECT_NE(
         text.find( "1403636579763555584,ok,136,0,0,0,1,0,0.000000,0.000000,0,"
                    "0,0.000000,0" ),
@@ -245,12 +248,16 @@ namespace
     EXPECT_LT( result.first_image_ts, result.last_image_ts );
     EXPECT_GT( result.wall_s, 0.0 );
 
+    // MH_01 is the clean-run reference: no re-anchors, no seed-gate
+    // rejections, so no "vo segments summary" warning is expected.
+    EXPECT_EQ( result.counts.reanchors, 0U );
+    EXPECT_EQ( result.counts.seed_rejected, 0U );
     const bool has_summary_warning =
         std::any_of( result.warnings.begin(), result.warnings.end(),
-                    []( const std::string& warning ) {
-                      return warning.rfind( "vo segments summary:", 0 ) == 0;
-                    } );
-    EXPECT_TRUE( has_summary_warning );
+                     []( const std::string& warning ) {
+                       return warning.rfind( "vo segments summary:", 0 ) == 0;
+                     } );
+    EXPECT_FALSE( has_summary_warning );
   }
 
 }  // namespace

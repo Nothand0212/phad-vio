@@ -20,3 +20,8 @@ bench / probe 共用 `writeDiagCsv()`，旧 13 列参考产物不再适用于 M3
 健康序列（如 MH_01）仍应 `segment_id` 全程为 0；断裂序列上段边界表现为
 该列跳变。`summary.json` 侧对应 `robustness.reanchors` 与
 `trajectory.segments`（见 `phad/bench/README.md`）。
+
+`OfflineVoSession` 结束时的 `vo segments summary: segments=… reanchors=…
+seed_rejected=…` 只在 `reanchors > 0 || seed_rejected > 0` 时写入
+`warnings`（干净的单段跑不产生这条 warning，`RunStatus` 因此可以是
+`kCompleted`）；probe stdout 的计数摘要不受此限制，始终打印。

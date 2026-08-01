@@ -289,6 +289,11 @@ Slice ① 出口（commit `0b0cd34` / `default_030a0197`，对照 `4780660`）�
   `4780660/default_0885385a` **逐字节相同**；ATE 仍 ≈ 0.150155 m；
 - completion 显著恢复：`MH_02` 0.131→0.997、`V1_03` 0.113→0.993、
   `V2_02` 0.113→0.980、`V2_01` 保持 0.952；`V2_03` 0.032→0.485（不门控）；
+- `V1_02` completion 由 1.000 降至 0.946：新增的首段 seed 门限（默认
+  `min_seed_observations=10`）拒掉了前 93 帧观测不足的帧；这是有意的
+  门限行为，不是回归。真正对齐 M3.2 的 A/B 需要**同时**设
+  `enable_reanchor=false` **与** `min_seed_observations=1`（只关
+  `enable_reanchor` 不够，因为首段初始化也共用该门限）；
 - ATE **只记录不门控**；跨 coverage 不可直接比较（如 V1_03 / V2_02）；
 - 全序列数字快照见
   [M3.3 Slice ① 基线](research/m3.3-slice1-baseline.md)。

@@ -52,19 +52,19 @@ namespace
   TEST( RunSummaryTest, FieldCompletenessWithMetrics )
   {
     RunSummary summary;
-    summary.status           = RunStatus::kCompleted;
-    summary.sequence         = "MH_01_easy";
-    summary.git_commit_short = "abcdef1";
-    summary.config_label     = "default";
-    summary.config_hash      = "9f2ab41c";
-    summary.trajectory       = { .image_frames    = 3682,
-                                 .poses_written   = 3682,
-                                 .ok              = 3682,
-                                 .rejected        = 0,
-                                 .failed          = 0,
-                                 .completion_rate = 1.0,
-                                 .coverage_rate   = 1.0,
-                                 .segments        = 1 };
+    summary.status               = RunStatus::kCompleted;
+    summary.sequence             = "MH_01_easy";
+    summary.git_commit_short     = "abcdef1";
+    summary.config_label         = "default";
+    summary.config_hash          = "9f2ab41c";
+    summary.trajectory           = { .image_frames    = 3682,
+                                     .poses_written   = 3682,
+                                     .ok              = 3682,
+                                     .rejected        = 0,
+                                     .failed          = 0,
+                                     .completion_rate = 1.0,
+                                     .coverage_rate   = 1.0,
+                                     .segments        = 1 };
     summary.robustness.reanchors = 0;
     MetricReport ate;
     ate.trans.rmse = 0.15;
@@ -92,10 +92,10 @@ namespace
   TEST( RunSummaryTest, SegmentsAndReanchorsSerialize )
   {
     RunSummary summary;
-    summary.status                  = RunStatus::kCompleted;
-    summary.sequence                = "MH_04_difficult";
-    summary.trajectory.segments     = 3;
-    summary.robustness.reanchors    = 2;
+    summary.status               = RunStatus::kCompleted;
+    summary.sequence             = "MH_04_difficult";
+    summary.trajectory.segments  = 3;
+    summary.robustness.reanchors = 2;
 
     const json root = json::parse( summary.toJson() );
     EXPECT_EQ( root.at( "trajectory" ).at( "segments" ), 3 );

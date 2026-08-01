@@ -110,8 +110,8 @@ namespace phad::apps
     std::vector<double>            total_s;
 
     std::optional<std::uint32_t> last_segment_id;
-    bool                          any_segment_established = false;
-    bool                          warned_reanchor          = false;
+    bool                         any_segment_established = false;
+    bool                         warned_reanchor         = false;
     std::vector<std::string>     segment_warnings;
 
     const auto                       wall_begin = std::chrono::steady_clock::now();
@@ -128,12 +128,18 @@ namespace phad::apps
           result.warnings.insert( result.warnings.end(),
                                   segment_warnings.begin(),
                                   segment_warnings.end() );
-          result.warnings.push_back(
-              "vo segments summary: segments=" +
-              std::to_string( result.counts.segments ) +
-              " reanchors=" + std::to_string( result.counts.reanchors ) +
-              " seed_rejected=" +
-              std::to_string( result.counts.seed_rejected ) );
+          // Only worth a warning when something actually happened to the
+          // segment lifecycle; a clean single-segment run stays kCompleted.
+          if ( result.counts.reanchors > 0U ||
+               result.counts.seed_rejected > 0U )
+          {
+            result.warnings.push_back(
+                "vo segments summary: segments=" +
+                std::to_string( result.counts.segments ) +
+                " reanchors=" + std::to_string( result.counts.reanchors ) +
+                " seed_rejected=" +
+                std::to_string( result.counts.seed_rejected ) );
+          }
         };
 
     while ( true )
@@ -236,7 +242,7 @@ namespace phad::apps
           }
         }
         any_segment_established = true;
-        last_segment_id          = segment_id;
+        last_segment_id         = segment_id;
       }
 
       const auto& d = update.diagnostics;
