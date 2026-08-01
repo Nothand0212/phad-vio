@@ -22,7 +22,6 @@ namespace phad::frontend
      * - id：跟踪的特征点 ID
      * - length：跟踪的长度
      * - pixel：跟踪的左目像素坐标
-     * - last_disp_px：跟踪的上一帧视差
      * - disparity_px：跟踪的视差
      * - status：跟踪的立体匹配状态
      */
@@ -31,7 +30,6 @@ namespace phad::frontend
       LandmarkId    id           = 0;
       std::uint32_t length       = 0;
       cv::Point2f   pixel        = {};
-      float         last_disp_px = 0.0F;
       double        disparity_px = 0.0;
       StereoStatus  status       = StereoStatus::kNoRightMatch;
     };
@@ -153,6 +151,18 @@ namespace phad::frontend
         throw std::invalid_argument(
             "depth range must satisfy 0 < min_depth_m < max_depth_m" );
       }
+      if ( options.stereo_sad_half_win_px < 1 )
+      {
+        throw std::invalid_argument( "stereo_sad_half_win_px must be >= 1" );
+      }
+      if ( options.stereo_row_tol_px < 0 )
+      {
+        throw std::invalid_argument( "stereo_row_tol_px must be >= 0" );
+      }
+      if ( !( options.stereo_bidir_px > 0.0 ) )
+      {
+        throw std::invalid_argument( "stereo_bidir_px must be positive" );
+      }
     }
 
     void detectNewTracks( const cv::Mat& left, std::uint32_t& detected )
@@ -198,18 +208,14 @@ namespace phad::frontend
       }
 
       std::vector<cv::Point2f> left_pts;
-      std::vector<cv::Point2f> right_seed;
       left_pts.reserve( tracks.size() );
-      right_seed.reserve( tracks.size() );
       for ( const LiveTrack& track : tracks )
       {
         left_pts.push_back( track.pixel );
-        right_seed.emplace_back( track.pixel.x - track.last_disp_px,
-                                 track.pixel.y );
       }
 
       const cv::Size            win( options.lk_window_px, options.lk_window_px );
-      std::vector<cv::Point2f>  right_pts = right_seed;
+      std::vector<cv::Point2f>  right_pts = left_pts;
       std::vector<std::uint8_t> forward_status;
       std::vector<float>        forward_error;
       cv::calcOpticalFlowPyrLK( left, right, left_pts, right_pts,
@@ -254,8 +260,6 @@ namespace phad::frontend
 
         const double disparity = static_cast<double>( left_pts[ index ].x -
                                                       right_pts[ index ].x );
-        track.last_disp_px =
-            static_cast<float>( disparity );  // seed next frame even if rejected
 
         if ( abs_dy > options.max_epipolar_px )
         {

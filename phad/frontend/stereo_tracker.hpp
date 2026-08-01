@@ -37,6 +37,9 @@ namespace phad::frontend
    * - min_disparity_px：最小视差
    * - min_depth_m：最小深度
    * - max_depth_m：最大深度
+   * - stereo_sad_half_win_px：立体 SAD 半窗口
+   * - stereo_row_tol_px：立体行容差
+   * - stereo_bidir_px：立体双向匹配距离
    */
   struct StereoTrackerOptions
   {
@@ -51,6 +54,9 @@ namespace phad::frontend
     double min_disparity_px    = 0.5;
     double min_depth_m         = 0.3;
     double max_depth_m         = 40.0;
+    int    stereo_sad_half_win_px = 5;
+    int    stereo_row_tol_px      = 0;
+    double stereo_bidir_px        = 0.5;
   };
 
   /**

@@ -303,6 +303,33 @@ namespace
     EXPECT_GE( tracks.stats.depth_rejected, 1U );
   }
 
+  TEST( StereoTrackerTest, RejectsNonPositiveStereoBidir )
+  {
+    auto options = testOptions( 4 );
+    options.stereo_bidir_px = 0.0;
+    EXPECT_THROW(
+        ( StereoTracker{ makeRectifiedCalibration(), options } ),
+        std::invalid_argument );
+  }
+
+  TEST( StereoTrackerTest, RejectsNegativeRowTol )
+  {
+    auto options = testOptions( 4 );
+    options.stereo_row_tol_px = -1;
+    EXPECT_THROW(
+        ( StereoTracker{ makeRectifiedCalibration(), options } ),
+        std::invalid_argument );
+  }
+
+  TEST( StereoTrackerTest, RejectsNonPositiveSadHalfWin )
+  {
+    auto options = testOptions( 4 );
+    options.stereo_sad_half_win_px = 0;
+    EXPECT_THROW(
+        ( StereoTracker{ makeRectifiedCalibration(), options } ),
+        std::invalid_argument );
+  }
+
   TEST( StereoTrackerTest, VerticalRightOffsetBecomesInvalidDisparity )
   {
     const auto calibration = makeRectifiedCalibration();
