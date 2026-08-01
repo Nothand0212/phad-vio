@@ -305,6 +305,11 @@ namespace
     snap.set( "estimator.min_seed_observations",
               static_cast<std::int64_t>( estimator.min_seed_observations ) );
     snap.set( "estimator.enable_reanchor", estimator.enable_reanchor );
+    snap.set( "estimator.enable_pnp_init", estimator.enable_pnp_init );
+    snap.set( "estimator.pnp_reproj_px", estimator.pnp_reproj_px );
+    snap.set( "estimator.pnp_confidence", estimator.pnp_confidence );
+    snap.set( "estimator.min_pnp_inliers",
+              static_cast<std::int64_t>( estimator.min_pnp_inliers ) );
 
     snap.set( "session.dataset_format", std::string( "euroc" ) );
     if ( session.max_frames.has_value() )
@@ -517,6 +522,8 @@ namespace
     summary.robustness.failed           = session.counts.failed;
     summary.robustness.low_connectivity = session.counts.low_connectivity;
     summary.robustness.reanchors        = session.counts.reanchors;
+    summary.robustness.pnp_successes    = session.counts.pnp_successes;
+    summary.robustness.pnp_fallbacks    = session.counts.pnp_fallbacks;
     for ( const auto& row : session.diag )
     {
       summary.robustness.cheirality += row.num_cheirality;

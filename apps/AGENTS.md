@@ -13,15 +13,22 @@
 
 ## `diag.csv` 合同（M3.3）
 
-M3.3 **有意**将 `diag.csv` 从 **13 列扩到 14 列**：在既有列尾追加
-`segment_id`（与 `UpdateDiagnostics.segment_id` 一致）。这不是格式漂移——
-bench / probe 共用 `writeDiagCsv()`，旧 13 列参考产物不再适用于 M3.3 及之后。
+M3.3 Slice ① **有意**将 `diag.csv` 从 **13 列扩到 14 列**：在既有列尾追加
+`segment_id`（与 `UpdateDiagnostics.segment_id` 一致）。
+
+M3.3 Slice ③ **有意**再扩到 **16 列**：在 `segment_id` 后追加
+`pnp_success,pnp_inliers`（`pnp_success` 为 0/1 整数；与
+`UpdateDiagnostics` 同名字段一致）。这不是格式漂移——bench / probe 共用
+`writeDiagCsv()`，旧 13/14 列参考产物不再适用于 Slice ③ 及之后。
 
 健康序列（如 MH_01）仍应 `segment_id` 全程为 0；断裂序列上段边界表现为
-该列跳变。`summary.json` 侧对应 `robustness.reanchors` 与
+该列跳变。`summary.json` 侧对应 `robustness.reanchors` /
+`robustness.pnp_successes` / `robustness.pnp_fallbacks` 与
 `trajectory.segments`（见 `phad/bench/README.md`）。
 
 `OfflineVoSession` 结束时的 `vo segments summary: segments=… reanchors=…
 seed_rejected=…` 只在 `reanchors > 0 || seed_rejected > 0` 时写入
-`warnings`（干净的单段跑不产生这条 warning，`RunStatus` 因此可以是
-`kCompleted`）；probe stdout 的计数摘要不受此限制，始终打印。
+`warnings`；`vo pnp summary: pnp_successes=… pnp_fallbacks=…` 只在
+`pnp_fallbacks > 0` 时写入（干净的单段且 PnP 全成功跑不产生这些
+warning，`RunStatus` 因此可以是 `kCompleted`）；probe stdout 的计数摘要
+不受此限制，始终打印。

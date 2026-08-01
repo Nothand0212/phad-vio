@@ -156,6 +156,8 @@ namespace phad::bench
         { "low_connectivity", robustness.low_connectivity },
         { "cheirality", robustness.cheirality },
         { "reanchors", robustness.reanchors },
+        { "pnp_successes", robustness.pnp_successes },
+        { "pnp_fallbacks", robustness.pnp_fallbacks },
     };
 
     json timing_json = json{
