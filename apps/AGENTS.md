@@ -34,7 +34,9 @@ M3.3 Slice ④ **有意**再扩到 **18 列**：在 `pnp_inliers` 后追加
 `OfflineVoSession` 结束时的 `vo segments summary: segments=… reanchors=…
 seed_rejected=…` 只在 `reanchors > 0 || seed_rejected > 0` 时写入
 `warnings`；`vo pnp summary: pnp_successes=… pnp_fallbacks=…` 只在
-`pnp_fallbacks > 0` 时写入；`vo outlier cull summary: outliers_culled=…
-outliers_culled_unique=…` 只在 `outliers_culled > 0` 时写入（干净的单段、
-PnP 全成功且无剔点跑不产生这些 warning，`RunStatus` 因此可以是
-`kCompleted`）；probe stdout 的计数摘要不受此限制，始终打印。
+`pnp_fallbacks > 0` 时写入。剔点累计只进 `FrameCounts` /
+`summary.json` 的 `robustness.outliers_culled` /
+`robustness.outliers_culled_unique`，**不**写入 `warnings`（健康序列上
+正常 cull 仍可保持 `kCompleted`）。干净的单段且 PnP 全成功跑不产生
+segments / pnp warning。probe stdout 的计数摘要不受此限制，始终打印
+（含 `outliers_culled` / `outliers_culled_unique`）。

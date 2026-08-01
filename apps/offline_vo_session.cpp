@@ -129,8 +129,9 @@ namespace phad::apps
                                   segment_warnings.begin(),
                                   segment_warnings.end() );
           // Only worth a warning when something actually happened to the
-          // segment lifecycle or PnP fell back; a clean single-segment run
-          // with successful PnP stays kCompleted.
+          // segment lifecycle or PnP fell back. Cull totals stay in
+          // FrameCounts / summary.json robustness only — healthy runs with
+          // normal cull must remain eligible for kCompleted.
           if ( result.counts.reanchors > 0U ||
                result.counts.seed_rejected > 0U )
           {
@@ -148,14 +149,6 @@ namespace phad::apps
                 std::to_string( result.counts.pnp_successes ) +
                 " pnp_fallbacks=" +
                 std::to_string( result.counts.pnp_fallbacks ) );
-          }
-          if ( result.counts.outliers_culled > 0U )
-          {
-            result.warnings.push_back(
-                "vo outlier cull summary: outliers_culled=" +
-                std::to_string( result.counts.outliers_culled ) +
-                " outliers_culled_unique=" +
-                std::to_string( result.counts.outliers_culled_unique ) );
           }
         };
 

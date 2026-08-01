@@ -144,9 +144,11 @@ pnp_success,pnp_inliers,outliers_culled,reproj_rms_after_cull_px
 `outliers_culled,reproj_rms_after_cull_px` → 18；有意的契约变更）。
 `pnp_success` 为 `0/1` 整数。`status` 为 `ok` / `rejected` / `failed`。
 stdout summary 含帧数、各状态计数、拒帧比例、`low_connectivity` 帧数、
-`pnp_successes` / `pnp_fallbacks`、重投影 RMS 中位数与 p95；session 还会在
-`warnings` 里按需汇总 `segments` / `reanchors` / `seed_rejected`、PnP
-summary 与 outlier cull summary（见 `apps/AGENTS.md`）。
+`pnp_successes` / `pnp_fallbacks`、`outliers_culled` /
+`outliers_culled_unique`、重投影 RMS 中位数与 p95；session 还会在
+`warnings` 里按需汇总 `segments` / `reanchors` / `seed_rejected` 与 PnP
+summary（剔点累计只进 `FrameCounts` / `summary.json` robustness，不进
+`warnings`；见 `apps/AGENTS.md`）。
 
 ## 相关入口
 

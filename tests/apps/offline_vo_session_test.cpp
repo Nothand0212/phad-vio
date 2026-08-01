@@ -181,7 +181,8 @@ namespace
 
     // Mid-loop stream errors still run segment finalization, but a run
     // with no re-anchors and no seed-gate rejections is clean: no
-    // "vo segments summary" warning should be emitted.
+    // "vo segments summary" warning should be emitted. Cull totals never
+    // enter warnings either.
     EXPECT_EQ( result.counts.reanchors, 0U );
     EXPECT_EQ( result.counts.seed_rejected, 0U );
     const bool has_summary_warning =
@@ -190,6 +191,13 @@ namespace
                        return warning.rfind( "vo segments summary:", 0 ) == 0;
                      } );
     EXPECT_FALSE( has_summary_warning );
+    const bool has_cull_warning =
+        std::any_of( result.warnings.begin(), result.warnings.end(),
+                     []( const std::string& warning ) {
+                       return warning.rfind( "vo outlier cull summary:", 0 ) ==
+                              0;
+                     } );
+    EXPECT_FALSE( has_cull_warning );
   }
 
   TEST( OfflineVoSessionTest, WriteDiagCsvMatchesProbeContract )
@@ -259,6 +267,7 @@ namespace
 
     // MH_01 is the clean-run reference: no re-anchors, no seed-gate
     // rejections, so no "vo segments summary" warning is expected.
+    // Cull counters may be non-zero but must not enter warnings.
     EXPECT_EQ( result.counts.reanchors, 0U );
     EXPECT_EQ( result.counts.seed_rejected, 0U );
     const bool has_summary_warning =
@@ -267,6 +276,13 @@ namespace
                        return warning.rfind( "vo segments summary:", 0 ) == 0;
                      } );
     EXPECT_FALSE( has_summary_warning );
+    const bool has_cull_warning =
+        std::any_of( result.warnings.begin(), result.warnings.end(),
+                     []( const std::string& warning ) {
+                       return warning.rfind( "vo outlier cull summary:", 0 ) ==
+                              0;
+                     } );
+    EXPECT_FALSE( has_cull_warning );
   }
 
 }  // namespace
