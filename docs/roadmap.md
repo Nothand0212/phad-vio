@@ -352,7 +352,7 @@ Slice ③ 出口（commit `b712c91` / `default_8a9236e0`，对照 `764d3b2`；
 [M3.3 Slice ②](plans/2026-08-01_m3.3_slice2_right_match_c8e74511.plan.md)、
 [M3.3 Slice ③](plans/2026-08-01_m3.3_slice3_pnp_0154cd20.plan.md)、
 [M3.3 Slice ④](plans/2026-08-01_m3.3_slice4_outlier_cull_840bf39c.plan.md)。
-Issue：[#23](https://github.com/Nothand0212/phad-vio/issues/23)。
+Issue：[#23](https://github.com/Nothand0212/phad-vio/issues/23)（M3.3 总图）； Slice ④：[#24](https://github.com/Nothand0212/phad-vio/issues/24)。
 
 ## M4：接入 IMU
 
