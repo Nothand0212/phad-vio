@@ -263,14 +263,14 @@ adapter 移到独立的同步器——那里同时是 M4 的 IMU 包络与未来
 [M3.2 双目配对同步器](plans/2026-07-31_m3.2_stereo_pair_synchronizer_5b7d1c93.plan.md)。
 Issue：[#22](https://github.com/Nothand0212/phad-vio/issues/22)。
 
-### M3.3 VO 加固（依赖 M3.2；Slice ①②③ 已完成；④–⑤ 待做）
+### M3.3 VO 加固（依赖 M3.2；Slice ①②③ 已完成；④ 部分完成 / needs-reopt；⑤ 待做）
 
 M3.2 全序列基线暴露的主导失败不是精度，而是一个**吸收态**：估计器一旦因
 `num_shared == 0` 拒帧，事务回滚会冻结窗口与 landmark 表，而前端跟踪断裂后
 重新检测会发放全新 `LandmarkId`，此后交集恒为空、永久拒帧。V1_03 上一帧异常
 废掉了随后 1906 帧。因此本阶段按失败驱动排序，恢复先于精度。
 
-范围（五片，Slice ①②③ 已落地；④–⑤ 待做）：
+范围（五片，Slice ①②③ 已落地；④ 编码+MH_05 诊断已落地但门控不够；⑤ 待做）：
 
 - **① 恢复（已完成）**：去掉 `num_shared == 0` 拒帧门，重叠断裂即以新 id 重建窗口，
   prior 打在最后一个被接受的位姿上（anchor 复用现有恒速位姿初值规则）；
@@ -283,8 +283,9 @@ M3.2 全序列基线暴露的主导失败不是精度，而是一个**吸收态*
 - **③ PnP 初值（已完成）**：正常路径 `solvePnPRansac` 位姿初值 + 本帧 shared
   RANSAC 外点掩码；失败回退恒速/上一帧且不 cull；选项与诊断进 `config_hash` /
   `diag.csv`（16 列）/ `summary.json`；
-- **④** 优化后外点剔除与 landmark 生命周期（设计已对齐：VINS 型平均重投影
-  永久删点、不重优；编码后先跑 MH_05 诊断）；
+- **④ 外点剔除（部分完成 / needs-reopt）**：VINS 型平均重投影永久删点、不重优
+  已编码；MH_05 诊断门判定 **不够**（ATE 43.3 m，未回到 &lt;1 m）→ 停止全序列，
+  需回头讨论本帧二次 LM（设计 B/C）；
 - **⑤** 关键帧策略（视差、跟踪数、时间间隔）。会改 `est.tum` 的输出语义且与 M4 的
   IMU 预积分边界耦合，开工前单独对齐。
 
@@ -328,6 +329,16 @@ Slice ③ 出口（commit `b712c91` / `default_8a9236e0`，对照 `764d3b2`；
   `cheirality=2055`）；V2_01 ATE 略升；留给 Slice ④+；
 - 全序列数字见
   [M3.3 Slice ③ 基线](research/m3.3-slice3-baseline.md)。
+
+Slice ④ MH_05 诊断门（commit `b6fbcb6` / `default_bc8b10e2`，对照 `b712c91`）：
+
+- ATE 33179→**43.29** m，`cheirality` 2055→**151**，`culled/unique=70/70=1.0`，
+  `reanchors=2` / `segments=3`（豁免）；
+- 判定 **不够**：ATE 未回到 &lt;1 m；大剔后 `reproj_rms_after_cull_px` 仍可
+  60–337 px，随后长 failed 簇（completion 0.884）——「只删不重优」不足；
+- **停止**其余 10 条；基线见
+  [M3.3 Slice ④ 基线](research/m3.3-slice4-baseline.md)（部分完成 /
+  needs-reopt）；待二次 LM 后再开全序列出口。
 
 后续切片出口：
 
