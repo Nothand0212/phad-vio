@@ -321,14 +321,17 @@ Slice ② 出口（commit `764d3b2` / `default_a962bc8b`，对照 `0b0cd34`；
 
 设计见
 [M3.3 VO 加固设计](research/m3.3-vo-hardening-design.md)、
-[M3.3 Slice ② 右目匹配设计](research/m3.3-slice2-right-match-design.md)，
+[M3.3 Slice ② 右目匹配设计](research/m3.3-slice2-right-match-design.md)、
+[M3.3 Slice ③ PnP 设计](research/m3.3-slice3-pnp-design.md)，
 根因诊断见
 [M3.3 VO 崩溃根因诊断](research/m3.3-vo-collapse-diagnosis.md)，开源对照见
 [M3.3 VO 加固：开源实现对照](research/m3.3-vo-hardening-open-source-refs.md)、
-[Slice ② 开源对照](research/m3.3-slice2-right-match-open-source-refs.md)。
+[Slice ② 开源对照](research/m3.3-slice2-right-match-open-source-refs.md)、
+[Slice ③ 开源对照](research/m3.3-slice3-pnp-open-source-refs.md)。
 实施计划见
 [M3.3 VO 加固 Slice ①](plans/2026-07-31_m3.3_vo_hardening_a3f7d2e9.plan.md)、
-[M3.3 Slice ②](plans/2026-08-01_m3.3_slice2_right_match_c8e74511.plan.md)。
+[M3.3 Slice ②](plans/2026-08-01_m3.3_slice2_right_match_c8e74511.plan.md)、
+[M3.3 Slice ③](plans/2026-08-01_m3.3_slice3_pnp_0154cd20.plan.md)。
 Issue：[#23](https://github.com/Nothand0212/phad-vio/issues/23)。
 
 ## M4：接入 IMU

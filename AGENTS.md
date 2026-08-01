@@ -63,6 +63,7 @@ C++ formatting 与 control-flow style 遵循项目规则。详见 `docs/agents/c
 - 重大设计决策前先检索开源参考实现（GTSAM examples、Kimera-VIO、ORB-SLAM3、VINS-Fusion），把对照笔记写进 `docs/research/` 再定方案；审阅设计文档时直接指出问题并与用户讨论改法，不擅自定稿
 - 模块边界优先低耦合、高内聚、深模块与单向依赖；benchmark/编排放 composition root（见 `apps/AGENTS.md`），不反向注入 frontend/estimator
 - 排障时先对照开源实现与本地清单，区分数据损坏与 loader 合同过严，勿直接断定数据源损坏
+- EuRoC / milestone baseline 文档须含可复现的运行时参数快照（取自对应 run 的 `meta.json`：`config` / `config_canonical_text`，与 `config_hash` 同源），不能只写 hash 名；跨切片时标出相对上一基线的增量键
 
 ## Learned Workspace Facts
 
