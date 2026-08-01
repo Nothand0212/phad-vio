@@ -143,6 +143,47 @@ namespace phad::estimator
       return std::sqrt( sum_sq / static_cast<double>( count ) );
     }
 
+    // Same RMS as stereoReprojRms but skips factors whose landmark is no longer
+    // in landmarks_W (cheirality / mean-reproj cull). Does not rebuild the graph.
+    [[nodiscard]] double stereoReprojRmsSkippingMissingLandmarks(
+        const gtsam::NonlinearFactorGraph&                       graph,
+        const gtsam::Values&                                     values,
+        const std::unordered_map<LandmarkId, Eigen::Vector3d>& landmarks_W )
+    {
+      double      sum_sq = 0.0;
+      std::size_t count  = 0;
+      for ( const auto& factor : graph )
+      {
+        if ( factor == nullptr )
+        {
+          continue;
+        }
+        const auto* stereo =
+            dynamic_cast<const gtsam::GenericStereoFactor<gtsam::Pose3,
+                                                          gtsam::Point3>*>(
+                factor.get() );
+        if ( stereo == nullptr )
+        {
+          continue;
+        }
+        const gtsam::Key  lkey = stereo->key2();
+        const LandmarkId  id =
+            static_cast<LandmarkId>( gtsam::Symbol( lkey ).index() );
+        if ( landmarks_W.find( id ) == landmarks_W.end() )
+        {
+          continue;
+        }
+        const gtsam::Vector error = stereo->unwhitenedError( values );
+        sum_sq += error.squaredNorm();
+        ++count;
+      }
+      if ( count == 0 )
+      {
+        return 0.0;
+      }
+      return std::sqrt( sum_sq / static_cast<double>( count ) );
+    }
+
     // GenericStereoFactor returns 2*fx on each residual axis when the point is
     // behind the camera (throwCheirality=false).
     [[nodiscard]] std::uint32_t countCheiralityFactors(
@@ -1035,8 +1076,68 @@ namespace phad::estimator
         m_impl->dropCheiralityLandmarks( optimized );
     result.diagnostics.num_cheirality =
         std::max( cheirality_before, std::max( cheirality_after, dropped ) );
+
+    std::uint32_t outliers_culled        = 0;
+    std::uint32_t outliers_culled_unique = 0;
+    if ( m_impl->options.enable_outlier_cull )
+    {
+      std::vector<LandmarkId> candidate_ids;
+      candidate_ids.reserve( m_impl->landmarks_W.size() );
+      for ( const auto& [ id, _unused ] : m_impl->landmarks_W )
+      {
+        candidate_ids.push_back( id );
+      }
+      for ( const LandmarkId id : candidate_ids )
+      {
+        double      sum_norm = 0.0;
+        std::size_t n_factors = 0;
+        for ( const auto& factor : graph )
+        {
+          if ( factor == nullptr )
+          {
+            continue;
+          }
+          const auto* stereo =
+              dynamic_cast<const gtsam::GenericStereoFactor<gtsam::Pose3,
+                                                            gtsam::Point3>*>(
+                  factor.get() );
+          if ( stereo == nullptr )
+          {
+            continue;
+          }
+          if ( stereo->key2() != L( id ) )
+          {
+            continue;
+          }
+          sum_norm += stereo->unwhitenedError( optimized ).norm();
+          ++n_factors;
+        }
+        if ( n_factors < 4 )
+        {
+          continue;
+        }
+        const double score =
+            sum_norm / static_cast<double>( n_factors );
+        if ( score > m_impl->options.outlier_avg_reproj_px )
+        {
+          m_impl->landmarks_W.erase( id );
+          m_impl->eraseLandmarkFromWindow( id );
+          ++outliers_culled;
+          if ( m_impl->culled_ids_.insert( id ).second )
+          {
+            ++outliers_culled_unique;
+          }
+        }
+      }
+    }
+    result.diagnostics.outliers_culled        = outliers_culled;
+    result.diagnostics.outliers_culled_unique = outliers_culled_unique;
+    // Full-graph RMS (includes factors for just-culled ids) = pre-cull quality.
     result.diagnostics.reproj_rms_after_px =
         stereoReprojRms( graph, optimized );
+    result.diagnostics.reproj_rms_after_cull_px =
+        stereoReprojRmsSkippingMissingLandmarks( graph, optimized,
+                                                 m_impl->landmarks_W );
     result.diagnostics.max_window_pose_shift_m = max_shift_m;
 
     m_impl->initialized         = true;
