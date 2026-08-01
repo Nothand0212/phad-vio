@@ -17,6 +17,8 @@
 #include <cstdint>
 #include <deque>
 #include <memory>
+#include <opencv2/calib3d.hpp>
+#include <opencv2/core.hpp>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -262,6 +264,21 @@ namespace phad::estimator
         throw std::invalid_argument(
             "EstimatorOptions.stereo_sigma_px must be > 0" );
       }
+      if ( !( options.pnp_reproj_px > 0.0 ) )
+      {
+        throw std::invalid_argument(
+            "EstimatorOptions.pnp_reproj_px must be > 0" );
+      }
+      if ( !( options.pnp_confidence > 0.0 && options.pnp_confidence < 1.0 ) )
+      {
+        throw std::invalid_argument(
+            "EstimatorOptions.pnp_confidence must be in (0, 1)" );
+      }
+      if ( options.min_pnp_inliers < 4 )
+      {
+        throw std::invalid_argument(
+            "EstimatorOptions.min_pnp_inliers must be >= 4" );
+      }
     }
 
     [[nodiscard]] Eigen::Vector3d backprojectWorld(
@@ -329,6 +346,131 @@ namespace phad::estimator
         return T_prev;
       }
       return predicted;
+    }
+
+    struct PnpInitResult
+    {
+      bool              success = false;
+      Eigen::Isometry3d T_W_B   = Eigen::Isometry3d::Identity();
+      std::vector<int>  inlier_indices;  // into shared correspondence list
+    };
+
+    // Shared landmarks_W ∩ current left observations → solvePnPRansac.
+    // Success only when RANSAC converges, pose is finite, and
+    // inliers.size() >= min_pnp_inliers (weak models → fallback, no cull).
+    [[nodiscard]] PnpInitResult tryPnpInit(
+        const KeyframeMeasurement& measurement,
+        const Eigen::Isometry3d&   guess_T_W_B ) const
+    {
+      PnpInitResult result;
+
+      std::vector<cv::Point3d> pts3d;
+      std::vector<cv::Point2d> pts2d;
+      pts3d.reserve( measurement.observations.size() );
+      pts2d.reserve( measurement.observations.size() );
+      for ( const StereoObservation& observation : measurement.observations )
+      {
+        const auto landmark_it = landmarks_W.find( observation.id );
+        if ( landmark_it == landmarks_W.end() )
+        {
+          continue;
+        }
+        const Eigen::Vector3d& point_W = landmark_it->second;
+        pts3d.emplace_back( point_W.x(), point_W.y(), point_W.z() );
+        pts2d.emplace_back( observation.left_pixel.x(),
+                            observation.left_pixel.y() );
+      }
+      if ( static_cast<int>( pts3d.size() ) < options.min_pnp_inliers )
+      {
+        return result;
+      }
+
+      const Eigen::Isometry3d T_B_left       = toIsometry( body_P_sensor );
+      const Eigen::Isometry3d T_W_left_guess = guess_T_W_B * T_B_left;
+      const Eigen::Isometry3d T_left_W_guess = T_W_left_guess.inverse();
+
+      cv::Mat R_guess( 3, 3, CV_64F );
+      for ( int row = 0; row < 3; ++row )
+      {
+        for ( int col = 0; col < 3; ++col )
+        {
+          R_guess.at<double>( row, col ) =
+              T_left_W_guess.linear()( row, col );
+        }
+      }
+      cv::Mat rvec;
+      cv::Mat tvec;
+      cv::Rodrigues( R_guess, rvec );
+      tvec = ( cv::Mat_<double>( 3, 1 ) << T_left_W_guess.translation().x(),
+               T_left_W_guess.translation().y(),
+               T_left_W_guess.translation().z() );
+
+      const cv::Mat K =
+          ( cv::Mat_<double>( 3, 3 ) << calibration.fxPixels(), 0.0,
+            calibration.cxPixels(), 0.0, calibration.fyPixels(),
+            calibration.cyPixels(), 0.0, 0.0, 1.0 );
+
+      cv::Mat inliers;
+      bool    solved = false;
+      try
+      {
+        solved = cv::solvePnPRansac(
+            pts3d, pts2d, K, cv::noArray(), rvec, tvec,
+            /*useExtrinsicGuess=*/true, /*iterationsCount=*/100,
+            static_cast<float>( options.pnp_reproj_px ),
+            options.pnp_confidence, inliers, cv::SOLVEPNP_ITERATIVE );
+      }
+      catch ( const cv::Exception& )
+      {
+        return result;
+      }
+      if ( !solved || inliers.empty() )
+      {
+        return result;
+      }
+
+      result.inlier_indices.reserve(
+          static_cast<std::size_t>( inliers.rows ) );
+      for ( int row = 0; row < inliers.rows; ++row )
+      {
+        result.inlier_indices.push_back( inliers.at<int>( row, 0 ) );
+      }
+      if ( static_cast<int>( result.inlier_indices.size() ) <
+           options.min_pnp_inliers )
+      {
+        result.inlier_indices.clear();
+        return result;
+      }
+
+      cv::Mat R_left_W;
+      cv::Rodrigues( rvec, R_left_W );
+      Eigen::Matrix3d rotation;
+      Eigen::Vector3d translation;
+      for ( int row = 0; row < 3; ++row )
+      {
+        translation( row ) = tvec.at<double>( row, 0 );
+        for ( int col = 0; col < 3; ++col )
+        {
+          rotation( row, col ) = R_left_W.at<double>( row, col );
+        }
+      }
+      Eigen::Quaterniond quat( rotation );
+      quat.normalize();
+      Eigen::Isometry3d T_left_W = Eigen::Isometry3d::Identity();
+      T_left_W.linear()          = quat.toRotationMatrix();
+      T_left_W.translation()     = translation;
+
+      const Eigen::Isometry3d T_W_left = T_left_W.inverse();
+      const Eigen::Isometry3d T_W_B    = T_W_left * T_B_left.inverse();
+      if ( !isFinite( T_W_B ) )
+      {
+        result.inlier_indices.clear();
+        return result;
+      }
+
+      result.success = true;
+      result.T_W_B   = T_W_B;
+      return result;
     }
 
     void pruneLandmarksNotInWindow()
@@ -655,7 +797,67 @@ namespace phad::estimator
       candidate.timestamp    = measurement.timestamp;
       candidate.observations = measurement.observations;
 
-      candidate.T_W_B = m_impl->poseInitialValue();
+      const Eigen::Isometry3d guess_T_W_B = m_impl->poseInitialValue();
+      candidate.T_W_B                     = guess_T_W_B;
+
+      if ( m_impl->options.enable_pnp_init &&
+           static_cast<int>( num_shared ) >=
+               m_impl->options.min_pnp_inliers )
+      {
+        const Impl::PnpInitResult pnp =
+            m_impl->tryPnpInit( measurement, guess_T_W_B );
+        if ( pnp.success )
+        {
+          candidate.T_W_B = pnp.T_W_B;
+
+          // Map inlier indices → shared LandmarkIds (same scan order as
+          // tryPnpInit), then drop shared outliers; keep new ids.
+          std::vector<LandmarkId> shared_ids;
+          shared_ids.reserve( static_cast<std::size_t>( num_shared ) );
+          for ( const StereoObservation& observation :
+                measurement.observations )
+          {
+            if ( m_impl->landmarks_W.find( observation.id ) !=
+                 m_impl->landmarks_W.end() )
+            {
+              shared_ids.push_back( observation.id );
+            }
+          }
+          std::unordered_set<LandmarkId> inlier_ids;
+          inlier_ids.reserve( pnp.inlier_indices.size() );
+          for ( const int index : pnp.inlier_indices )
+          {
+            if ( index < 0 ||
+                 static_cast<std::size_t>( index ) >= shared_ids.size() )
+            {
+              continue;
+            }
+            inlier_ids.insert(
+                shared_ids[ static_cast<std::size_t>( index ) ] );
+          }
+          std::vector<StereoObservation> filtered;
+          filtered.reserve( candidate.observations.size() );
+          for ( const StereoObservation& observation :
+                candidate.observations )
+          {
+            const bool is_shared =
+                m_impl->landmarks_W.find( observation.id ) !=
+                m_impl->landmarks_W.end();
+            if ( is_shared &&
+                 inlier_ids.find( observation.id ) == inlier_ids.end() )
+            {
+              continue;
+            }
+            filtered.push_back( observation );
+          }
+          candidate.observations = std::move( filtered );
+
+          result.diagnostics.pnp_success = true;
+          result.diagnostics.pnp_inliers =
+              static_cast<std::uint32_t>( pnp.inlier_indices.size() );
+        }
+      }
+
       if ( !isFinite( candidate.T_W_B ) )
       {
         restore();
@@ -663,10 +865,16 @@ namespace phad::estimator
         result.message = "non-finite pose initial value";
         return result;
       }
+      // CRITICAL: track_times must see the full measurement (including
+      // shared outliers masked out of candidate.observations).
       for ( const StereoObservation& observation : measurement.observations )
       {
         m_impl->track_times[ observation.id ].push_back(
             measurement.timestamp );
+      }
+      // New ids only: backproject from masked candidate.observations.
+      for ( const StereoObservation& observation : candidate.observations )
+      {
         if ( m_impl->landmarks_W.find( observation.id ) !=
              m_impl->landmarks_W.end() )
         {

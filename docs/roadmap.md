@@ -263,14 +263,14 @@ adapter 移到独立的同步器——那里同时是 M4 的 IMU 包络与未来
 [M3.2 双目配对同步器](plans/2026-07-31_m3.2_stereo_pair_synchronizer_5b7d1c93.plan.md)。
 Issue：[#22](https://github.com/Nothand0212/phad-vio/issues/22)。
 
-### M3.3 VO 加固（依赖 M3.2；Slice ①② 已完成；③–⑤ 待做）
+### M3.3 VO 加固（依赖 M3.2；Slice ①②③ 已完成；④–⑤ 待做）
 
 M3.2 全序列基线暴露的主导失败不是精度，而是一个**吸收态**：估计器一旦因
 `num_shared == 0` 拒帧，事务回滚会冻结窗口与 landmark 表，而前端跟踪断裂后
 重新检测会发放全新 `LandmarkId`，此后交集恒为空、永久拒帧。V1_03 上一帧异常
 废掉了随后 1906 帧。因此本阶段按失败驱动排序，恢复先于精度。
 
-范围（五片，Slice ①② 已落地；③–⑤ 待做）：
+范围（五片，Slice ①②③ 已落地；④–⑤ 待做）：
 
 - **① 恢复（已完成）**：去掉 `num_shared == 0` 拒帧门，重叠断裂即以新 id 重建窗口，
   prior 打在最后一个被接受的位姿上（anchor 复用现有恒速位姿初值规则）；
@@ -280,7 +280,9 @@ M3.2 全序列基线暴露的主导失败不是精度，而是一个**吸收态*
   显式视差区间的 SAD + 亚像素 + 同行反向一致性；删除 `last_disp_px`；选项
   `stereo_sad_half_win_px` / `stereo_row_tol_px` / `stereo_bidir_px` /
   `stereo_uniq_ratio` / `stereo_check_bidir` 进 `config_hash`；
-- **③** `solvePnPRansac` 位姿初值取代恒速初值 + 几何验证剔时序外点；
+- **③ PnP 初值（已完成）**：正常路径 `solvePnPRansac` 位姿初值 + 本帧 shared
+  RANSAC 外点掩码；失败回退恒速/上一帧且不 cull；选项与诊断进 `config_hash` /
+  `diag.csv`（16 列）/ `summary.json`；
 - **④** 优化后 chi2 外点剔除与 landmark 生命周期；
 - **⑤** 关键帧策略（视差、跟踪数、时间间隔）。会改 `est.tum` 的输出语义且与 M4 的
   IMU 预积分边界耦合，开工前单独对齐。
@@ -309,26 +311,43 @@ Slice ② 出口（commit `764d3b2` / `default_a962bc8b`，对照 `0b0cd34`；
 - 改善侧：MH_02 ATE 0.559→0.089、`reanchors` 1→0；V1_01 ATE 0.680→0.375；
   V2_02 re 7→3；V2_03 re 26→10（不门控）；
 - 已知债（只记录）：MH_03/04/05 ATE 上升（MH_04≈3.36）；V1_03 re 8→14；
-  V2_01 re 0→1；留给 Slice ③+；
+  V2_01 re 0→1；留给后续片；
 - 全序列数字见
   [M3.3 Slice ② 基线](research/m3.3-slice2-baseline.md)。
+
+Slice ③ 出口（commit `b712c91` / `default_8a9236e0`，对照 `764d3b2`；
+**硬门控 MH_01 + 全序列 reanchors 不增**，其余只记录）：
+
+- MH_01 ATE **0.099263** m（≤0.1073），`segments=1` / `reanchors=0`，
+  `pnp_successes=3681` / `pnp_fallbacks=0`，`reproj_after` mean≈0.37；
+- 全序列 `reanchors` 相对 Slice ② **无一增加**；
+- 改善侧：MH_04 ATE 3.36→0.27；V1_01 0.375→0.157；V1_02 / V1_03 / V2_02 /
+  V2_03 ATE 下降；
+- 已知债（只记录）：MH_02/03 ATE 上升；**MH_05 发散**（ATE≈3.3e4，
+  `cheirality=2055`）；V2_01 ATE 略升；留给 Slice ④+；
+- 全序列数字见
+  [M3.3 Slice ③ 基线](research/m3.3-slice3-baseline.md)。
 
 后续切片出口：
 
 - 每次改动用 `phad_vo_bench` 产出前后数字；无法测量的改动不进入本阶段；
-- **`MH_01` 作不回归锚**（ATE 不劣于本片 0.1073 m，且 `reanchors=0`）；
-- 健康序列 ATE / 全序列 `reanchors` 在后续片优先消化，不回退到吸收态修复。
+- **`MH_01` 作不回归锚**（ATE 不劣于本片 0.099263 m，且 `reanchors=0`）；
+- MH_05 发散与健康序列 ATE 债优先在 Slice ④（chi2 / landmark 生命周期）消化，
+  不回退到吸收态修复。
 
 设计见
 [M3.3 VO 加固设计](research/m3.3-vo-hardening-design.md)、
-[M3.3 Slice ② 右目匹配设计](research/m3.3-slice2-right-match-design.md)，
+[M3.3 Slice ② 右目匹配设计](research/m3.3-slice2-right-match-design.md)、
+[M3.3 Slice ③ PnP 设计](research/m3.3-slice3-pnp-design.md)，
 根因诊断见
 [M3.3 VO 崩溃根因诊断](research/m3.3-vo-collapse-diagnosis.md)，开源对照见
 [M3.3 VO 加固：开源实现对照](research/m3.3-vo-hardening-open-source-refs.md)、
-[Slice ② 开源对照](research/m3.3-slice2-right-match-open-source-refs.md)。
+[Slice ② 开源对照](research/m3.3-slice2-right-match-open-source-refs.md)、
+[Slice ③ 开源对照](research/m3.3-slice3-pnp-open-source-refs.md)。
 实施计划见
 [M3.3 VO 加固 Slice ①](plans/2026-07-31_m3.3_vo_hardening_a3f7d2e9.plan.md)、
-[M3.3 Slice ②](plans/2026-08-01_m3.3_slice2_right_match_c8e74511.plan.md)。
+[M3.3 Slice ②](plans/2026-08-01_m3.3_slice2_right_match_c8e74511.plan.md)、
+[M3.3 Slice ③](plans/2026-08-01_m3.3_slice3_pnp_0154cd20.plan.md)。
 Issue：[#23](https://github.com/Nothand0212/phad-vio/issues/23)。
 
 ## M4：接入 IMU

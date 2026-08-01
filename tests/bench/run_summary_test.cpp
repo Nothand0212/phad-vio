@@ -65,7 +65,9 @@ namespace
                                      .completion_rate = 1.0,
                                      .coverage_rate   = 1.0,
                                      .segments        = 1 };
-    summary.robustness.reanchors = 0;
+    summary.robustness.reanchors     = 0;
+    summary.robustness.pnp_successes = 0;
+    summary.robustness.pnp_fallbacks = 0;
     MetricReport ate;
     ate.trans.rmse = 0.15;
     summary.ate    = ate;
@@ -87,6 +89,8 @@ namespace
     EXPECT_TRUE( root.contains( "warnings" ) );
     EXPECT_EQ( root.at( "trajectory" ).at( "segments" ), 1 );
     EXPECT_EQ( root.at( "robustness" ).at( "reanchors" ), 0 );
+    EXPECT_EQ( root.at( "robustness" ).at( "pnp_successes" ), 0 );
+    EXPECT_EQ( root.at( "robustness" ).at( "pnp_fallbacks" ), 0 );
   }
 
   TEST( RunSummaryTest, SegmentsAndReanchorsSerialize )
@@ -100,6 +104,19 @@ namespace
     const json root = json::parse( summary.toJson() );
     EXPECT_EQ( root.at( "trajectory" ).at( "segments" ), 3 );
     EXPECT_EQ( root.at( "robustness" ).at( "reanchors" ), 2 );
+  }
+
+  TEST( RunSummaryTest, PnpCountersSerialize )
+  {
+    RunSummary summary;
+    summary.status                   = RunStatus::kCompleted;
+    summary.sequence                 = "MH_01_easy";
+    summary.robustness.pnp_successes = 3600;
+    summary.robustness.pnp_fallbacks = 12;
+
+    const json root = json::parse( summary.toJson() );
+    EXPECT_EQ( root.at( "robustness" ).at( "pnp_successes" ), 3600 );
+    EXPECT_EQ( root.at( "robustness" ).at( "pnp_fallbacks" ), 12 );
   }
 
   TEST( RunMetaTest, SerializesCodeConfigAndPaths )

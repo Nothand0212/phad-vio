@@ -129,7 +129,8 @@ namespace phad::apps
                                   segment_warnings.begin(),
                                   segment_warnings.end() );
           // Only worth a warning when something actually happened to the
-          // segment lifecycle; a clean single-segment run stays kCompleted.
+          // segment lifecycle or PnP fell back; a clean single-segment run
+          // with successful PnP stays kCompleted.
           if ( result.counts.reanchors > 0U ||
                result.counts.seed_rejected > 0U )
           {
@@ -139,6 +140,14 @@ namespace phad::apps
                 " reanchors=" + std::to_string( result.counts.reanchors ) +
                 " seed_rejected=" +
                 std::to_string( result.counts.seed_rejected ) );
+          }
+          if ( result.counts.pnp_fallbacks > 0U )
+          {
+            result.warnings.push_back(
+                "vo pnp summary: pnp_successes=" +
+                std::to_string( result.counts.pnp_successes ) +
+                " pnp_fallbacks=" +
+                std::to_string( result.counts.pnp_fallbacks ) );
           }
         };
 
@@ -220,16 +229,19 @@ namespace phad::apps
         ++result.counts.low_connectivity;
       }
 
+      const auto& d = update.diagnostics;
       if ( update.status == estimator::UpdateStatus::kOk )
       {
-        rms_after.push_back( update.diagnostics.reproj_rms_after_px );
+        rms_after.push_back( d.reproj_rms_after_px );
         common::TimedPose pose;
         pose.timestamp = update.estimate->timestamp;
         pose.T_W_B     = update.estimate->T_W_B;
         poses.push_back( pose );
 
-        const std::uint32_t segment_id = update.diagnostics.segment_id;
-        if ( last_segment_id.has_value() && segment_id > *last_segment_id )
+        const std::uint32_t segment_id  = d.segment_id;
+        const bool          is_reanchor = last_segment_id.has_value() &&
+                                 segment_id > *last_segment_id;
+        if ( is_reanchor )
         {
           ++result.counts.reanchors;
           if ( !warned_reanchor )
@@ -241,11 +253,24 @@ namespace phad::apps
             warned_reanchor = true;
           }
         }
+
+        // Normal-path PnP counters: seed / re-anchor frames are excluded
+        // (num_shared==0 or segment jump). enable_pnp_init=false is not a
+        // fallback — that path never attempted PnP.
+        if ( d.pnp_success )
+        {
+          ++result.counts.pnp_successes;
+        }
+        if ( options.estimator.enable_pnp_init && d.num_shared > 0U &&
+             !d.pnp_success && !is_reanchor )
+        {
+          ++result.counts.pnp_fallbacks;
+        }
+
         any_segment_established = true;
         last_segment_id         = segment_id;
       }
 
-      const auto& d = update.diagnostics;
       result.diag.push_back( VoDiagRow{
           .timestamp_ns            = tracks.timestamp.nanoseconds(),
           .status                  = updateStatusName( update.status ),
@@ -261,6 +286,8 @@ namespace phad::apps
           .lm_iterations           = d.lm_iterations,
           .max_window_pose_shift_m = d.max_window_pose_shift_m,
           .segment_id              = d.segment_id,
+          .pnp_success             = d.pnp_success,
+          .pnp_inliers             = d.pnp_inliers,
       } );
 
       if ( options.collect_timing )
@@ -321,7 +348,8 @@ namespace phad::apps
     out << "timestamp_ns,status,num_obs,num_landmarks,num_shared,"
            "low_connectivity,window_size,prior_key,"
            "reproj_rms_before_px,reproj_rms_after_px,num_cheirality,"
-           "lm_iterations,max_window_pose_shift_m,segment_id\n";
+           "lm_iterations,max_window_pose_shift_m,segment_id,"
+           "pnp_success,pnp_inliers\n";
 
     for ( const VoDiagRow& row : rows )
     {
@@ -334,7 +362,8 @@ namespace phad::apps
           << std::setprecision( 6 ) << row.reproj_rms_before_px << ','
           << row.reproj_rms_after_px << ',' << row.num_cheirality << ','
           << row.lm_iterations << ',' << row.max_window_pose_shift_m << ','
-          << row.segment_id << '\n';
+          << row.segment_id << ',' << ( row.pnp_success ? 1 : 0 ) << ','
+          << row.pnp_inliers << '\n';
     }
 
     if ( !out )

@@ -147,7 +147,7 @@ target_compile_features(phad_estimator PUBLIC cxx_std_20)
 target_include_directories(phad_estimator PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(phad_estimator
   PUBLIC phad::common phad::camera
-  PRIVATE gtsam
+  PRIVATE gtsam opencv_calib3d
 )
 # GTSAM headers trip -Wconversion / -Wpedantic; keep them out of our warning set.
 target_include_directories(phad_estimator SYSTEM PRIVATE
@@ -331,6 +331,7 @@ if(PHAD_BUILD_TESTS)
     tests/estimator/stereo_vo_estimator_test.cpp
     tests/estimator/stereo_vo_diagnostics_test.cpp
     tests/estimator/stereo_vo_reanchor_test.cpp
+    tests/estimator/stereo_vo_pnp_test.cpp
   )
   target_link_libraries(phad_estimator_tests PRIVATE
     phad::estimator gtsam GTest::gtest_main

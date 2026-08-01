@@ -52,6 +52,8 @@ namespace phad::apps
     std::uint32_t lm_iterations           = 0;
     double        max_window_pose_shift_m = 0.0;
     std::uint32_t segment_id              = 0;
+    bool          pnp_success             = false;
+    std::uint32_t pnp_inliers             = 0;
   };
 
   struct FrameCounts
@@ -64,6 +66,8 @@ namespace phad::apps
     std::uint64_t segments         = 0;
     std::uint64_t reanchors        = 0;
     std::uint64_t seed_rejected    = 0;
+    std::uint64_t pnp_successes    = 0;
+    std::uint64_t pnp_fallbacks    = 0;
   };
 
   struct StageTiming

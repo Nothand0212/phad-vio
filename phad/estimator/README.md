@@ -17,7 +17,8 @@ include 标 SYSTEM）。
 | 固定窗口 pose / landmark / 窗口内观测 | 关键帧决策、feature track 生命周期 |
 | `GenericStereoFactor` + LM、最老帧 Prior gauge | 边缘化、smart factor、IMU |
 | 重叠断裂时 re-anchor（`enable_reanchor`） | 分段 TUM / Atlas 式多轨迹 |
-| 共视 / cheirality / 重投影 / `segment_id` 诊断 | ATE（`phad::eval`） |
+| 共视 / cheirality / 重投影 / `segment_id` / PnP 诊断 | ATE（`phad::eval`） |
+| 正常路径 `solvePnPRansac` 初值 + 本帧 inlier 掩码 | 永久删 landmark / frontend track（Slice ④） |
 | `body_P_sensor = T_B_left_rectified` | 未校正左目外参 |
 
 ## 文件布局
@@ -79,6 +80,28 @@ prior 与由该帧 backproject 得到的 landmark 初值自洽，优化不会移
 - `kRejected` / `kFailed`：诊断里的 `segment_id` 反映**回滚后**的状态
   （seed 门限拒帧时不递增）。
 
+## PnP 初值（M3.3 Slice ③）
+
+正常路径（`initialized && num_shared > 0`）在 `poseInitialValue()` guess 之上
+可选跑 `cv::solvePnPRansac`（PIMPL 内、`PRIVATE opencv_calib3d`）：
+
+| 条件 | 结果 |
+|---|---|
+| `enable_pnp_init == false` | `T_W_B = guess`，不 cull；复现 Slice ② |
+| `num_shared < min_pnp_inliers` 或 RANSAC 失败 / inliers 不足 | fallback：`T_W_B = guess`，**不** cull、**不**拒帧 |
+| 成功且 inliers ≥ `min_pnp_inliers` | `T_W_B` 取 PnP；从本帧观测去掉 shared 外点（新 id 保留） |
+
+首段 seed / re-anchor **不跑** PnP（`num_shared == 0`）。默认
+`pnp_reproj_px=2.0`、`pnp_confidence=0.99`、`min_pnp_inliers=10`。
+
+**掩码语义**：被掩码的 shared 外点仍写入 `track_times` /
+`observationTimestamps()`；`num_observations` 保持测量原值（不是入图观测数）。
+`landmarks_W` 与 frontend track 不动——永久生命周期属 Slice ④。
+
+诊断：`UpdateDiagnostics.pnp_success` / `pnp_inliers`；session 汇总
+`pnp_successes` / `pnp_fallbacks`（仅正常路径；seed / re-anchor 不计
+fallback）。详见 `docs/research/m3.3-slice3-pnp-design.md`。
+
 ## 诊断 CSV 合同（probe）
 
 ```bash
@@ -90,13 +113,17 @@ phad_stereo_vo_probe <sequence-root> --tum <path> [--diag-csv <path>]
 ```text
 timestamp_ns,status,num_obs,num_landmarks,num_shared,low_connectivity,
 window_size,prior_key,reproj_rms_before_px,reproj_rms_after_px,
-num_cheirality,lm_iterations,max_window_pose_shift_m,segment_id
+num_cheirality,lm_iterations,max_window_pose_shift_m,segment_id,
+pnp_success,pnp_inliers
 ```
 
-共 **14 列**（M3.3 在 M2.3 的 13 列尾部追加 `segment_id`，有意的契约变更）。
-`status` 为 `ok` / `rejected` / `failed`。stdout summary 含帧数、各状态计数、
-拒帧比例、`low_connectivity` 帧数、重投影 RMS 中位数与 p95；session 还会在
-`warnings` 里汇总 `segments` / `reanchors` / `seed_rejected`（见 `apps/AGENTS.md`）。
+共 **16 列**（Slice ① 在 M2.3 的 13 列尾追加 `segment_id` → 14；Slice ③
+再追加 `pnp_success,pnp_inliers` → 16；有意的契约变更）。`pnp_success` 为
+`0/1` 整数。`status` 为 `ok` / `rejected` / `failed`。stdout summary 含帧数、
+各状态计数、拒帧比例、`low_connectivity` 帧数、`pnp_successes` /
+`pnp_fallbacks`、重投影 RMS 中位数与 p95；session 还会在 `warnings` 里按需
+汇总 `segments` / `reanchors` / `seed_rejected` 与 PnP summary（见
+`apps/AGENTS.md`）。
 
 ## 相关入口
 

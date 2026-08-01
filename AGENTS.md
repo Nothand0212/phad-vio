@@ -63,11 +63,12 @@ C++ formatting 与 control-flow style 遵循项目规则。详见 `docs/agents/c
 - 重大设计决策前先检索开源参考实现（GTSAM examples、Kimera-VIO、ORB-SLAM3、VINS-Fusion），把对照笔记写进 `docs/research/` 再定方案；审阅设计文档时直接指出问题并与用户讨论改法，不擅自定稿
 - 模块边界优先低耦合、高内聚、深模块与单向依赖；benchmark/编排放 composition root（见 `apps/AGENTS.md`），不反向注入 frontend/estimator
 - 排障时先对照开源实现与本地清单，区分数据损坏与 loader 合同过严，勿直接断定数据源损坏
+- EuRoC / milestone baseline 文档须含可复现的运行时参数快照（取自对应 run 的 `meta.json`：`config` / `config_canonical_text`，与 `config_hash` 同源），不能只写 hash 名；跨切片时标出相对上一基线的增量键
 
 ## Learned Workspace Facts
 
 - clangd 通过 `.clangd` 配置，`CompilationDatabase: build`；根目录 `compile_commands.json` 是指向 `build/compile_commands.json` 的 symlink，且已被 gitignore；改 CMake 或源文件后用 `cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` 重新生成；仓库只有单一根 `CMakeLists.txt`（无 per-module 版本），且开启 `-Wconversion -Wsign-conversion -Wpedantic`
 - spdlog 1.17.0 备在 gitignore 的 `thirdparty/`，尚未接入；GTSAM / Eigen / nlohmann_json 等依赖细节见各模块 `AGENTS.md`（`estimator`、`sensor`、`bench` 等）
 - C++ naming / style 权威为 `docs/agents/cpp-naming.md` 与 `docs/agents/cpp-style.md`（`.cursor/rules/` 镜像）；格式遵循根 `.clang-format`
-- 里程碑顺序与出口以 `docs/roadmap.md` 为准：M1→M2.x→M3.1→M3.2 已完成；M3.3 Slice ①（re-anchor）基线见 `docs/research/m3.3-slice1-baseline.md`（MH_01 ATE 0.150155 m）；Slice ②（一维 SAD 右目匹配，放宽门控后接受）基线见 `docs/research/m3.3-slice2-baseline.md`（`764d3b2` / `default_a962bc8b`，MH_01 ATE ≈ 0.1073 m）；下一为 Slice ③ PnP 初值；前端 OpenCV、后端 GTSAM，自研以调库版为对拍 oracle
+- 里程碑顺序与出口以 `docs/roadmap.md` 为准：M1→M2.x→M3.1→M3.2 已完成；M3.3 Slice ①（re-anchor）基线见 `docs/research/m3.3-slice1-baseline.md`（MH_01 ATE 0.150155 m）；Slice ②（一维 SAD 右目匹配，放宽门控后接受）基线见 `docs/research/m3.3-slice2-baseline.md`（`764d3b2` / `default_a962bc8b`，MH_01 ATE ≈ 0.1073 m）；Slice ③（PnP 初值）基线见 `docs/research/m3.3-slice3-baseline.md`（`b712c91` / `default_8a9236e0`，MH_01 ATE ≈ 0.0993 m）；下一为 Slice ④ chi2 / landmark 生命周期；前端 OpenCV、后端 GTSAM，自研以调库版为对拍 oracle
 - Issues 在 remote `origin`（`Nothand0212/phad-vio`）；`GITHUB_TOKEN` 指向的 fine-grained PAT 无 Issues 写权限时，用 `env -u GITHUB_TOKEN gh ...` 改走 keyring 凭据
