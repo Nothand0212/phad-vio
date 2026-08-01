@@ -310,6 +310,9 @@ namespace
     snap.set( "estimator.pnp_confidence", estimator.pnp_confidence );
     snap.set( "estimator.min_pnp_inliers",
               static_cast<std::int64_t>( estimator.min_pnp_inliers ) );
+    snap.set( "estimator.enable_outlier_cull", estimator.enable_outlier_cull );
+    snap.set( "estimator.outlier_avg_reproj_px",
+              estimator.outlier_avg_reproj_px );
 
     snap.set( "session.dataset_format", std::string( "euroc" ) );
     if ( session.max_frames.has_value() )
@@ -522,8 +525,11 @@ namespace
     summary.robustness.failed           = session.counts.failed;
     summary.robustness.low_connectivity = session.counts.low_connectivity;
     summary.robustness.reanchors        = session.counts.reanchors;
-    summary.robustness.pnp_successes    = session.counts.pnp_successes;
-    summary.robustness.pnp_fallbacks    = session.counts.pnp_fallbacks;
+    summary.robustness.pnp_successes          = session.counts.pnp_successes;
+    summary.robustness.pnp_fallbacks          = session.counts.pnp_fallbacks;
+    summary.robustness.outliers_culled        = session.counts.outliers_culled;
+    summary.robustness.outliers_culled_unique =
+        session.counts.outliers_culled_unique;
     for ( const auto& row : session.diag )
     {
       summary.robustness.cheirality += row.num_cheirality;

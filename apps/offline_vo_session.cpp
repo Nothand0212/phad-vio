@@ -149,6 +149,14 @@ namespace phad::apps
                 " pnp_fallbacks=" +
                 std::to_string( result.counts.pnp_fallbacks ) );
           }
+          if ( result.counts.outliers_culled > 0U )
+          {
+            result.warnings.push_back(
+                "vo outlier cull summary: outliers_culled=" +
+                std::to_string( result.counts.outliers_culled ) +
+                " outliers_culled_unique=" +
+                std::to_string( result.counts.outliers_culled_unique ) );
+          }
         };
 
     while ( true )
@@ -230,6 +238,8 @@ namespace phad::apps
       }
 
       const auto& d = update.diagnostics;
+      result.counts.outliers_culled += d.outliers_culled;
+      result.counts.outliers_culled_unique += d.outliers_culled_unique;
       if ( update.status == estimator::UpdateStatus::kOk )
       {
         rms_after.push_back( d.reproj_rms_after_px );
@@ -272,22 +282,24 @@ namespace phad::apps
       }
 
       result.diag.push_back( VoDiagRow{
-          .timestamp_ns            = tracks.timestamp.nanoseconds(),
-          .status                  = updateStatusName( update.status ),
-          .num_observations        = d.num_observations,
-          .num_landmarks           = d.num_landmarks,
-          .num_shared              = d.num_shared,
-          .low_connectivity        = d.low_connectivity,
-          .window_size             = d.window_size,
-          .prior_key               = d.prior_key,
-          .reproj_rms_before_px    = d.reproj_rms_before_px,
-          .reproj_rms_after_px     = d.reproj_rms_after_px,
-          .num_cheirality          = d.num_cheirality,
-          .lm_iterations           = d.lm_iterations,
-          .max_window_pose_shift_m = d.max_window_pose_shift_m,
-          .segment_id              = d.segment_id,
-          .pnp_success             = d.pnp_success,
-          .pnp_inliers             = d.pnp_inliers,
+          .timestamp_ns             = tracks.timestamp.nanoseconds(),
+          .status                   = updateStatusName( update.status ),
+          .num_observations         = d.num_observations,
+          .num_landmarks            = d.num_landmarks,
+          .num_shared               = d.num_shared,
+          .low_connectivity         = d.low_connectivity,
+          .window_size              = d.window_size,
+          .prior_key                = d.prior_key,
+          .reproj_rms_before_px     = d.reproj_rms_before_px,
+          .reproj_rms_after_px      = d.reproj_rms_after_px,
+          .num_cheirality           = d.num_cheirality,
+          .lm_iterations            = d.lm_iterations,
+          .max_window_pose_shift_m  = d.max_window_pose_shift_m,
+          .segment_id               = d.segment_id,
+          .pnp_success              = d.pnp_success,
+          .pnp_inliers              = d.pnp_inliers,
+          .outliers_culled          = d.outliers_culled,
+          .reproj_rms_after_cull_px = d.reproj_rms_after_cull_px,
       } );
 
       if ( options.collect_timing )
@@ -349,7 +361,8 @@ namespace phad::apps
            "low_connectivity,window_size,prior_key,"
            "reproj_rms_before_px,reproj_rms_after_px,num_cheirality,"
            "lm_iterations,max_window_pose_shift_m,segment_id,"
-           "pnp_success,pnp_inliers\n";
+           "pnp_success,pnp_inliers,outliers_culled,"
+           "reproj_rms_after_cull_px\n";
 
     for ( const VoDiagRow& row : rows )
     {
@@ -363,7 +376,8 @@ namespace phad::apps
           << row.reproj_rms_after_px << ',' << row.num_cheirality << ','
           << row.lm_iterations << ',' << row.max_window_pose_shift_m << ','
           << row.segment_id << ',' << ( row.pnp_success ? 1 : 0 ) << ','
-          << row.pnp_inliers << '\n';
+          << row.pnp_inliers << ',' << row.outliers_culled << ','
+          << row.reproj_rms_after_cull_px << '\n';
     }
 
     if ( !out )

@@ -51,23 +51,27 @@ namespace phad::apps
     std::uint32_t num_cheirality          = 0;
     std::uint32_t lm_iterations           = 0;
     double        max_window_pose_shift_m = 0.0;
-    std::uint32_t segment_id              = 0;
-    bool          pnp_success             = false;
-    std::uint32_t pnp_inliers             = 0;
+    std::uint32_t segment_id               = 0;
+    bool          pnp_success              = false;
+    std::uint32_t pnp_inliers              = 0;
+    std::uint32_t outliers_culled          = 0;
+    double        reproj_rms_after_cull_px = 0.0;
   };
 
   struct FrameCounts
   {
-    std::uint64_t image_frames     = 0;
-    std::uint64_t ok               = 0;
-    std::uint64_t rejected         = 0;
-    std::uint64_t failed           = 0;
-    std::uint64_t low_connectivity = 0;
-    std::uint64_t segments         = 0;
-    std::uint64_t reanchors        = 0;
-    std::uint64_t seed_rejected    = 0;
-    std::uint64_t pnp_successes    = 0;
-    std::uint64_t pnp_fallbacks    = 0;
+    std::uint64_t image_frames           = 0;
+    std::uint64_t ok                     = 0;
+    std::uint64_t rejected               = 0;
+    std::uint64_t failed                 = 0;
+    std::uint64_t low_connectivity       = 0;
+    std::uint64_t segments               = 0;
+    std::uint64_t reanchors              = 0;
+    std::uint64_t seed_rejected          = 0;
+    std::uint64_t pnp_successes          = 0;
+    std::uint64_t pnp_fallbacks          = 0;
+    std::uint64_t outliers_culled        = 0;
+    std::uint64_t outliers_culled_unique = 0;
   };
 
   struct StageTiming

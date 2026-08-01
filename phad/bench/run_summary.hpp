@@ -61,13 +61,15 @@ namespace phad::bench
 
   struct RobustnessSummary
   {
-    std::uint64_t rejected         = 0;
-    std::uint64_t failed           = 0;
-    std::uint64_t low_connectivity = 0;
-    std::uint64_t cheirality       = 0;
-    std::uint64_t reanchors        = 0;
-    std::uint64_t pnp_successes    = 0;
-    std::uint64_t pnp_fallbacks    = 0;
+    std::uint64_t rejected               = 0;
+    std::uint64_t failed                 = 0;
+    std::uint64_t low_connectivity       = 0;
+    std::uint64_t cheirality             = 0;
+    std::uint64_t reanchors              = 0;
+    std::uint64_t pnp_successes          = 0;
+    std::uint64_t pnp_fallbacks          = 0;
+    std::uint64_t outliers_culled        = 0;
+    std::uint64_t outliers_culled_unique = 0;
   };
 
   struct StageTiming

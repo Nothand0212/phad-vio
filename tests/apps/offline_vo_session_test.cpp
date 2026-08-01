@@ -162,6 +162,8 @@ namespace
     EXPECT_EQ( counts.seed_rejected, 0U );
     EXPECT_EQ( counts.pnp_successes, 0U );
     EXPECT_EQ( counts.pnp_fallbacks, 0U );
+    EXPECT_EQ( counts.outliers_culled, 0U );
+    EXPECT_EQ( counts.outliers_culled_unique, 0U );
   }
 
   TEST( OfflineVoSessionTest,
@@ -210,9 +212,11 @@ namespace
     row.num_cheirality          = 0;
     row.lm_iterations           = 0;
     row.max_window_pose_shift_m = 0.0;
-    row.segment_id              = 0;
-    row.pnp_success             = false;
-    row.pnp_inliers             = 0;
+    row.segment_id               = 0;
+    row.pnp_success              = false;
+    row.pnp_inliers              = 0;
+    row.outliers_culled          = 0;
+    row.reproj_rms_after_cull_px = 0.0;
 
     ASSERT_FALSE( writeDiagCsv( path, { row } ).has_value() );
 
@@ -222,11 +226,12 @@ namespace
     oss << in.rdbuf();
     const std::string text = oss.str();
     EXPECT_NE( text.find( "timestamp_ns,status,num_obs," ), std::string::npos );
-    EXPECT_NE( text.find( "segment_id,pnp_success,pnp_inliers" ),
+    EXPECT_NE( text.find( "pnp_success,pnp_inliers,outliers_culled,"
+                           "reproj_rms_after_cull_px" ),
                std::string::npos );
     EXPECT_NE(
         text.find( "1403636579763555584,ok,136,0,0,0,1,0,0.000000,0.000000,0,"
-                   "0,0.000000,0,0,0" ),
+                   "0,0.000000,0,0,0,0,0.000000" ),
         std::string::npos );
     std::filesystem::remove( path );
   }
