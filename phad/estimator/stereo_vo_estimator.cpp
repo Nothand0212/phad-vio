@@ -239,6 +239,8 @@ namespace phad::estimator
     std::uint64_t                    next_frame_index = 0;
     bool                             initialized      = false;
     std::uint32_t                    segment_id       = 0;
+    // Cross-segment set of mean-reproj-culled ids (written in Task 2).
+    std::unordered_set<LandmarkId> culled_ids_;
 
     explicit Impl( camera::RectifiedStereoCalibration calibration_in,
                    EstimatorOptions                   options_in )
@@ -278,6 +280,24 @@ namespace phad::estimator
       {
         throw std::invalid_argument(
             "EstimatorOptions.min_pnp_inliers must be >= 4" );
+      }
+      if ( !( options.outlier_avg_reproj_px > 0.0 ) )
+      {
+        throw std::invalid_argument(
+            "EstimatorOptions.outlier_avg_reproj_px must be > 0" );
+      }
+    }
+
+    void eraseLandmarkFromWindow( LandmarkId id )
+    {
+      for ( WindowFrame& frame : window )
+      {
+        auto& obs = frame.observations;
+        obs.erase( std::remove_if( obs.begin(), obs.end(),
+                                   [id]( const StereoObservation& o ) {
+                                     return o.id == id;
+                                   } ),
+                   obs.end() );
       }
     }
 
@@ -618,6 +638,7 @@ namespace phad::estimator
       for ( const LandmarkId id : to_drop )
       {
         landmarks_W.erase( id );
+        eraseLandmarkFromWindow( id );
         ++dropped;
       }
       return dropped;
