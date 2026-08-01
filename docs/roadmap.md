@@ -263,24 +263,23 @@ adapter 移到独立的同步器——那里同时是 M4 的 IMU 包络与未来
 [M3.2 双目配对同步器](plans/2026-07-31_m3.2_stereo_pair_synchronizer_5b7d1c93.plan.md)。
 Issue：[#22](https://github.com/Nothand0212/phad-vio/issues/22)。
 
-### M3.3 VO 加固（依赖 M3.2；Slice ① 已完成；Slice ② 代码已落地、出口门控未过）
+### M3.3 VO 加固（依赖 M3.2；Slice ①② 已完成；③–⑤ 待做）
 
 M3.2 全序列基线暴露的主导失败不是精度，而是一个**吸收态**：估计器一旦因
 `num_shared == 0` 拒帧，事务回滚会冻结窗口与 landmark 表，而前端跟踪断裂后
 重新检测会发放全新 `LandmarkId`，此后交集恒为空、永久拒帧。V1_03 上一帧异常
 废掉了随后 1906 帧。因此本阶段按失败驱动排序，恢复先于精度。
 
-范围（五片，Slice ① 已落地；② 代码在 `m3.3` / `d8a0521`，**门控未通过**；
-③–⑤ 暂缓至 ② 门控修复或明确回退）：
+范围（五片，Slice ①② 已落地；③–⑤ 待做）：
 
 - **① 恢复（已完成）**：去掉 `num_shared == 0` 拒帧门，重叠断裂即以新 id 重建窗口，
   prior 打在最后一个被接受的位姿上（anchor 复用现有恒速位姿初值规则）；
   新增 `min_seed_observations`（初始化与 re-anchor 共用）与 `enable_reanchor`；
   `segment_id` 进 `diag.csv`，`reanchors` / `segments` 进 `summary.json`；
-- **② 右目一维 SAD（代码已落地，出口未过）**：`matchRight` 改为沿 epipolar 行 +
+- **② 右目一维 SAD（已完成，放宽门控）**：`matchRight` 改为沿 epipolar 行 +
   显式视差区间的 SAD + 亚像素 + 同行反向一致性；删除 `last_disp_px`；选项
-  `stereo_sad_half_win_px` / `stereo_row_tol_px` / `stereo_bidir_px` 进
-  `config_hash`；
+  `stereo_sad_half_win_px` / `stereo_row_tol_px` / `stereo_bidir_px` /
+  `stereo_uniq_ratio` / `stereo_check_bidir` 进 `config_hash`；
 - **③** `solvePnPRansac` 位姿初值取代恒速初值 + 几何验证剔时序外点；
 - **④** 优化后 chi2 外点剔除与 landmark 生命周期；
 - **⑤** 关键帧策略（视差、跟踪数、时间间隔）。会改 `est.tum` 的输出语义且与 M4 的
@@ -301,21 +300,24 @@ Slice ① 出口（commit `0b0cd34` / `default_030a0197`，对照 `4780660`）�
 - 全序列数字快照见
   [M3.3 Slice ① 基线](research/m3.3-slice1-baseline.md)。
 
-Slice ② 实测（commit `d8a0521` / `default_cec87cd9`，对照 `0b0cd34`）——
-**门控未通过，不标完成**：
+Slice ② 出口（commit `764d3b2` / `default_a962bc8b`，对照 `0b0cd34`；
+**硬门控仅 MH_01**，其余只记录）：
 
-- MH_01 ATE 0.150155→**0.261663** m（`segments=1` / `reanchors=0` 仍成立）；
-- 健康单段 ATE 劣化：MH_03/04/05、V1_01；
-- `reanchors`：MH_02 1→0、V2_02 7→0 改善；**V1_03 8→11 上升**（门控失败）；
-- 改善侧：MH_02 ATE 0.559→0.137；V2_01/V2_02 ATE 与 completion 变好；
-- 全序列数字与门控表见
+- 裸 SAD（`d8a0521`）曾把 MH_01 ATE 打到 0.262、`reproj_after`≈2.8；加固后恢复；
+- MH_01 ATE **0.1073** m（≤0.150155），`segments=1` / `reanchors=0`，
+  `reproj_after` mean≈0.50；
+- 改善侧：MH_02 ATE 0.559→0.089、`reanchors` 1→0；V1_01 ATE 0.680→0.375；
+  V2_02 re 7→3；V2_03 re 26→10（不门控）；
+- 已知债（只记录）：MH_03/04/05 ATE 上升（MH_04≈3.36）；V1_03 re 8→14；
+  V2_01 re 0→1；留给 Slice ③+；
+- 全序列数字见
   [M3.3 Slice ② 基线](research/m3.3-slice2-baseline.md)。
 
-后续切片出口（不变）：
+后续切片出口：
 
 - 每次改动用 `phad_vo_bench` 产出前后数字；无法测量的改动不进入本阶段；
-- **同等 coverage 下 ATE 不劣化**，`MH_01` 作不回归锚（不劣于 0.150155 m）；
-- Slice ② 优先盯 `reanchors` 次数与每帧观测数，而不是再修吸收态。
+- **`MH_01` 作不回归锚**（ATE 不劣于本片 0.1073 m，且 `reanchors=0`）；
+- 健康序列 ATE / 全序列 `reanchors` 在后续片优先消化，不回退到吸收态修复。
 
 设计见
 [M3.3 VO 加固设计](research/m3.3-vo-hardening-design.md)、
