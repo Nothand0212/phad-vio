@@ -57,18 +57,18 @@ C++ formatting 与 control-flow style 遵循项目规则。详见 `docs/agents/c
 - 跨库规则持久化到 `docs/agents/` 并在根 `AGENTS.md` 链接；**模块作用域**约定写在对应目录 `AGENTS.md`，由根索引链接，勿把库细节堆进根文件
 - C++ 的 go-to-definition 与 references 优先使用 clangd；禁用 Microsoft C/C++ IntelliSense 以避免冲突
 - C++ identifiers 宜短，使用常见领域缩写（`imu`、`acc`、`gyr`、`nd`、`rw`、`fx`）；避免自造缩写与拼写出的单位后缀（细则见 `docs/agents/cpp-naming.md`）
-- 在主 checkout 上使用短生命周期分支，而非 git worktrees；按 vertical slice 逐片提交（commit subject 带对应 issue 号，如 `(#18)`），本地 merge 到 `main` 时**必须** `git merge --no-ff`（禁止 fast-forward，以便 Git Graph 可见分叉/合回），再删除分支；除非明确要求否则不 push 到 remote。详见 `docs/agents/git-workflow.md`
+- 在主 checkout 上使用短生命周期分支，而非 git worktrees；实施计划开工前先建 GitHub issue；按 vertical slice 逐片提交（commit subject 带对应 issue 号，如 `(#24)`；里程碑总图 issue 可留作 epic），本地 merge 到 `main` 时**必须** `git merge --no-ff`（禁止 fast-forward，以便 Git Graph 可见分叉/合回），再删除分支；除非明确要求否则不 push 到 remote。详见 `docs/agents/git-workflow.md`
 - `phad/` 下每个库目录都要有 README（职责边界、文件布局、数据流、格式合同），顶部声明「本文档描述当前约定，不是绝对约束，会随项目开发修订」；`apps/`、`tests/` 与 adapter 子目录不单独写
 - 每个 milestone 与 vertical slice 开工前先逐项对齐：一次只问一个问题、给 A/B/C 选项并标明推荐，设计稿分段（模块边界 → 数据流 → 错误与诊断 → 测试与验收）逐段确认后再动手
 - 重大设计决策前先检索开源参考实现（GTSAM examples、Kimera-VIO、ORB-SLAM3、VINS-Fusion），把对照笔记写进 `docs/research/` 再定方案；审阅设计文档时直接指出问题并与用户讨论改法，不擅自定稿
 - 模块边界优先低耦合、高内聚、深模块与单向依赖；benchmark/编排放 composition root（见 `apps/AGENTS.md`），不反向注入 frontend/estimator
 - 排障时先对照开源实现与本地清单，区分数据损坏与 loader 合同过严，勿直接断定数据源损坏
-- EuRoC / milestone baseline 文档须含可复现的运行时参数快照（取自对应 run 的 `meta.json`：`config` / `config_canonical_text`，与 `config_hash` 同源），不能只写 hash 名；跨切片时标出相对上一基线的增量键
+- EuRoC / milestone baseline 文档须含可复现的运行时参数快照（取自对应 run 的 `meta.json`：`config` / `config_canonical_text`，与 `config_hash` 同源），不能只写 hash 名；跨切片时标出相对上一基线的增量键；消化已知发散债时，编码后先跑诊断序列（如 MH_05），不够则停、不扩全序列
 
 ## Learned Workspace Facts
 
 - clangd 通过 `.clangd` 配置，`CompilationDatabase: build`；根目录 `compile_commands.json` 是指向 `build/compile_commands.json` 的 symlink，且已被 gitignore；改 CMake 或源文件后用 `cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` 重新生成；仓库只有单一根 `CMakeLists.txt`（无 per-module 版本），且开启 `-Wconversion -Wsign-conversion -Wpedantic`
 - spdlog 1.17.0 备在 gitignore 的 `thirdparty/`，尚未接入；GTSAM / Eigen / nlohmann_json 等依赖细节见各模块 `AGENTS.md`（`estimator`、`sensor`、`bench` 等）
 - C++ naming / style 权威为 `docs/agents/cpp-naming.md` 与 `docs/agents/cpp-style.md`（`.cursor/rules/` 镜像）；格式遵循根 `.clang-format`
-- 里程碑顺序与出口以 `docs/roadmap.md` 为准：M1→M2.x→M3.1→M3.2 已完成；M3.3 Slice ①（re-anchor）基线见 `docs/research/m3.3-slice1-baseline.md`（MH_01 ATE 0.150155 m）；Slice ②（一维 SAD 右目匹配，放宽门控后接受）基线见 `docs/research/m3.3-slice2-baseline.md`（`764d3b2` / `default_a962bc8b`，MH_01 ATE ≈ 0.1073 m）；Slice ③（PnP 初值）基线见 `docs/research/m3.3-slice3-baseline.md`（`b712c91` / `default_8a9236e0`，MH_01 ATE ≈ 0.0993 m）；下一为 Slice ④ chi2 / landmark 生命周期；前端 OpenCV、后端 GTSAM，自研以调库版为对拍 oracle
+- 里程碑顺序与出口以 `docs/roadmap.md` 为准：M1→M2.x→M3.1→M3.2 已完成；M3.3 Slice ①–③ 已完成；Slice ④/④b 见 `docs/research/m3.3-slice4-baseline.md`（④ `b6fbcb6`/`bc8b10e2` MH_05 ATE ≈43.3 m；④b `3855395`/`65273570` ATE ≈3.45 m，reopt 有效但仍不够 <1 m，已停全序列）；下一讨论多轮 cull/reopt 或其它手段，或对齐 Slice ⑤ 关键帧；前端 OpenCV、后端 GTSAM，自研以调库版为对拍 oracle
 - Issues 在 remote `origin`（`Nothand0212/phad-vio`）；`GITHUB_TOKEN` 指向的 fine-grained PAT 无 Issues 写权限时，用 `env -u GITHUB_TOKEN gh ...` 改走 keyring 凭据

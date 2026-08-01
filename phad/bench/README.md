@@ -68,7 +68,8 @@ RunMeta / RunSummary   ──toJson──► meta.json / summary.json 文本
 - `status`：`completed` / `completed_with_failures` /
   `completed_with_warnings` / `eval_failed` / `failed`
 
-M3.3 在 `summary.json` 追加段 / PnP 可观测性字段（`schema_version` 仍为 1）：
+M3.3 在 `summary.json` 追加段 / PnP / 剔点可观测性字段（`schema_version`
+仍为 1）：
 
 | 路径 | 含义 |
 |---|---|
@@ -76,12 +77,19 @@ M3.3 在 `summary.json` 追加段 / PnP 可观测性字段（`schema_version` �
 | `robustness.reanchors` | `segment_id` 跳变次数（每次成功 re-anchor 计 1） |
 | `robustness.pnp_successes` | 正常路径上采用 PnP 初值的 `kOk` 帧数 |
 | `robustness.pnp_fallbacks` | 正常路径上本可尝试 PnP 但未采用的帧（对应点不足 / RANSAC 失败 / inliers 不足）；首段 seed 与 re-anchor 不计 |
+| `robustness.outliers_culled` | 全 run 累计 mean-reproj 删点**次数**（按帧累加本帧删点数） |
+| `robustness.outliers_culled_unique` | 全 run 累计去重 id 数；`outliers_culled / outliers_culled_unique` 为重复删除率（>1 表示同 id「删→再喂→重建→再删」空转） |
+| `robustness.outlier_reopts` | 全 run 累计成功 LM₂ 帧数（仅 `UpdateDiagnostics.outlier_reopt==true`；失败回退不计） |
 
 由 `OfflineVoSession` 统计后经 `phad_vo_bench` 写入；`bench_table.py`
-可据此区分「算法变好」与「re-anchor / PnP fallback 变多」。`est.tum` 仍为
-单条连续轨迹，不含段号列。
+可据此区分「算法变好」与「re-anchor / PnP fallback / 剔点空转 /
+重优触发变多」。`est.tum` 仍为单条连续轨迹，不含段号列。
+`schema_version` 仍为 1。
 
 `config_hash` 在 M3.3 起纳入 `estimator.min_seed_observations` 与
 `estimator.enable_reanchor`；Slice ③ 再纳入 `estimator.enable_pnp_init` /
 `estimator.pnp_reproj_px` / `estimator.pnp_confidence` /
-`estimator.min_pnp_inliers`（apps 侧 `flattenConfig` 展平）；新配置落新目录。
+`estimator.min_pnp_inliers`；Slice ④ 再纳入
+`estimator.enable_outlier_cull` / `estimator.outlier_avg_reproj_px`；
+Slice ④b 再纳入 `estimator.enable_outlier_reopt`（apps 侧
+`flattenConfig` 展平）；新配置落新目录。

@@ -65,9 +65,11 @@ namespace
                                      .completion_rate = 1.0,
                                      .coverage_rate   = 1.0,
                                      .segments        = 1 };
-    summary.robustness.reanchors     = 0;
-    summary.robustness.pnp_successes = 0;
-    summary.robustness.pnp_fallbacks = 0;
+    summary.robustness.reanchors             = 0;
+    summary.robustness.pnp_successes         = 0;
+    summary.robustness.pnp_fallbacks         = 0;
+    summary.robustness.outliers_culled       = 0;
+    summary.robustness.outliers_culled_unique = 0;
     MetricReport ate;
     ate.trans.rmse = 0.15;
     summary.ate    = ate;
@@ -91,6 +93,9 @@ namespace
     EXPECT_EQ( root.at( "robustness" ).at( "reanchors" ), 0 );
     EXPECT_EQ( root.at( "robustness" ).at( "pnp_successes" ), 0 );
     EXPECT_EQ( root.at( "robustness" ).at( "pnp_fallbacks" ), 0 );
+    EXPECT_EQ( root.at( "robustness" ).at( "outliers_culled" ), 0 );
+    EXPECT_EQ( root.at( "robustness" ).at( "outliers_culled_unique" ), 0 );
+    EXPECT_EQ( root.at( "robustness" ).at( "outlier_reopts" ), 0 );
   }
 
   TEST( RunSummaryTest, SegmentsAndReanchorsSerialize )
@@ -117,6 +122,31 @@ namespace
     const json root = json::parse( summary.toJson() );
     EXPECT_EQ( root.at( "robustness" ).at( "pnp_successes" ), 3600 );
     EXPECT_EQ( root.at( "robustness" ).at( "pnp_fallbacks" ), 12 );
+  }
+
+  TEST( RunSummaryTest, OutlierCullCountersSerialize )
+  {
+    RunSummary summary;
+    summary.status                            = RunStatus::kCompleted;
+    summary.sequence                          = "MH_05_difficult";
+    summary.robustness.outliers_culled        = 42;
+    summary.robustness.outliers_culled_unique = 30;
+
+    const json root = json::parse( summary.toJson() );
+    EXPECT_EQ( root.at( "robustness" ).at( "outliers_culled" ), 42 );
+    EXPECT_EQ( root.at( "robustness" ).at( "outliers_culled_unique" ), 30 );
+  }
+
+  TEST( RunSummaryTest, OutlierReoptCounterSerialize )
+  {
+    RunSummary summary;
+    summary.status                    = RunStatus::kCompleted;
+    summary.sequence                  = "MH_05_difficult";
+    summary.robustness.outlier_reopts = 7;
+
+    const json root = json::parse( summary.toJson() );
+    EXPECT_EQ( root.at( "robustness" ).at( "outlier_reopts" ), 7 );
+    EXPECT_EQ( root.at( "schema_version" ), 1 );
   }
 
   TEST( RunMetaTest, SerializesCodeConfigAndPaths )

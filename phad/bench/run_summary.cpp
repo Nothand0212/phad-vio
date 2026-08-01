@@ -158,6 +158,9 @@ namespace phad::bench
         { "reanchors", robustness.reanchors },
         { "pnp_successes", robustness.pnp_successes },
         { "pnp_fallbacks", robustness.pnp_fallbacks },
+        { "outliers_culled", robustness.outliers_culled },
+        { "outliers_culled_unique", robustness.outliers_culled_unique },
+        { "outlier_reopts", robustness.outlier_reopts },
     };
 
     json timing_json = json{

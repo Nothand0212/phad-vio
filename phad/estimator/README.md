@@ -18,7 +18,8 @@ include 标 SYSTEM）。
 | `GenericStereoFactor` + LM、最老帧 Prior gauge | 边缘化、smart factor、IMU |
 | 重叠断裂时 re-anchor（`enable_reanchor`） | 分段 TUM / Atlas 式多轨迹 |
 | 共视 / cheirality / 重投影 / `segment_id` / PnP 诊断 | ATE（`phad::eval`） |
-| 正常路径 `solvePnPRansac` 初值 + 本帧 inlier 掩码 | 永久删 landmark / frontend track（Slice ④） |
+| 正常路径 `solvePnPRansac` 初值 + 本帧 inlier 掩码 | frontend track 生命周期 |
+| BA 后 mean-reproj 伪永久剔点（不重优） | 拒绝名单 / 真永久删 frontend track |
 | `body_P_sensor = T_B_left_rectified` | 未校正左目外参 |
 
 ## 文件布局
@@ -96,11 +97,48 @@ prior 与由该帧 backproject 得到的 landmark 初值自洽，优化不会移
 
 **掩码语义**：被掩码的 shared 外点仍写入 `track_times` /
 `observationTimestamps()`；`num_observations` 保持测量原值（不是入图观测数）。
-`landmarks_W` 与 frontend track 不动——永久生命周期属 Slice ④。
+`landmarks_W` 与 frontend track 不动——伪永久生命周期见 Slice ④。
 
 诊断：`UpdateDiagnostics.pnp_success` / `pnp_inliers`；session 汇总
 `pnp_successes` / `pnp_fallbacks`（仅正常路径；seed / re-anchor 不计
 fallback）。详见 `docs/research/m3.3-slice3-pnp-design.md`。
+
+## 外点剔除与二次重优（M3.3 Slice ④ / ④b）
+
+LM₁ 收敛写回位姿后、返回 `kOk` 前，可选按 landmark **平均 stereo 重投影**
+（`||unwhitenedError||` 均值，≥4 观测）从 `landmarks_W` 删除高误差点，并经
+共用 helper 清窗口观测。`reproj_rms_after_px` **始终**是 LM₁ 后、mean-cull
+**前** 的全图 RMS。
+
+若本帧 `outliers_culled >= 4` 且 `enable_outlier_reopt`，则用剩余窗口观测与
+`landmarks_W` **重建 factor graph** 再跑 **一趟** LM₂ 并写回位姿与点。LM₂
+失败则回退到「LM₁ 写回 + cull 后」状态，仍返回 `kOk`（`outlier_reopt=false`、
+`outlier_reopt_failed=true`）。`enable_outlier_reopt=false` 复现 Slice ④
+只 cull（`b6fbcb6`）。
+
+| 选项 | 语义 |
+|---|---|
+| `enable_outlier_cull`（默认 `true`） | `false` **只关** mean-reproj 剔点；cheirality 清窗口观测 helper 仍生效；无剔点则自然不触发 reopt |
+| `outlier_avg_reproj_px`（默认 `3.0`） | 均值阈值（像素）；构造时须 `> 0` |
+| `enable_outlier_reopt`（默认 `true`） | `false` → 只 cull 不重优；触发条件另需 `outliers_culled >= 4` |
+
+**伪永久**：无拒绝名单；被删 id 的 `track_times` /
+`observationTimestamps()` **保留**；frontend 再喂同 id → 按新点
+backproject。Impl 侧 `culled_ids_` 仅用于去重统计。
+
+诊断：
+
+| 字段 | 语义 |
+|---|---|
+| `outliers_culled` / `outliers_culled_unique` | 本帧 mean-reproj 删点数 / 去重 id |
+| `lm_iterations` | LM₁ +（成功时）LM₂ 迭代累加 |
+| `reproj_rms_after_cull_px` | **有成功 reopt**：LM₂ 后 graph RMS；**无 reopt / LM₂ 失败**：Slice ④ 语义（cull 关时 `== reproj_rms_after_px`；cull 开时跳过已删 id 的 graph RMS） |
+| `outlier_reopt` / `outlier_reopt_failed` | 本帧是否成功跑了 LM₂ / LM₂ 失败已回退；**不**进 `diag.csv` |
+
+session 累计成功 reopt 为 `FrameCounts.outlier_reopts` →
+`summary.json` 的 `robustness.outlier_reopts`。详见
+`docs/research/m3.3-slice4-outlier-cull-design.md` 与
+`docs/research/m3.3-slice4b-outlier-reopt-design.md`。
 
 ## 诊断 CSV 合同（probe）
 
@@ -114,16 +152,20 @@ phad_stereo_vo_probe <sequence-root> --tum <path> [--diag-csv <path>]
 timestamp_ns,status,num_obs,num_landmarks,num_shared,low_connectivity,
 window_size,prior_key,reproj_rms_before_px,reproj_rms_after_px,
 num_cheirality,lm_iterations,max_window_pose_shift_m,segment_id,
-pnp_success,pnp_inliers
+pnp_success,pnp_inliers,outliers_culled,reproj_rms_after_cull_px
 ```
 
-共 **16 列**（Slice ① 在 M2.3 的 13 列尾追加 `segment_id` → 14；Slice ③
-再追加 `pnp_success,pnp_inliers` → 16；有意的契约变更）。`pnp_success` 为
-`0/1` 整数。`status` 为 `ok` / `rejected` / `failed`。stdout summary 含帧数、
-各状态计数、拒帧比例、`low_connectivity` 帧数、`pnp_successes` /
-`pnp_fallbacks`、重投影 RMS 中位数与 p95；session 还会在 `warnings` 里按需
-汇总 `segments` / `reanchors` / `seed_rejected` 与 PnP summary（见
-`apps/AGENTS.md`）。
+共 **18 列**（Slice ① 在 M2.3 的 13 列尾追加 `segment_id` → 14；Slice ③
+再追加 `pnp_success,pnp_inliers` → 16；Slice ④ 再追加
+`outliers_culled,reproj_rms_after_cull_px` → 18；有意的契约变更）。
+`pnp_success` 为 `0/1` 整数。`status` 为 `ok` / `rejected` / `failed`。
+stdout summary 含帧数、各状态计数、拒帧比例、`low_connectivity` 帧数、
+`pnp_successes` / `pnp_fallbacks`、`outliers_culled` /
+`outliers_culled_unique`、`outlier_reopts`、重投影 RMS 中位数与 p95；
+session 还会在 `warnings` 里按需汇总 `segments` / `reanchors` /
+`seed_rejected` 与 PnP summary（剔点 / reopt 累计只进 `FrameCounts` /
+`summary.json` robustness，不进 `warnings`；见 `apps/AGENTS.md`）。
+`diag.csv` **保持 18 列**（不追加 `outlier_reopt`）。
 
 ## 相关入口
 

@@ -162,6 +162,9 @@ namespace
     EXPECT_EQ( counts.seed_rejected, 0U );
     EXPECT_EQ( counts.pnp_successes, 0U );
     EXPECT_EQ( counts.pnp_fallbacks, 0U );
+    EXPECT_EQ( counts.outliers_culled, 0U );
+    EXPECT_EQ( counts.outliers_culled_unique, 0U );
+    EXPECT_EQ( counts.outlier_reopts, 0U );
   }
 
   TEST( OfflineVoSessionTest,
@@ -179,7 +182,8 @@ namespace
 
     // Mid-loop stream errors still run segment finalization, but a run
     // with no re-anchors and no seed-gate rejections is clean: no
-    // "vo segments summary" warning should be emitted.
+    // "vo segments summary" warning should be emitted. Cull totals never
+    // enter warnings either.
     EXPECT_EQ( result.counts.reanchors, 0U );
     EXPECT_EQ( result.counts.seed_rejected, 0U );
     const bool has_summary_warning =
@@ -188,6 +192,13 @@ namespace
                        return warning.rfind( "vo segments summary:", 0 ) == 0;
                      } );
     EXPECT_FALSE( has_summary_warning );
+    const bool has_cull_warning =
+        std::any_of( result.warnings.begin(), result.warnings.end(),
+                     []( const std::string& warning ) {
+                       return warning.rfind( "vo outlier cull summary:", 0 ) ==
+                              0;
+                     } );
+    EXPECT_FALSE( has_cull_warning );
   }
 
   TEST( OfflineVoSessionTest, WriteDiagCsvMatchesProbeContract )
@@ -210,9 +221,11 @@ namespace
     row.num_cheirality          = 0;
     row.lm_iterations           = 0;
     row.max_window_pose_shift_m = 0.0;
-    row.segment_id              = 0;
-    row.pnp_success             = false;
-    row.pnp_inliers             = 0;
+    row.segment_id               = 0;
+    row.pnp_success              = false;
+    row.pnp_inliers              = 0;
+    row.outliers_culled          = 0;
+    row.reproj_rms_after_cull_px = 0.0;
 
     ASSERT_FALSE( writeDiagCsv( path, { row } ).has_value() );
 
@@ -222,11 +235,12 @@ namespace
     oss << in.rdbuf();
     const std::string text = oss.str();
     EXPECT_NE( text.find( "timestamp_ns,status,num_obs," ), std::string::npos );
-    EXPECT_NE( text.find( "segment_id,pnp_success,pnp_inliers" ),
+    EXPECT_NE( text.find( "pnp_success,pnp_inliers,outliers_culled,"
+                           "reproj_rms_after_cull_px" ),
                std::string::npos );
     EXPECT_NE(
         text.find( "1403636579763555584,ok,136,0,0,0,1,0,0.000000,0.000000,0,"
-                   "0,0.000000,0,0,0" ),
+                   "0,0.000000,0,0,0,0,0.000000" ),
         std::string::npos );
     std::filesystem::remove( path );
   }
@@ -254,6 +268,7 @@ namespace
 
     // MH_01 is the clean-run reference: no re-anchors, no seed-gate
     // rejections, so no "vo segments summary" warning is expected.
+    // Cull counters may be non-zero but must not enter warnings.
     EXPECT_EQ( result.counts.reanchors, 0U );
     EXPECT_EQ( result.counts.seed_rejected, 0U );
     const bool has_summary_warning =
@@ -262,6 +277,13 @@ namespace
                        return warning.rfind( "vo segments summary:", 0 ) == 0;
                      } );
     EXPECT_FALSE( has_summary_warning );
+    const bool has_cull_warning =
+        std::any_of( result.warnings.begin(), result.warnings.end(),
+                     []( const std::string& warning ) {
+                       return warning.rfind( "vo outlier cull summary:", 0 ) ==
+                              0;
+                     } );
+    EXPECT_FALSE( has_cull_warning );
   }
 
 }  // namespace

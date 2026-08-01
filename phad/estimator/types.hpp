@@ -44,6 +44,11 @@ namespace phad::estimator
     double pnp_reproj_px              = 2.0;
     double pnp_confidence             = 0.99;
     int    min_pnp_inliers            = 10;
+    // enable_outlier_cull only gates mean-reproj cull; cheirality always
+    // clears window observations for dropped landmarks.
+    bool   enable_outlier_cull   = true;
+    bool   enable_outlier_reopt  = true;  // false → 复现 b6fbcb6 只 cull
+    double outlier_avg_reproj_px = 3.0;
   };
 
   enum class UpdateStatus : std::uint8_t
@@ -75,6 +80,11 @@ namespace phad::estimator
     bool          low_connectivity        = false;
     bool          pnp_success             = false;
     std::uint32_t pnp_inliers             = 0;
+    std::uint32_t outliers_culled          = 0;
+    std::uint32_t outliers_culled_unique   = 0;
+    double        reproj_rms_after_cull_px = 0.0;
+    bool          outlier_reopt            = false;  // 本帧是否成功跑了 LM₂
+    bool          outlier_reopt_failed     = false;  // LM₂ 失败已回退；不进 diag.csv
   };
 
   struct VioUpdateResult

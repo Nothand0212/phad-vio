@@ -118,6 +118,10 @@ namespace
               << "seed_rejected=" << result.counts.seed_rejected << '\n'
               << "pnp_successes=" << result.counts.pnp_successes << '\n'
               << "pnp_fallbacks=" << result.counts.pnp_fallbacks << '\n'
+              << "outliers_culled=" << result.counts.outliers_culled << '\n'
+              << "outliers_culled_unique="
+              << result.counts.outliers_culled_unique << '\n'
+              << "outlier_reopts=" << result.counts.outlier_reopts << '\n'
               << "reproj_rms_after_median_px=" << result.reproj.median_px
               << '\n'
               << "reproj_rms_after_p95_px=" << result.reproj.p95_px << '\n'
