@@ -327,6 +327,11 @@ namespace phad::estimator
         throw std::invalid_argument(
             "EstimatorOptions.outlier_avg_reproj_px must be > 0" );
       }
+      if ( options.max_outlier_reopts < 0 )
+      {
+        throw std::invalid_argument(
+            "EstimatorOptions.max_outlier_reopts must be >= 0" );
+      }
     }
 
     void eraseLandmarkFromWindow( LandmarkId id )

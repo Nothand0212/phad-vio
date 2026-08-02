@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <stdexcept>
 #include <vector>
 
 #include "phad/camera/rectified_stereo_calibration.hpp"
@@ -21,6 +22,7 @@ namespace
   using phad::estimator::LandmarkId;
   using phad::estimator::StereoObservation;
   using phad::estimator::StereoVoEstimator;
+  using phad::estimator::UpdateDiagnostics;
   using phad::estimator::UpdateStatus;
   using phad::sensor::RigidTransform;
 
@@ -180,6 +182,22 @@ namespace
   }
 
 }  // namespace
+
+TEST( StereoVoOutlierReoptTest, DefaultsMaxReoptsThreeAndRoundsZero )
+{
+  EstimatorOptions options;
+  EXPECT_EQ( options.max_outlier_reopts, 3 );
+  UpdateDiagnostics d;
+  EXPECT_EQ( d.outlier_reopt_rounds, 0U );
+}
+
+TEST( StereoVoOutlierReoptTest, RejectsNegativeMaxOutlierReopts )
+{
+  EstimatorOptions options;
+  options.max_outlier_reopts = -1;
+  EXPECT_THROW( StereoVoEstimator( makeCalibration(), options ),
+                std::invalid_argument );
+}
 
 TEST( StereoVoOutlierReoptTest, ReoptsWhenAtLeastFourCulled )
 {
