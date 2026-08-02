@@ -44,8 +44,9 @@ apps/stereo_vo_glue.hpp  ── filter kValid ──► KeyframeMeasurement
                                                VioUpdateResult
                                     ┌─────────────┴─────────────┐
                                     ▼                           ▼
-                         phad_stereo_vo_probe            phad_euroc_runner
-                          TUM + diag CSV                  估计轨迹叠加
+                         OfflineVoSession                 phad_euroc_runner
+                    dropTracks(culled ids)                 估计轨迹叠加
+                    → probe / phad_vo_bench
 ```
 
 ## 段生命周期（M3.3）

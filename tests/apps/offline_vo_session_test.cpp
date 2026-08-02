@@ -238,6 +238,12 @@ namespace
     EXPECT_NE( text.find( "pnp_success,pnp_inliers,outliers_culled,"
                            "reproj_rms_after_cull_px" ),
                std::string::npos );
+    // Slice ④c keeps the 18-column contract; culled_landmark_ids stay
+    // in-memory only (session dropTracks; not a diag column).
+    const auto header_end = text.find( '\n' );
+    ASSERT_NE( header_end, std::string::npos );
+    const std::string header = text.substr( 0, header_end );
+    EXPECT_EQ( std::count( header.begin(), header.end(), ',' ), 17 );
     EXPECT_NE(
         text.find( "1403636579763555584,ok,136,0,0,0,1,0,0.000000,0.000000,0,"
                    "0,0.000000,0,0,0,0,0.000000" ),

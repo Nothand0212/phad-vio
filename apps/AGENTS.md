@@ -9,6 +9,14 @@
 - `StereoPairStream` 组合 `SensorSource` + `phad::sync`；`io` 与 `sync` 互不依赖
 - `FrameTracks` → `KeyframeMeasurement` 经 `stereo_vo_glue.hpp` 组装
 - `phad_stereo_vo_probe` 与 `phad_vo_bench` 共用 session，保证 diag 列合同一致
+- Slice ④c：`estimator.update` 返回后若
+  `!diagnostics.culled_landmark_ids.empty()`，session 调用
+  `tracker.dropTracks(...)`（composition root 回传；**不**进 `warnings`）。
+  `block_culled_rebirth=false` 时仍 drop（设计 §5）；真复现 tip 伪永久需另
+  关 drop（YAGNI，本片不加 session 开关）。bench
+  `--allow-culled-rebirth` 仅把 `estimator.block_culled_rebirth` 设为
+  `false`；默认不传 flag 即 estimator 默认 `true`。该键进
+  `flattenConfig` → `config_hash`
 - 行为保持型重构：先在当前 commit 产出仓库外参考产物，再改代码并以逐字节 diff 验收
 
 ## `diag.csv` 合同（M3.3）

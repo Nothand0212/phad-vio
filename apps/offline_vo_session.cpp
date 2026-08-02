@@ -201,6 +201,15 @@ namespace phad::apps
       const auto estimator_end = std::chrono::steady_clock::now();
       const auto frame_end     = estimator_end;
 
+      // Composition-root feedback: drop frontend tracks for ids the
+      // estimator permanently removed this frame. Runs whenever the list
+      // is non-empty — including block_culled_rebirth=false (design §5).
+      // Does not enter warnings.
+      if ( !update.diagnostics.culled_landmark_ids.empty() )
+      {
+        tracker.dropTracks( update.diagnostics.culled_landmark_ids );
+      }
+
       if ( result.counts.image_frames == 0U )
       {
         result.first_image_ts = tracks.timestamp;
