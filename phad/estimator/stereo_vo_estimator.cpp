@@ -143,6 +143,81 @@ namespace phad::estimator
       return std::sqrt( sum_sq / static_cast<double>( count ) );
     }
 
+    // Keep top-K pose shifts by |Δt|; at most K entries, unordered until sorted.
+    void considerShiftTopK(
+        std::vector<std::pair<std::uint64_t, double>>& top, std::uint64_t key,
+        double dt_m, std::size_t k )
+    {
+      if ( top.size() < k )
+      {
+        top.emplace_back( key, dt_m );
+        return;
+      }
+      auto min_it = std::min_element(
+          top.begin(), top.end(),
+          []( const std::pair<std::uint64_t, double>& a,
+              const std::pair<std::uint64_t, double>& b ) {
+            return a.second < b.second;
+          } );
+      if ( dt_m > min_it->second )
+      {
+        *min_it = { key, dt_m };
+      }
+    }
+
+    // Per-landmark mean stereo residual (unwhitened L2), then mean/max/max_id.
+    void fillProbeLandmarkResiduals( const gtsam::NonlinearFactorGraph& graph,
+                                     const gtsam::Values&               values,
+                                     UpdateDiagnostics&                 diagnostics )
+    {
+      std::unordered_map<LandmarkId, std::pair<double, std::size_t>> per_lm;
+      for ( const auto& factor : graph )
+      {
+        if ( factor == nullptr )
+        {
+          continue;
+        }
+        const auto* stereo =
+            dynamic_cast<const gtsam::GenericStereoFactor<gtsam::Pose3,
+                                                          gtsam::Point3>*>(
+                factor.get() );
+        if ( stereo == nullptr )
+        {
+          continue;
+        }
+        const LandmarkId id =
+            static_cast<LandmarkId>( gtsam::Symbol( stereo->key2() ).index() );
+        auto& entry = per_lm[ id ];
+        entry.first += stereo->unwhitenedError( values ).norm();
+        ++entry.second;
+      }
+
+      diagnostics.probe_detail_valid = true;
+      if ( per_lm.empty() )
+      {
+        return;
+      }
+
+      double     sum_means = 0.0;
+      double     max_px    = -1.0;
+      LandmarkId max_id{};
+      for ( const auto& [ id, score ] : per_lm )
+      {
+        const double mean =
+            score.first / static_cast<double>( score.second );
+        sum_means += mean;
+        if ( mean > max_px )
+        {
+          max_px = mean;
+          max_id = id;
+        }
+      }
+      diagnostics.probe_res_mean_px =
+          sum_means / static_cast<double>( per_lm.size() );
+      diagnostics.probe_res_max_px = max_px;
+      diagnostics.probe_res_max_id = max_id;
+    }
+
     // Same RMS as stereoReprojRms but skips factors whose landmark is no longer
     // in landmarks_W (cheirality / mean-reproj cull). Does not rebuild the graph.
     [[nodiscard]] double stereoReprojRmsSkippingMissingLandmarks(
@@ -360,7 +435,9 @@ namespace phad::estimator
 
     // 返回 false 表示 backproject 失败（调用方回滚并 kRejected）
     bool seedSegment( const Eigen::Isometry3d&   anchor_T_W_B,
-                      const KeyframeMeasurement& measurement )
+                      const KeyframeMeasurement& measurement,
+                      std::uint32_t&             probe_rejected_block_n,
+                      std::uint32_t&             probe_new_lm_n )
     {
       landmarks_W.clear();
 
@@ -375,6 +452,7 @@ namespace phad::estimator
         if ( options.block_culled_rebirth &&
              culled_ids_.find( observation.id ) != culled_ids_.end() )
         {
+          ++probe_rejected_block_n;
           continue;
         }
         const Eigen::Vector3d point_W =
@@ -389,6 +467,7 @@ namespace phad::estimator
         }
         landmarks_W[ observation.id ] = point_W;
         track_times[ observation.id ].push_back( measurement.timestamp );
+        ++probe_new_lm_n;
       }
 
       if ( landmarks_W.empty() )
@@ -923,8 +1002,9 @@ namespace phad::estimator
 
     if ( !m_impl->initialized )
     {
-      if ( !m_impl->seedSegment( Eigen::Isometry3d::Identity(),
-                                 measurement ) )
+      if ( !m_impl->seedSegment( Eigen::Isometry3d::Identity(), measurement,
+                                 result.diagnostics.probe_rejected_block_n,
+                                 result.diagnostics.probe_new_lm_n ) )
       {
         restore();
         result.status  = UpdateStatus::kRejected;
@@ -942,7 +1022,9 @@ namespace phad::estimator
         result.message = "non-finite pose initial value";
         return result;
       }
-      if ( !m_impl->seedSegment( anchor, measurement ) )
+      if ( !m_impl->seedSegment( anchor, measurement,
+                                 result.diagnostics.probe_rejected_block_n,
+                                 result.diagnostics.probe_new_lm_n ) )
       {
         restore();
         result.status  = UpdateStatus::kRejected;
@@ -1046,6 +1128,7 @@ namespace phad::estimator
              m_impl->culled_ids_.find( observation.id ) !=
                  m_impl->culled_ids_.end() )
         {
+          ++result.diagnostics.probe_rejected_block_n;
           continue;
         }
         const Eigen::Vector3d point_W =
@@ -1060,6 +1143,7 @@ namespace phad::estimator
           continue;
         }
         m_impl->landmarks_W[ observation.id ] = point_W;
+        ++result.diagnostics.probe_new_lm_n;
       }
 
       m_impl->window.push_back( std::move( candidate ) );
@@ -1143,7 +1227,12 @@ namespace phad::estimator
       }
     }
 
-    double max_shift_m = 0.0;
+    double                max_shift_m     = 0.0;
+    constexpr std::size_t kProbeShiftTopK = 3;
+    if ( m_impl->options.enable_probe_b )
+    {
+      result.diagnostics.probe_shift_top.reserve( kProbeShiftTopK );
+    }
     for ( WindowFrame& frame : m_impl->window )
     {
       const Eigen::Isometry3d T_W_B =
@@ -1151,11 +1240,25 @@ namespace phad::estimator
       const auto before_it = poses_before.find( frame.frame_index );
       if ( before_it != poses_before.end() )
       {
-        max_shift_m = std::max(
-            max_shift_m,
-            ( T_W_B.translation() - before_it->second ).norm() );
+        const double dt_m =
+            ( T_W_B.translation() - before_it->second ).norm();
+        max_shift_m = std::max( max_shift_m, dt_m );
+        if ( m_impl->options.enable_probe_b )
+        {
+          considerShiftTopK( result.diagnostics.probe_shift_top,
+                             frame.frame_index, dt_m, kProbeShiftTopK );
+        }
       }
       frame.T_W_B = T_W_B;
+    }
+    if ( m_impl->options.enable_probe_b )
+    {
+      std::sort( result.diagnostics.probe_shift_top.begin(),
+                 result.diagnostics.probe_shift_top.end(),
+                 []( const std::pair<std::uint64_t, double>& a,
+                     const std::pair<std::uint64_t, double>& b ) {
+                   return a.second > b.second;
+                 } );
     }
 
     for ( auto& [ id, point_W ] : m_impl->landmarks_W )
@@ -1248,7 +1351,7 @@ namespace phad::estimator
             continue;
           }
           const gtsam::Point3 point = optimized_r.at<gtsam::Point3>( key );
-          point_W = Eigen::Vector3d( point.x(), point.y(), point.z() );
+          point_W                   = Eigen::Vector3d( point.x(), point.y(), point.z() );
           if ( !isFinite( point_W ) )
           {
             throw std::runtime_error( "non-finite optimized landmark" );
@@ -1287,6 +1390,21 @@ namespace phad::estimator
     result.diagnostics.reproj_rms_after_cull_px = after_cull;
     result.diagnostics.max_window_pose_shift_m  = max_shift_m;
     result.diagnostics.culled_landmark_ids      = std::move( frame_culled );
+
+    if ( m_impl->options.enable_probe_b )
+    {
+      // Final window/landmarks snapshot (same stage as reproj_rms_after_*).
+      gtsam::NonlinearFactorGraph probe_graph;
+      gtsam::Values               probe_values;
+      std::uint64_t               probe_prior_key = 0;
+      std::uint32_t               probe_num_lm    = 0;
+      m_impl->buildGraph( probe_graph, probe_values, probe_prior_key,
+                          probe_num_lm );
+      (void)probe_prior_key;
+      (void)probe_num_lm;
+      fillProbeLandmarkResiduals( probe_graph, probe_values,
+                                  result.diagnostics );
+    }
 
     m_impl->initialized         = true;
     m_impl->prev_accepted_T_W_B = m_impl->last_accepted_T_W_B;
