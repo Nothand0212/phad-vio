@@ -5,16 +5,21 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
 
+#include "apps/probe_b_writer.hpp"
 #include "apps/stereo_pair_stream.hpp"
 #include "apps/stereo_vo_glue.hpp"
 #include "phad/camera/stereo_rectifier.hpp"
+#include "phad/common/landmark_id.hpp"
 #include "phad/estimator/stereo_vo_estimator.hpp"
 #include "phad/io/dataset/dataset_replay_source.hpp"
 #include "phad/io/dataset/euroc/euroc_dataset.hpp"
@@ -98,9 +103,28 @@ namespace phad::apps
       return result;
     }
 
-    const auto&                  rectified_cal = rectifier.value().calibration();
-    frontend::StereoTracker      tracker( rectified_cal, options.tracker );
-    estimator::StereoVoEstimator estimator( rectified_cal, options.estimator );
+    const auto&             rectified_cal = rectifier.value().calibration();
+    frontend::StereoTracker tracker( rectified_cal, options.tracker );
+
+    // Probe B: CLI path only. Enable estimator side-channel when writing.
+    std::unique_ptr<ProbeBWriter>              probe_b_writer;
+    std::unordered_set<common::LandmarkId>     lifetime_culled;
+    estimator::EstimatorOptions                estimator_options = options.estimator;
+    if ( !options.probe_b_path.empty() )
+    {
+      try
+      {
+        probe_b_writer =
+            std::make_unique<ProbeBWriter>( options.probe_b_path );
+      }
+      catch ( const std::runtime_error& exception )
+      {
+        result.error = SessionError{ exception.what() };
+        return result;
+      }
+      estimator_options.enable_probe_b = true;
+    }
+    estimator::StereoVoEstimator estimator( rectified_cal, estimator_options );
 
     std::vector<common::TimedPose> poses;
     std::vector<double>            rms_after;
@@ -193,6 +217,19 @@ namespace phad::apps
           tracker.process( rectified.value() );
       const auto frontend_end = std::chrono::steady_clock::now();
 
+      // Zombie = frontend obs whose id was permanently culled in a prior frame.
+      std::uint32_t zombie_track_n = 0;
+      if ( probe_b_writer )
+      {
+        for ( const auto& obs : tracks.observations )
+        {
+          if ( lifetime_culled.count( obs.id ) != 0U )
+          {
+            ++zombie_track_n;
+          }
+        }
+      }
+
       const auto                           estimator_begin = std::chrono::steady_clock::now();
       const estimator::KeyframeMeasurement measurement =
           toKeyframeMeasurement( tracks );
@@ -205,6 +242,7 @@ namespace phad::apps
       // estimator permanently removed this frame. Default on (④c); two-level
       // gate (④f): drop_culled_tracks then skip when outliers_culled >= N.
       // Does not enter warnings.
+      bool drops_skipped_this_frame = false;
       if ( options.drop_culled_tracks &&
            !update.diagnostics.culled_landmark_ids.empty() )
       {
@@ -215,10 +253,77 @@ namespace phad::apps
         if ( skip )
         {
           ++result.counts.drops_skipped;
+          drops_skipped_this_frame = true;
         }
         else
         {
           tracker.dropTracks( update.diagnostics.culled_landmark_ids );
+        }
+      }
+
+      // Probe B jsonl: i matches diag row order (0-based before increment).
+      if ( probe_b_writer )
+      {
+        const std::uint64_t frame_i = result.counts.image_frames;
+        const auto&         d       = update.diagnostics;
+        for ( const common::LandmarkId id : d.culled_landmark_ids )
+        {
+          lifetime_culled.insert( id );
+        }
+
+        const bool heavy =
+            ( frame_i >= 420U && frame_i <= 450U ) ||
+            !d.culled_landmark_ids.empty() || d.lm_iterations >= 100U ||
+            d.max_window_pose_shift_m > 0.5;
+
+        ProbeBFrame probe_frame;
+        probe_frame.i     = frame_i;
+        probe_frame.ts_ns = tracks.timestamp.nanoseconds();
+        if ( heavy )
+        {
+          probe_frame.culled_ids = std::vector<std::uint64_t>(
+              d.culled_landmark_ids.begin(), d.culled_landmark_ids.end() );
+          probe_frame.zombie_track_n    = zombie_track_n;
+          probe_frame.rejected_block_n  = d.probe_rejected_block_n;
+          probe_frame.new_lm            = d.probe_new_lm_n;
+          probe_frame.shared            = d.num_shared;
+          probe_frame.num_obs           = d.num_observations;
+          probe_frame.lm_iterations     = d.lm_iterations;
+          probe_frame.shift_m           = d.max_window_pose_shift_m;
+          std::vector<ProbeBShiftTop> shift_top;
+          shift_top.reserve( d.probe_shift_top.size() );
+          for ( const auto& entry : d.probe_shift_top )
+          {
+            shift_top.push_back(
+                ProbeBShiftTop{ .key = entry.first, .dt_m = entry.second } );
+          }
+          probe_frame.shift_top = std::move( shift_top );
+          if ( d.probe_detail_valid )
+          {
+            probe_frame.res_mean_px = d.probe_res_mean_px;
+            probe_frame.res_max_px  = d.probe_res_max_px;
+            probe_frame.res_max_id  = static_cast<std::uint64_t>(
+                d.probe_res_max_id );
+          }
+          probe_frame.drops_skipped_this_frame = drops_skipped_this_frame;
+        }
+        else
+        {
+          // Light frame (design §4): keep index continuity without heavy fields.
+          probe_frame.shared  = d.num_shared;
+          probe_frame.num_obs = d.num_observations;
+        }
+
+        try
+        {
+          probe_b_writer->write( probe_frame );
+        }
+        catch ( const std::runtime_error& exception )
+        {
+          result.error = SessionError{ exception.what() };
+          result.sync  = stream.diagnostics();
+          finalizeSegmentsAndWarnings();
+          return result;
         }
       }
 
