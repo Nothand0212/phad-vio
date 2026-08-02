@@ -46,6 +46,8 @@ namespace
       "                     [--max-frames <n>] [--force]\n"
       "                     [--no-outlier-cull] [--no-outlier-reopt]\n"
       "                     [--allow-culled-rebirth]\n"
+      "                     [--no-drop-culled-tracks]\n"
+      "                     [--skip-drop-min-culled <n>]\n"
       "                     [--outlier-avg-reproj-px <v>]\n"
       "                     [--max-outlier-reopts <n>]\n";
 
@@ -68,11 +70,13 @@ namespace
     std::optional<std::uint64_t> max_frames;
     bool                         write_errors_csv   = false;
     bool                         force              = false;
-    bool                         no_outlier_cull      = false;
-    bool                         no_outlier_reopt     = false;
-    bool                         allow_culled_rebirth = false;
+    bool                         no_outlier_cull       = false;
+    bool                         no_outlier_reopt      = false;
+    bool                         allow_culled_rebirth  = false;
+    bool                         no_drop_culled_tracks = false;
     std::optional<double>        outlier_avg_reproj_px;
     std::optional<int>           max_outlier_reopts;
+    std::optional<int>           skip_drop_min_culled;
   };
 
   [[nodiscard]] bool parseDouble( std::string_view text, double& value )
@@ -125,6 +129,11 @@ namespace
       if ( flag == "--allow-culled-rebirth" )
       {
         arguments.allow_culled_rebirth = true;
+        continue;
+      }
+      if ( flag == "--no-drop-culled-tracks" )
+      {
+        arguments.no_drop_culled_tracks = true;
         continue;
       }
       if ( index + 1 >= argc )
@@ -223,6 +232,19 @@ namespace
           return false;
         }
         arguments.max_outlier_reopts = static_cast<int>( parsed );
+      }
+      else if ( flag == "--skip-drop-min-culled" )
+      {
+        std::uint64_t parsed = 0;
+        if ( !parseUint64( value, parsed ) ||
+             parsed > static_cast<std::uint64_t>(
+                          std::numeric_limits<int>::max() ) )
+        {
+          std::cerr
+              << "--skip-drop-min-culled expects a non-negative integer\n";
+          return false;
+        }
+        arguments.skip_drop_min_culled = static_cast<int>( parsed );
       }
       else
       {
@@ -369,6 +391,9 @@ namespace
               estimator.block_culled_rebirth );
 
     snap.set( "session.dataset_format", std::string( "euroc" ) );
+    snap.set( "session.drop_culled_tracks", session.drop_culled_tracks );
+    snap.set( "session.skip_drop_min_culled",
+              static_cast<std::int64_t>( session.skip_drop_min_culled ) );
     if ( session.max_frames.has_value() )
     {
       snap.set( "session.max_frames",
@@ -480,10 +505,19 @@ namespace
       session_options.estimator.enable_outlier_reopt = false;
     }
     // Default leaves estimator.block_culled_rebirth=true. Flag only for
-    // A/B that re-enables same-id backproject; session still dropTracks.
+    // A/B that re-enables same-id backproject; session still dropTracks
+    // unless --no-drop-culled-tracks.
     if ( arguments.allow_culled_rebirth )
     {
       session_options.estimator.block_culled_rebirth = false;
+    }
+    if ( arguments.no_drop_culled_tracks )
+    {
+      session_options.drop_culled_tracks = false;
+    }
+    if ( arguments.skip_drop_min_culled.has_value() )
+    {
+      session_options.skip_drop_min_culled = *arguments.skip_drop_min_culled;
     }
     if ( arguments.outlier_avg_reproj_px.has_value() )
     {
@@ -609,6 +643,7 @@ namespace
     summary.robustness.outliers_culled_unique =
         session.counts.outliers_culled_unique;
     summary.robustness.outlier_reopts = session.counts.outlier_reopts;
+    summary.robustness.drops_skipped  = session.counts.drops_skipped;
     for ( const auto& row : session.diag )
     {
       summary.robustness.cheirality += row.num_cheirality;
