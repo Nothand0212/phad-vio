@@ -42,6 +42,8 @@ namespace phad::apps
     /// outliers_culled >= this threshold. Default 4 (Slice ④f). 0 disables
     /// skip-by-threshold (always drop when list non-empty).
     int skip_drop_min_culled = 4;
+    /// MH_05 Probe B jsonl path; empty → writer not constructed (default off).
+    std::filesystem::path probe_b_path{};
   };
 
   struct VoDiagRow

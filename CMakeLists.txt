@@ -193,7 +193,10 @@ target_compile_options(phad_stereo_pair_stream PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
-add_library(phad_offline_vo_session STATIC apps/offline_vo_session.cpp)
+add_library(phad_offline_vo_session STATIC
+  apps/offline_vo_session.cpp
+  apps/probe_b_writer.cpp
+)
 target_compile_features(phad_offline_vo_session PUBLIC cxx_std_20)
 target_include_directories(phad_offline_vo_session PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}"
