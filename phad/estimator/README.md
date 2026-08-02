@@ -104,24 +104,28 @@ prior 与由该帧 backproject 得到的 landmark 初值自洽，优化不会移
 `pnp_successes` / `pnp_fallbacks`（仅正常路径；seed / re-anchor 不计
 fallback）。详见 `docs/research/m3.3-slice3-pnp-design.md`。
 
-## 外点剔除与二次重优（M3.3 Slice ④ / ④b）
+## 外点剔除与多轮重优（M3.3 Slice ④ / ④b / ④e）
 
 LM₁ 收敛写回位姿后、返回 `kOk` 前，可选按 landmark **平均 stereo 重投影**
 （`||unwhitenedError||` 均值，≥4 观测）从 `landmarks_W` 删除高误差点，并经
 共用 helper 清窗口观测。`reproj_rms_after_px` **始终**是 LM₁ 后、mean-cull
-**前** 的全图 RMS。
+**前** 的全图 RMS（不受后续 reopt 轮次影响）。
 
-若本帧 `outliers_culled >= 4` 且 `enable_outlier_reopt`，则用剩余窗口观测与
-`landmarks_W` **重建 factor graph** 再跑 **一趟** LM₂ 并写回位姿与点。LM₂
-失败则回退到「LM₁ 写回 + cull 后」状态，仍返回 `kOk`（`outlier_reopt=false`、
-`outlier_reopt_failed=true`）。`enable_outlier_reopt=false` 复现 Slice ④
-只 cull（`b6fbcb6`）。
+**多轮热路径（Slice ④e）**：每趟 mean-cull / cheirality 必须用**该趟** LM 的
+graph + values 打分。若本趟 `culled_round >= 4`（仅 mean-cull 计数；cheirality
+不计触发）且 `enable_outlier_reopt`，且已成功轮数 `< max_outlier_reopts`，则
+用剩余窗口观测与 `landmarks_W` **重建 factor graph** 再跑一趟 LM，写回后再次
+cull。如此循环直至本趟 cull `< 4`、达到 `max_outlier_reopts`、或开关关闭。
+某趟 LM 失败则回退到该趟开始前的 window / landmarks（保留此前已成功轮次），
+仍返回 `kOk`（`outlier_reopt_failed=true`；`outlier_reopt == (rounds > 0)`）。
+`max_outlier_reopts = 0` 或 `enable_outlier_reopt=false` 复现只 cull 不重优。
 
 | 选项 | 语义 |
 |---|---|
 | `enable_outlier_cull`（默认 `true`） | `false` **只关** mean-reproj 剔点；cheirality 清窗口观测 helper 仍生效；无剔点则自然不触发 reopt |
 | `outlier_avg_reproj_px`（默认 `4.0`） | 均值阈值（像素）；构造时须 `> 0`；bench 可用 `--outlier-avg-reproj-px` 覆盖扫参（Slice ④d） |
-| `enable_outlier_reopt`（默认 `true`） | `false` → 只 cull 不重优；触发条件另需 `outliers_culled >= 4` |
+| `enable_outlier_reopt`（默认 `true`） | `false` → 只 cull 不重优；触发条件另需本趟 `culled_round >= 4` |
+| `max_outlier_reopts`（默认 `3`） | ≥0；本帧最多成功 reopt 轮数；`0` → 永不重优；进 flattenConfig |
 | `block_culled_rebirth`（默认 `true`） | `false` → 允许同 id stereo-backproject 重生（复现 Slice ④ 伪永久，仅 A/B） |
 
 **拒复生（Slice ④c）**：mean-cull 与 cheirality 真正 erase 的 id 写入
@@ -129,17 +133,17 @@ LM₁ 收敛写回位姿后、返回 `kOk` 前，可选按 landmark **平均 ste
 backproject。被删 id 的 `track_times` / `observationTimestamps()` **仍保留**。
 本帧列表 `UpdateDiagnostics.culled_landmark_ids`（mean-cull ∪ cheirality）
 仅在提交成功路径填充；`restore()` 后为空；**不**进 `diag.csv`。
-`outliers_culled` / `unique` **仍只计** mean-reproj cull。
+`outliers_culled` / `unique` **仍只计** mean-reproj cull（跨轮累计）。
 
 诊断：
 
 | 字段 | 语义 |
 |---|---|
-| `outliers_culled` / `outliers_culled_unique` | 本帧 mean-reproj 删点数 / 去重 id |
+| `outliers_culled` / `outliers_culled_unique` | 本帧 mean-reproj 删点数 / 去重 id（含 reopt 后各趟 cull） |
 | `culled_landmark_ids` | 本帧永久移出地图的 id（mean-cull ∪ cheirality）；仅内存 / API |
-| `lm_iterations` | LM₁ +（成功时）LM₂ 迭代累加 |
-| `reproj_rms_after_cull_px` | **有成功 reopt**：LM₂ 后 graph RMS；**无 reopt / LM₂ 失败**：Slice ④ 语义（cull 关时 `== reproj_rms_after_px`；cull 开时跳过已删 id 的 graph RMS） |
-| `outlier_reopt` / `outlier_reopt_failed` | 本帧是否成功跑了 LM₂ / LM₂ 失败已回退；**不**进 `diag.csv` |
+| `lm_iterations` | LM₁ + 各成功 reopt 轮 LM 迭代累加 |
+| `reproj_rms_after_cull_px` | **有成功 reopt**：最近成功轮 LM 后 graph RMS；**无 reopt / 首趟即失败**：Slice ④ 语义（cull 关时 `== reproj_rms_after_px`；cull 开时跳过已删 id 的 graph RMS） |
+| `outlier_reopt` / `outlier_reopt_rounds` / `outlier_reopt_failed` | `outlier_reopt == (rounds > 0)`；成功轮数；是否有轮次失败已回退；**均不**进 `diag.csv` |
 
 session 累计成功 reopt 为 `FrameCounts.outlier_reopts` →
 `summary.json` 的 `robustness.outlier_reopts`。详见
