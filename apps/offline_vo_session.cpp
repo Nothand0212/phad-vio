@@ -242,10 +242,8 @@ namespace phad::apps
       const auto& d = update.diagnostics;
       result.counts.outliers_culled += d.outliers_culled;
       result.counts.outliers_culled_unique += d.outliers_culled_unique;
-      if ( d.outlier_reopt )
-      {
-        result.counts.outlier_reopts += 1U;
-      }
+      // Slice ④e: accumulate successful reopt *rounds*, not frames-with-reopt.
+      result.counts.outlier_reopts += d.outlier_reopt_rounds;
       if ( update.status == estimator::UpdateStatus::kOk )
       {
         rms_after.push_back( d.reproj_rms_after_px );

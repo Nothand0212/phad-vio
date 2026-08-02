@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <stdexcept>
 #include <vector>
 
 #include "phad/camera/rectified_stereo_calibration.hpp"
@@ -21,6 +22,7 @@ namespace
   using phad::estimator::LandmarkId;
   using phad::estimator::StereoObservation;
   using phad::estimator::StereoVoEstimator;
+  using phad::estimator::UpdateDiagnostics;
   using phad::estimator::UpdateStatus;
   using phad::sensor::RigidTransform;
 
@@ -181,6 +183,22 @@ namespace
 
 }  // namespace
 
+TEST( StereoVoOutlierReoptTest, DefaultsMaxReoptsThreeAndRoundsZero )
+{
+  EstimatorOptions options;
+  EXPECT_EQ( options.max_outlier_reopts, 3 );
+  UpdateDiagnostics d;
+  EXPECT_EQ( d.outlier_reopt_rounds, 0U );
+}
+
+TEST( StereoVoOutlierReoptTest, RejectsNegativeMaxOutlierReopts )
+{
+  EstimatorOptions options;
+  options.max_outlier_reopts = -1;
+  EXPECT_THROW( StereoVoEstimator( makeCalibration(), options ),
+                std::invalid_argument );
+}
+
 TEST( StereoVoOutlierReoptTest, ReoptsWhenAtLeastFourCulled )
 {
   const auto                    calibration = makeCalibration();
@@ -218,9 +236,86 @@ TEST( StereoVoOutlierReoptTest, ReoptsWhenAtLeastFourCulled )
     {
       EXPECT_TRUE( r_on.diagnostics.outlier_reopt );
       EXPECT_FALSE( r_on.diagnostics.outlier_reopt_failed );
+      EXPECT_EQ( r_on.diagnostics.outlier_reopt_rounds, 1U );
       EXPECT_GT( r_on.diagnostics.lm_iterations,
                  r_off.diagnostics.lm_iterations );
       EXPECT_FALSE( r_off.diagnostics.outlier_reopt );
+      EXPECT_EQ( r_off.diagnostics.outlier_reopt_rounds, 0U );
+      saw = true;
+      break;
+    }
+  }
+  EXPECT_TRUE( saw );
+}
+
+TEST( StereoVoOutlierReoptTest, MaxZeroSkipsReopt )
+{
+  const auto                    calibration = makeCalibration();
+  const auto                    ids         = sequentialIds( kDenseLandmarks.size(), 1 );
+  const auto                    poses       = translatingPoses( 12, 0.05 );
+  const std::vector<LandmarkId> poison_ids{ 1, 2, 3, 4 };
+
+  EstimatorOptions options    = defaultReoptOptions();
+  options.huber_k_px          = 0.0;
+  options.max_outlier_reopts  = 0;
+  options.enable_outlier_reopt = true;
+  StereoVoEstimator estimator( calibration, options );
+
+  bool saw = false;
+  for ( std::size_t index = 0; index < poses.size(); ++index )
+  {
+    const std::int64_t ts_ns =
+        static_cast<std::int64_t>( index + 1 ) * 50'000'000;
+    auto measurement =
+        makeFrame( calibration, poses[ index ], ts_ns, kDenseLandmarks, ids );
+    if ( index >= 1 )
+    {
+      poisonIds( measurement, poison_ids, index );
+    }
+    const auto result = estimator.update( measurement );
+    ASSERT_EQ( result.status, UpdateStatus::kOk ) << result.message;
+    if ( result.diagnostics.outliers_culled >= 4U )
+    {
+      EXPECT_EQ( result.diagnostics.outlier_reopt_rounds, 0U );
+      EXPECT_FALSE( result.diagnostics.outlier_reopt );
+      EXPECT_FALSE( result.diagnostics.outlier_reopt_failed );
+      saw = true;
+      break;
+    }
+  }
+  EXPECT_TRUE( saw );
+}
+
+TEST( StereoVoOutlierReoptTest, MaxOneCapsReoptRounds )
+{
+  const auto                    calibration = makeCalibration();
+  const auto                    ids         = sequentialIds( kDenseLandmarks.size(), 1 );
+  const auto                    poses       = translatingPoses( 12, 0.05 );
+  const std::vector<LandmarkId> poison_ids{ 1, 2, 3, 4 };
+
+  EstimatorOptions options   = defaultReoptOptions();
+  options.huber_k_px         = 0.0;
+  options.max_outlier_reopts = 1;
+  StereoVoEstimator estimator( calibration, options );
+
+  bool saw = false;
+  for ( std::size_t index = 0; index < poses.size(); ++index )
+  {
+    const std::int64_t ts_ns =
+        static_cast<std::int64_t>( index + 1 ) * 50'000'000;
+    auto measurement =
+        makeFrame( calibration, poses[ index ], ts_ns, kDenseLandmarks, ids );
+    if ( index >= 1 )
+    {
+      poisonIds( measurement, poison_ids, index );
+    }
+    const auto result = estimator.update( measurement );
+    ASSERT_EQ( result.status, UpdateStatus::kOk ) << result.message;
+    if ( result.diagnostics.outliers_culled >= 4U )
+    {
+      EXPECT_TRUE( result.diagnostics.outlier_reopt );
+      EXPECT_EQ( result.diagnostics.outlier_reopt_rounds, 1U );
+      EXPECT_FALSE( result.diagnostics.outlier_reopt_failed );
       saw = true;
       break;
     }
@@ -465,6 +560,7 @@ TEST( StereoVoOutlierReoptTest, Lm2FailureFallsBackToLm1Cull )
     if ( r_on.diagnostics.outliers_culled >= 4U )
     {
       EXPECT_FALSE( r_on.diagnostics.outlier_reopt );
+      EXPECT_EQ( r_on.diagnostics.outlier_reopt_rounds, 0U );
       EXPECT_TRUE( r_on.diagnostics.outlier_reopt_failed );
       EXPECT_GE( r_on.diagnostics.outliers_culled, 4U );
       EXPECT_TRUE( r_on.estimate->T_W_B.matrix().isApprox(
@@ -478,8 +574,9 @@ TEST( StereoVoOutlierReoptTest, Lm2FailureFallsBackToLm1Cull )
   EXPECT_TRUE( saw ) << "max_culled=" << max_culled;
 }
 
-TEST( StereoVoOutlierReoptTest, NoSecondCullAfterLm2 )
+TEST( StereoVoOutlierReoptTest, CullsAfterReoptLm )
 {
+  // ④e allows mean-cull after a successful reopt LM (replaces NoSecondCull).
   const auto                    calibration = makeCalibration();
   const auto                    ids         = sequentialIds( kDenseLandmarks.size(), 1 );
   const auto                    poses       = translatingPoses( 12, 0.05 );
@@ -487,6 +584,7 @@ TEST( StereoVoOutlierReoptTest, NoSecondCullAfterLm2 )
 
   EstimatorOptions options_on      = defaultReoptOptions();
   options_on.huber_k_px            = 0.0;
+  options_on.max_outlier_reopts    = 1;
   EstimatorOptions options_off     = options_on;
   options_off.enable_outlier_reopt = false;
 
@@ -508,14 +606,17 @@ TEST( StereoVoOutlierReoptTest, NoSecondCullAfterLm2 )
     const auto r_off = est_off.update( measurement );
     ASSERT_EQ( r_on.status, UpdateStatus::kOk ) << r_on.message;
     ASSERT_EQ( r_off.status, UpdateStatus::kOk ) << r_off.message;
-    if ( r_on.diagnostics.outliers_culled >= 4U )
+    if ( r_on.diagnostics.outliers_culled >= 4U ||
+         r_off.diagnostics.outliers_culled >= 4U )
     {
+      EXPECT_EQ( r_on.status, UpdateStatus::kOk );
       EXPECT_TRUE( r_on.diagnostics.outlier_reopt );
-      // LM₂ must not run a second mean-cull: culled count matches reopt-off twin.
-      EXPECT_EQ( r_on.diagnostics.outliers_culled,
+      EXPECT_EQ( r_on.diagnostics.outlier_reopt_rounds, 1U );
+      EXPECT_FALSE( r_on.diagnostics.outlier_reopt_failed );
+      // Reopt-then-cull may cull at least as many as reopt-off (second wave
+      // often 0 on this fixture — rounds==1 + kOk is the hard floor).
+      EXPECT_GE( r_on.diagnostics.outliers_culled,
                  r_off.diagnostics.outliers_culled );
-      EXPECT_EQ( r_on.diagnostics.outliers_culled_unique,
-                 r_off.diagnostics.outliers_culled_unique );
       saw = true;
       break;
     }

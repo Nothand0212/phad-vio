@@ -89,4 +89,25 @@ namespace
     EXPECT_THROW( snap.set( "", 1.0 ), std::invalid_argument );
   }
 
+  TEST( ConfigSnapshotTest, MaxOutlierReoptsChangesConfigHash )
+  {
+    ConfigSnapshot defaults;
+    defaults.set( "estimator.enable_outlier_reopt", true );
+    defaults.set( "estimator.max_outlier_reopts",
+                  static_cast<std::int64_t>( 3 ) );
+
+    ConfigSnapshot override_max;
+    override_max.set( "estimator.enable_outlier_reopt", true );
+    override_max.set( "estimator.max_outlier_reopts",
+                      static_cast<std::int64_t>( 1 ) );
+
+    EXPECT_NE( defaults.hash8(), override_max.hash8() );
+    EXPECT_NE( defaults.canonicalText().find(
+                   "estimator.max_outlier_reopts=3" ),
+               std::string::npos );
+    EXPECT_NE( override_max.canonicalText().find(
+                   "estimator.max_outlier_reopts=1" ),
+               std::string::npos );
+  }
+
 }  // namespace

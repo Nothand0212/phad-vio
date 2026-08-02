@@ -327,6 +327,11 @@ namespace phad::estimator
         throw std::invalid_argument(
             "EstimatorOptions.outlier_avg_reproj_px must be > 0" );
       }
+      if ( options.max_outlier_reopts < 0 )
+      {
+        throw std::invalid_argument(
+            "EstimatorOptions.max_outlier_reopts must be >= 0" );
+      }
     }
 
     void eraseLandmarkFromWindow( LandmarkId id )
@@ -696,6 +701,81 @@ namespace phad::estimator
         ++dropped;
       }
       return dropped;
+    }
+
+    // Returns mean-cull count this pass. Cheirality ids are appended to
+    // frame_culled but do not count toward the reopt trigger.
+    [[nodiscard]] std::uint32_t runCheiralityAndMeanCull(
+        const gtsam::Values&               optimized,
+        const gtsam::NonlinearFactorGraph& graph_for_scoring,
+        std::vector<LandmarkId>&           frame_culled,
+        std::uint32_t&                     outliers_culled_total,
+        std::uint32_t&                     outliers_culled_unique_total,
+        std::uint32_t&                     num_cheirality_inout )
+    {
+      const std::uint32_t cheirality_after = countCheiralityFactors(
+          graph_for_scoring, optimized, calibration.fxPixels() );
+      const std::uint32_t dropped =
+          dropCheiralityLandmarks( optimized, frame_culled );
+      num_cheirality_inout = std::max(
+          num_cheirality_inout, std::max( cheirality_after, dropped ) );
+
+      std::uint32_t culled_round = 0;
+      if ( !options.enable_outlier_cull )
+      {
+        return culled_round;
+      }
+
+      std::vector<LandmarkId> candidate_ids;
+      candidate_ids.reserve( landmarks_W.size() );
+      for ( const auto& [ id, _unused ] : landmarks_W )
+      {
+        candidate_ids.push_back( id );
+      }
+      for ( const LandmarkId id : candidate_ids )
+      {
+        double      sum_norm  = 0.0;
+        std::size_t n_factors = 0;
+        for ( const auto& factor : graph_for_scoring )
+        {
+          if ( factor == nullptr )
+          {
+            continue;
+          }
+          const auto* stereo =
+              dynamic_cast<const gtsam::GenericStereoFactor<gtsam::Pose3,
+                                                            gtsam::Point3>*>(
+                  factor.get() );
+          if ( stereo == nullptr )
+          {
+            continue;
+          }
+          if ( stereo->key2() != L( id ) )
+          {
+            continue;
+          }
+          sum_norm += stereo->unwhitenedError( optimized ).norm();
+          ++n_factors;
+        }
+        if ( n_factors < 4 )
+        {
+          continue;
+        }
+        const double score = sum_norm / static_cast<double>( n_factors );
+        if ( score > options.outlier_avg_reproj_px )
+        {
+          landmarks_W.erase( id );
+          eraseLandmarkFromWindow( id );
+          frame_culled.push_back( id );
+          ++culled_round;
+          ++outliers_culled_total;
+          if ( culled_ids_.insert( id ).second )
+          {
+            ++outliers_culled_unique_total;
+          }
+        }
+      }
+      return culled_round;
     }
   };
 
@@ -1096,70 +1176,16 @@ namespace phad::estimator
       }
     }
 
-    const std::uint32_t cheirality_after = countCheiralityFactors(
-        graph, optimized, m_impl->calibration.fxPixels() );
-    const std::uint32_t dropped =
-        m_impl->dropCheiralityLandmarks( optimized, frame_culled );
-    result.diagnostics.num_cheirality =
-        std::max( cheirality_before, std::max( cheirality_after, dropped ) );
+    result.diagnostics.num_cheirality = cheirality_before;
 
     std::uint32_t outliers_culled        = 0;
     std::uint32_t outliers_culled_unique = 0;
-    if ( m_impl->options.enable_outlier_cull )
-    {
-      std::vector<LandmarkId> candidate_ids;
-      candidate_ids.reserve( m_impl->landmarks_W.size() );
-      for ( const auto& [ id, _unused ] : m_impl->landmarks_W )
-      {
-        candidate_ids.push_back( id );
-      }
-      for ( const LandmarkId id : candidate_ids )
-      {
-        double      sum_norm  = 0.0;
-        std::size_t n_factors = 0;
-        for ( const auto& factor : graph )
-        {
-          if ( factor == nullptr )
-          {
-            continue;
-          }
-          const auto* stereo =
-              dynamic_cast<const gtsam::GenericStereoFactor<gtsam::Pose3,
-                                                            gtsam::Point3>*>(
-                  factor.get() );
-          if ( stereo == nullptr )
-          {
-            continue;
-          }
-          if ( stereo->key2() != L( id ) )
-          {
-            continue;
-          }
-          sum_norm += stereo->unwhitenedError( optimized ).norm();
-          ++n_factors;
-        }
-        if ( n_factors < 4 )
-        {
-          continue;
-        }
-        const double score =
-            sum_norm / static_cast<double>( n_factors );
-        if ( score > m_impl->options.outlier_avg_reproj_px )
-        {
-          m_impl->landmarks_W.erase( id );
-          m_impl->eraseLandmarkFromWindow( id );
-          frame_culled.push_back( id );
-          ++outliers_culled;
-          if ( m_impl->culled_ids_.insert( id ).second )
-          {
-            ++outliers_culled_unique;
-          }
-        }
-      }
-    }
-    result.diagnostics.outliers_culled        = outliers_culled;
-    result.diagnostics.outliers_culled_unique = outliers_culled_unique;
-    // Full-graph RMS (includes factors for just-culled ids) = pre-cull quality.
+    std::uint32_t culled_round           = m_impl->runCheiralityAndMeanCull(
+        optimized, graph, frame_culled, outliers_culled, outliers_culled_unique,
+        result.diagnostics.num_cheirality );
+
+    // Full-graph RMS on LM₁ graph/values (includes just-culled ids) =
+    // pre-cull quality; contract unchanged by multi-round reopt.
     result.diagnostics.reproj_rms_after_px =
         stereoReprojRms( graph, optimized );
     // Slice ④ after_cull initial value (final when reopt is skipped / fails).
@@ -1170,35 +1196,38 @@ namespace phad::estimator
           graph, optimized, m_impl->landmarks_W );
     }
 
-    bool outlier_reopt        = false;
-    bool outlier_reopt_failed = false;
-    if ( m_impl->options.enable_outlier_reopt && outliers_culled >= 4U )
+    std::uint32_t rounds               = 0;
+    bool          outlier_reopt_failed = false;
+    while ( m_impl->options.enable_outlier_reopt &&
+            rounds <
+                static_cast<std::uint32_t>( m_impl->options.max_outlier_reopts ) &&
+            culled_round >= 4U )
     {
-      // Local snapshot: LM₂ failure rolls back to LM₁ write-back + cull only.
-      const auto window_after_cull    = m_impl->window;
-      const auto landmarks_after_cull = m_impl->landmarks_W;
+      // Snapshot: failed round rolls back to pre-round window/landmarks.
+      const auto window_snap    = m_impl->window;
+      const auto landmarks_snap = m_impl->landmarks_W;
 
-      gtsam::NonlinearFactorGraph graph2;
-      gtsam::Values               values2;
-      std::uint64_t               prior_key2     = 0;
-      std::uint32_t               num_landmarks2 = 0;
-      m_impl->buildGraph( graph2, values2, prior_key2, num_landmarks2 );
-      (void)prior_key2;
-      (void)num_landmarks2;
+      gtsam::NonlinearFactorGraph g_r;
+      gtsam::Values               v_r;
+      std::uint64_t               prior_key_r = 0;
+      std::uint32_t               n_lm_r      = 0;
+      m_impl->buildGraph( g_r, v_r, prior_key_r, n_lm_r );
+      (void)prior_key_r;
+      (void)n_lm_r;
 
       try
       {
-        gtsam::LevenbergMarquardtOptimizer optimizer2( graph2, values2 );
-        const gtsam::Values                optimized2 = optimizer2.optimize();
+        gtsam::LevenbergMarquardtOptimizer opt( g_r, v_r );
+        const gtsam::Values                optimized_r = opt.optimize();
 
         for ( const WindowFrame& frame : m_impl->window )
         {
-          if ( !optimized2.exists( X( frame.frame_index ) ) )
+          if ( !optimized_r.exists( X( frame.frame_index ) ) )
           {
             throw std::runtime_error( "optimized values missing a window pose" );
           }
-          const Eigen::Isometry3d T_W_B =
-              toIsometry( optimized2.at<gtsam::Pose3>( X( frame.frame_index ) ) );
+          const Eigen::Isometry3d T_W_B = toIsometry(
+              optimized_r.at<gtsam::Pose3>( X( frame.frame_index ) ) );
           if ( !isFinite( T_W_B ) )
           {
             throw std::runtime_error( "non-finite optimized pose" );
@@ -1208,18 +1237,18 @@ namespace phad::estimator
         for ( WindowFrame& frame : m_impl->window )
         {
           frame.T_W_B = toIsometry(
-              optimized2.at<gtsam::Pose3>( X( frame.frame_index ) ) );
+              optimized_r.at<gtsam::Pose3>( X( frame.frame_index ) ) );
         }
 
         for ( auto& [ id, point_W ] : m_impl->landmarks_W )
         {
           const gtsam::Key key = L( id );
-          if ( !optimized2.exists( key ) )
+          if ( !optimized_r.exists( key ) )
           {
             continue;
           }
-          const gtsam::Point3 point = optimized2.at<gtsam::Point3>( key );
-          point_W                   = Eigen::Vector3d( point.x(), point.y(), point.z() );
+          const gtsam::Point3 point = optimized_r.at<gtsam::Point3>( key );
+          point_W = Eigen::Vector3d( point.x(), point.y(), point.z() );
           if ( !isFinite( point_W ) )
           {
             throw std::runtime_error( "non-finite optimized landmark" );
@@ -1227,29 +1256,35 @@ namespace phad::estimator
         }
 
         result.diagnostics.lm_iterations +=
-            static_cast<std::uint32_t>( optimizer2.iterations() );
-        outlier_reopt = true;
-        after_cull    = stereoReprojRms( graph2, optimized2 );
+            static_cast<std::uint32_t>( opt.iterations() );
+        ++rounds;
+        after_cull   = stereoReprojRms( g_r, optimized_r );
+        culled_round = m_impl->runCheiralityAndMeanCull(
+            optimized_r, g_r, frame_culled, outliers_culled,
+            outliers_culled_unique, result.diagnostics.num_cheirality );
       }
       catch ( const gtsam::IndeterminantLinearSystemException& )
       {
-        m_impl->window       = window_after_cull;
-        m_impl->landmarks_W  = landmarks_after_cull;
-        outlier_reopt        = false;
+        m_impl->window       = window_snap;
+        m_impl->landmarks_W  = landmarks_snap;
         outlier_reopt_failed = true;
+        break;
       }
       catch ( const std::exception& )
       {
-        m_impl->window       = window_after_cull;
-        m_impl->landmarks_W  = landmarks_after_cull;
-        outlier_reopt        = false;
+        m_impl->window       = window_snap;
+        m_impl->landmarks_W  = landmarks_snap;
         outlier_reopt_failed = true;
+        break;
       }
     }
 
-    result.diagnostics.reproj_rms_after_cull_px = after_cull;
-    result.diagnostics.outlier_reopt            = outlier_reopt;
+    result.diagnostics.outliers_culled          = outliers_culled;
+    result.diagnostics.outliers_culled_unique   = outliers_culled_unique;
+    result.diagnostics.outlier_reopt_rounds     = rounds;
+    result.diagnostics.outlier_reopt            = ( rounds > 0U );
     result.diagnostics.outlier_reopt_failed     = outlier_reopt_failed;
+    result.diagnostics.reproj_rms_after_cull_px = after_cull;
     result.diagnostics.max_window_pose_shift_m  = max_shift_m;
     result.diagnostics.culled_landmark_ids      = std::move( frame_culled );
 

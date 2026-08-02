@@ -18,7 +18,10 @@
   `false`；默认不传 flag 即 estimator 默认 `true`。该键进
   `flattenConfig` → `config_hash`。Slice ④d：
   `--outlier-avg-reproj-px <v>`（须 `> 0`）覆盖
-  `estimator.outlier_avg_reproj_px`（默认 `4.0`），同样进 `config_hash`
+  `estimator.outlier_avg_reproj_px`（默认 `4.0`），同样进 `config_hash`。
+  Slice ④e：`--max-outlier-reopts <n>`（须 `≥ 0`）覆盖
+  `estimator.max_outlier_reopts`（默认 `3`），进 `flattenConfig` →
+  `config_hash`；非法值非 0 退出
 - 行为保持型重构：先在当前 commit 产出仓库外参考产物，再改代码并以逐字节 diff 验收
 
 ## `diag.csv` 合同（M3.3）
@@ -35,10 +38,12 @@ M3.3 Slice ④ **有意**再扩到 **18 列**：在 `pnp_inliers` 后追加
 `UpdateDiagnostics` 同名字段一致）。这不是格式漂移——bench / probe 共用
 `writeDiagCsv()`，旧 13/14/16 列参考产物不再适用于 Slice ④ 及之后。
 
-Slice ④b（剔点后 LM₂）**保持 18 列**：不追加 `outlier_reopt` /
-`outlier_reopt_failed`。成功 reopt 只进 `FrameCounts.outlier_reopts` →
-`summary.json` 的 `robustness.outlier_reopts`，以及 probe stdout
-`outlier_reopts=`；失败回退不计、也不进 `warnings`。
+Slice ④b / ④e（剔点后 reopt）**保持 18 列**：不追加 `outlier_reopt` /
+`outlier_reopt_rounds` / `outlier_reopt_failed`。成功 reopt **次数**
+（Σ `outlier_reopt_rounds`，非「触发过 reopt 的帧数」）进
+`FrameCounts.outlier_reopts` → `summary.json` 的
+`robustness.outlier_reopts`，以及 probe stdout `outlier_reopts=`；失败回退
+不计、也不进 `warnings`。
 
 健康序列（如 MH_01）仍应 `segment_id` 全程为 0；断裂序列上段边界表现为
 该列跳变。`summary.json` 侧对应 `robustness.reanchors` /

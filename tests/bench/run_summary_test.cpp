@@ -139,6 +139,8 @@ namespace
 
   TEST( RunSummaryTest, OutlierReoptCounterSerialize )
   {
+    // Slice ④e: outlier_reopts is a successful reopt *round* count
+    // (sum of UpdateDiagnostics.outlier_reopt_rounds), not frames-with-reopt.
     RunSummary summary;
     summary.status                    = RunStatus::kCompleted;
     summary.sequence                  = "MH_05_difficult";
