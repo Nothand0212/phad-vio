@@ -32,10 +32,9 @@
   `drops_skipped`（A/B 诊断臂）。`--skip-drop-min-culled <n>`（须 `≥ 0`）覆盖
   阈值；非法值非 0 退出。两 session 键均进 `flattenConfig` →
   `config_hash`。跳过 drop **不**进 `warnings`。
-- Slice ④g：skip 当帧未 drop 的完整 `culled_landmark_ids` 在下一帧
-  `process` 前延后 `dropTracks`（`pending_drop`）；无新 CLI /
-  `config_hash` 键；`deferred_drops` / `deferred_drop_ids` 进
-  `summary.json` 的 `robustness.*` 与 probe stdout。
+- Slice ④g 编排已回退：默认恢复 ④f「skip 则不 drop」；`deferred_drops` /
+  `deferred_drop_ids` 计数合同仍保留（默认恒 0）。事后诊断见
+  `docs/research/m3.3-slice4g-postmortem.md`（④g ≡ ④e bit-identical）。
 - MH_05 Probe B：`--probe-b <path>` 为 CLI-only（bench / probe）；**不**进
   `flattenConfig` / `config_hash`，**不**改 18 列 `diag.csv`。
 - 行为保持型重构：先在当前 commit 产出仓库外参考产物，再改代码并以逐字节 diff 验收
