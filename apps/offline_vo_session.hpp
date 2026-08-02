@@ -86,6 +86,8 @@ namespace phad::apps
     std::uint64_t outlier_reopts = 0;
     /// Frames where dropTracks was skipped because outliers_culled >= N.
     std::uint64_t drops_skipped = 0;
+    std::uint64_t deferred_drops    = 0;  // 冲刷次数
+    std::uint64_t deferred_drop_ids = 0;  // 累计 drop 的 id 个数
   };
 
   struct StageTiming

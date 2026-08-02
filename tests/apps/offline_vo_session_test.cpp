@@ -174,6 +174,8 @@ namespace
     EXPECT_TRUE( options.drop_culled_tracks );
     FrameCounts counts;
     EXPECT_EQ( counts.drops_skipped, 0U );
+    EXPECT_EQ( counts.deferred_drops, 0U );
+    EXPECT_EQ( counts.deferred_drop_ids, 0U );
   }
 
   TEST( OfflineVoSessionTest,
