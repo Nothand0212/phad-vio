@@ -34,6 +34,14 @@ namespace phad::apps
     estimator::EstimatorOptions    estimator;
     std::optional<std::uint64_t>   max_frames;
     bool                           collect_timing = true;
+    /// After estimator cull/cheirality erasures, drop matching frontend
+    /// tracks. Default true (Slice ④c). False is A/B only — do not use as
+    /// a production default without a MH_01 gate.
+    bool drop_culled_tracks = true;
+    /// When drop_culled_tracks is true, skip dropTracks when mean-cull
+    /// outliers_culled >= this threshold. Default 4 (Slice ④f). 0 disables
+    /// skip-by-threshold (always drop when list non-empty).
+    int skip_drop_min_culled = 4;
   };
 
   struct VoDiagRow
@@ -74,6 +82,8 @@ namespace phad::apps
     std::uint64_t outliers_culled_unique = 0;
     /// Cumulative successful reopt *rounds* (sum of outlier_reopt_rounds).
     std::uint64_t outlier_reopts = 0;
+    /// Frames where dropTracks was skipped because outliers_culled >= N.
+    std::uint64_t drops_skipped = 0;
   };
 
   struct StageTiming

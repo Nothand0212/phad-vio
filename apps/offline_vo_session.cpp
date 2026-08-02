@@ -202,12 +202,24 @@ namespace phad::apps
       const auto frame_end     = estimator_end;
 
       // Composition-root feedback: drop frontend tracks for ids the
-      // estimator permanently removed this frame. Runs whenever the list
-      // is non-empty — including block_culled_rebirth=false (design §5).
+      // estimator permanently removed this frame. Default on (④c); two-level
+      // gate (④f): drop_culled_tracks then skip when outliers_culled >= N.
       // Does not enter warnings.
-      if ( !update.diagnostics.culled_landmark_ids.empty() )
+      if ( options.drop_culled_tracks &&
+           !update.diagnostics.culled_landmark_ids.empty() )
       {
-        tracker.dropTracks( update.diagnostics.culled_landmark_ids );
+        const bool skip =
+            options.skip_drop_min_culled > 0 &&
+            update.diagnostics.outliers_culled >=
+                static_cast<std::uint32_t>( options.skip_drop_min_culled );
+        if ( skip )
+        {
+          ++result.counts.drops_skipped;
+        }
+        else
+        {
+          tracker.dropTracks( update.diagnostics.culled_landmark_ids );
+        }
       }
 
       if ( result.counts.image_frames == 0U )
