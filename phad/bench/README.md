@@ -79,7 +79,7 @@ M3.3 在 `summary.json` 追加段 / PnP / 剔点可观测性字段（`schema_ver
 | `robustness.pnp_fallbacks` | 正常路径上本可尝试 PnP 但未采用的帧（对应点不足 / RANSAC 失败 / inliers 不足）；首段 seed 与 re-anchor 不计 |
 | `robustness.outliers_culled` | 全 run 累计 mean-reproj 删点**次数**（按帧累加本帧删点数） |
 | `robustness.outliers_culled_unique` | 全 run 累计去重 id 数；`outliers_culled / outliers_culled_unique` 为重复删除率（>1 表示同 id「删→再喂→重建→再删」空转） |
-| `robustness.outlier_reopts` | 全 run 累计成功 LM₂ 帧数（仅 `UpdateDiagnostics.outlier_reopt==true`；失败回退不计） |
+| `robustness.outlier_reopts` | 全 run 累计成功 reopt **次数**（Σ `UpdateDiagnostics.outlier_reopt_rounds`；失败回退的轮次不计；不是「触发过 reopt 的帧数」） |
 
 由 `OfflineVoSession` 统计后经 `phad_vo_bench` 写入；`bench_table.py`
 可据此区分「算法变好」与「re-anchor / PnP fallback / 剔点空转 /
@@ -92,4 +92,5 @@ M3.3 在 `summary.json` 追加段 / PnP / 剔点可观测性字段（`schema_ver
 `estimator.min_pnp_inliers`；Slice ④ 再纳入
 `estimator.enable_outlier_cull` / `estimator.outlier_avg_reproj_px`；
 Slice ④b 再纳入 `estimator.enable_outlier_reopt`（apps 侧
-`flattenConfig` 展平）；新配置落新目录。
+`flattenConfig` 展平）；Slice ④e 再纳入 `estimator.max_outlier_reopts`
+（默认 `3`；bench `--max-outlier-reopts` 可覆盖）；新配置落新目录。

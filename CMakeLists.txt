@@ -375,10 +375,15 @@ if(PHAD_BUILD_TESTS)
 
   add_executable(phad_apps_tests
     tests/apps/offline_vo_session_test.cpp
+    tests/apps/phad_vo_bench_cli_test.cpp
   )
   target_link_libraries(phad_apps_tests PRIVATE
     phad_offline_vo_session GTest::gtest_main opencv_imgcodecs
   )
+  target_compile_definitions(phad_apps_tests PRIVATE
+    PHAD_VO_BENCH_PATH="$<TARGET_FILE:phad_vo_bench>"
+  )
+  add_dependencies(phad_apps_tests phad_vo_bench)
   target_compile_options(phad_apps_tests PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
   )

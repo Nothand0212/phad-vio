@@ -46,7 +46,8 @@ namespace
       "                     [--max-frames <n>] [--force]\n"
       "                     [--no-outlier-cull] [--no-outlier-reopt]\n"
       "                     [--allow-culled-rebirth]\n"
-      "                     [--outlier-avg-reproj-px <v>]\n";
+      "                     [--outlier-avg-reproj-px <v>]\n"
+      "                     [--max-outlier-reopts <n>]\n";
 
 #ifndef PHAD_SOURCE_DIR
 #define PHAD_SOURCE_DIR ""
@@ -71,6 +72,7 @@ namespace
     bool                         no_outlier_reopt     = false;
     bool                         allow_culled_rebirth = false;
     std::optional<double>        outlier_avg_reproj_px;
+    std::optional<int>           max_outlier_reopts;
   };
 
   [[nodiscard]] bool parseDouble( std::string_view text, double& value )
@@ -208,6 +210,19 @@ namespace
           return false;
         }
         arguments.outlier_avg_reproj_px = px;
+      }
+      else if ( flag == "--max-outlier-reopts" )
+      {
+        std::uint64_t parsed = 0;
+        if ( !parseUint64( value, parsed ) ||
+             parsed > static_cast<std::uint64_t>(
+                          std::numeric_limits<int>::max() ) )
+        {
+          std::cerr
+              << "--max-outlier-reopts expects a non-negative integer\n";
+          return false;
+        }
+        arguments.max_outlier_reopts = static_cast<int>( parsed );
       }
       else
       {
@@ -348,6 +363,8 @@ namespace
               estimator.outlier_avg_reproj_px );
     snap.set( "estimator.enable_outlier_reopt",
               estimator.enable_outlier_reopt );
+    snap.set( "estimator.max_outlier_reopts",
+              static_cast<std::int64_t>( estimator.max_outlier_reopts ) );
     snap.set( "estimator.block_culled_rebirth",
               estimator.block_culled_rebirth );
 
@@ -472,6 +489,11 @@ namespace
     {
       session_options.estimator.outlier_avg_reproj_px =
           *arguments.outlier_avg_reproj_px;
+    }
+    if ( arguments.max_outlier_reopts.has_value() )
+    {
+      session_options.estimator.max_outlier_reopts =
+          *arguments.max_outlier_reopts;
     }
 
     phad::bench::ConfigSnapshot config =

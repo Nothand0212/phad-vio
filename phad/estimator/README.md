@@ -145,11 +145,13 @@ backproject。被删 id 的 `track_times` / `observationTimestamps()` **仍保�
 | `reproj_rms_after_cull_px` | **有成功 reopt**：最近成功轮 LM 后 graph RMS；**无 reopt / 首趟即失败**：Slice ④ 语义（cull 关时 `== reproj_rms_after_px`；cull 开时跳过已删 id 的 graph RMS） |
 | `outlier_reopt` / `outlier_reopt_rounds` / `outlier_reopt_failed` | `outlier_reopt == (rounds > 0)`；成功轮数；是否有轮次失败已回退；**均不**进 `diag.csv` |
 
-session 累计成功 reopt 为 `FrameCounts.outlier_reopts` →
+session 累计成功 reopt **次数**为
+`FrameCounts.outlier_reopts`（Σ `outlier_reopt_rounds`，非帧数）→
 `summary.json` 的 `robustness.outlier_reopts`。详见
 `docs/research/m3.3-slice4-outlier-cull-design.md`、
-`docs/research/m3.3-slice4b-outlier-reopt-design.md` 与
-`docs/research/m3.3-slice4c-cull-track-drop-design.md`。
+`docs/research/m3.3-slice4b-outlier-reopt-design.md`、
+`docs/research/m3.3-slice4c-cull-track-drop-design.md` 与
+`docs/research/m3.3-slice4e-multiround-reopt-design.md`。
 
 ## 诊断 CSV 合同（probe）
 
