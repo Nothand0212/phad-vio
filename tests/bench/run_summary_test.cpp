@@ -96,6 +96,7 @@ namespace
     EXPECT_EQ( root.at( "robustness" ).at( "outliers_culled" ), 0 );
     EXPECT_EQ( root.at( "robustness" ).at( "outliers_culled_unique" ), 0 );
     EXPECT_EQ( root.at( "robustness" ).at( "outlier_reopts" ), 0 );
+    EXPECT_EQ( root.at( "robustness" ).at( "drops_skipped" ), 0 );
   }
 
   TEST( RunSummaryTest, SegmentsAndReanchorsSerialize )
@@ -149,6 +150,17 @@ namespace
     const json root = json::parse( summary.toJson() );
     EXPECT_EQ( root.at( "robustness" ).at( "outlier_reopts" ), 7 );
     EXPECT_EQ( root.at( "schema_version" ), 1 );
+  }
+
+  TEST( RunSummaryTest, DropsSkippedCounterSerialize )
+  {
+    RunSummary summary;
+    summary.status                   = RunStatus::kCompleted;
+    summary.sequence                 = "MH_05_difficult";
+    summary.robustness.drops_skipped = 3;
+
+    const json root = json::parse( summary.toJson() );
+    EXPECT_EQ( root.at( "robustness" ).at( "drops_skipped" ), 3 );
   }
 
   TEST( RunMetaTest, SerializesCodeConfigAndPaths )

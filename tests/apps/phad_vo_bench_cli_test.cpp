@@ -87,6 +87,30 @@ namespace
     std::filesystem::remove_all( root );
   }
 
+  TEST( VoBenchCliTest, RejectsNegativeSkipDropMinCulled )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_reject_skip_neg";
+    std::filesystem::remove_all( root );
+    std::filesystem::create_directories( root );
+    const auto stdout_path = root / "stdout.txt";
+    const auto stderr_path = root / "stderr.txt";
+
+    const int exit_code = runBench(
+        "/nonexistent/sequence --out \"" + ( root / "out" ).string() +
+            "\" --sequence-name cli_reject --skip-drop-min-culled -1",
+        stdout_path, stderr_path );
+
+    EXPECT_NE( exit_code, 0 );
+    const std::string err = readFile( stderr_path );
+    EXPECT_NE( err.find( "--skip-drop-min-culled" ), std::string::npos );
+    EXPECT_NE( err.find( "non-negative" ), std::string::npos );
+
+    std::filesystem::remove_all( root );
+  }
+
   TEST( VoBenchCliTest, MaxOutlierReoptsOverrideChangesConfigHash )
   {
     ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
@@ -125,6 +149,47 @@ namespace
     EXPECT_NE( meta_default.find( "estimator.max_outlier_reopts=3" ),
                std::string::npos );
     EXPECT_NE( meta_max1.find( "estimator.max_outlier_reopts=1" ),
+               std::string::npos );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, SkipDropMinCulledOverrideChangesConfigHash )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_skip_drop_hash";
+    std::filesystem::remove_all( root );
+    const auto out_default = root / "out_default";
+    const auto out_zero    = root / "out_zero";
+    std::filesystem::create_directories( root );
+
+    const auto stdout_default = root / "stdout_default.txt";
+    const auto stderr_default = root / "stderr_default.txt";
+    const auto stdout_zero    = root / "stdout_zero.txt";
+    const auto stderr_zero    = root / "stderr_zero.txt";
+
+    (void)runBench( "/nonexistent/sequence --out \"" + out_default.string() +
+                        "\" --sequence-name hash_probe --force",
+                    stdout_default, stderr_default );
+    (void)runBench( "/nonexistent/sequence --out \"" + out_zero.string() +
+                        "\" --sequence-name hash_probe --force "
+                        "--skip-drop-min-culled 0",
+                    stdout_zero, stderr_zero );
+
+    const std::string hash_default =
+        extractConfigHash( readFile( stdout_default ) );
+    const std::string hash_zero = extractConfigHash( readFile( stdout_zero ) );
+    ASSERT_FALSE( hash_default.empty() ) << readFile( stderr_default );
+    ASSERT_FALSE( hash_zero.empty() ) << readFile( stderr_zero );
+    EXPECT_NE( hash_default, hash_zero );
+
+    const std::string meta_default = readFile( out_default / "meta.json" );
+    const std::string meta_zero    = readFile( out_zero / "meta.json" );
+    EXPECT_NE( meta_default.find( "session.skip_drop_min_culled=4" ),
+               std::string::npos );
+    EXPECT_NE( meta_zero.find( "session.skip_drop_min_culled=0" ),
                std::string::npos );
 
     std::filesystem::remove_all( root );

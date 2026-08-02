@@ -161,6 +161,7 @@ namespace phad::bench
         { "outliers_culled", robustness.outliers_culled },
         { "outliers_culled_unique", robustness.outliers_culled_unique },
         { "outlier_reopts", robustness.outlier_reopts },
+        { "drops_skipped", robustness.drops_skipped },
     };
 
     json timing_json = json{

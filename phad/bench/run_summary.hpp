@@ -72,6 +72,8 @@ namespace phad::bench
     std::uint64_t outliers_culled_unique = 0;
     /// Cumulative successful reopt *rounds* (times), not frames-with-reopt.
     std::uint64_t outlier_reopts = 0;
+    /// Frames where dropTracks was skipped because outliers_culled >= N.
+    std::uint64_t drops_skipped = 0;
   };
 
   struct StageTiming

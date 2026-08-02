@@ -263,16 +263,16 @@ adapter 移到独立的同步器——那里同时是 M4 的 IMU 包络与未来
 [M3.2 双目配对同步器](plans/2026-07-31_m3.2_stereo_pair_synchronizer_5b7d1c93.plan.md)。
 Issue：[#22](https://github.com/Nothand0212/phad-vio/issues/22)。
 
-### M3.3 VO 加固（依赖 M3.2；Slice ①②③④d 已完成；④e 部分完成；④/④b 不够；④c 部分；⑤ 先对齐再开）
+### M3.3 VO 加固（依赖 M3.2；Slice ①②③④d 已完成；④f 已完成；④e 部分完成；④/④b 不够；④c 部分；⑤ 先对齐再开）
 
 M3.2 全序列基线暴露的主导失败不是精度，而是一个**吸收态**：估计器一旦因
 `num_shared == 0` 拒帧，事务回滚会冻结窗口与 landmark 表，而前端跟踪断裂后
 重新检测会发放全新 `LandmarkId`，此后交集恒为空、永久拒帧。V1_03 上一帧异常
 废掉了随后 1906 帧。因此本阶段按失败驱动排序，恢复先于精度。
 
-范围（五片 + ④ 续片；Slice ①②③④d 已落地；④e 编码完成但 MH_05 不够；④/④b
-不够；④c 机制落地但曾硬门不够，由 ④d 阈值收口；⑤ MH_01 门控已满足，④e 未
-消化 MH_05 → **先对齐再开** ⑤）：
+范围（五片 + ④ 续片；Slice ①②③④d 已落地；④f skip-drop 已完成；④e 编码完成但 MH_05 不够；④/④b
+不够；④c 机制落地但曾硬门不够，由 ④d 阈值收口；⑤ MH_01 门控已满足，MH_05 债由 ④f 软改善
+至 ≈3.06 m 仍未 &lt;1 m → **先对齐再开** ⑤）：
 
 - **① 恢复（已完成）**：去掉 `num_shared == 0` 拒帧门，重叠断裂即以新 id 重建窗口，
   prior 打在最后一个被接受的位姿上（anchor 复用现有恒速位姿初值规则）；
@@ -303,9 +303,14 @@ M3.2 全序列基线暴露的主导失败不是精度，而是一个**吸收态*
   （`0ced28b` / `default_3a21162e`）；MH_01 不回归（ATE **0.0987839**）；
   MH_05 与 ④d **持平**（**4.565**，无软改善）→ **停全序列**；多轮预算未动用；
   设计见 [Slice ④e](research/m3.3-slice4e-multiround-reopt-design.md)；
+- **④f 大剔跳过 dropTracks（已完成）**：`session.skip_drop_min_culled=4` 已编码
+  （`c446ac5` / `default_a5e90dc7`）；MH_01 硬门 **PASS**（ATE **0.0987839**；
+  `drops_skipped=0`）；MH_05 软门 **PASS**（ATE **3.057** vs ④e **4.565**；
+  `drops_skipped=1`）→ **全序列未跑**；设计见
+  [Slice ④f](research/m3.3-slice4f-skip-drop-design.md)；
 - **⑤** 关键帧策略（视差、跟踪数、时间间隔）— MH_01 硬门已满足；会改
-  `est.tum` 输出语义且与 M4 IMU 预积分边界耦合；④e **不够**消化 MH_05 →
-  ⑤ **先对齐再开**（勿在 ④e 债未决时直接开工）。
+  `est.tum` 输出语义且与 M4 IMU 预积分边界耦合；MH_05 债 ④f 软改善后仍 ≈3 m
+  → ⑤ **先对齐再开**（勿在 MH_05 债未决时直接开工）。
 
 Slice ① 出口（commit `0b0cd34` / `default_030a0197`，对照 `4780660`）：
 
@@ -402,12 +407,26 @@ Slice ④e 出口（commit `0ced28b` / `default_3a21162e`；
   [Slice ④e 计划](plans/2026-08-02_m3.3_slice4e_multiround_reopt_e0517b9a.plan.md)、
   [基线](research/m3.3-slice4-baseline.md) §10。
 
+Slice ④f 出口（commit `c446ac5` / `default_a5e90dc7`；
+**已完成** — MH_01 硬门 + MH_05 软门通过；全序列未跑）：
+
+- 增量键：`session.drop_culled_tracks=true`；`session.skip_drop_min_culled=4`
+  （相对 ④e `3a21162e`）；
+- MH_01 ATE **0.0987839** ≤ 0.098784，`seg/re/failed=1/0/0`，`drops_skipped=0`，
+  culled 3/3；
+- MH_05 ATE **3.056878** vs ④e **4.565065**（Δ≈−1.51）；优于 no_drop A/B
+  **3.972**；`drops_skipped=1`；`seg/re/failed=1/0/0`；completion ≈0.998；
+- **未跑**其余 EuRoC；
+- 设计 / 数字见
+  [Slice ④f 设计](research/m3.3-slice4f-skip-drop-design.md)、
+  [基线](research/m3.3-slice4-baseline.md) §11。
+
 后续切片出口：
 
 - 每次改动用 `phad_vo_bench` 产出前后数字；无法测量的改动不进入本阶段；
 - **`MH_01` 作不回归锚**（ATE 不劣于 **0.098784** m，且 `reanchors=0`）；
-- MH_05 / 发散债：④e **不够**（持平）→ 下一刀建议去 Huber 末轮 / 观测级外点
-  续片（单独设计）；⑤ 门控已满足但与 M4 耦合，**先对齐再开**。
+- MH_05 / 发散债：④f 软改善至 **≈3.06 m**（仍非 &lt;1 m）→ 下一刀建议去 Huber
+  末轮 / 观测级外点续片（单独设计）；⑤ 门控已满足但与 M4 耦合，**先对齐再开**。
 
 设计见
 [M3.3 VO 加固设计](research/m3.3-vo-hardening-design.md)、
@@ -417,7 +436,8 @@ Slice ④e 出口（commit `0ced28b` / `default_3a21162e`；
 [M3.3 Slice ④b 二次 LM 设计](research/m3.3-slice4b-outlier-reopt-design.md)、
 [M3.3 Slice ④c cull-track-drop 设计](research/m3.3-slice4c-cull-track-drop-design.md)、
 [M3.3 Slice ④d 阈值设计](research/m3.3-slice4d-cull-threshold-design.md)、
-[M3.3 Slice ④e 多轮 reopt 设计](research/m3.3-slice4e-multiround-reopt-design.md)，
+[M3.3 Slice ④e 多轮 reopt 设计](research/m3.3-slice4e-multiround-reopt-design.md)、
+[M3.3 Slice ④f skip-drop 设计](research/m3.3-slice4f-skip-drop-design.md)，
 根因诊断见
 [M3.3 VO 崩溃根因诊断](research/m3.3-vo-collapse-diagnosis.md)，开源对照见
 [M3.3 VO 加固：开源实现对照](research/m3.3-vo-hardening-open-source-refs.md)、
@@ -435,7 +455,7 @@ Slice ④e 出口（commit `0ced28b` / `default_3a21162e`；
 [M3.3 Slice ④d](plans/2026-08-02_m3.3_slice4d_cull_threshold_ecdd49d4.plan.md)、
 [M3.3 Slice ④e](plans/2026-08-02_m3.3_slice4e_multiround_reopt_e0517b9a.plan.md)。
 Issue：[#23](https://github.com/Nothand0212/phad-vio/issues/23)（M3.3 总图）；
-Slice ④/④b/④c/④d/④e：[#24](https://github.com/Nothand0212/phad-vio/issues/24)。
+Slice ④/④b/④c/④d/④e/④f：[#24](https://github.com/Nothand0212/phad-vio/issues/24)。
 
 ## M4：接入 IMU
 
