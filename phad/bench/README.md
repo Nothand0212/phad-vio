@@ -81,6 +81,8 @@ M3.3 在 `summary.json` 追加段 / PnP / 剔点可观测性字段（`schema_ver
 | `robustness.outliers_culled_unique` | 全 run 累计去重 id 数；`outliers_culled / outliers_culled_unique` 为重复删除率（>1 表示同 id「删→再喂→重建→再删」空转） |
 | `robustness.outlier_reopts` | 全 run 累计成功 reopt **次数**（Σ `UpdateDiagnostics.outlier_reopt_rounds`；失败回退的轮次不计；不是「触发过 reopt 的帧数」） |
 | `robustness.drops_skipped` | 全 run 累计因 `outliers_culled ≥ session.skip_drop_min_culled` 跳过 `dropTracks` 的**帧数**（Slice ④f；`drop_culled_tracks=false` 时不计） |
+| `robustness.deferred_drops` | 全 run 累计 skip 后延后冲刷 `dropTracks` 的**次数**（Slice ④g） |
+| `robustness.deferred_drop_ids` | 全 run 累计延后 drop 的 id **个数**（Slice ④g） |
 
 由 `OfflineVoSession` 统计后经 `phad_vo_bench` 写入；`bench_table.py`
 可据此区分「算法变好」与「re-anchor / PnP fallback / 剔点空转 /

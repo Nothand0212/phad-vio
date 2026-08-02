@@ -652,6 +652,8 @@ namespace
         session.counts.outliers_culled_unique;
     summary.robustness.outlier_reopts = session.counts.outlier_reopts;
     summary.robustness.drops_skipped  = session.counts.drops_skipped;
+    summary.robustness.deferred_drops    = session.counts.deferred_drops;
+    summary.robustness.deferred_drop_ids = session.counts.deferred_drop_ids;
     for ( const auto& row : session.diag )
     {
       summary.robustness.cheirality += row.num_cheirality;
