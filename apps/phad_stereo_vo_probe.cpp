@@ -129,6 +129,9 @@ namespace
               << result.counts.outliers_culled_unique << '\n'
               << "outlier_reopts=" << result.counts.outlier_reopts << '\n'
               << "drops_skipped=" << result.counts.drops_skipped << '\n'
+              << "deferred_drops=" << result.counts.deferred_drops << '\n'
+              << "deferred_drop_ids=" << result.counts.deferred_drop_ids
+              << '\n'
               << "reproj_rms_after_median_px=" << result.reproj.median_px
               << '\n'
               << "reproj_rms_after_p95_px=" << result.reproj.p95_px << '\n'
