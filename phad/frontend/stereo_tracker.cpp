@@ -8,6 +8,7 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/video/tracking.hpp>
 #include <stdexcept>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -517,6 +518,21 @@ namespace phad::frontend
 
   StereoTracker& StereoTracker::operator=( StereoTracker&& ) noexcept =
       default;
+
+  void StereoTracker::dropTracks( std::span<const LandmarkId> ids )
+  {
+    if ( ids.empty() )
+    {
+      return;
+    }
+    const std::unordered_set<LandmarkId> drop_set( ids.begin(), ids.end() );
+    m_impl->tracks.erase(
+        std::remove_if( m_impl->tracks.begin(), m_impl->tracks.end(),
+                        [ &drop_set ]( const LiveTrack& track ) {
+                          return drop_set.count( track.id ) != 0U;
+                        } ),
+        m_impl->tracks.end() );
+  }
 
   FrameTracks StereoTracker::process( const sensor::StereoFrame& rectified )
   {

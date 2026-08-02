@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <span>
 
 #include "phad/camera/rectified_stereo_calibration.hpp"
 #include "phad/frontend/stereo_tracks.hpp"
@@ -45,17 +46,17 @@ namespace phad::frontend
    */
   struct StereoTrackerOptions
   {
-    int    max_tracks          = 200;
-    double quality_level       = 0.01;
-    double min_distance_px     = 20.0;
-    int    mask_radius_px      = 20;
-    int    lk_window_px        = 21;
-    int    lk_pyramid_levels   = 3;
-    double forward_backward_px = 0.5;
-    double max_epipolar_px     = 1.5;
-    double min_disparity_px    = 0.5;
-    double min_depth_m         = 0.3;
-    double max_depth_m         = 40.0;
+    int    max_tracks             = 200;
+    double quality_level          = 0.01;
+    double min_distance_px        = 20.0;
+    int    mask_radius_px         = 20;
+    int    lk_window_px           = 21;
+    int    lk_pyramid_levels      = 3;
+    double forward_backward_px    = 0.5;
+    double max_epipolar_px        = 1.5;
+    double min_disparity_px       = 0.5;
+    double min_depth_m            = 0.3;
+    double max_depth_m            = 40.0;
     int    stereo_sad_half_win_px = 7;
     int    stereo_row_tol_px      = 0;
     double stereo_bidir_px        = 0.5;
@@ -82,6 +83,11 @@ namespace phad::frontend
 
     [[nodiscard]] FrameTracks process(
         const sensor::StereoFrame& rectified );
+
+    /**
+     * @brief 按 LandmarkId 擦除存活 tracks；未知 id 忽略；不改 next_id。
+     */
+    void dropTracks( std::span<const LandmarkId> ids );
 
   private:
     struct Impl;
