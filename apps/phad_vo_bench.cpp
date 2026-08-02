@@ -45,7 +45,8 @@ namespace
       "                     [--errors-csv] [--repo <dir>]\n"
       "                     [--max-frames <n>] [--force]\n"
       "                     [--no-outlier-cull] [--no-outlier-reopt]\n"
-      "                     [--allow-culled-rebirth]\n";
+      "                     [--allow-culled-rebirth]\n"
+      "                     [--outlier-avg-reproj-px <v>]\n";
 
 #ifndef PHAD_SOURCE_DIR
 #define PHAD_SOURCE_DIR ""
@@ -69,6 +70,7 @@ namespace
     bool                         no_outlier_cull      = false;
     bool                         no_outlier_reopt     = false;
     bool                         allow_culled_rebirth = false;
+    std::optional<double>        outlier_avg_reproj_px;
   };
 
   [[nodiscard]] bool parseDouble( std::string_view text, double& value )
@@ -195,6 +197,17 @@ namespace
           return false;
         }
         arguments.max_frames = max_frames;
+      }
+      else if ( flag == "--outlier-avg-reproj-px" )
+      {
+        double px = 0.0;
+        if ( !parseDouble( value, px ) || !( px > 0.0 ) )
+        {
+          std::cerr
+              << "--outlier-avg-reproj-px expects a number greater than 0\n";
+          return false;
+        }
+        arguments.outlier_avg_reproj_px = px;
       }
       else
       {
@@ -454,6 +467,11 @@ namespace
     if ( arguments.allow_culled_rebirth )
     {
       session_options.estimator.block_culled_rebirth = false;
+    }
+    if ( arguments.outlier_avg_reproj_px.has_value() )
+    {
+      session_options.estimator.outlier_avg_reproj_px =
+          *arguments.outlier_avg_reproj_px;
     }
 
     phad::bench::ConfigSnapshot config =

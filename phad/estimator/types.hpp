@@ -48,7 +48,7 @@ namespace phad::estimator
     // clears window observations for dropped landmarks.
     bool   enable_outlier_cull   = true;
     bool   enable_outlier_reopt  = true;  // false → 复现 b6fbcb6 只 cull
-    double outlier_avg_reproj_px = 3.0;
+    double outlier_avg_reproj_px = 4.0;
     // After mean-cull / cheirality erase: refuse same LandmarkId backproject.
     // false → allow rebirth (Slice ④ pseudo-permanent; A/B only).
     bool block_culled_rebirth = true;

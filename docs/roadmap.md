@@ -263,15 +263,15 @@ adapter 移到独立的同步器——那里同时是 M4 的 IMU 包络与未来
 [M3.2 双目配对同步器](plans/2026-07-31_m3.2_stereo_pair_synchronizer_5b7d1c93.plan.md)。
 Issue：[#22](https://github.com/Nothand0212/phad-vio/issues/22)。
 
-### M3.3 VO 加固（依赖 M3.2；Slice ①②③ 已完成；④/④b 不够；④c 部分完成；⑤ 暂停）
+### M3.3 VO 加固（依赖 M3.2；Slice ①②③④d 已完成；④/④b 不够；④c 部分；⑤ 门控已满足待对齐）
 
 M3.2 全序列基线暴露的主导失败不是精度，而是一个**吸收态**：估计器一旦因
 `num_shared == 0` 拒帧，事务回滚会冻结窗口与 landmark 表，而前端跟踪断裂后
 重新检测会发放全新 `LandmarkId`，此后交集恒为空、永久拒帧。V1_03 上一帧异常
 废掉了随后 1906 帧。因此本阶段按失败驱动排序，恢复先于精度。
 
-范围（五片 + ④ 续片；Slice ①②③ 已落地；④/④b 不够；④c 编码完成但出口部分；
-⑤ 在 MH_01 硬门通过或另开阈值片前 **暂停**）：
+范围（五片 + ④ 续片；Slice ①②③④d 已落地；④/④b 不够；④c 机制落地但曾硬门
+不够，由 ④d 阈值收口；⑤ MH_01 门控已满足，建议先 ④e 再单独对齐 ⑤）：
 
 - **① 恢复（已完成）**：去掉 `num_shared == 0` 拒帧门，重叠断裂即以新 id 重建窗口，
   prior 打在最后一个被接受的位姿上（anchor 复用现有恒速位姿初值规则）；
@@ -290,13 +290,17 @@ M3.2 全序列基线暴露的主导失败不是精度，而是一个**吸收态*
   已编码；MH_05 诊断门仍 **不够**（ATE **3.45** m，未 &lt;1 m；reopt 有效：
   大剔后 RMS 0.18/0.26 px）→ **不**跑其余 10 条；需多轮或其它手段；
   设计见 [Slice ④b](research/m3.3-slice4b-outlier-reopt-design.md)；
-- **④c cull-track-drop（部分完成 / 停全序列）**：`block_culled_rebirth` 默认
-  `true` + session `dropTracks` 已编码；MH_01 健康恢复（seg/re=1/0、failed=0）
-  但 ATE **0.120** &gt; 锚 **0.099** → 硬门 **不够**；MH_05 ATE **4.565** vs
-  ④b **3.449** → **不**跑其余 10 条；⑤ 仍暂停，直至 MH_01 硬门或另开阈值片；
-  设计见 [Slice ④c](research/m3.3-slice4c-cull-track-drop-design.md)；
-- **⑤** 关键帧策略（视差、跟踪数、时间间隔）— **暂停**。会改 `est.tum` 的输出
-  语义且与 M4 的 IMU 预积分边界耦合；④c MH_01 硬门通过或另开阈值片前不开工。
+- **④c cull-track-drop（部分完成）**：`block_culled_rebirth` 默认 `true` +
+  session `dropTracks` 已编码；MH_01 健康恢复但 ATE 曾 **0.120** &gt; 锚 →
+  硬门不够；由 ④d 收口。设计见
+  [Slice ④c](research/m3.3-slice4c-cull-track-drop-design.md)；
+- **④d mean-cull 阈值（已完成）**：扫参选定默认 `outlier_avg_reproj_px=4.0`
+  （`79505f8` / `default_85c97158`）；MH_01 ATE **0.098784** ≤ 0.099263；
+  MH_05 与 ④c 持平（**4.565**）→ 全序列只记录；设计见
+  [Slice ④d](research/m3.3-slice4d-cull-threshold-design.md)；
+- **⑤** 关键帧策略（视差、跟踪数、时间间隔）— MH_01 硬门已满足；会改
+  `est.tum` 输出语义且与 M4 IMU 预积分边界耦合；建议先开 **④e**（多轮
+  cull↔LM）消化 MH_05 / 发散债，⑤ 单独对齐后再开工。
 
 Slice ① 出口（commit `0b0cd34` / `default_030a0197`，对照 `4780660`）：
 
@@ -357,26 +361,34 @@ Slice ④b MH_05 诊断门（commit `3855395` / `default_65273570`，对照 `b6f
 - 数字见 [M3.3 Slice ④ / ④b 基线](research/m3.3-slice4-baseline.md) §6。
 
 Slice ④c 出口（编码至 `de32bd7` / `default_9da4ccd2`；docs `d5118e0`/`625f688`；
-**部分完成**）：
+**部分完成** → 由 ④d 收口 MH_01）：
 
-- MH_01：健康恢复（seg/re=**1/0**、failed=**0**；相对 tip ~43.48 与 block-only
-  0.72，`dropTracks` 有效）但 ATE **0.120247** &gt; 锚 **0.099263** → 硬门
-  **不够**（见基线 §7）；
-- MH_05：ATE **4.565** vs ④b **3.449** → 软判定恶化 → **停全序列**（非 ~1e4 /
-  completion 崩；见基线 §8）；
-- **不**改 `outlier_avg_reproj_px`；⑤ 仍暂停，直至 MH_01 硬门或另开阈值片；
+- MH_01：健康恢复（seg/re=**1/0**、failed=**0**）但 ATE **0.120247** &gt; 锚
+  **0.099263** → 硬门 **不够**（见基线 §7）；
+- MH_05：ATE **4.565** vs ④b **3.449** → 软判定恶化 → 当时 **停全序列**；
 - 设计 / 计划 / 数字见
   [Slice ④c 设计](research/m3.3-slice4c-cull-track-drop-design.md)、
   [Slice ④c 计划](plans/2026-08-02_m3.3_slice4c_cull_track_drop_5a3a4e09.plan.md)、
-  [Slice ④ / ④b / ④c 基线](research/m3.3-slice4-baseline.md) §7–§8。
+  [基线](research/m3.3-slice4-baseline.md) §7–§8。
+
+Slice ④d 出口（commit `79505f8` / `default_85c97158`；扫参 `9feb6d4`；
+**MH_01 硬门通过**）：
+
+- 网格 `{3.0,3.5,4.0,5.0,6.0}`：仅 **4.0 / 5.0** 过门；取最紧 **`T*=4.0`**；
+- MH_01 ATE **0.098784** ≤ 0.099263，`seg/re=1/0`；MH_05 ATE **4.565**
+  （与 ④c 持平）→ 全序列只记录；
+- 已知债：MH_02 / V1_02 / V1_03 发散；多序列 reanchors 上升；
+- 设计 / 计划 / 数字见
+  [Slice ④d 设计](research/m3.3-slice4d-cull-threshold-design.md)、
+  [Slice ④d 计划](plans/2026-08-02_m3.3_slice4d_cull_threshold_ecdd49d4.plan.md)、
+  [基线](research/m3.3-slice4-baseline.md) §9。
 
 后续切片出口：
 
 - 每次改动用 `phad_vo_bench` 产出前后数字；无法测量的改动不进入本阶段；
-- **`MH_01` 作不回归锚**（ATE 不劣于本片 0.099263 m，且 `reanchors=0`）；
-- MH_05 发散与健康序列 ATE 债优先在 Slice ④（chi2 / landmark 生命周期）消化，
-  不回退到吸收态修复；
-- Slice ⑤ 在 ④c MH_01 硬门通过或另开阈值片前 **不开工**。
+- **`MH_01` 作不回归锚**（ATE 不劣于 **0.098784** m，且 `reanchors=0`）；
+- MH_05 / 发散债优先 **④e**（多轮 cull↔LM）；⑤ 门控已满足但与 M4 耦合，
+  单独对齐后再开工。
 
 设计见
 [M3.3 VO 加固设计](research/m3.3-vo-hardening-design.md)、
@@ -384,7 +396,8 @@ Slice ④c 出口（编码至 `de32bd7` / `default_9da4ccd2`；docs `d5118e0`/`6
 [M3.3 Slice ③ PnP 设计](research/m3.3-slice3-pnp-design.md)、
 [M3.3 Slice ④ 外点剔除设计](research/m3.3-slice4-outlier-cull-design.md)、
 [M3.3 Slice ④b 二次 LM 设计](research/m3.3-slice4b-outlier-reopt-design.md)、
-[M3.3 Slice ④c cull-track-drop 设计](research/m3.3-slice4c-cull-track-drop-design.md)，
+[M3.3 Slice ④c cull-track-drop 设计](research/m3.3-slice4c-cull-track-drop-design.md)、
+[M3.3 Slice ④d 阈值设计](research/m3.3-slice4d-cull-threshold-design.md)，
 根因诊断见
 [M3.3 VO 崩溃根因诊断](research/m3.3-vo-collapse-diagnosis.md)，开源对照见
 [M3.3 VO 加固：开源实现对照](research/m3.3-vo-hardening-open-source-refs.md)、
@@ -397,8 +410,10 @@ Slice ④c 出口（编码至 `de32bd7` / `default_9da4ccd2`；docs `d5118e0`/`6
 [M3.3 Slice ③](plans/2026-08-01_m3.3_slice3_pnp_0154cd20.plan.md)、
 [M3.3 Slice ④](plans/2026-08-01_m3.3_slice4_outlier_cull_840bf39c.plan.md)、
 [M3.3 Slice ④b](plans/2026-08-01_m3.3_slice4b_outlier_reopt_4d57d1fc.plan.md)、
-[M3.3 Slice ④c](plans/2026-08-02_m3.3_slice4c_cull_track_drop_5a3a4e09.plan.md)。
-Issue：[#23](https://github.com/Nothand0212/phad-vio/issues/23)（M3.3 总图）； Slice ④/④b/④c：[#24](https://github.com/Nothand0212/phad-vio/issues/24)。
+[M3.3 Slice ④c](plans/2026-08-02_m3.3_slice4c_cull_track_drop_5a3a4e09.plan.md)、
+[M3.3 Slice ④d](plans/2026-08-02_m3.3_slice4d_cull_threshold_ecdd49d4.plan.md)。
+Issue：[#23](https://github.com/Nothand0212/phad-vio/issues/23)（M3.3 总图）；
+Slice ④/④b/④c/④d：[#24](https://github.com/Nothand0212/phad-vio/issues/24)。
 
 ## M4：接入 IMU
 
