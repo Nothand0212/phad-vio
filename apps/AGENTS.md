@@ -16,7 +16,9 @@
   关 drop（YAGNI，本片不加 session 开关）。bench
   `--allow-culled-rebirth` 仅把 `estimator.block_culled_rebirth` 设为
   `false`；默认不传 flag 即 estimator 默认 `true`。该键进
-  `flattenConfig` → `config_hash`
+  `flattenConfig` → `config_hash`。Slice ④d：
+  `--outlier-avg-reproj-px <v>`（须 `> 0`）覆盖
+  `estimator.outlier_avg_reproj_px`（默认 `3.0`），同样进 `config_hash`
 - 行为保持型重构：先在当前 commit 产出仓库外参考产物，再改代码并以逐字节 diff 验收
 
 ## `diag.csv` 合同（M3.3）
