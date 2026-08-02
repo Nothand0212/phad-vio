@@ -126,24 +126,6 @@ namespace phad::apps
     }
     estimator::StereoVoEstimator estimator( rectified_cal, estimator_options );
 
-    // Slice ④g: skip-drop unions into pending; flush before next process /
-    // early return / session end so zombies are not kept across a full frame.
-    std::unordered_set<common::LandmarkId> pending_drop;
-
-    const auto flushPendingDrop = [ & ]() {
-      if ( pending_drop.empty() )
-      {
-        return;
-      }
-      const std::vector<common::LandmarkId> ids( pending_drop.begin(),
-                                                 pending_drop.end() );
-      tracker.dropTracks( ids );
-      ++result.counts.deferred_drops;
-      result.counts.deferred_drop_ids +=
-          static_cast<std::uint64_t>( ids.size() );
-      pending_drop.clear();
-    };
-
     std::vector<common::TimedPose> poses;
     std::vector<double>            rms_after;
     std::vector<double>            rectify_s;
@@ -211,7 +193,6 @@ namespace phad::apps
       {
         result.error = SessionError{ error->detail };
         result.sync  = stream.diagnostics();
-        flushPendingDrop();
         finalizeSegmentsAndWarnings();
         return result;
       }
@@ -227,12 +208,10 @@ namespace phad::apps
         result.error =
             SessionError{ "rectify failed: " + rectified.error().detail };
         result.sync = stream.diagnostics();
-        flushPendingDrop();
         finalizeSegmentsAndWarnings();
         return result;
       }
 
-      flushPendingDrop();
       const auto                  frontend_begin = std::chrono::steady_clock::now();
       const frontend::FrameTracks tracks =
           tracker.process( rectified.value() );
@@ -262,9 +241,9 @@ namespace phad::apps
       // Composition-root feedback: drop frontend tracks for ids the
       // estimator permanently removed this frame. Default on (④c); two-level
       // gate (④f): drop_culled_tracks then skip when outliers_culled >= N.
-      // Slice ④g: skip unions full culled_landmark_ids into pending_drop
-      // (flushed before next process); non-skip still drops immediately.
-      // Does not enter warnings.
+      // ④g pending_drop deferred flush was reverted: on MH_05 it is
+      // bit-identical to immediate drop (④e) and regresses ATE; see
+      // docs/research/m3.3-slice4g-postmortem.md. Does not enter warnings.
       bool drops_skipped_this_frame = false;
       if ( options.drop_culled_tracks &&
            !update.diagnostics.culled_landmark_ids.empty() )
@@ -277,11 +256,6 @@ namespace phad::apps
         {
           ++result.counts.drops_skipped;
           drops_skipped_this_frame = true;
-          for ( const common::LandmarkId id :
-                update.diagnostics.culled_landmark_ids )
-          {
-            pending_drop.insert( id );
-          }
         }
         else
         {
@@ -350,7 +324,6 @@ namespace phad::apps
         {
           result.error = SessionError{ exception.what() };
           result.sync  = stream.diagnostics();
-          flushPendingDrop();
           finalizeSegmentsAndWarnings();
           return result;
         }
@@ -463,8 +436,6 @@ namespace phad::apps
         total_s.push_back( seconds( frame_begin, frame_end ) );
       }
     }
-
-    flushPendingDrop();
 
     const auto wall_end = std::chrono::steady_clock::now();
     result.wall_s =
