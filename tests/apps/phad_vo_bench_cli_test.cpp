@@ -63,6 +63,63 @@ namespace
     return stdout_text.substr( start, end - start );
   }
 
+  TEST( VoBenchCliTest, UsageMentionsProbeB )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root =
+        std::filesystem::temp_directory_path() / "phad_vo_bench_cli_usage";
+    std::filesystem::remove_all( root );
+    std::filesystem::create_directories( root );
+    const auto stdout_path = root / "stdout.txt";
+    const auto stderr_path = root / "stderr.txt";
+
+    // No sequence-root → parseArguments fails and prints usage.
+    const int exit_code = runBench( "", stdout_path, stderr_path );
+    EXPECT_EQ( exit_code, 2 );
+    const std::string err = readFile( stderr_path );
+    EXPECT_NE( err.find( "--probe-b" ), std::string::npos );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, ProbeBPathDoesNotChangeConfigHash )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_probe_b_hash";
+    std::filesystem::remove_all( root );
+    const auto out_default = root / "out_default";
+    const auto out_probe   = root / "out_probe";
+    std::filesystem::create_directories( root );
+
+    const auto stdout_default = root / "stdout_default.txt";
+    const auto stderr_default = root / "stderr_default.txt";
+    const auto stdout_probe   = root / "stdout_probe.txt";
+    const auto stderr_probe   = root / "stderr_probe.txt";
+    const auto probe_path     = root / "probe_b.jsonl";
+
+    // meta.json / config_hash are written before the session opens the
+    // dataset; Probe B is CLI-only and must not enter flattenConfig.
+    (void)runBench( "/nonexistent/sequence --out \"" + out_default.string() +
+                        "\" --sequence-name hash_probe --force",
+                    stdout_default, stderr_default );
+    (void)runBench( "/nonexistent/sequence --out \"" + out_probe.string() +
+                        "\" --sequence-name hash_probe --force --probe-b \"" +
+                        probe_path.string() + "\"",
+                    stdout_probe, stderr_probe );
+
+    const std::string hash_default =
+        extractConfigHash( readFile( stdout_default ) );
+    const std::string hash_probe = extractConfigHash( readFile( stdout_probe ) );
+    ASSERT_FALSE( hash_default.empty() ) << readFile( stderr_default );
+    ASSERT_FALSE( hash_probe.empty() ) << readFile( stderr_probe );
+    EXPECT_EQ( hash_default, hash_probe );
+
+    std::filesystem::remove_all( root );
+  }
+
   TEST( VoBenchCliTest, RejectsNegativeMaxOutlierReopts )
   {
     ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );

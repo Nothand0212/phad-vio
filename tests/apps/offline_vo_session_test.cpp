@@ -247,9 +247,10 @@ namespace
     EXPECT_NE( text.find( "pnp_success,pnp_inliers,outliers_culled,"
                            "reproj_rms_after_cull_px" ),
                std::string::npos );
-    // Slice ④e keeps the 18-column contract; outlier_reopt_rounds stay
-    // off diag (session/summary only). culled_landmark_ids remain
-    // in-memory only (session dropTracks; not a diag column).
+    // Slice ④e / Probe B keep the 18-column contract; Probe B is a
+    // separate jsonl side-channel. outlier_reopt_rounds stay off diag
+    // (session/summary only). culled_landmark_ids remain in-memory only
+    // (session dropTracks; not a diag column).
     const auto header_end = text.find( '\n' );
     ASSERT_NE( header_end, std::string::npos );
     const std::string header = text.substr( 0, header_end );
@@ -259,6 +260,102 @@ namespace
                    "0,0.000000,0,0,0,0,0.000000" ),
         std::string::npos );
     std::filesystem::remove( path );
+  }
+
+  TEST( OfflineVoSessionTest, EmptyProbeBPathDoesNotCreateFile )
+  {
+    const char* configured_path = std::getenv( "PHAD_EUROC_MH01_PATH" );
+    if ( configured_path == nullptr || configured_path[ 0 ] == '\0' )
+    {
+      GTEST_SKIP() << "PHAD_EUROC_MH01_PATH is not set";
+    }
+
+    const auto probe_dir = std::filesystem::temp_directory_path() /
+                           "phad_offline_vo_session_probe_b_off";
+    std::filesystem::remove_all( probe_dir );
+    std::filesystem::create_directories( probe_dir );
+    const auto probe_path = probe_dir / "probe_b.jsonl";
+
+    OfflineVoSessionOptions options;
+    options.sequence_root = configured_path;
+    options.max_frames    = 5;
+    // Default: probe_b_path empty → writer not constructed.
+    ASSERT_TRUE( options.probe_b_path.empty() );
+
+    const auto result = runOfflineVoSession( options );
+    ASSERT_FALSE( result.error.has_value() ) << result.error->detail;
+    EXPECT_EQ( result.counts.image_frames, 5U );
+    EXPECT_FALSE( std::filesystem::exists( probe_path ) );
+    EXPECT_TRUE( std::filesystem::is_empty( probe_dir ) );
+
+    std::filesystem::remove_all( probe_dir );
+  }
+
+  TEST( OfflineVoSessionTest, ValidProbeBPathWritesJsonlLines )
+  {
+    const char* configured_path = std::getenv( "PHAD_EUROC_MH01_PATH" );
+    if ( configured_path == nullptr || configured_path[ 0 ] == '\0' )
+    {
+      GTEST_SKIP() << "PHAD_EUROC_MH01_PATH is not set";
+    }
+
+    const auto probe_dir = std::filesystem::temp_directory_path() /
+                           "phad_offline_vo_session_probe_b_on";
+    std::filesystem::remove_all( probe_dir );
+    std::filesystem::create_directories( probe_dir );
+    const auto probe_path = probe_dir / "probe_b.jsonl";
+
+    OfflineVoSessionOptions options;
+    options.sequence_root = configured_path;
+    options.max_frames    = 5;
+    options.probe_b_path  = probe_path;
+
+    const auto result = runOfflineVoSession( options );
+    ASSERT_FALSE( result.error.has_value() ) << result.error->detail;
+    EXPECT_EQ( result.counts.image_frames, 5U );
+    ASSERT_TRUE( std::filesystem::exists( probe_path ) );
+
+    std::ifstream in( probe_path );
+    ASSERT_TRUE( in );
+    std::size_t valid_lines = 0;
+    std::string line;
+    while ( std::getline( in, line ) )
+    {
+      if ( line.empty() )
+      {
+        continue;
+      }
+      EXPECT_EQ( line.front(), '{' );
+      EXPECT_EQ( line.back(), '}' );
+      EXPECT_NE( line.find( "\"i\":" ), std::string::npos );
+      EXPECT_NE( line.find( "\"ts_ns\":" ), std::string::npos );
+      ++valid_lines;
+    }
+    EXPECT_GE( valid_lines, 1U );
+    EXPECT_EQ( valid_lines, result.counts.image_frames );
+
+    std::filesystem::remove_all( probe_dir );
+  }
+
+  TEST( OfflineVoSessionTest, IllegalProbeBParentDirFailsSession )
+  {
+    // Writer open fails before the frame loop; TinyEuroc is enough.
+    TinyEurocFixture fixture;
+    const auto       probe_path =
+        std::filesystem::temp_directory_path() /
+        "phad_offline_vo_session_probe_b_missing_parent" / "nested" /
+        "probe_b.jsonl";
+    std::filesystem::remove_all( probe_path.parent_path().parent_path() );
+
+    OfflineVoSessionOptions options;
+    options.sequence_root = fixture.root();
+    options.max_frames    = 5;
+    options.probe_b_path  = probe_path;
+
+    const auto result = runOfflineVoSession( options );
+    ASSERT_TRUE( result.error.has_value() );
+    EXPECT_NE( result.error->detail.find( "probe_b" ), std::string::npos );
+    EXPECT_FALSE( std::filesystem::exists( probe_path ) );
   }
 
   TEST( OfflineVoSessionTest, MaxFramesLimitsCountsAndCoverageSpan )

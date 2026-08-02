@@ -49,7 +49,8 @@ namespace
       "                     [--no-drop-culled-tracks]\n"
       "                     [--skip-drop-min-culled <n>]\n"
       "                     [--outlier-avg-reproj-px <v>]\n"
-      "                     [--max-outlier-reopts <n>]\n";
+      "                     [--max-outlier-reopts <n>]\n"
+      "                     [--probe-b <path>]\n";
 
 #ifndef PHAD_SOURCE_DIR
 #define PHAD_SOURCE_DIR ""
@@ -77,6 +78,7 @@ namespace
     std::optional<double>        outlier_avg_reproj_px;
     std::optional<int>           max_outlier_reopts;
     std::optional<int>           skip_drop_min_culled;
+    std::filesystem::path        probe_b_path;
   };
 
   [[nodiscard]] bool parseDouble( std::string_view text, double& value )
@@ -245,6 +247,10 @@ namespace
           return false;
         }
         arguments.skip_drop_min_culled = static_cast<int>( parsed );
+      }
+      else if ( flag == "--probe-b" )
+      {
+        arguments.probe_b_path = value;
       }
       else
       {
@@ -529,6 +535,8 @@ namespace
       session_options.estimator.max_outlier_reopts =
           *arguments.max_outlier_reopts;
     }
+    // Probe B path is CLI-only: not in flattenConfig / config_hash.
+    session_options.probe_b_path = arguments.probe_b_path;
 
     phad::bench::ConfigSnapshot config =
         flattenConfig( arguments, session_options );

@@ -426,8 +426,10 @@ Slice ④f 出口（commit `c446ac5` / `default_a5e90dc7`；
 - 每次改动用 `phad_vo_bench` 产出前后数字；无法测量的改动不进入本阶段；
 - **`MH_01` 作不回归锚**（ATE 不劣于 **0.098784** m，且 `reanchors=0`）；
 - MH_05 / 发散债：④f 软改善至 **≈3.06 m**（仍非 &lt;1 m；且已优于 ④b ≈3.45）→
-  诊断见 [post-4f 诊断](research/m3.3-mh05-post4f-diagnosis.md)：剩余形态为
-  i≈429 锁定的自洽漂移；**下一刀=升级探针 B**（否决单独去 Huber / 观测级作首选）；
+  探针 B 诊断见 [Probe B 诊断](research/m3.3-mh05-probe-b-diagnosis.md)：
+  **下一刀=skip-drop 后对完整 `culled_landmark_ids` zombie 精确 `dropTracks`**
+  （保留 `block_culled_rebirth` 与 skip-drop 软门；否决单独去 Huber / 观测级 /
+  关整个 block / 关整个 skip-drop / ⑤ 作首选）；
   ⑤ 门控已满足但与 M4 耦合，**先对齐再开**。
 
 设计见

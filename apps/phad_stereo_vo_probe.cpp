@@ -20,13 +20,14 @@ namespace
 
   constexpr std::string_view kUsage =
       "usage: phad_stereo_vo_probe <sequence-root> --tum <path> "
-      "[--diag-csv <path>]\n";
+      "[--diag-csv <path>] [--probe-b <path>]\n";
 
   struct Arguments
   {
     std::filesystem::path sequence_root;
     std::filesystem::path tum_path;
     std::filesystem::path diag_csv;
+    std::filesystem::path probe_b_path;
   };
 
   [[nodiscard]] bool parseArguments( int argc, char** argv,
@@ -55,6 +56,10 @@ namespace
       {
         arguments.diag_csv = value;
       }
+      else if ( flag == "--probe-b" )
+      {
+        arguments.probe_b_path = value;
+      }
       else
       {
         std::cerr << "unknown flag " << flag << '\n';
@@ -68,6 +73,7 @@ namespace
   {
     phad::apps::OfflineVoSessionOptions options;
     options.sequence_root = arguments.sequence_root;
+    options.probe_b_path  = arguments.probe_b_path;
 
     phad::apps::OfflineVoSessionResult result =
         phad::apps::runOfflineVoSession( options );
