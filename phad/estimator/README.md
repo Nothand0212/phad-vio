@@ -19,7 +19,7 @@ include 标 SYSTEM）。
 | 重叠断裂时 re-anchor（`enable_reanchor`） | 分段 TUM / Atlas 式多轨迹 |
 | 共视 / cheirality / 重投影 / `segment_id` / PnP 诊断 | ATE（`phad::eval`） |
 | 正常路径 `solvePnPRansac` 初值 + 本帧 inlier 掩码 | frontend track 生命周期 |
-| BA 后 mean-reproj 伪永久剔点（不重优） | 拒绝名单 / 真永久删 frontend track |
+| BA 后 mean-reproj / cheirality 剔点 + 拒同 id 复生 | frontend track 生命周期（由 apps 回传 drop） |
 | `body_P_sensor = T_B_left_rectified` | 未校正左目外参 |
 
 ## 文件布局
@@ -44,8 +44,9 @@ apps/stereo_vo_glue.hpp  ── filter kValid ──► KeyframeMeasurement
                                                VioUpdateResult
                                     ┌─────────────┴─────────────┐
                                     ▼                           ▼
-                         phad_stereo_vo_probe            phad_euroc_runner
-                          TUM + diag CSV                  估计轨迹叠加
+                         OfflineVoSession                 phad_euroc_runner
+                    dropTracks(culled ids)                 估计轨迹叠加
+                    → probe / phad_vo_bench
 ```
 
 ## 段生命周期（M3.3）
@@ -121,24 +122,30 @@ LM₁ 收敛写回位姿后、返回 `kOk` 前，可选按 landmark **平均 ste
 | `enable_outlier_cull`（默认 `true`） | `false` **只关** mean-reproj 剔点；cheirality 清窗口观测 helper 仍生效；无剔点则自然不触发 reopt |
 | `outlier_avg_reproj_px`（默认 `3.0`） | 均值阈值（像素）；构造时须 `> 0` |
 | `enable_outlier_reopt`（默认 `true`） | `false` → 只 cull 不重优；触发条件另需 `outliers_culled >= 4` |
+| `block_culled_rebirth`（默认 `true`） | `false` → 允许同 id stereo-backproject 重生（复现 Slice ④ 伪永久，仅 A/B） |
 
-**伪永久**：无拒绝名单；被删 id 的 `track_times` /
-`observationTimestamps()` **保留**；frontend 再喂同 id → 按新点
-backproject。Impl 侧 `culled_ids_` 仅用于去重统计。
+**拒复生（Slice ④c）**：mean-cull 与 cheirality 真正 erase 的 id 写入
+`culled_ids_`；`block_culled_rebirth` 时 seed / 正常路径 skip 同 id
+backproject。被删 id 的 `track_times` / `observationTimestamps()` **仍保留**。
+本帧列表 `UpdateDiagnostics.culled_landmark_ids`（mean-cull ∪ cheirality）
+仅在提交成功路径填充；`restore()` 后为空；**不**进 `diag.csv`。
+`outliers_culled` / `unique` **仍只计** mean-reproj cull。
 
 诊断：
 
 | 字段 | 语义 |
 |---|---|
 | `outliers_culled` / `outliers_culled_unique` | 本帧 mean-reproj 删点数 / 去重 id |
+| `culled_landmark_ids` | 本帧永久移出地图的 id（mean-cull ∪ cheirality）；仅内存 / API |
 | `lm_iterations` | LM₁ +（成功时）LM₂ 迭代累加 |
 | `reproj_rms_after_cull_px` | **有成功 reopt**：LM₂ 后 graph RMS；**无 reopt / LM₂ 失败**：Slice ④ 语义（cull 关时 `== reproj_rms_after_px`；cull 开时跳过已删 id 的 graph RMS） |
 | `outlier_reopt` / `outlier_reopt_failed` | 本帧是否成功跑了 LM₂ / LM₂ 失败已回退；**不**进 `diag.csv` |
 
 session 累计成功 reopt 为 `FrameCounts.outlier_reopts` →
 `summary.json` 的 `robustness.outlier_reopts`。详见
-`docs/research/m3.3-slice4-outlier-cull-design.md` 与
-`docs/research/m3.3-slice4b-outlier-reopt-design.md`。
+`docs/research/m3.3-slice4-outlier-cull-design.md`、
+`docs/research/m3.3-slice4b-outlier-reopt-design.md` 与
+`docs/research/m3.3-slice4c-cull-track-drop-design.md`。
 
 ## 诊断 CSV 合同（probe）
 

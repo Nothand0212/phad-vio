@@ -49,6 +49,9 @@ namespace phad::estimator
     bool   enable_outlier_cull   = true;
     bool   enable_outlier_reopt  = true;  // false → 复现 b6fbcb6 只 cull
     double outlier_avg_reproj_px = 3.0;
+    // After mean-cull / cheirality erase: refuse same LandmarkId backproject.
+    // false → allow rebirth (Slice ④ pseudo-permanent; A/B only).
+    bool block_culled_rebirth = true;
   };
 
   enum class UpdateStatus : std::uint8_t
@@ -85,6 +88,8 @@ namespace phad::estimator
     double        reproj_rms_after_cull_px = 0.0;
     bool          outlier_reopt            = false;  // 本帧是否成功跑了 LM₂
     bool          outlier_reopt_failed     = false;  // LM₂ 失败已回退；不进 diag.csv
+    // 本帧永久移出地图的 id（mean-cull ∪ cheirality）；不进 diag.csv
+    std::vector<common::LandmarkId> culled_landmark_ids;
   };
 
   struct VioUpdateResult

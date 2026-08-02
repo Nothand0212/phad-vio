@@ -334,6 +334,7 @@ if(PHAD_BUILD_TESTS)
     tests/estimator/stereo_vo_pnp_test.cpp
     tests/estimator/stereo_vo_outlier_cull_test.cpp
     tests/estimator/stereo_vo_outlier_reopt_test.cpp
+    tests/estimator/stereo_vo_cull_rebirth_test.cpp
   )
   target_link_libraries(phad_estimator_tests PRIVATE
     phad::estimator gtsam GTest::gtest_main

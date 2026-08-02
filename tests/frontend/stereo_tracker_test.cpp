@@ -21,7 +21,6 @@ namespace
   using phad::frontend::StereoStatus;
   using phad::frontend::StereoTracker;
   using phad::frontend::StereoTrackerOptions;
-  using phad::testing::StereoRenderOptions;
   using phad::testing::kStereoEpochNs;
   using phad::testing::kStereoStepNs;
   using phad::testing::makePointGrid;
@@ -29,6 +28,7 @@ namespace
   using phad::testing::projectLeft;
   using phad::testing::projectRight;
   using phad::testing::renderStereo;
+  using phad::testing::StereoRenderOptions;
 
   StereoTrackerOptions testOptions( int max_tracks )
   {
@@ -62,7 +62,7 @@ namespace
       double max_dist_px = 4.0 )
   {
     std::optional<phad::frontend::TrackObservation> best;
-    double best_dist = max_dist_px;
+    double                                          best_dist = max_dist_px;
     for ( const auto& observation : tracks.observations )
     {
       const double dist = ( observation.left_pixel - pixel ).norm();
@@ -77,7 +77,7 @@ namespace
 
   TEST( StereoTrackerTest, SurvivesPureTranslationWithStableIds )
   {
-    const auto calibration = makeRectifiedCalibration();
+    const auto                         calibration = makeRectifiedCalibration();
     const std::vector<Eigen::Vector3d> points =
         makePointGrid( calibration, 3, 4 );
     const int max_tracks = static_cast<int>( points.size() );
@@ -86,8 +86,8 @@ namespace
     StereoTrackerOptions options = testOptions( max_tracks );
     options.stereo_uniq_ratio    = 0.0;
     options.stereo_check_bidir   = false;
-    StereoTracker tracker( calibration, options );
-    constexpr int kFrames = 5;
+    StereoTracker        tracker( calibration, options );
+    constexpr int        kFrames = 5;
     std::set<LandmarkId> first_ids;
 
     for ( int frame = 0; frame < kFrames; ++frame )
@@ -145,11 +145,84 @@ namespace
     }
   }
 
+  TEST( StereoTrackerTest, DropTracksRemovesIdsAndIgnoresUnknown )
+  {
+    const auto                         calibration = makeRectifiedCalibration();
+    const std::vector<Eigen::Vector3d> points =
+        makePointGrid( calibration, 3, 4 );
+    const int            max_tracks = static_cast<int>( points.size() );
+    StereoTrackerOptions options    = testOptions( max_tracks );
+    options.stereo_uniq_ratio       = 0.0;
+    options.stereo_check_bidir      = false;
+    StereoTracker tracker( calibration, options );
+
+    FrameTracks seeded;
+    for ( int frame = 0; frame < 2; ++frame )
+    {
+      std::vector<Eigen::Vector3d> moved;
+      moved.reserve( points.size() );
+      const double shift_m = 0.01 * static_cast<double>( frame );
+      for ( const Eigen::Vector3d& point : points )
+      {
+        moved.emplace_back( point.x() - shift_m, point.y(), point.z() );
+      }
+      seeded = tracker.process( renderStereo(
+          calibration, moved,
+          phad::common::Timestamp{
+              kStereoEpochNs +
+              static_cast<std::int64_t>( frame ) * kStereoStepNs },
+          2.5 ) );
+    }
+    ASSERT_GE( seeded.observations.size(), 2U );
+
+    const LandmarkId drop_id = seeded.observations.front().id;
+    LandmarkId       max_id  = 0;
+    for ( const auto& observation : seeded.observations )
+    {
+      max_id = std::max( max_id, observation.id );
+    }
+
+    const std::vector<LandmarkId> to_drop{ drop_id, 999999 };
+    tracker.dropTracks( to_drop );
+
+    std::vector<Eigen::Vector3d> continued;
+    continued.reserve( points.size() );
+    for ( const Eigen::Vector3d& point : points )
+    {
+      continued.emplace_back( point.x() - 0.02, point.y(), point.z() );
+    }
+    const FrameTracks after_drop = tracker.process( renderStereo(
+        calibration, continued,
+        phad::common::Timestamp{ kStereoEpochNs + 2 * kStereoStepNs },
+        2.5 ) );
+    EXPECT_EQ( idsOf( after_drop ).count( drop_id ), 0U );
+
+    std::vector<Eigen::Vector3d> gone = points;
+    for ( Eigen::Vector3d& point : gone )
+    {
+      point.x() -= 3.0;
+    }
+    (void)tracker.process( renderStereo(
+        calibration, gone,
+        phad::common::Timestamp{ kStereoEpochNs + 3 * kStereoStepNs },
+        2.5 ) );
+
+    const FrameTracks refilled = tracker.process( renderStereo(
+        calibration, points,
+        phad::common::Timestamp{ kStereoEpochNs + 4 * kStereoStepNs },
+        2.5 ) );
+    ASSERT_FALSE( refilled.observations.empty() );
+    for ( const auto& observation : refilled.observations )
+    {
+      EXPECT_GT( observation.id, max_id );
+    }
+  }
+
   TEST( StereoTrackerTest, DoesNotReuseIdsAfterTracksLeaveFov )
   {
-    const auto calibration = makeRectifiedCalibration();
-    std::vector<Eigen::Vector3d> points = makePointGrid( calibration, 2, 3 );
-    StereoTracker tracker( calibration, testOptions( 12 ) );
+    const auto                   calibration = makeRectifiedCalibration();
+    std::vector<Eigen::Vector3d> points      = makePointGrid( calibration, 2, 3 );
+    StereoTracker                tracker( calibration, testOptions( 12 ) );
 
     const auto first = renderStereo(
         calibration, points, phad::common::Timestamp{ kStereoEpochNs }, 2.5 );
@@ -185,7 +258,7 @@ namespace
 
   TEST( StereoTrackerTest, RefillsTowardMaxTracksAfterMassExodus )
   {
-    const auto calibration = makeRectifiedCalibration();
+    const auto                         calibration = makeRectifiedCalibration();
     const std::vector<Eigen::Vector3d> points =
         makePointGrid( calibration, 4, 5 );
     constexpr int kMaxTracks = 20;
@@ -216,13 +289,13 @@ namespace
 
   TEST( StereoTrackerTest, ValidDisparityMatchesGeometry )
   {
-    const auto calibration = makeRectifiedCalibration();
-    constexpr double kDepth = 3.0;
+    const auto       calibration = makeRectifiedCalibration();
+    constexpr double kDepth      = 3.0;
     // Single blob avoids identical-template ambiguity under global SAD.
     const std::vector<Eigen::Vector3d> points{ { 0.0, 0.0, kDepth } };
-    StereoTrackerOptions options = testOptions( 4 );
-    options.stereo_uniq_ratio    = 0.0;
-    options.stereo_check_bidir   = false;
+    StereoTrackerOptions               options = testOptions( 4 );
+    options.stereo_uniq_ratio                  = 0.0;
+    options.stereo_check_bidir                 = false;
     StereoTracker tracker( calibration, options );
 
     const FrameTracks tracks = tracker.process( renderStereo(
@@ -247,8 +320,8 @@ namespace
 
   TEST( StereoTrackerTest, MissingRightBlobBecomesNoRightMatch )
   {
-    const auto calibration = makeRectifiedCalibration();
-    std::vector<Eigen::Vector3d> points = {
+    const auto                   calibration = makeRectifiedCalibration();
+    std::vector<Eigen::Vector3d> points      = {
         { -0.3, -0.2, 2.5 },
         { 0.3, -0.2, 2.5 },
         { -0.3, 0.2, 2.5 },
@@ -286,15 +359,15 @@ namespace
   // never sees the right blob → kNoRightMatch (not kDepthOutOfRange).
   TEST( StereoTrackerTest, FarPointOutsideSearchIsNoRightMatch )
   {
-    const auto calibration = makeRectifiedCalibration();
-    StereoTrackerOptions options = testOptions( 4 );
-    options.max_depth_m          = 5.0;
-    options.min_distance_px      = 8.0;
-    options.mask_radius_px       = 8;
+    const auto           calibration = makeRectifiedCalibration();
+    StereoTrackerOptions options     = testOptions( 4 );
+    options.max_depth_m              = 5.0;
+    options.min_distance_px          = 8.0;
+    options.mask_radius_px           = 8;
     StereoTracker tracker( calibration, options );
 
     const std::vector<Eigen::Vector3d> points{ { 0.0, 0.0, 12.0 } };
-    const FrameTracks tracks = tracker.process( renderStereo(
+    const FrameTracks                  tracks = tracker.process( renderStereo(
         calibration, points, phad::common::Timestamp{ kStereoEpochNs },
         3.0 ) );
 
@@ -314,7 +387,7 @@ namespace
 
   TEST( StereoTrackerTest, RejectsNonPositiveStereoBidir )
   {
-    auto options = testOptions( 4 );
+    auto options            = testOptions( 4 );
     options.stereo_bidir_px = 0.0;
     EXPECT_THROW(
         ( StereoTracker{ makeRectifiedCalibration(), options } ),
@@ -323,7 +396,7 @@ namespace
 
   TEST( StereoTrackerTest, RejectsNegativeRowTol )
   {
-    auto options = testOptions( 4 );
+    auto options              = testOptions( 4 );
     options.stereo_row_tol_px = -1;
     EXPECT_THROW(
         ( StereoTracker{ makeRectifiedCalibration(), options } ),
@@ -332,7 +405,7 @@ namespace
 
   TEST( StereoTrackerTest, RejectsNonPositiveSadHalfWin )
   {
-    auto options = testOptions( 4 );
+    auto options                   = testOptions( 4 );
     options.stereo_sad_half_win_px = 0;
     EXPECT_THROW(
         ( StereoTracker{ makeRectifiedCalibration(), options } ),
@@ -341,7 +414,7 @@ namespace
 
   TEST( StereoTrackerTest, RejectsNegativeUniqRatio )
   {
-    auto options = testOptions( 4 );
+    auto options              = testOptions( 4 );
     options.stereo_uniq_ratio = -0.1;
     EXPECT_THROW(
         ( StereoTracker{ makeRectifiedCalibration(), options } ),
@@ -350,7 +423,7 @@ namespace
 
   TEST( StereoTrackerTest, VerticalOffsetWithZeroRowTolIsNoRightMatch )
   {
-    const auto calibration = makeRectifiedCalibration();
+    const auto                         calibration = makeRectifiedCalibration();
     const std::vector<Eigen::Vector3d> points =
         makePointGrid( calibration, 2, 3, 3.0 );
     StereoTrackerOptions options = testOptions( 12 );
@@ -381,15 +454,15 @@ namespace
 
   TEST( StereoTrackerTest, VerticalOffsetWithinRowTolCanBeValid )
   {
-    const auto calibration = makeRectifiedCalibration();
+    const auto                         calibration = makeRectifiedCalibration();
     const std::vector<Eigen::Vector3d> points =
         makePointGrid( calibration, 2, 3, 3.0 );
     StereoTrackerOptions options = testOptions( 12 );
     options.stereo_row_tol_px    = 4;
     options.max_epipolar_px      = 4.5;
     // Identical synthetic blobs: uniqueness/bidir reject twins across rows.
-    options.stereo_uniq_ratio    = 0.0;
-    options.stereo_check_bidir   = false;
+    options.stereo_uniq_ratio  = 0.0;
+    options.stereo_check_bidir = false;
     StereoTracker tracker( calibration, options );
 
     StereoRenderOptions render;
@@ -416,8 +489,8 @@ namespace
   // still hits the right blob but reverse 1D search prefers the decoy.
   TEST( StereoTrackerTest, ReverseConsistencyFailureIsNoRightMatch )
   {
-    const auto     calibration = makeRectifiedCalibration();
-    constexpr double kDepth    = 3.0;
+    const auto            calibration = makeRectifiedCalibration();
+    constexpr double      kDepth      = 3.0;
     const Eigen::Vector3d primary{ 0.0, 0.0, kDepth };
     const Eigen::Vector2d left_uv  = projectLeft( calibration, primary );
     const Eigen::Vector2d right_uv = projectRight( calibration, primary );
@@ -431,8 +504,8 @@ namespace
         calibration, std::vector<Eigen::Vector3d>{ primary },
         phad::common::Timestamp{ kStereoEpochNs }, 2.5 ) );
 
-    const int width  = calibration.imageWidth();
-    const int height = calibration.imageHeight();
+    const int                 width  = calibration.imageWidth();
+    const int                 height = calibration.imageHeight();
     std::vector<std::uint8_t> left_pixels(
         static_cast<std::size_t>( width * height ), 0U );
     std::vector<std::uint8_t> right_pixels(

@@ -43,7 +43,9 @@ namespace
       "                     [--gt-euroc <sequence-root>] [--max-dt-ms <v>]\n"
       "                     [--min-match-rate <v>] [--rpe-delta-s <v>]\n"
       "                     [--errors-csv] [--repo <dir>]\n"
-      "                     [--max-frames <n>] [--force]\n";
+      "                     [--max-frames <n>] [--force]\n"
+      "                     [--no-outlier-cull] [--no-outlier-reopt]\n"
+      "                     [--allow-culled-rebirth]\n";
 
 #ifndef PHAD_SOURCE_DIR
 #define PHAD_SOURCE_DIR ""
@@ -62,8 +64,11 @@ namespace
     double                       min_match_rate = 0.5;
     double                       rpe_delta_s    = 1.0;
     std::optional<std::uint64_t> max_frames;
-    bool                         write_errors_csv = false;
-    bool                         force            = false;
+    bool                         write_errors_csv   = false;
+    bool                         force              = false;
+    bool                         no_outlier_cull      = false;
+    bool                         no_outlier_reopt     = false;
+    bool                         allow_culled_rebirth = false;
   };
 
   [[nodiscard]] bool parseDouble( std::string_view text, double& value )
@@ -101,6 +106,21 @@ namespace
       if ( flag == "--errors-csv" )
       {
         arguments.write_errors_csv = true;
+        continue;
+      }
+      if ( flag == "--no-outlier-cull" )
+      {
+        arguments.no_outlier_cull = true;
+        continue;
+      }
+      if ( flag == "--no-outlier-reopt" )
+      {
+        arguments.no_outlier_reopt = true;
+        continue;
+      }
+      if ( flag == "--allow-culled-rebirth" )
+      {
+        arguments.allow_culled_rebirth = true;
         continue;
       }
       if ( index + 1 >= argc )
@@ -315,6 +335,8 @@ namespace
               estimator.outlier_avg_reproj_px );
     snap.set( "estimator.enable_outlier_reopt",
               estimator.enable_outlier_reopt );
+    snap.set( "estimator.block_culled_rebirth",
+              estimator.block_culled_rebirth );
 
     snap.set( "session.dataset_format", std::string( "euroc" ) );
     if ( session.max_frames.has_value() )
@@ -419,6 +441,20 @@ namespace
     phad::apps::OfflineVoSessionOptions session_options;
     session_options.sequence_root = arguments.sequence_root;
     session_options.max_frames    = arguments.max_frames;
+    if ( arguments.no_outlier_cull )
+    {
+      session_options.estimator.enable_outlier_cull = false;
+    }
+    if ( arguments.no_outlier_reopt )
+    {
+      session_options.estimator.enable_outlier_reopt = false;
+    }
+    // Default leaves estimator.block_culled_rebirth=true. Flag only for
+    // A/B that re-enables same-id backproject; session still dropTracks.
+    if ( arguments.allow_culled_rebirth )
+    {
+      session_options.estimator.block_culled_rebirth = false;
+    }
 
     phad::bench::ConfigSnapshot config =
         flattenConfig( arguments, session_options );

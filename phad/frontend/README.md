@@ -20,9 +20,11 @@ PRIVATE。
 | 左目时序 LK + 前后向一致性 | 位姿 / IMU 预测 |
 | 右目 1D SAD 匹配（行容差 + 视差区间 + 亚像素 + 反向一致性）与几何门限 | `KeyframeMeasurement` 合同 |
 | 单调不复用的 `LandmarkId` 与 `FrameStats` | 无限累积历史观测 |
+| `dropTracks(ids)` 按 id 擦除存活 tracks（未知 id 忽略；不改 `next_id`） | 知道 estimator cull / 图优化语义 |
 
 输入假定为 `StereoRectifier` 输出的校正后 `StereoFrame` 与
-`RectifiedStereoCalibration`。
+`RectifiedStereoCalibration`。session 可在 estimator `update` 后把
+`culled_landmark_ids` 回传给 `dropTracks`，frontend 本身不依赖 estimator。
 
 ## 文件布局
 
