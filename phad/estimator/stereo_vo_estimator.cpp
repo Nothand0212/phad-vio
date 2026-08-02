@@ -280,7 +280,7 @@ namespace phad::estimator
     std::uint64_t                    next_frame_index = 0;
     bool                             initialized      = false;
     std::uint32_t                    segment_id       = 0;
-    // Cross-segment set of mean-reproj-culled ids (written in Task 2).
+    // Cross-segment reject set: mean-cull ∪ cheirality erasures (block rebirth).
     std::unordered_set<LandmarkId> culled_ids_;
 
     explicit Impl( camera::RectifiedStereoCalibration calibration_in,
@@ -367,6 +367,11 @@ namespace phad::estimator
 
       for ( const StereoObservation& observation : measurement.observations )
       {
+        if ( options.block_culled_rebirth &&
+             culled_ids_.find( observation.id ) != culled_ids_.end() )
+        {
+          continue;
+        }
         const Eigen::Vector3d point_W =
             backprojectWorld( candidate.T_W_B, observation );
         const gtsam::Pose3 T_W_left =
@@ -379,6 +384,11 @@ namespace phad::estimator
         }
         landmarks_W[ observation.id ] = point_W;
         track_times[ observation.id ].push_back( measurement.timestamp );
+      }
+
+      if ( landmarks_W.empty() )
+      {
+        return false;
       }
 
       window.clear();
@@ -631,7 +641,8 @@ namespace phad::estimator
     }
 
     [[nodiscard]] std::uint32_t dropCheiralityLandmarks(
-        const gtsam::Values& values )
+        const gtsam::Values&     values,
+        std::vector<LandmarkId>& frame_culled )
     {
       std::uint32_t           dropped = 0;
       std::vector<LandmarkId> to_drop;
@@ -680,6 +691,8 @@ namespace phad::estimator
       {
         landmarks_W.erase( id );
         eraseLandmarkFromWindow( id );
+        culled_ids_.insert( id );
+        frame_culled.push_back( id );
         ++dropped;
       }
       return dropped;
@@ -717,6 +730,7 @@ namespace phad::estimator
       const KeyframeMeasurement& measurement )
   {
     VioUpdateResult result;
+    result.diagnostics.culled_landmark_ids.clear();
     result.diagnostics.num_observations =
         static_cast<std::uint32_t>( measurement.observations.size() );
     result.diagnostics.segment_id = m_impl->segment_id;
@@ -810,6 +824,8 @@ namespace phad::estimator
     const auto segment_id_backup  = m_impl->segment_id;
     const auto culled_ids_backup  = m_impl->culled_ids_;
 
+    std::vector<LandmarkId> frame_culled;
+
     auto restore = [ & ]() {
       m_impl->window                = window_backup;
       m_impl->landmarks_W           = landmarks_backup;
@@ -821,6 +837,8 @@ namespace phad::estimator
       m_impl->segment_id            = segment_id_backup;
       m_impl->culled_ids_           = culled_ids_backup;
       result.diagnostics.segment_id = m_impl->segment_id;
+      result.diagnostics.culled_landmark_ids.clear();
+      frame_culled.clear();
     };
 
     if ( !m_impl->initialized )
@@ -941,6 +959,12 @@ namespace phad::estimator
       {
         if ( m_impl->landmarks_W.find( observation.id ) !=
              m_impl->landmarks_W.end() )
+        {
+          continue;
+        }
+        if ( m_impl->options.block_culled_rebirth &&
+             m_impl->culled_ids_.find( observation.id ) !=
+                 m_impl->culled_ids_.end() )
         {
           continue;
         }
@@ -1075,7 +1099,7 @@ namespace phad::estimator
     const std::uint32_t cheirality_after = countCheiralityFactors(
         graph, optimized, m_impl->calibration.fxPixels() );
     const std::uint32_t dropped =
-        m_impl->dropCheiralityLandmarks( optimized );
+        m_impl->dropCheiralityLandmarks( optimized, frame_culled );
     result.diagnostics.num_cheirality =
         std::max( cheirality_before, std::max( cheirality_after, dropped ) );
 
@@ -1124,6 +1148,7 @@ namespace phad::estimator
         {
           m_impl->landmarks_W.erase( id );
           m_impl->eraseLandmarkFromWindow( id );
+          frame_culled.push_back( id );
           ++outliers_culled;
           if ( m_impl->culled_ids_.insert( id ).second )
           {
@@ -1226,6 +1251,7 @@ namespace phad::estimator
     result.diagnostics.outlier_reopt            = outlier_reopt;
     result.diagnostics.outlier_reopt_failed     = outlier_reopt_failed;
     result.diagnostics.max_window_pose_shift_m  = max_shift_m;
+    result.diagnostics.culled_landmark_ids      = std::move( frame_culled );
 
     m_impl->initialized         = true;
     m_impl->prev_accepted_T_W_B = m_impl->last_accepted_T_W_B;

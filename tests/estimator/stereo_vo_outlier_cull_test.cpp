@@ -349,7 +349,10 @@ TEST( StereoVoOutlierCullTest, RepeatCullIncrementsTotalNotUnique )
   const auto       poses       = translatingPoses( 24, 0.05 );
   const LandmarkId poison_id   = 1;
 
-  StereoVoEstimator estimator( calibration, defaultCullOptions() );
+  // Requires rebirth of the same LandmarkId after mean-cull (Slice ④ semantics).
+  EstimatorOptions options     = defaultCullOptions();
+  options.block_culled_rebirth = false;
+  StereoVoEstimator estimator( calibration, options );
 
   std::uint32_t total_culled      = 0;
   std::uint32_t total_unique      = 0;

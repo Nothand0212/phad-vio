@@ -150,6 +150,9 @@ namespace
     options.enable_outlier_cull   = true;
     options.enable_outlier_reopt  = true;
     options.outlier_avg_reproj_px = 3.0;
+    // Reopt fixtures poison several ids across frames; allow rebirth so a
+    // single frame can still mean-cull >= 4 (Slice ④ pseudo-permanent).
+    options.block_culled_rebirth = false;
     return options;
   }
 
