@@ -16,7 +16,7 @@ TEST( EstimatorTypes, LandmarkIdAliasesCommon )
 TEST( EstimatorTypes, OutlierAvgReprojDefault )
 {
   phad::estimator::EstimatorOptions options;
-  EXPECT_DOUBLE_EQ( options.outlier_avg_reproj_px, 3.0 );
+  EXPECT_DOUBLE_EQ( options.outlier_avg_reproj_px, 4.0 );
   EXPECT_TRUE( options.enable_outlier_cull );
   EXPECT_TRUE( options.block_culled_rebirth );
 }
