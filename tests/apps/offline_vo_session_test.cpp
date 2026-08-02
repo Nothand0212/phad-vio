@@ -172,6 +172,7 @@ namespace
     OfflineVoSessionOptions options;
     EXPECT_EQ( options.skip_drop_min_culled, 4 );
     EXPECT_TRUE( options.drop_culled_tracks );
+    EXPECT_EQ( options.defer_drop_topk, 0 );
     FrameCounts counts;
     EXPECT_EQ( counts.drops_skipped, 0U );
     EXPECT_EQ( counts.deferred_drops, 0U );

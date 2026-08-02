@@ -35,6 +35,10 @@
 - Slice ④g 编排已回退：默认恢复 ④f「skip 则不 drop」；`deferred_drops` /
   `deferred_drop_ids` 计数合同仍保留（默认恒 0）。事后诊断见
   `docs/research/m3.3-slice4g-postmortem.md`（④g ≡ ④e bit-identical）。
+- 子集延后 drop 探针：`--defer-drop-topk <k>`（默认 0；bench / probe）；
+  skip 后按 `LandmarkId` 排序取前 k 入 `pending_drop`，下帧 `process` 前
+  flush；**不**进 `flattenConfig` / `config_hash`。见
+  `docs/research/m3.3-post4g-next-knife-candidates.md`。
 - MH_05 Probe B：`--probe-b <path>` 为 CLI-only（bench / probe）；**不**进
   `flattenConfig` / `config_hash`，**不**改 18 列 `diag.csv`。
 - 行为保持型重构：先在当前 commit 产出仓库外参考产物，再改代码并以逐字节 diff 验收

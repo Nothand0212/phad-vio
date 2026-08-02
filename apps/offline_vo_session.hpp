@@ -44,6 +44,10 @@ namespace phad::apps
     int skip_drop_min_culled = 4;
     /// MH_05 Probe B jsonl path; empty → writer not constructed (default off).
     std::filesystem::path probe_b_path{};
+    /// Probe: after skip-drop, defer dropTracks of the first K culled ids
+    /// (sorted by LandmarkId) until next tracker.process. Default 0 = ④f
+    /// (skip and never defer-drop). CLI-only; not in config_hash.
+    int defer_drop_topk = 0;
   };
 
   struct VoDiagRow

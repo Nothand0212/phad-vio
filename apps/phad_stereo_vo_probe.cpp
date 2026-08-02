@@ -1,9 +1,13 @@
+#include <charconv>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 #include "apps/offline_vo_session.hpp"
 #include "phad/eval/tum_io.hpp"
@@ -20,7 +24,7 @@ namespace
 
   constexpr std::string_view kUsage =
       "usage: phad_stereo_vo_probe <sequence-root> --tum <path> "
-      "[--diag-csv <path>] [--probe-b <path>]\n";
+      "[--diag-csv <path>] [--probe-b <path>] [--defer-drop-topk <k>]\n";
 
   struct Arguments
   {
@@ -28,6 +32,7 @@ namespace
     std::filesystem::path tum_path;
     std::filesystem::path diag_csv;
     std::filesystem::path probe_b_path;
+    std::optional<int>    defer_drop_topk;
   };
 
   [[nodiscard]] bool parseArguments( int argc, char** argv,
@@ -60,6 +65,22 @@ namespace
       {
         arguments.probe_b_path = value;
       }
+      else if ( flag == "--defer-drop-topk" )
+      {
+        std::uint64_t parsed = 0;
+        const auto    result = std::from_chars(
+            value.data(), value.data() + value.size(), parsed );
+        if ( result.ec != std::errc{} ||
+             result.ptr != value.data() + value.size() ||
+             parsed > static_cast<std::uint64_t>(
+                          std::numeric_limits<int>::max() ) )
+        {
+          std::cerr
+              << "--defer-drop-topk expects a non-negative integer\n";
+          return false;
+        }
+        arguments.defer_drop_topk = static_cast<int>( parsed );
+      }
       else
       {
         std::cerr << "unknown flag " << flag << '\n';
@@ -74,6 +95,10 @@ namespace
     phad::apps::OfflineVoSessionOptions options;
     options.sequence_root = arguments.sequence_root;
     options.probe_b_path  = arguments.probe_b_path;
+    if ( arguments.defer_drop_topk.has_value() )
+    {
+      options.defer_drop_topk = *arguments.defer_drop_topk;
+    }
 
     phad::apps::OfflineVoSessionResult result =
         phad::apps::runOfflineVoSession( options );
