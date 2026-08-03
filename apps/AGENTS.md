@@ -43,9 +43,9 @@
   完整 `culled_landmark_ids` 调 `markEvictable`，GFTT 需要槽位时按 id 升序
   挤出；**不**进 `flattenConfig` / `config_hash`。见
   `docs/research/m3.3-evict-skip-culled-probe-design.md`。
-- 多帧 zombie 龄 drop 探针：`--zombie-drop-age <n>`（默认 0；bench / probe）；
-  skip 入表龄=1，连续仍在 `FrameTracks` 则 +1，`≥n` 精确 `dropTracks`；
-  **不**进 `flattenConfig` / `config_hash`。见
+- 多帧 zombie 龄 drop：`session.zombie_drop_age` 默认 **5**（进
+  `flattenConfig` / `config_hash`）；`--zombie-drop-age <n>` 可覆写；`0`=关。
+  skip 入表龄=1，连续仍在 `FrameTracks` 则 +1，`≥n` 精确 `dropTracks`。见
   `docs/research/m3.3-zombie-drop-age-probe-design.md`。
 - MH_05 Probe B：`--probe-b <path>` 为 CLI-only（bench / probe）；**不**进
   `flattenConfig` / `config_hash`，**不**改 18 列 `diag.csv`。

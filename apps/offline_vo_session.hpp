@@ -51,9 +51,10 @@ namespace phad::apps
     /// Probe: on skip-drop, mark culled ids evictable for lazy GFTT slot
     /// reclaim. Default false. CLI-only; not in config_hash.
     bool evict_skip_culled = false;
-    /// Probe: drop skip-culled ids after N consecutive frames still present
-    /// in FrameTracks. Default 0 = off (④f). CLI-only; not in config_hash.
-    int zombie_drop_age = 0;
+    /// Drop skip-culled ids after N consecutive frames still present in
+    /// FrameTracks. Default 5 (M3.3 candidate B productized). 0 = off.
+    /// In flattenConfig / config_hash; CLI --zombie-drop-age may override.
+    int zombie_drop_age = 5;
   };
 
   struct VoDiagRow

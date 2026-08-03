@@ -437,6 +437,8 @@ namespace
     snap.set( "session.drop_culled_tracks", session.drop_culled_tracks );
     snap.set( "session.skip_drop_min_culled",
               static_cast<std::int64_t>( session.skip_drop_min_culled ) );
+    snap.set( "session.zombie_drop_age",
+              static_cast<std::int64_t>( session.zombie_drop_age ) );
     if ( session.max_frames.has_value() )
     {
       snap.set( "session.max_frames",
@@ -581,7 +583,7 @@ namespace
     }
     // evict-skip-culled is CLI-only probe: not in flattenConfig / config_hash.
     session_options.evict_skip_culled = arguments.evict_skip_culled;
-    // zombie-drop-age is CLI-only probe: not in flattenConfig / config_hash.
+    // zombie-drop-age defaults to 5 and enters flattenConfig / config_hash.
     if ( arguments.zombie_drop_age.has_value() )
     {
       session_options.zombie_drop_age = *arguments.zombie_drop_age;

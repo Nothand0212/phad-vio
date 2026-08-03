@@ -306,7 +306,7 @@ namespace
     std::filesystem::remove_all( root );
   }
 
-  TEST( VoBenchCliTest, ZombieDropAgeDoesNotChangeConfigHash )
+  TEST( VoBenchCliTest, ZombieDropAgeOverrideChangesConfigHash )
   {
     ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
 
@@ -314,28 +314,42 @@ namespace
                       "phad_vo_bench_cli_zombie_age_hash";
     std::filesystem::remove_all( root );
     const auto out_default = root / "out_default";
-    const auto out_age     = root / "out_age";
+    const auto out_age5    = root / "out_age5";
+    const auto out_age8    = root / "out_age8";
     std::filesystem::create_directories( root );
 
     const auto stdout_default = root / "stdout_default.txt";
     const auto stderr_default = root / "stderr_default.txt";
-    const auto stdout_age     = root / "stdout_age.txt";
-    const auto stderr_age     = root / "stderr_age.txt";
+    const auto stdout_age5    = root / "stdout_age5.txt";
+    const auto stderr_age5    = root / "stderr_age5.txt";
+    const auto stdout_age8    = root / "stdout_age8.txt";
+    const auto stderr_age8    = root / "stderr_age8.txt";
 
     (void)runBench( "/nonexistent/sequence --out \"" + out_default.string() +
                         "\" --sequence-name hash_probe --force",
                     stdout_default, stderr_default );
-    (void)runBench( "/nonexistent/sequence --out \"" + out_age.string() +
+    (void)runBench( "/nonexistent/sequence --out \"" + out_age5.string() +
+                        "\" --sequence-name hash_probe --force "
+                        "--zombie-drop-age 5",
+                    stdout_age5, stderr_age5 );
+    (void)runBench( "/nonexistent/sequence --out \"" + out_age8.string() +
                         "\" --sequence-name hash_probe --force "
                         "--zombie-drop-age 8",
-                    stdout_age, stderr_age );
+                    stdout_age8, stderr_age8 );
 
     const std::string hash_default =
         extractConfigHash( readFile( stdout_default ) );
-    const std::string hash_age = extractConfigHash( readFile( stdout_age ) );
+    const std::string hash_age5 = extractConfigHash( readFile( stdout_age5 ) );
+    const std::string hash_age8 = extractConfigHash( readFile( stdout_age8 ) );
     ASSERT_FALSE( hash_default.empty() ) << readFile( stderr_default );
-    ASSERT_FALSE( hash_age.empty() ) << readFile( stderr_age );
-    EXPECT_EQ( hash_default, hash_age );
+    ASSERT_FALSE( hash_age5.empty() ) << readFile( stderr_age5 );
+    ASSERT_FALSE( hash_age8.empty() ) << readFile( stderr_age8 );
+    EXPECT_EQ( hash_default, hash_age5 );
+    EXPECT_NE( hash_default, hash_age8 );
+
+    const std::string meta_default = readFile( out_default / "meta.json" );
+    EXPECT_NE( meta_default.find( "session.zombie_drop_age=5" ),
+               std::string::npos );
 
     std::filesystem::remove_all( root );
   }
