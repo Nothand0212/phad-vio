@@ -50,7 +50,8 @@ namespace
       "                     [--skip-drop-min-culled <n>]\n"
       "                     [--outlier-avg-reproj-px <v>]\n"
       "                     [--max-outlier-reopts <n>]\n"
-      "                     [--probe-b <path>]\n";
+      "                     [--probe-b <path>]\n"
+      "                     [--defer-drop-topk <k>]\n";
 
 #ifndef PHAD_SOURCE_DIR
 #define PHAD_SOURCE_DIR ""
@@ -79,6 +80,7 @@ namespace
     std::optional<int>           max_outlier_reopts;
     std::optional<int>           skip_drop_min_culled;
     std::filesystem::path        probe_b_path;
+    std::optional<int>           defer_drop_topk;
   };
 
   [[nodiscard]] bool parseDouble( std::string_view text, double& value )
@@ -251,6 +253,19 @@ namespace
       else if ( flag == "--probe-b" )
       {
         arguments.probe_b_path = value;
+      }
+      else if ( flag == "--defer-drop-topk" )
+      {
+        std::uint64_t parsed = 0;
+        if ( !parseUint64( value, parsed ) ||
+             parsed > static_cast<std::uint64_t>(
+                          std::numeric_limits<int>::max() ) )
+        {
+          std::cerr
+              << "--defer-drop-topk expects a non-negative integer\n";
+          return false;
+        }
+        arguments.defer_drop_topk = static_cast<int>( parsed );
       }
       else
       {
@@ -537,6 +552,11 @@ namespace
     }
     // Probe B path is CLI-only: not in flattenConfig / config_hash.
     session_options.probe_b_path = arguments.probe_b_path;
+    // defer-drop-topk is CLI-only probe: not in flattenConfig / config_hash.
+    if ( arguments.defer_drop_topk.has_value() )
+    {
+      session_options.defer_drop_topk = *arguments.defer_drop_topk;
+    }
 
     phad::bench::ConfigSnapshot config =
         flattenConfig( arguments, session_options );

@@ -79,6 +79,7 @@ namespace
     EXPECT_EQ( exit_code, 2 );
     const std::string err = readFile( stderr_path );
     EXPECT_NE( err.find( "--probe-b" ), std::string::npos );
+    EXPECT_NE( err.find( "--defer-drop-topk" ), std::string::npos );
 
     std::filesystem::remove_all( root );
   }
@@ -207,6 +208,64 @@ namespace
                std::string::npos );
     EXPECT_NE( meta_max1.find( "estimator.max_outlier_reopts=1" ),
                std::string::npos );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, DeferDropTopkDoesNotChangeConfigHash )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_defer_topk_hash";
+    std::filesystem::remove_all( root );
+    const auto out_default = root / "out_default";
+    const auto out_topk    = root / "out_topk";
+    std::filesystem::create_directories( root );
+
+    const auto stdout_default = root / "stdout_default.txt";
+    const auto stderr_default = root / "stderr_default.txt";
+    const auto stdout_topk    = root / "stdout_topk.txt";
+    const auto stderr_topk    = root / "stderr_topk.txt";
+
+    (void)runBench( "/nonexistent/sequence --out \"" + out_default.string() +
+                        "\" --sequence-name hash_probe --force",
+                    stdout_default, stderr_default );
+    (void)runBench( "/nonexistent/sequence --out \"" + out_topk.string() +
+                        "\" --sequence-name hash_probe --force "
+                        "--defer-drop-topk 8",
+                    stdout_topk, stderr_topk );
+
+    const std::string hash_default =
+        extractConfigHash( readFile( stdout_default ) );
+    const std::string hash_topk = extractConfigHash( readFile( stdout_topk ) );
+    ASSERT_FALSE( hash_default.empty() ) << readFile( stderr_default );
+    ASSERT_FALSE( hash_topk.empty() ) << readFile( stderr_topk );
+    EXPECT_EQ( hash_default, hash_topk );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, RejectsNegativeDeferDropTopk )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_reject_topk_neg";
+    std::filesystem::remove_all( root );
+    std::filesystem::create_directories( root );
+    const auto stdout_path = root / "stdout.txt";
+    const auto stderr_path = root / "stderr.txt";
+
+    const int exit_code = runBench(
+        "/nonexistent/sequence --out \"" + ( root / "out" ).string() +
+            "\" --sequence-name cli_reject --defer-drop-topk -1",
+        stdout_path, stderr_path );
+
+    EXPECT_NE( exit_code, 0 );
+    const std::string err = readFile( stderr_path );
+    EXPECT_NE( err.find( "--defer-drop-topk" ), std::string::npos );
+    EXPECT_NE( err.find( "non-negative" ), std::string::npos );
 
     std::filesystem::remove_all( root );
   }

@@ -126,6 +126,41 @@ namespace phad::apps
     }
     estimator::StereoVoEstimator estimator( rectified_cal, estimator_options );
 
+    // Probe: optional deferred top-K drop after skip (see defer_drop_topk).
+    std::unordered_set<common::LandmarkId> pending_drop;
+
+    const auto flushPendingDrop = [ & ]() {
+      if ( pending_drop.empty() )
+      {
+        return;
+      }
+      const std::vector<common::LandmarkId> ids( pending_drop.begin(),
+                                                 pending_drop.end() );
+      tracker.dropTracks( ids );
+      ++result.counts.deferred_drops;
+      result.counts.deferred_drop_ids +=
+          static_cast<std::uint64_t>( ids.size() );
+      pending_drop.clear();
+    };
+
+    const auto selectDeferDropTopk =
+        []( const std::vector<common::LandmarkId>& culled,
+            const int                              topk ) {
+          std::vector<common::LandmarkId> selected;
+          if ( topk <= 0 || culled.empty() )
+          {
+            return selected;
+          }
+          selected = culled;
+          std::sort( selected.begin(), selected.end() );
+          const auto keep = static_cast<std::size_t>( topk );
+          if ( keep < selected.size() )
+          {
+            selected.resize( keep );
+          }
+          return selected;
+        };
+
     std::vector<common::TimedPose> poses;
     std::vector<double>            rms_after;
     std::vector<double>            rectify_s;
@@ -193,6 +228,7 @@ namespace phad::apps
       {
         result.error = SessionError{ error->detail };
         result.sync  = stream.diagnostics();
+        flushPendingDrop();
         finalizeSegmentsAndWarnings();
         return result;
       }
@@ -208,10 +244,12 @@ namespace phad::apps
         result.error =
             SessionError{ "rectify failed: " + rectified.error().detail };
         result.sync = stream.diagnostics();
+        flushPendingDrop();
         finalizeSegmentsAndWarnings();
         return result;
       }
 
+      flushPendingDrop();
       const auto                  frontend_begin = std::chrono::steady_clock::now();
       const frontend::FrameTracks tracks =
           tracker.process( rectified.value() );
@@ -241,9 +279,9 @@ namespace phad::apps
       // Composition-root feedback: drop frontend tracks for ids the
       // estimator permanently removed this frame. Default on (④c); two-level
       // gate (④f): drop_culled_tracks then skip when outliers_culled >= N.
-      // ④g pending_drop deferred flush was reverted: on MH_05 it is
-      // bit-identical to immediate drop (④e) and regresses ATE; see
-      // docs/research/m3.3-slice4g-postmortem.md. Does not enter warnings.
+      // Probe --defer-drop-topk: on skip, optionally queue sorted top-K ids
+      // for flush before next process (K=0 keeps ④f; K=full ≈④g/④e).
+      // Does not enter warnings.
       bool drops_skipped_this_frame = false;
       if ( options.drop_culled_tracks &&
            !update.diagnostics.culled_landmark_ids.empty() )
@@ -256,6 +294,12 @@ namespace phad::apps
         {
           ++result.counts.drops_skipped;
           drops_skipped_this_frame = true;
+          for ( const common::LandmarkId id : selectDeferDropTopk(
+                    update.diagnostics.culled_landmark_ids,
+                    options.defer_drop_topk ) )
+          {
+            pending_drop.insert( id );
+          }
         }
         else
         {
@@ -324,6 +368,7 @@ namespace phad::apps
         {
           result.error = SessionError{ exception.what() };
           result.sync  = stream.diagnostics();
+          flushPendingDrop();
           finalizeSegmentsAndWarnings();
           return result;
         }
@@ -436,6 +481,8 @@ namespace phad::apps
         total_s.push_back( seconds( frame_begin, frame_end ) );
       }
     }
+
+    flushPendingDrop();
 
     const auto wall_end = std::chrono::steady_clock::now();
     result.wall_s =
