@@ -263,17 +263,18 @@ adapter 移到独立的同步器——那里同时是 M4 的 IMU 包络与未来
 [M3.2 双目配对同步器](plans/2026-07-31_m3.2_stereo_pair_synchronizer_5b7d1c93.plan.md)。
 Issue：[#22](https://github.com/Nothand0212/phad-vio/issues/22)。
 
-### M3.3 VO 加固（依赖 M3.2；Slice ①②③④d 已完成；④f 已完成（当前默认）；④g 证伪并回退编排；④e 部分完成；④/④b 不够；④c 部分；⑤ 先对齐再开）
+### M3.3 VO 加固（依赖 M3.2；Slice ①②③④d 已完成；④f + zombie age=5 为当前默认且全序列 baseline 已建立；④g 证伪并回退编排；④e 部分完成；④/④b 不够；④c 部分；⑤ 先对齐再开）
 
 M3.2 全序列基线暴露的主导失败不是精度，而是一个**吸收态**：估计器一旦因
 `num_shared == 0` 拒帧，事务回滚会冻结窗口与 landmark 表，而前端跟踪断裂后
 重新检测会发放全新 `LandmarkId`，此后交集恒为空、永久拒帧。V1_03 上一帧异常
 废掉了随后 1906 帧。因此本阶段按失败驱动排序，恢复先于精度。
 
-范围（五片 + ④ 续片；Slice ①②③④d 已落地；④f skip-drop 为**当前默认**；④g 曾编码但
-MH_05 软门失败且 ≡④e → **编排已回退**；④e 编码完成但 MH_05 不够；④/④b 不够；④c
-机制落地但曾硬门不够，由 ④d 阈值收口；⑤ MH_01 门控已满足，MH_05 债以 ④f ≈3.06 m
-为锚 → **先对齐再开** ⑤）：
+范围（五片 + ④ 续片；Slice ①②③④d 已落地；④f skip-drop +
+`session.zombie_drop_age=5` 为**当前默认**；④g 曾编码但 MH_05 软门失败且 ≡④e →
+**编排已回退**；④e 编码完成但 MH_05 不够；④/④b 不够；④c 机制落地但曾硬门不够，
+由 ④d 阈值收口；⑤ MH_01 门控已满足，MH_05 当前锚≈2.456 m，且 EuRoC 11/11
+record-only baseline 已建立 → **先对齐再开** ⑤）：
 
 - **① 恢复（已完成）**：去掉 `num_shared == 0` 拒帧门，重叠断裂即以新 id 重建窗口，
   prior 打在最后一个被接受的位姿上（anchor 复用现有恒速位姿初值规则）；
@@ -307,16 +308,23 @@ MH_05 软门失败且 ≡④e → **编排已回退**；④e 编码完成但 MH_
 - **④f 大剔跳过 dropTracks（已完成）**：`session.skip_drop_min_culled=4` 已编码
   （`c446ac5` / `default_a5e90dc7`）；MH_01 硬门 **PASS**（ATE **0.0987839**；
   `drops_skipped=0`）；MH_05 软门 **PASS**（ATE **3.057** vs ④e **4.565**；
-  `drops_skipped=1`）→ **全序列未跑**；设计见
+  `drops_skipped=1`）；纯 ④f 当时未扩全序列，当前默认叠加 zombie age 后已跑
+  11/11；设计见
   [Slice ④f](research/m3.3-slice4f-skip-drop-design.md)；
 - **④g skip-drop 后延后 drop zombie（证伪 / 编排已回退）**：曾编码并门控失败
   （ATE **4.565**=④e；zombie 归零）；事后诊断 ④g≡④e bit-identical → 删除
   `pending_drop`，默认恢复 ④f；`deferred_*` 合同保留；见
   [Slice ④g](research/m3.3-slice4g-zombie-drop-design.md)、
   [postmortem](research/m3.3-slice4g-postmortem.md)；
+- **④g 后候选 B：多帧 zombie 龄 drop（已产品化 / 当前默认）**：
+  `session.zombie_drop_age=5`，相对 ④f 新增该唯一 config 键；默认 hash
+  `773ea011`。MH_01 ATE **0.0987839** 硬门 PASS；MH_05 ATE
+  **2.455726**（相对 ④f 改善 19.67%）软门 PASS。`4cf55ca` 已完成 EuRoC
+  11/11 正式 baseline；全序列只记录、不作硬门，见
+  [全序列 baseline](research/m3.3-full-suite-baseline-773ea011.md)；
 - **⑤** 关键帧策略（视差、跟踪数、时间间隔）— MH_01 硬门已满足；会改
-  `est.tum` 输出语义且与 M4 IMU 预积分边界耦合；MH_05 债以 ④f ≈3.06 m 为锚 →
-  ⑤ **先对齐再开**（勿在 MH_05 债未决时直接开工）。
+  `est.tum` 输出语义且与 M4 IMU 预积分边界耦合；MH_05 当前锚≈2.456 m，且
+  全序列已暴露其它回归风险 → ⑤ **先对齐再开**（勿在现有债未决时直接开工）。
 
 Slice ① 出口（commit `0b0cd34` / `default_030a0197`，对照 `4780660`）：
 
@@ -414,7 +422,8 @@ Slice ④e 出口（commit `0ced28b` / `default_3a21162e`；
   [基线](research/m3.3-slice4-baseline.md) §10。
 
 Slice ④f 出口（commit `c446ac5` / `default_a5e90dc7`；
-**已完成** — MH_01 硬门 + MH_05 软门通过；全序列未跑）：
+**已完成** — MH_01 硬门 + MH_05 软门通过；本配置当时未跑全序列，后续当前
+`default_773ea011` 已跑 11/11）：
 
 - 增量键：`session.drop_culled_tracks=true`；`session.skip_drop_min_culled=4`
   （相对 ④e `3a21162e`）；
@@ -422,7 +431,8 @@ Slice ④f 出口（commit `c446ac5` / `default_a5e90dc7`；
   culled 3/3；
 - MH_05 ATE **3.056878** vs ④e **4.565065**（Δ≈−1.51）；优于 no_drop A/B
   **3.972**；`drops_skipped=1`；`seg/re/failed=1/0/0`；completion ≈0.998；
-- **未跑**其余 EuRoC；
+- 纯 ④f 当时**未跑**其余 EuRoC；当前默认全序列数字见
+  [`default_773ea011` baseline](research/m3.3-full-suite-baseline-773ea011.md)；
 - 设计 / 数字见
   [Slice ④f 设计](research/m3.3-slice4f-skip-drop-design.md)、
   [基线](research/m3.3-slice4-baseline.md) §11。
@@ -438,14 +448,28 @@ Slice ④g 出口（commit `3ee5dea` / `default_a5e90dc7`；
   [基线](research/m3.3-slice4-baseline.md) §12、
   [postmortem](research/m3.3-slice4g-postmortem.md)。
 
+当前默认全序列出口（commit `4cf55ca` / `default_773ea011`；
+**正式 baseline 已建立**，全序列 record-only）：
+
+- 相对 ④f `a5e90dc7` 新增唯一键：`session.zombie_drop_age=5`；保留
+  `session.skip_drop_min_culled=4`；未开启 CLI-only 探针；
+- MH_01 ATE **0.0987839**、`segments/reanchors=1/0`，硬门 PASS；MH_05 ATE
+  **2.455726** vs ④f **3.056878**，软门 PASS；
+- EuRoC 11/11 `summary.json` 齐全且 hash 一致。全序列未设硬门；记录到
+  MH_02 ATE≈`5.30e5` / completion≈0.522，以及 V1_02 / V1_03 / V2_01 /
+  V2_02 / V2_03 的 4.38–9.79 m ATE 风险，后续须以全表而非单序列优化；
+- 完整 config snapshot、质量表与 robustness 计数见
+  [M3.3 EuRoC 全序列正式 baseline](research/m3.3-full-suite-baseline-773ea011.md)。
+
 后续切片出口：
 
 - 每次改动用 `phad_vo_bench` 产出前后数字；无法测量的改动不进入本阶段；
 - **`MH_01` 作不回归锚**（ATE 不劣于 **0.098784** m，且 `reanchors=0`）；
 - MH_05 / 发散债：④f skip-drop 保留；④g / id 序 top-K / 完整集懒腾槽均证伪；
   **候选 B 已产品化**：`session.zombie_drop_age=5`（MH_05 ATE≈**2.456**；
-  MH_01 硬门 PASS；见
-  [zombie-drop-age](research/m3.3-zombie-drop-age-probe-design.md)）；勿默认再
+  MH_01 硬门 PASS；全序列 11/11 baseline 已建立；见
+  [zombie-drop-age](research/m3.3-zombie-drop-age-probe-design.md)、
+  [全序列 baseline](research/m3.3-full-suite-baseline-773ea011.md)）；勿默认再
   整批 drop / 跳 ⑤ / 关整个 skip / 关整个 block / 单独去 Huber / 观测级；⑤ 与
   M4 耦合，**先对齐再开**。
 
