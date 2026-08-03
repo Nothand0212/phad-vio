@@ -7,9 +7,11 @@
 #include <iomanip>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <variant>
@@ -128,6 +130,16 @@ namespace phad::apps
 
     // Probe: optional deferred top-K drop after skip (see defer_drop_topk).
     std::unordered_set<common::LandmarkId> pending_drop;
+    // Probe: consecutive survival age for skip-culled ids (zombie_drop_age).
+    std::unordered_map<common::LandmarkId, int> zombie_age;
+
+    const auto eraseZombieAge =
+        [ &zombie_age ]( std::span<const common::LandmarkId> ids ) {
+          for ( const common::LandmarkId id : ids )
+          {
+            zombie_age.erase( id );
+          }
+        };
 
     const auto flushPendingDrop = [ & ]() {
       if ( pending_drop.empty() )
@@ -137,6 +149,7 @@ namespace phad::apps
       const std::vector<common::LandmarkId> ids( pending_drop.begin(),
                                                  pending_drop.end() );
       tracker.dropTracks( ids );
+      eraseZombieAge( ids );
       ++result.counts.deferred_drops;
       result.counts.deferred_drop_ids +=
           static_cast<std::uint64_t>( ids.size() );
@@ -255,6 +268,29 @@ namespace phad::apps
           tracker.process( rectified.value() );
       const auto frontend_end = std::chrono::steady_clock::now();
 
+      // Candidate B: age skip-culled ids still present after process.
+      if ( options.zombie_drop_age > 0 )
+      {
+        std::unordered_set<common::LandmarkId> present;
+        present.reserve( tracks.observations.size() );
+        for ( const auto& obs : tracks.observations )
+        {
+          present.insert( obs.id );
+        }
+        for ( auto it = zombie_age.begin(); it != zombie_age.end(); )
+        {
+          if ( present.count( it->first ) != 0U )
+          {
+            ++it->second;
+            ++it;
+          }
+          else
+          {
+            it = zombie_age.erase( it );
+          }
+        }
+      }
+
       // Zombie = frontend obs whose id was permanently culled in a prior frame.
       std::uint32_t zombie_track_n = 0;
       if ( probe_b_writer )
@@ -281,6 +317,8 @@ namespace phad::apps
       // gate (④f): drop_culled_tracks then skip when outliers_culled >= N.
       // Probe --defer-drop-topk: on skip, optionally queue sorted top-K ids
       // for flush before next process (K=0 keeps ④f; K=full ≈④g/④e).
+      // Probe --zombie-drop-age: on skip, track consecutive presence; drop
+      // when age >= N (see m3.3-zombie-drop-age-probe-design.md).
       // Does not enter warnings.
       bool drops_skipped_this_frame = false;
       if ( options.drop_culled_tracks &&
@@ -305,10 +343,39 @@ namespace phad::apps
             tracker.markEvictable( update.diagnostics.culled_landmark_ids );
             ++result.counts.evictable_marked;
           }
+          if ( options.zombie_drop_age > 0 )
+          {
+            for ( const common::LandmarkId id :
+                  update.diagnostics.culled_landmark_ids )
+            {
+              zombie_age.try_emplace( id, 1 );
+            }
+          }
         }
         else
         {
           tracker.dropTracks( update.diagnostics.culled_landmark_ids );
+          eraseZombieAge( update.diagnostics.culled_landmark_ids );
+        }
+      }
+
+      if ( options.zombie_drop_age > 0 )
+      {
+        std::vector<common::LandmarkId> aged_drop;
+        for ( const auto& [ id, age ] : zombie_age )
+        {
+          if ( age >= options.zombie_drop_age )
+          {
+            aged_drop.push_back( id );
+          }
+        }
+        if ( !aged_drop.empty() )
+        {
+          tracker.dropTracks( aged_drop );
+          eraseZombieAge( aged_drop );
+          ++result.counts.zombie_age_drops;
+          result.counts.zombie_age_drop_ids +=
+              static_cast<std::uint64_t>( aged_drop.size() );
         }
       }
 

@@ -166,6 +166,8 @@ namespace phad::bench
         { "deferred_drop_ids", robustness.deferred_drop_ids },
         { "evictable_marked", robustness.evictable_marked },
         { "tracks_evicted", robustness.tracks_evicted },
+        { "zombie_age_drops", robustness.zombie_age_drops },
+        { "zombie_age_drop_ids", robustness.zombie_age_drop_ids },
     };
 
     json timing_json = json{

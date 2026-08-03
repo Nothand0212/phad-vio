@@ -78,6 +78,8 @@ namespace phad::bench
     std::uint64_t deferred_drop_ids = 0;  // 累计 drop 的 id 个数
     std::uint64_t evictable_marked  = 0;  // skip 帧标记次数
     std::uint64_t tracks_evicted    = 0;  // frontend 懒腾槽累计
+    std::uint64_t zombie_age_drops    = 0;  // zombie 龄 drop 冲刷次数
+    std::uint64_t zombie_age_drop_ids = 0;  // zombie 龄 drop 累计 id
   };
 
   struct StageTiming

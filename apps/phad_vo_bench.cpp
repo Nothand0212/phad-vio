@@ -52,7 +52,8 @@ namespace
       "                     [--max-outlier-reopts <n>]\n"
       "                     [--probe-b <path>]\n"
       "                     [--defer-drop-topk <k>]\n"
-      "                     [--evict-skip-culled]\n";
+      "                     [--evict-skip-culled]\n"
+      "                     [--zombie-drop-age <n>]\n";
 
 #ifndef PHAD_SOURCE_DIR
 #define PHAD_SOURCE_DIR ""
@@ -83,6 +84,7 @@ namespace
     std::filesystem::path        probe_b_path;
     std::optional<int>           defer_drop_topk;
     bool                         evict_skip_culled = false;
+    std::optional<int>           zombie_drop_age;
   };
 
   [[nodiscard]] bool parseDouble( std::string_view text, double& value )
@@ -274,6 +276,19 @@ namespace
         }
         arguments.defer_drop_topk = static_cast<int>( parsed );
       }
+      else if ( flag == "--zombie-drop-age" )
+      {
+        std::uint64_t parsed = 0;
+        if ( !parseUint64( value, parsed ) ||
+             parsed > static_cast<std::uint64_t>(
+                          std::numeric_limits<int>::max() ) )
+        {
+          std::cerr
+              << "--zombie-drop-age expects a non-negative integer\n";
+          return false;
+        }
+        arguments.zombie_drop_age = static_cast<int>( parsed );
+      }
       else
       {
         std::cerr << "unknown flag " << flag << '\n';
@@ -422,6 +437,8 @@ namespace
     snap.set( "session.drop_culled_tracks", session.drop_culled_tracks );
     snap.set( "session.skip_drop_min_culled",
               static_cast<std::int64_t>( session.skip_drop_min_culled ) );
+    snap.set( "session.zombie_drop_age",
+              static_cast<std::int64_t>( session.zombie_drop_age ) );
     if ( session.max_frames.has_value() )
     {
       snap.set( "session.max_frames",
@@ -566,6 +583,11 @@ namespace
     }
     // evict-skip-culled is CLI-only probe: not in flattenConfig / config_hash.
     session_options.evict_skip_culled = arguments.evict_skip_culled;
+    // zombie-drop-age defaults to 5 and enters flattenConfig / config_hash.
+    if ( arguments.zombie_drop_age.has_value() )
+    {
+      session_options.zombie_drop_age = *arguments.zombie_drop_age;
+    }
 
     phad::bench::ConfigSnapshot config =
         flattenConfig( arguments, session_options );
@@ -683,8 +705,11 @@ namespace
     summary.robustness.drops_skipped     = session.counts.drops_skipped;
     summary.robustness.deferred_drops    = session.counts.deferred_drops;
     summary.robustness.deferred_drop_ids = session.counts.deferred_drop_ids;
-    summary.robustness.evictable_marked  = session.counts.evictable_marked;
-    summary.robustness.tracks_evicted    = session.counts.tracks_evicted;
+    summary.robustness.evictable_marked   = session.counts.evictable_marked;
+    summary.robustness.tracks_evicted     = session.counts.tracks_evicted;
+    summary.robustness.zombie_age_drops   = session.counts.zombie_age_drops;
+    summary.robustness.zombie_age_drop_ids =
+        session.counts.zombie_age_drop_ids;
     for ( const auto& row : session.diag )
     {
       summary.robustness.cheirality += row.num_cheirality;

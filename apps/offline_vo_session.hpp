@@ -51,6 +51,10 @@ namespace phad::apps
     /// Probe: on skip-drop, mark culled ids evictable for lazy GFTT slot
     /// reclaim. Default false. CLI-only; not in config_hash.
     bool evict_skip_culled = false;
+    /// Drop skip-culled ids after N consecutive frames still present in
+    /// FrameTracks. Default 5 (M3.3 candidate B productized). 0 = off.
+    /// In flattenConfig / config_hash; CLI --zombie-drop-age may override.
+    int zombie_drop_age = 5;
   };
 
   struct VoDiagRow
@@ -99,6 +103,10 @@ namespace phad::apps
     std::uint64_t evictable_marked = 0;
     /// Cumulative tracks evicted by frontend lazy slot reclaim.
     std::uint64_t tracks_evicted = 0;
+    /// Flush count for zombie-age dropTracks (probe).
+    std::uint64_t zombie_age_drops = 0;
+    /// Cumulative ids dropped by zombie-age probe.
+    std::uint64_t zombie_age_drop_ids = 0;
   };
 
   struct StageTiming

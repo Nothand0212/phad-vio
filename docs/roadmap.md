@@ -442,12 +442,12 @@ Slice ④g 出口（commit `3ee5dea` / `default_a5e90dc7`；
 
 - 每次改动用 `phad_vo_bench` 产出前后数字；无法测量的改动不进入本阶段；
 - **`MH_01` 作不回归锚**（ATE 不劣于 **0.098784** m，且 `reanchors=0`）；
-- MH_05 / 发散债：默认锚回 **④f ≈3.06**；④g / id 序 top-K 延后 drop /
-  完整集 `--evict-skip-culled` 均证伪（开臂 ≡④e）；
-  **下一刀 = 候选 B**（多帧条件 drop；见
-  [下一刀候选](research/m3.3-post4g-next-knife-candidates.md)）；勿默认再整批
-  drop / 跳 ⑤ / 关整个 skip / 关整个 block / 单独去 Huber / 观测级；⑤ 与 M4
-  耦合，**先对齐再开**。
+- MH_05 / 发散债：④f skip-drop 保留；④g / id 序 top-K / 完整集懒腾槽均证伪；
+  **候选 B 已产品化**：`session.zombie_drop_age=5`（MH_05 ATE≈**2.456**；
+  MH_01 硬门 PASS；见
+  [zombie-drop-age](research/m3.3-zombie-drop-age-probe-design.md)）；勿默认再
+  整批 drop / 跳 ⑤ / 关整个 skip / 关整个 block / 单独去 Huber / 观测级；⑤ 与
+  M4 耦合，**先对齐再开**。
 
 设计见
 [M3.3 VO 加固设计](research/m3.3-vo-hardening-design.md)、
