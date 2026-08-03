@@ -34,6 +34,7 @@ namespace phad::frontend
       cv::Point2f   pixel        = {};
       double        disparity_px = 0.0;
       StereoStatus  status       = StereoStatus::kNoRightMatch;
+      bool          evictable    = false;
     };
 
     [[nodiscard]] bool isGrayUint8( const sensor::Image& image )
@@ -269,13 +270,51 @@ namespace phad::frontend
       }
     }
 
-    void detectNewTracks( const cv::Mat& left, std::uint32_t& detected )
+    void detectNewTracks( const cv::Mat& left, std::uint32_t& detected,
+                          std::uint32_t& evicted )
     {
+      std::uint32_t non_evictable = 0;
+      for ( const LiveTrack& track : tracks )
+      {
+        if ( !track.evictable )
+        {
+          ++non_evictable;
+        }
+      }
       const int deficit =
-          options.max_tracks - static_cast<int>( tracks.size() );
+          options.max_tracks - static_cast<int>( non_evictable );
       if ( deficit <= 0 )
       {
         return;
+      }
+
+      const int room =
+          options.max_tracks - static_cast<int>( tracks.size() );
+      const int need_evict = deficit - room;
+      if ( need_evict > 0 )
+      {
+        std::vector<LandmarkId> evictable_ids;
+        evictable_ids.reserve( tracks.size() );
+        for ( const LiveTrack& track : tracks )
+        {
+          if ( track.evictable )
+          {
+            evictable_ids.push_back( track.id );
+          }
+        }
+        std::sort( evictable_ids.begin(), evictable_ids.end() );
+        const auto drop_n = static_cast<std::size_t>( std::min(
+            need_evict, static_cast<int>( evictable_ids.size() ) ) );
+        const std::unordered_set<LandmarkId> drop_set(
+            evictable_ids.begin(),
+            evictable_ids.begin() + static_cast<std::ptrdiff_t>( drop_n ) );
+        tracks.erase( std::remove_if( tracks.begin(), tracks.end(),
+                                      [ &drop_set ]( const LiveTrack& track ) {
+                                        return drop_set.count( track.id ) !=
+                                               0U;
+                                      } ),
+                      tracks.end() );
+        evicted += static_cast<std::uint32_t>( drop_n );
       }
 
       cv::Mat                mask    = cv::Mat::ones( left.size(), CV_8UC1 ) * 255;
@@ -534,6 +573,22 @@ namespace phad::frontend
         m_impl->tracks.end() );
   }
 
+  void StereoTracker::markEvictable( std::span<const LandmarkId> ids )
+  {
+    if ( ids.empty() )
+    {
+      return;
+    }
+    const std::unordered_set<LandmarkId> mark_set( ids.begin(), ids.end() );
+    for ( LiveTrack& track : m_impl->tracks )
+    {
+      if ( mark_set.count( track.id ) != 0U )
+      {
+        track.evictable = true;
+      }
+    }
+  }
+
   FrameTracks StereoTracker::process( const sensor::StereoFrame& rectified )
   {
     if ( rectified.left.width() != m_impl->calibration.imageWidth() ||
@@ -552,7 +607,7 @@ namespace phad::frontend
     if ( !m_impl->has_prev || m_impl->tracks.empty() )
     {
       m_impl->tracks.clear();
-      m_impl->detectNewTracks( left, stats.detected );
+      m_impl->detectNewTracks( left, stats.detected, stats.evicted );
       stats.tracked = 0U;
     }
     else
@@ -609,7 +664,7 @@ namespace phad::frontend
       }
       m_impl->tracks = std::move( survivors );
       stats.tracked  = static_cast<std::uint32_t>( m_impl->tracks.size() );
-      m_impl->detectNewTracks( left, stats.detected );
+      m_impl->detectNewTracks( left, stats.detected, stats.evicted );
     }
 
     m_impl->matchRight( left, right, stats );

@@ -83,6 +83,8 @@ M3.3 在 `summary.json` 追加段 / PnP / 剔点可观测性字段（`schema_ver
 | `robustness.drops_skipped` | 全 run 累计因 `outliers_culled ≥ session.skip_drop_min_culled` 跳过 `dropTracks` 的**帧数**（Slice ④f；`drop_culled_tracks=false` 时不计） |
 | `robustness.deferred_drops` | 全 run 累计 skip 后延后冲刷 `dropTracks` 的**次数**（Slice ④g） |
 | `robustness.deferred_drop_ids` | 全 run 累计延后 drop 的 id **个数**（Slice ④g） |
+| `robustness.evictable_marked` | 全 run 累计 skip 帧调用 `markEvictable` 的**次数**（`--evict-skip-culled`） |
+| `robustness.tracks_evicted` | 全 run 累计 frontend 懒腾槽移除的 track **个数** |
 
 由 `OfflineVoSession` 统计后经 `phad_vo_bench` 写入；`bench_table.py`
 可据此区分「算法变好」与「re-anchor / PnP fallback / 剔点空转 /

@@ -99,6 +99,8 @@ namespace
     EXPECT_EQ( root.at( "robustness" ).at( "drops_skipped" ), 0 );
     EXPECT_EQ( root.at( "robustness" ).at( "deferred_drops" ), 0 );
     EXPECT_EQ( root.at( "robustness" ).at( "deferred_drop_ids" ), 0 );
+    EXPECT_EQ( root.at( "robustness" ).at( "evictable_marked" ), 0 );
+    EXPECT_EQ( root.at( "robustness" ).at( "tracks_evicted" ), 0 );
   }
 
   TEST( RunSummaryTest, SegmentsAndReanchorsSerialize )
@@ -176,6 +178,19 @@ namespace
     const json root = json::parse( summary.toJson() );
     EXPECT_EQ( root.at( "robustness" ).at( "deferred_drops" ), 2 );
     EXPECT_EQ( root.at( "robustness" ).at( "deferred_drop_ids" ), 32 );
+  }
+
+  TEST( RunSummaryTest, EvictSkipCulledCountersSerialize )
+  {
+    RunSummary summary;
+    summary.status                       = RunStatus::kCompleted;
+    summary.sequence                     = "MH_05_difficult";
+    summary.robustness.evictable_marked  = 1;
+    summary.robustness.tracks_evicted    = 12;
+
+    const json root = json::parse( summary.toJson() );
+    EXPECT_EQ( root.at( "robustness" ).at( "evictable_marked" ), 1 );
+    EXPECT_EQ( root.at( "robustness" ).at( "tracks_evicted" ), 12 );
   }
 
   TEST( RunMetaTest, SerializesCodeConfigAndPaths )

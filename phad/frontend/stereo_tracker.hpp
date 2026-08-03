@@ -89,6 +89,14 @@ namespace phad::frontend
      */
     void dropTracks( std::span<const LandmarkId> ids );
 
+    /**
+     * @brief 标记 tracks 为补点时可驱逐；未知 id 忽略；不改 next_id。
+     *
+     * 被标记者在被挤掉前仍参与 LK 与 FrameTracks。detectNewTracks 按非
+     * evictable 计占用；缺槽时按 id 升序先驱逐再 GFTT。
+     */
+    void markEvictable( std::span<const LandmarkId> ids );
+
   private:
     struct Impl;
     std::unique_ptr<Impl> m_impl;

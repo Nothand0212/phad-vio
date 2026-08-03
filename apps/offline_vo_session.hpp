@@ -48,6 +48,9 @@ namespace phad::apps
     /// (sorted by LandmarkId) until next tracker.process. Default 0 = ④f
     /// (skip and never defer-drop). CLI-only; not in config_hash.
     int defer_drop_topk = 0;
+    /// Probe: on skip-drop, mark culled ids evictable for lazy GFTT slot
+    /// reclaim. Default false. CLI-only; not in config_hash.
+    bool evict_skip_culled = false;
   };
 
   struct VoDiagRow
@@ -92,6 +95,10 @@ namespace phad::apps
     std::uint64_t drops_skipped = 0;
     std::uint64_t deferred_drops    = 0;  // 冲刷次数
     std::uint64_t deferred_drop_ids = 0;  // 累计 drop 的 id 个数
+    /// Frames where skip marked culled ids evictable (probe).
+    std::uint64_t evictable_marked = 0;
+    /// Cumulative tracks evicted by frontend lazy slot reclaim.
+    std::uint64_t tracks_evicted = 0;
   };
 
   struct StageTiming

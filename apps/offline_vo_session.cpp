@@ -300,12 +300,19 @@ namespace phad::apps
           {
             pending_drop.insert( id );
           }
+          if ( options.evict_skip_culled )
+          {
+            tracker.markEvictable( update.diagnostics.culled_landmark_ids );
+            ++result.counts.evictable_marked;
+          }
         }
         else
         {
           tracker.dropTracks( update.diagnostics.culled_landmark_ids );
         }
       }
+
+      result.counts.tracks_evicted += tracks.stats.evicted;
 
       // Probe B jsonl: i matches diag row order (0-based before increment).
       if ( probe_b_writer )

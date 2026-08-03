@@ -145,6 +145,60 @@ namespace
     }
   }
 
+  TEST( StereoTrackerTest, MarkEvictableFreesSlotsForNewDetections )
+  {
+    const auto                         calibration = makeRectifiedCalibration();
+    const std::vector<Eigen::Vector3d> points =
+        makePointGrid( calibration, 3, 4 );
+    const int            max_tracks = static_cast<int>( points.size() );
+    StereoTrackerOptions options    = testOptions( max_tracks );
+    options.stereo_uniq_ratio       = 0.0;
+    options.stereo_check_bidir      = false;
+    StereoTracker tracker( calibration, options );
+
+    FrameTracks seeded;
+    for ( int frame = 0; frame < 2; ++frame )
+    {
+      std::vector<Eigen::Vector3d> moved;
+      moved.reserve( points.size() );
+      const double shift_m = 0.01 * static_cast<double>( frame );
+      for ( const Eigen::Vector3d& point : points )
+      {
+        moved.emplace_back( point.x() - shift_m, point.y(), point.z() );
+      }
+      seeded = tracker.process( renderStereo(
+          calibration, moved,
+          phad::common::Timestamp{
+              kStereoEpochNs +
+              static_cast<std::int64_t>( frame ) * kStereoStepNs },
+          2.5 ) );
+    }
+    ASSERT_EQ( static_cast<int>( seeded.observations.size() ), max_tracks );
+
+    std::vector<LandmarkId> mark_ids;
+    mark_ids.push_back( seeded.observations[ 0 ].id );
+    mark_ids.push_back( seeded.observations[ 1 ].id );
+    std::sort( mark_ids.begin(), mark_ids.end() );
+    tracker.markEvictable( mark_ids );
+    tracker.markEvictable( std::vector<LandmarkId>{ 999999 } );  // ignore
+
+    std::vector<Eigen::Vector3d> continued;
+    continued.reserve( points.size() );
+    for ( const Eigen::Vector3d& point : points )
+    {
+      continued.emplace_back( point.x() - 0.02, point.y(), point.z() );
+    }
+    const FrameTracks after = tracker.process( renderStereo(
+        calibration, continued,
+        phad::common::Timestamp{ kStereoEpochNs + 2 * kStereoStepNs },
+        2.5 ) );
+
+    EXPECT_EQ( after.stats.evicted, 2U );
+    EXPECT_EQ( idsOf( after ).count( mark_ids[ 0 ] ), 0U );
+    EXPECT_EQ( idsOf( after ).count( mark_ids[ 1 ] ), 0U );
+    EXPECT_EQ( static_cast<int>( after.observations.size() ), max_tracks );
+  }
+
   TEST( StereoTrackerTest, DropTracksRemovesIdsAndIgnoresUnknown )
   {
     const auto                         calibration = makeRectifiedCalibration();
