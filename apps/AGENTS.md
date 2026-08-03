@@ -43,6 +43,10 @@
   完整 `culled_landmark_ids` 调 `markEvictable`，GFTT 需要槽位时按 id 升序
   挤出；**不**进 `flattenConfig` / `config_hash`。见
   `docs/research/m3.3-evict-skip-culled-probe-design.md`。
+- 多帧 zombie 龄 drop 探针：`--zombie-drop-age <n>`（默认 0；bench / probe）；
+  skip 入表龄=1，连续仍在 `FrameTracks` 则 +1，`≥n` 精确 `dropTracks`；
+  **不**进 `flattenConfig` / `config_hash`。见
+  `docs/research/m3.3-zombie-drop-age-probe-design.md`。
 - MH_05 Probe B：`--probe-b <path>` 为 CLI-only（bench / probe）；**不**进
   `flattenConfig` / `config_hash`，**不**改 18 列 `diag.csv`。
 - 行为保持型重构：先在当前 commit 产出仓库外参考产物，再改代码并以逐字节 diff 验收
@@ -74,8 +78,9 @@ Slice ④b / ④e（剔点后 reopt）**保持 18 列**：不追加 `outlier_reo
 `robustness.outliers_culled` / `robustness.outliers_culled_unique` /
 `robustness.outlier_reopts` / `robustness.drops_skipped`（Slice ④f：因
 `outliers_culled ≥ N` 跳过 drop 的**帧数**）/
-`robustness.evictable_marked` / `robustness.tracks_evicted`（懒腾槽探针）与
-`trajectory.segments`（见 `phad/bench/README.md`）。
+`robustness.evictable_marked` / `robustness.tracks_evicted`（懒腾槽探针）/
+`robustness.zombie_age_drops` / `robustness.zombie_age_drop_ids`（龄 drop
+探针）与 `trajectory.segments`（见 `phad/bench/README.md`）。
 
 `OfflineVoSession` 结束时的 `vo segments summary: segments=… reanchors=…
 seed_rejected=…` 只在 `reanchors > 0 || seed_rejected > 0` 时写入
@@ -87,4 +92,5 @@ seed_rejected=…` 只在 `reanchors > 0 || seed_rejected > 0` 时写入
 `kCompleted`）。干净的单段且 PnP 全成功跑不产生 segments / pnp warning。
 probe stdout 的计数摘要不受此限制，始终打印（含 `outliers_culled` /
 `outliers_culled_unique` / `outlier_reopts` / `drops_skipped` /
-`evictable_marked` / `tracks_evicted`）。
+`evictable_marked` / `tracks_evicted` / `zombie_age_drops` /
+`zombie_age_drop_ids`）。

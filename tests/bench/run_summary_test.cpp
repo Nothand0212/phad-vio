@@ -101,6 +101,8 @@ namespace
     EXPECT_EQ( root.at( "robustness" ).at( "deferred_drop_ids" ), 0 );
     EXPECT_EQ( root.at( "robustness" ).at( "evictable_marked" ), 0 );
     EXPECT_EQ( root.at( "robustness" ).at( "tracks_evicted" ), 0 );
+    EXPECT_EQ( root.at( "robustness" ).at( "zombie_age_drops" ), 0 );
+    EXPECT_EQ( root.at( "robustness" ).at( "zombie_age_drop_ids" ), 0 );
   }
 
   TEST( RunSummaryTest, SegmentsAndReanchorsSerialize )
@@ -191,6 +193,19 @@ namespace
     const json root = json::parse( summary.toJson() );
     EXPECT_EQ( root.at( "robustness" ).at( "evictable_marked" ), 1 );
     EXPECT_EQ( root.at( "robustness" ).at( "tracks_evicted" ), 12 );
+  }
+
+  TEST( RunSummaryTest, ZombieAgeDropCountersSerialize )
+  {
+    RunSummary summary;
+    summary.status                          = RunStatus::kCompleted;
+    summary.sequence                        = "MH_05_difficult";
+    summary.robustness.zombie_age_drops     = 2;
+    summary.robustness.zombie_age_drop_ids  = 18;
+
+    const json root = json::parse( summary.toJson() );
+    EXPECT_EQ( root.at( "robustness" ).at( "zombie_age_drops" ), 2 );
+    EXPECT_EQ( root.at( "robustness" ).at( "zombie_age_drop_ids" ), 18 );
   }
 
   TEST( RunMetaTest, SerializesCodeConfigAndPaths )

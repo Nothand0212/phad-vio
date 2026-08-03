@@ -81,6 +81,7 @@ namespace
     EXPECT_NE( err.find( "--probe-b" ), std::string::npos );
     EXPECT_NE( err.find( "--defer-drop-topk" ), std::string::npos );
     EXPECT_NE( err.find( "--evict-skip-culled" ), std::string::npos );
+    EXPECT_NE( err.find( "--zombie-drop-age" ), std::string::npos );
 
     std::filesystem::remove_all( root );
   }
@@ -301,6 +302,64 @@ namespace
     ASSERT_FALSE( hash_default.empty() ) << readFile( stderr_default );
     ASSERT_FALSE( hash_evict.empty() ) << readFile( stderr_evict );
     EXPECT_EQ( hash_default, hash_evict );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, ZombieDropAgeDoesNotChangeConfigHash )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_zombie_age_hash";
+    std::filesystem::remove_all( root );
+    const auto out_default = root / "out_default";
+    const auto out_age     = root / "out_age";
+    std::filesystem::create_directories( root );
+
+    const auto stdout_default = root / "stdout_default.txt";
+    const auto stderr_default = root / "stderr_default.txt";
+    const auto stdout_age     = root / "stdout_age.txt";
+    const auto stderr_age     = root / "stderr_age.txt";
+
+    (void)runBench( "/nonexistent/sequence --out \"" + out_default.string() +
+                        "\" --sequence-name hash_probe --force",
+                    stdout_default, stderr_default );
+    (void)runBench( "/nonexistent/sequence --out \"" + out_age.string() +
+                        "\" --sequence-name hash_probe --force "
+                        "--zombie-drop-age 8",
+                    stdout_age, stderr_age );
+
+    const std::string hash_default =
+        extractConfigHash( readFile( stdout_default ) );
+    const std::string hash_age = extractConfigHash( readFile( stdout_age ) );
+    ASSERT_FALSE( hash_default.empty() ) << readFile( stderr_default );
+    ASSERT_FALSE( hash_age.empty() ) << readFile( stderr_age );
+    EXPECT_EQ( hash_default, hash_age );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, RejectsNegativeZombieDropAge )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_reject_zombie_age_neg";
+    std::filesystem::remove_all( root );
+    std::filesystem::create_directories( root );
+    const auto stdout_path = root / "stdout.txt";
+    const auto stderr_path = root / "stderr.txt";
+
+    const int exit_code = runBench(
+        "/nonexistent/sequence --out \"" + ( root / "out" ).string() +
+            "\" --sequence-name cli_reject --zombie-drop-age -1",
+        stdout_path, stderr_path );
+
+    EXPECT_NE( exit_code, 0 );
+    const std::string err = readFile( stderr_path );
+    EXPECT_NE( err.find( "--zombie-drop-age" ), std::string::npos );
+    EXPECT_NE( err.find( "non-negative" ), std::string::npos );
 
     std::filesystem::remove_all( root );
   }
