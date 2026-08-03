@@ -77,6 +77,8 @@ namespace phad::frontend
     double        epipolar_p95_px;
     std::uint32_t track_length_median;
     std::uint32_t track_length_max;
+    /// Evictable tracks removed this frame to free GFTT slots (lazy eviction).
+    std::uint32_t evicted = 0;
   };
 
 

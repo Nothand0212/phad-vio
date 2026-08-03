@@ -24,7 +24,8 @@ namespace
 
   constexpr std::string_view kUsage =
       "usage: phad_stereo_vo_probe <sequence-root> --tum <path> "
-      "[--diag-csv <path>] [--probe-b <path>] [--defer-drop-topk <k>]\n";
+      "[--diag-csv <path>] [--probe-b <path>] [--defer-drop-topk <k>] "
+      "[--evict-skip-culled]\n";
 
   struct Arguments
   {
@@ -33,6 +34,7 @@ namespace
     std::filesystem::path diag_csv;
     std::filesystem::path probe_b_path;
     std::optional<int>    defer_drop_topk;
+    bool                  evict_skip_culled = false;
   };
 
   [[nodiscard]] bool parseArguments( int argc, char** argv,
@@ -46,6 +48,11 @@ namespace
     for ( int index = 2; index < argc; ++index )
     {
       const std::string_view flag{ argv[ index ] };
+      if ( flag == "--evict-skip-culled" )
+      {
+        arguments.evict_skip_culled = true;
+        continue;
+      }
       if ( index + 1 >= argc )
       {
         std::cerr << "missing value for " << flag << '\n';
@@ -99,6 +106,7 @@ namespace
     {
       options.defer_drop_topk = *arguments.defer_drop_topk;
     }
+    options.evict_skip_culled = arguments.evict_skip_culled;
 
     phad::apps::OfflineVoSessionResult result =
         phad::apps::runOfflineVoSession( options );
@@ -157,6 +165,8 @@ namespace
               << "deferred_drops=" << result.counts.deferred_drops << '\n'
               << "deferred_drop_ids=" << result.counts.deferred_drop_ids
               << '\n'
+              << "evictable_marked=" << result.counts.evictable_marked << '\n'
+              << "tracks_evicted=" << result.counts.tracks_evicted << '\n'
               << "reproj_rms_after_median_px=" << result.reproj.median_px
               << '\n'
               << "reproj_rms_after_p95_px=" << result.reproj.p95_px << '\n'

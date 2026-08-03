@@ -80,6 +80,7 @@ namespace
     const std::string err = readFile( stderr_path );
     EXPECT_NE( err.find( "--probe-b" ), std::string::npos );
     EXPECT_NE( err.find( "--defer-drop-topk" ), std::string::npos );
+    EXPECT_NE( err.find( "--evict-skip-culled" ), std::string::npos );
 
     std::filesystem::remove_all( root );
   }
@@ -266,6 +267,40 @@ namespace
     const std::string err = readFile( stderr_path );
     EXPECT_NE( err.find( "--defer-drop-topk" ), std::string::npos );
     EXPECT_NE( err.find( "non-negative" ), std::string::npos );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, EvictSkipCulledDoesNotChangeConfigHash )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_evict_skip_hash";
+    std::filesystem::remove_all( root );
+    const auto out_default = root / "out_default";
+    const auto out_evict   = root / "out_evict";
+    std::filesystem::create_directories( root );
+
+    const auto stdout_default = root / "stdout_default.txt";
+    const auto stderr_default = root / "stderr_default.txt";
+    const auto stdout_evict   = root / "stdout_evict.txt";
+    const auto stderr_evict   = root / "stderr_evict.txt";
+
+    (void)runBench( "/nonexistent/sequence --out \"" + out_default.string() +
+                        "\" --sequence-name hash_probe --force",
+                    stdout_default, stderr_default );
+    (void)runBench( "/nonexistent/sequence --out \"" + out_evict.string() +
+                        "\" --sequence-name hash_probe --force "
+                        "--evict-skip-culled",
+                    stdout_evict, stderr_evict );
+
+    const std::string hash_default =
+        extractConfigHash( readFile( stdout_default ) );
+    const std::string hash_evict = extractConfigHash( readFile( stdout_evict ) );
+    ASSERT_FALSE( hash_default.empty() ) << readFile( stderr_default );
+    ASSERT_FALSE( hash_evict.empty() ) << readFile( stderr_evict );
+    EXPECT_EQ( hash_default, hash_evict );
 
     std::filesystem::remove_all( root );
   }

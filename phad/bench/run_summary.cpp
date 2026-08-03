@@ -164,6 +164,8 @@ namespace phad::bench
         { "drops_skipped", robustness.drops_skipped },
         { "deferred_drops", robustness.deferred_drops },
         { "deferred_drop_ids", robustness.deferred_drop_ids },
+        { "evictable_marked", robustness.evictable_marked },
+        { "tracks_evicted", robustness.tracks_evicted },
     };
 
     json timing_json = json{

@@ -51,7 +51,8 @@ namespace
       "                     [--outlier-avg-reproj-px <v>]\n"
       "                     [--max-outlier-reopts <n>]\n"
       "                     [--probe-b <path>]\n"
-      "                     [--defer-drop-topk <k>]\n";
+      "                     [--defer-drop-topk <k>]\n"
+      "                     [--evict-skip-culled]\n";
 
 #ifndef PHAD_SOURCE_DIR
 #define PHAD_SOURCE_DIR ""
@@ -81,6 +82,7 @@ namespace
     std::optional<int>           skip_drop_min_culled;
     std::filesystem::path        probe_b_path;
     std::optional<int>           defer_drop_topk;
+    bool                         evict_skip_culled = false;
   };
 
   [[nodiscard]] bool parseDouble( std::string_view text, double& value )
@@ -138,6 +140,11 @@ namespace
       if ( flag == "--no-drop-culled-tracks" )
       {
         arguments.no_drop_culled_tracks = true;
+        continue;
+      }
+      if ( flag == "--evict-skip-culled" )
+      {
+        arguments.evict_skip_culled = true;
         continue;
       }
       if ( index + 1 >= argc )
@@ -557,6 +564,8 @@ namespace
     {
       session_options.defer_drop_topk = *arguments.defer_drop_topk;
     }
+    // evict-skip-culled is CLI-only probe: not in flattenConfig / config_hash.
+    session_options.evict_skip_culled = arguments.evict_skip_culled;
 
     phad::bench::ConfigSnapshot config =
         flattenConfig( arguments, session_options );
@@ -671,9 +680,11 @@ namespace
     summary.robustness.outliers_culled_unique =
         session.counts.outliers_culled_unique;
     summary.robustness.outlier_reopts = session.counts.outlier_reopts;
-    summary.robustness.drops_skipped  = session.counts.drops_skipped;
+    summary.robustness.drops_skipped     = session.counts.drops_skipped;
     summary.robustness.deferred_drops    = session.counts.deferred_drops;
     summary.robustness.deferred_drop_ids = session.counts.deferred_drop_ids;
+    summary.robustness.evictable_marked  = session.counts.evictable_marked;
+    summary.robustness.tracks_evicted    = session.counts.tracks_evicted;
     for ( const auto& row : session.diag )
     {
       summary.robustness.cheirality += row.num_cheirality;
