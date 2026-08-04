@@ -19,6 +19,7 @@
 #include <memory>
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core.hpp>
+#include <optional>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -510,19 +511,89 @@ namespace phad::estimator
       std::vector<int>  inlier_indices;  // into shared correspondence list
     };
 
+    [[nodiscard]] std::optional<double> stereoRmsAtPose(
+        const Eigen::Isometry3d&                     T_W_B,
+        const std::vector<const StereoObservation*>& shared_observations,
+        const std::vector<int>&                      inlier_indices ) const
+    {
+      if ( !isFinite( T_W_B ) || inlier_indices.empty() )
+      {
+        return std::nullopt;
+      }
+
+      const gtsam::Pose3        T_W_left = toPose3( T_W_B ) * body_P_sensor;
+      const gtsam::StereoCamera camera( T_W_left, K );
+      double                    sum_sq = 0.0;
+      for ( const int index : inlier_indices )
+      {
+        if ( index < 0 ||
+             static_cast<std::size_t>( index ) >= shared_observations.size() )
+        {
+          return std::nullopt;
+        }
+        const StereoObservation* observation =
+            shared_observations[ static_cast<std::size_t>( index ) ];
+        if ( observation == nullptr )
+        {
+          return std::nullopt;
+        }
+        const auto landmark_it = landmarks_W.find( observation->id );
+        if ( landmark_it == landmarks_W.end() ||
+             !isFinite( landmark_it->second ) )
+        {
+          return std::nullopt;
+        }
+
+        const gtsam::Point3 point_W( landmark_it->second.x(),
+                                     landmark_it->second.y(),
+                                     landmark_it->second.z() );
+        const gtsam::Point3 point_left = T_W_left.transformTo( point_W );
+        if ( !point_left.allFinite() || point_left.z() <= 0.0 )
+        {
+          return std::nullopt;
+        }
+
+        gtsam::StereoPoint2 projected;
+        try
+        {
+          projected = camera.project( point_W );
+        }
+        catch ( const gtsam::StereoCheiralityException& )
+        {
+          return std::nullopt;
+        }
+        const gtsam::Vector residual =
+            ( projected - toStereoPoint( *observation ) ).vector();
+        if ( !residual.allFinite() )
+        {
+          return std::nullopt;
+        }
+        sum_sq += residual.squaredNorm();
+        if ( !std::isfinite( sum_sq ) )
+        {
+          return std::nullopt;
+        }
+      }
+      return std::sqrt( sum_sq /
+                        static_cast<double>( inlier_indices.size() ) );
+    }
+
     // Shared landmarks_W ∩ current left observations → solvePnPRansac.
-    // Success only when RANSAC converges, pose is finite, and
-    // inliers.size() >= min_pnp_inliers (weak models → fallback, no cull).
+    // A finite, sufficiently supported proposal is accepted only when its
+    // stereo RMS on the PnP inlier set is no more than one observation sigma
+    // worse than the existing guess.
     [[nodiscard]] PnpInitResult tryPnpInit(
         const KeyframeMeasurement& measurement,
         const Eigen::Isometry3d&   guess_T_W_B ) const
     {
       PnpInitResult result;
 
-      std::vector<cv::Point3d> pts3d;
-      std::vector<cv::Point2d> pts2d;
+      std::vector<cv::Point3d>              pts3d;
+      std::vector<cv::Point2d>              pts2d;
+      std::vector<const StereoObservation*> shared_observations;
       pts3d.reserve( measurement.observations.size() );
       pts2d.reserve( measurement.observations.size() );
+      shared_observations.reserve( measurement.observations.size() );
       for ( const StereoObservation& observation : measurement.observations )
       {
         const auto landmark_it = landmarks_W.find( observation.id );
@@ -534,6 +605,7 @@ namespace phad::estimator
         pts3d.emplace_back( point_W.x(), point_W.y(), point_W.z() );
         pts2d.emplace_back( observation.left_pixel.x(),
                             observation.left_pixel.y() );
+        shared_observations.push_back( &observation );
       }
       if ( static_cast<int>( pts3d.size() ) < options.min_pnp_inliers )
       {
@@ -584,16 +656,14 @@ namespace phad::estimator
         return result;
       }
 
-      result.inlier_indices.reserve(
-          static_cast<std::size_t>( inliers.rows ) );
+      std::vector<int> inlier_indices;
+      inlier_indices.reserve( static_cast<std::size_t>( inliers.rows ) );
       for ( int row = 0; row < inliers.rows; ++row )
       {
-        result.inlier_indices.push_back( inliers.at<int>( row, 0 ) );
+        inlier_indices.push_back( inliers.at<int>( row, 0 ) );
       }
-      if ( static_cast<int>( result.inlier_indices.size() ) <
-           options.min_pnp_inliers )
+      if ( static_cast<int>( inlier_indices.size() ) < options.min_pnp_inliers )
       {
-        result.inlier_indices.clear();
         return result;
       }
 
@@ -619,12 +689,26 @@ namespace phad::estimator
       const Eigen::Isometry3d T_W_B    = T_W_left * T_B_left.inverse();
       if ( !isFinite( T_W_B ) )
       {
-        result.inlier_indices.clear();
         return result;
       }
 
-      result.success = true;
-      result.T_W_B   = T_W_B;
+      const std::optional<double> proposal_rms = stereoRmsAtPose(
+          T_W_B, shared_observations, inlier_indices );
+      if ( !proposal_rms.has_value() )
+      {
+        return result;
+      }
+      const std::optional<double> guess_rms = stereoRmsAtPose(
+          guess_T_W_B, shared_observations, inlier_indices );
+      if ( guess_rms.has_value() &&
+           *proposal_rms > *guess_rms + options.stereo_sigma_px )
+      {
+        return result;
+      }
+
+      result.success        = true;
+      result.T_W_B          = T_W_B;
+      result.inlier_indices = std::move( inlier_indices );
       return result;
     }
 

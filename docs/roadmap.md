@@ -14,7 +14,7 @@
 3. **合成数据只作为测试资产，不作为里程碑。** 预积分与投影的解析验证
    写成单元测试，不占据独立阶段。
 4. **调库优先。** 前端用 OpenCV，后端用 GTSAM。调库版本随后成为手写
-   版本的 oracle：任何自研替换的验收标准是「同一序列上 ATE 与调库版本
+   版本的对拍基准：任何自研替换的验收标准是「同一序列上 ATE 与调库版本
    在容差内一致，且 track 数、内点率、重投影误差分布可比」。
 5. **前端风险最先出清。** 决定 VIO 能否工作的是特征跟踪与初始化，
    不是后端公式；因此 LK frontend 属于第二个里程碑而非最后一个。
@@ -263,7 +263,7 @@ adapter 移到独立的同步器——那里同时是 M4 的 IMU 包络与未来
 [M3.2 双目配对同步器](plans/2026-07-31_m3.2_stereo_pair_synchronizer_5b7d1c93.plan.md)。
 Issue：[#22](https://github.com/Nothand0212/phad-vio/issues/22)。
 
-### M3.3 VO 加固（依赖 M3.2；Slice ①②③④d 已完成；④f + zombie age=5 为当前默认且全序列 baseline 已建立；④g 证伪并回退编排；④e 部分完成；④/④b 不够；④c 部分；⑤ 先对齐再开）
+### M3.3 VO 加固（依赖 M3.2；Slice ①②③④d 已完成；④f + zombie age=5 为当前默认且全序列 baseline 已建立；PnP stereo 一致性仲裁已验证；④g 证伪并回退编排；④e 部分完成；④/④b 不够；④c 部分；⑤ 先对齐再开）
 
 M3.2 全序列基线暴露的主导失败不是精度，而是一个**吸收态**：估计器一旦因
 `num_shared == 0` 拒帧，事务回滚会冻结窗口与 landmark 表，而前端跟踪断裂后
@@ -460,10 +460,28 @@ Slice ④g 出口（commit `3ee5dea` / `default_a5e90dc7`；
   V2_02 / V2_03 的 4.38–9.79 m ATE 风险，后续须以全表而非单序列优化；
 - 完整 config snapshot、质量表与 robustness 计数见
   [M3.3 EuRoC 全序列正式 baseline](research/m3.3-full-suite-baseline-773ea011.md)。
-- **MH_02 首次发散诊断已完成，尚未修复**：锁定“左目 inlier 数即采用 PnP
-  proposal → LM₁ 中间位姿授权不可逆 cheirality 删除 → 后续零度 pose”因果链；
-  唯一下一片为 PnP stereo-consistency arbitration，见
-  [诊断](research/m3.3-mh02-divergence-diagnosis.md)。
+- **MH_02 首次发散诊断与 PnP stereo 一致性仲裁已完成**：根因是“左目 inlier
+  数即采用 PnP proposal → LM₁ 中间位姿授权不可逆 cheirality 删除 → 后续零度
+  pose”。仲裁在同一 PnP inlier 集上比较 proposal/guess 的完整 stereo RMS，
+  通过后才授权 pose 与 mask；见
+  [诊断](research/m3.3-mh02-divergence-diagnosis.md)、
+  [设计](research/m3.3-pnp-stereo-consistency-design.md)与
+  [dirty 验证结果](research/m3.3-pnp-stereo-arbitration-results.md)。
+
+PnP stereo 一致性仲裁出口（实现已提交；验证产物为
+`4e42517_dirty/default_773ea011`，**非正式 baseline**；对照
+`4cf55ca/default_773ea011`）：
+
+- estimator tests 58/58；MH_02 390 帧因果门 PASS；
+- MH_01 ATE **0.0987839 m**，`est.tum` 与正式基线逐字节一致，硬门 PASS；
+- MH_05 ATE **2.455726→0.472225 m**，软门 PASS；
+- 完整 MH_02 ATE **5.30e5→0.092417 m**，completion **0.522→1.0**，
+  segments/reanchors/failed **7/6/1453→1/0/0**；
+- EuRoC 11/11 dirty record-only 产物齐全；V1_02、V1_03、V2_01、V2_02、V2_03
+  均改善，但 MH_03 ATE/RPE **1.120766/0.196499→1.336250/0.278380 m**，为
+  后续选片前必须保留的回归证据；
+- 配置无增量，继续为 42 键 `default_773ea011`；完整表、snapshot 与短诊断见
+  [验证结果](research/m3.3-pnp-stereo-arbitration-results.md)。
 
 后续切片出口：
 
@@ -475,8 +493,9 @@ Slice ④g 出口（commit `3ee5dea` / `default_a5e90dc7`；
   [zombie-drop-age](research/m3.3-zombie-drop-age-probe-design.md)、
   [全序列 baseline](research/m3.3-full-suite-baseline-773ea011.md)）；勿默认再
   整批 drop / 跳 ⑤ / 关整个 skip / 关整个 block / 单独去 Huber / 观测级；⑤ 与
-  M4 耦合，**先对齐再开**。MH_02 则先实施已归因的 PnP stereo-consistency
-  arbitration，不用调 session/cull 阈值代替修复。
+  M4 耦合，**先对齐再开**。MH_02 已按归因完成 PnP stereo 一致性仲裁；下一片
+  需先结合 MH_03 回归与 V1_03/V2_02/V2_03 剩余 failure 债重新对齐，不用调
+  session/cull 阈值或任意放大 `stereo_sigma_px` 代替诊断。
 
 设计见
 [M3.3 VO 加固设计](research/m3.3-vo-hardening-design.md)、
@@ -490,6 +509,7 @@ Slice ④g 出口（commit `3ee5dea` / `default_a5e90dc7`；
 [M3.3 Slice ④f skip-drop 设计](research/m3.3-slice4f-skip-drop-design.md)、
 [M3.3 Slice ④g zombie-drop 设计](research/m3.3-slice4g-zombie-drop-design.md)、
 [M3.3 Slice ④g postmortem](research/m3.3-slice4g-postmortem.md)，
+[PnP stereo 一致性仲裁设计](research/m3.3-pnp-stereo-consistency-design.md)，
 根因诊断见
 [M3.3 VO 崩溃根因诊断](research/m3.3-vo-collapse-diagnosis.md)、
 [M3.3 MH_02 首次发散诊断](research/m3.3-mh02-divergence-diagnosis.md)，开源对照见
@@ -497,7 +517,8 @@ Slice ④g 出口（commit `3ee5dea` / `default_a5e90dc7`；
 [Slice ② 开源对照](research/m3.3-slice2-right-match-open-source-refs.md)、
 [Slice ③ 开源对照](research/m3.3-slice3-pnp-open-source-refs.md)、
 [Slice ④ 开源对照](research/m3.3-slice4-outlier-cull-open-source-refs.md)、
-[Slice ④e 开源对照](research/m3.3-slice4e-multiround-open-source-refs.md)。
+[Slice ④e 开源对照](research/m3.3-slice4e-multiround-open-source-refs.md)、
+[PnP stereo 一致性仲裁开源对照](research/m3.3-pnp-stereo-consistency-open-source-refs.md)。
 实施计划见
 [M3.3 VO 加固 Slice ①](plans/2026-07-31_m3.3_vo_hardening_a3f7d2e9.plan.md)、
 [M3.3 Slice ②](plans/2026-08-01_m3.3_slice2_right_match_c8e74511.plan.md)、
@@ -507,9 +528,11 @@ Slice ④g 出口（commit `3ee5dea` / `default_a5e90dc7`；
 [M3.3 Slice ④c](plans/2026-08-02_m3.3_slice4c_cull_track_drop_5a3a4e09.plan.md)、
 [M3.3 Slice ④d](plans/2026-08-02_m3.3_slice4d_cull_threshold_ecdd49d4.plan.md)、
 [M3.3 Slice ④e](plans/2026-08-02_m3.3_slice4e_multiround_reopt_e0517b9a.plan.md)、
-[M3.3 Slice ④g](plans/2026-08-02_m3.3_slice4g_zombie_drop_0a81d46d.plan.md)。
+[M3.3 Slice ④g](plans/2026-08-02_m3.3_slice4g_zombie_drop_0a81d46d.plan.md)、
+[PnP stereo 一致性仲裁](plans/2026-08-04_m3.3_pnp_stereo_arbitration_4721cb40.plan.md)。
 Issue：[#23](https://github.com/Nothand0212/phad-vio/issues/23)（M3.3 总图）；
-Slice ④/④b/④c/④d/④e/④f/④g：[#24](https://github.com/Nothand0212/phad-vio/issues/24)。
+Slice ④/④b/④c/④d/④e/④f/④g：[#24](https://github.com/Nothand0212/phad-vio/issues/24)；
+PnP stereo 一致性仲裁：[#25](https://github.com/Nothand0212/phad-vio/issues/25)。
 
 ## M4：接入 IMU
 

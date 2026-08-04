@@ -18,7 +18,7 @@ include 标 SYSTEM）。
 | `GenericStereoFactor` + LM、最老帧 Prior gauge | 边缘化、smart factor、IMU |
 | 重叠断裂时 re-anchor（`enable_reanchor`） | 分段 TUM / Atlas 式多轨迹 |
 | 共视 / cheirality / 重投影 / `segment_id` / PnP 诊断 | ATE（`phad::eval`） |
-| 正常路径 `solvePnPRansac` 初值 + 本帧 inlier 掩码 | frontend track 生命周期 |
+| 正常路径 `solvePnPRansac` proposal + stereo 一致性仲裁 + 本帧 inlier 掩码 | frontend track 生命周期 |
 | BA 后 mean-reproj / cheirality 剔点 + 拒同 id 复生 | frontend track 生命周期（由 apps 回传 drop） |
 | `body_P_sensor = T_B_left_rectified` | 未校正左目外参 |
 
@@ -82,7 +82,7 @@ prior 与由该帧 backproject 得到的 landmark 初值自洽，优化不会移
 - `kRejected` / `kFailed`：诊断里的 `segment_id` 反映**回滚后**的状态
   （seed 门限拒帧时不递增）。
 
-## PnP 初值（M3.3 Slice ③）
+## PnP 初值与 stereo 一致性仲裁（M3.3 Slice ③）
 
 正常路径（`initialized && num_shared > 0`）在 `poseInitialValue()` guess 之上
 可选跑 `cv::solvePnPRansac`（PIMPL 内、`PRIVATE opencv_calib3d`）：
@@ -91,10 +91,17 @@ prior 与由该帧 backproject 得到的 landmark 初值自洽，优化不会移
 |---|---|
 | `enable_pnp_init == false` | `T_W_B = guess`，不 cull；复现 Slice ② |
 | `num_shared < min_pnp_inliers` 或 RANSAC 失败 / inliers 不足 | fallback：`T_W_B = guess`，**不** cull、**不**拒帧 |
-| 成功且 inliers ≥ `min_pnp_inliers` | `T_W_B` 取 PnP；从本帧观测去掉 shared 外点（新 id 保留） |
+| proposal 的 stereo score 无效，或比 guess 差超过 `stereo_sigma_px` | fallback：`T_W_B = guess`，保留本帧全部观测，**不**应用 PnP mask |
+| proposal 有效，且 guess 无效或 proposal RMS ≤ guess RMS + `stereo_sigma_px` | `T_W_B` 取 PnP；从本帧观测去掉 shared 外点（新 id 保留） |
 
 首段 seed / re-anchor **不跑** PnP（`num_shared == 0`）。默认
 `pnp_reproj_px=2.0`、`pnp_confidence=0.99`、`min_pnp_inliers=10`。
+
+PnP 成功只生成 proposal，不直接授权 pose 或 mask。proposal 与 guess 都在 PnP
+返回的同一 shared inlier 集上计算未白化 `(uL,uR,v)` RMS；非法 index、非有限投影
+或 cheirality 令候选 score 无效。`stereo_sigma_px` 是既有观测噪声，也作为统计
+等价带，不新增配置或 `config_hash` 输入。只有仲裁采用 proposal 后才应用其
+inlier mask；回退不修改 measurement。
 
 **掩码语义**：被掩码的 shared 外点仍写入 `track_times` /
 `observationTimestamps()`；`num_observations` 保持测量原值（不是入图观测数）。
@@ -102,7 +109,9 @@ prior 与由该帧 backproject 得到的 landmark 初值自洽，优化不会移
 
 诊断：`UpdateDiagnostics.pnp_success` / `pnp_inliers`；session 汇总
 `pnp_successes` / `pnp_fallbacks`（仅正常路径；seed / re-anchor 不计
-fallback）。详见 `docs/research/m3.3-slice3-pnp-design.md`。
+fallback）。详见 `docs/research/m3.3-slice3-pnp-design.md`、
+`docs/research/m3.3-pnp-stereo-consistency-design.md` 与
+`docs/research/m3.3-pnp-stereo-arbitration-results.md`。
 
 ## 外点剔除与多轮重优（M3.3 Slice ④ / ④b / ④e）
 
