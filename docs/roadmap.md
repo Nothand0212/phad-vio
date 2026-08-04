@@ -460,6 +460,10 @@ Slice ④g 出口（commit `3ee5dea` / `default_a5e90dc7`；
   V2_02 / V2_03 的 4.38–9.79 m ATE 风险，后续须以全表而非单序列优化；
 - 完整 config snapshot、质量表与 robustness 计数见
   [M3.3 EuRoC 全序列正式 baseline](research/m3.3-full-suite-baseline-773ea011.md)。
+- **MH_02 首次发散诊断已完成，尚未修复**：锁定“左目 inlier 数即采用 PnP
+  proposal → LM₁ 中间位姿授权不可逆 cheirality 删除 → 后续零度 pose”因果链；
+  唯一下一片为 PnP stereo-consistency arbitration，见
+  [诊断](research/m3.3-mh02-divergence-diagnosis.md)。
 
 后续切片出口：
 
@@ -471,7 +475,8 @@ Slice ④g 出口（commit `3ee5dea` / `default_a5e90dc7`；
   [zombie-drop-age](research/m3.3-zombie-drop-age-probe-design.md)、
   [全序列 baseline](research/m3.3-full-suite-baseline-773ea011.md)）；勿默认再
   整批 drop / 跳 ⑤ / 关整个 skip / 关整个 block / 单独去 Huber / 观测级；⑤ 与
-  M4 耦合，**先对齐再开**。
+  M4 耦合，**先对齐再开**。MH_02 则先实施已归因的 PnP stereo-consistency
+  arbitration，不用调 session/cull 阈值代替修复。
 
 设计见
 [M3.3 VO 加固设计](research/m3.3-vo-hardening-design.md)、
@@ -486,7 +491,8 @@ Slice ④g 出口（commit `3ee5dea` / `default_a5e90dc7`；
 [M3.3 Slice ④g zombie-drop 设计](research/m3.3-slice4g-zombie-drop-design.md)、
 [M3.3 Slice ④g postmortem](research/m3.3-slice4g-postmortem.md)，
 根因诊断见
-[M3.3 VO 崩溃根因诊断](research/m3.3-vo-collapse-diagnosis.md)，开源对照见
+[M3.3 VO 崩溃根因诊断](research/m3.3-vo-collapse-diagnosis.md)、
+[M3.3 MH_02 首次发散诊断](research/m3.3-mh02-divergence-diagnosis.md)，开源对照见
 [M3.3 VO 加固：开源实现对照](research/m3.3-vo-hardening-open-source-refs.md)、
 [Slice ② 开源对照](research/m3.3-slice2-right-match-open-source-refs.md)、
 [Slice ③ 开源对照](research/m3.3-slice3-pnp-open-source-refs.md)、
