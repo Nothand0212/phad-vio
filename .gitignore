@@ -3,8 +3,10 @@
 .cursor/
 .vscode/
 .worktree/
+.reasonix/
 
 thirdparty/
 /build*/
 compile_commands.json
 scripts/__pycache__/
+reasonix.toml
