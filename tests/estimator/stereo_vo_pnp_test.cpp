@@ -143,6 +143,22 @@ namespace
       { 0.85, 0.15, 4.8 },
   };
 
+  // Close to the optical axis but spread in depth. A forward-shifted camera
+  // changes disparity more than left-image position for this set, allowing a
+  // deterministic left-PnP/stereo disagreement fixture.
+  const std::vector<Eigen::Vector3d> kNearAxisLandmarks{
+      { 0.02, 0.01, 4.0 },
+      { -0.03, 0.02, 4.5 },
+      { 0.01, -0.04, 5.0 },
+      { 0.05, -0.01, 5.5 },
+      { -0.04, -0.03, 6.0 },
+      { 0.00, 0.04, 6.5 },
+      { 0.03, 0.03, 4.2 },
+      { -0.02, -0.05, 5.8 },
+      { 0.04, -0.02, 6.8 },
+      { -0.05, 0.01, 7.0 },
+  };
+
   EstimatorOptions defaultPnpOptions()
   {
     EstimatorOptions options;
@@ -280,6 +296,99 @@ TEST( StereoVoPnpTest, PnpMasksSharedOutliers )
   ASSERT_EQ( recovered.status, UpdateStatus::kOk ) << recovered.message;
   EXPECT_EQ( recovered.diagnostics.num_shared, landmarks_plus.size() );
   EXPECT_EQ( recovered.diagnostics.num_landmarks, kLandmarksA.size() + 1U );
+}
+
+TEST( StereoVoPnpTest, FallsBackWhenPnpStereoRmsIsWorseThanGuess )
+{
+  const auto calibration = makeCalibration();
+  const auto ids         = sequentialIds( kNearAxisLandmarks.size(), 1 );
+
+  EstimatorOptions options     = defaultPnpOptions();
+  options.enable_outlier_cull  = false;
+  options.enable_outlier_reopt = false;
+  StereoVoEstimator estimator( calibration, options );
+
+  const Eigen::Isometry3d stationary = Eigen::Isometry3d::Identity();
+  for ( std::int64_t frame = 1; frame <= 2; ++frame )
+  {
+    const auto result = estimator.update( makeFrame(
+        calibration, stationary, frame * 50'000'000, kNearAxisLandmarks,
+        ids ) );
+    ASSERT_EQ( result.status, UpdateStatus::kOk ) << result.message;
+  }
+
+  std::vector<Eigen::Vector3d> landmarks_plus = kNearAxisLandmarks;
+  std::vector<LandmarkId>      ids_plus       = ids;
+  const LandmarkId             probe_id       = 99;
+  landmarks_plus.emplace_back( 0.04, -0.03, 5.5 );
+  ids_plus.push_back( probe_id );
+
+  const auto introduced = estimator.update( makeFrame(
+      calibration, stationary, 150'000'000, landmarks_plus, ids_plus ) );
+  ASSERT_EQ( introduced.status, UpdateStatus::kOk ) << introduced.message;
+  ASSERT_EQ( introduced.diagnostics.num_landmarks,
+             kNearAxisLandmarks.size() );
+
+  Eigen::Isometry3d wrong_pose = stationary;
+  wrong_pose.translation().z() = 1.0;
+  auto       inconsistent      = makeFrame( calibration, wrong_pose, 200'000'000,
+                                            landmarks_plus, ids_plus );
+  const auto guess_measurement = makeFrame(
+      calibration, stationary, 200'000'000, landmarks_plus, ids_plus );
+  for ( std::size_t index = 0; index < kNearAxisLandmarks.size(); ++index )
+  {
+    inconsistent.observations[ index ].disparity_px =
+        guess_measurement.observations[ index ].disparity_px;
+  }
+  offsetLeftPixel( inconsistent, probe_id, Eigen::Vector2d( 80.0, 0.0 ) );
+
+  const auto fallback = estimator.update( inconsistent );
+  ASSERT_EQ( fallback.status, UpdateStatus::kOk ) << fallback.message;
+  ASSERT_TRUE( fallback.estimate.has_value() );
+  EXPECT_TRUE( fallback.estimate->T_W_B.matrix().allFinite() );
+  EXPECT_FALSE( fallback.diagnostics.pnp_success );
+  EXPECT_EQ( fallback.diagnostics.pnp_inliers, 0U );
+  // Rejected proposal must not apply its mask: the probe's second sighting
+  // reaches min_landmark_observations and therefore enters the graph.
+  EXPECT_EQ( fallback.diagnostics.num_landmarks, landmarks_plus.size() );
+}
+
+TEST( StereoVoPnpTest, AcceptsPnpWithinStereoNoise )
+{
+  const auto calibration = makeCalibration();
+  const auto ids         = sequentialIds( kNearAxisLandmarks.size(), 1 );
+
+  EstimatorOptions  options = defaultPnpOptions();
+  StereoVoEstimator estimator( calibration, options );
+
+  const Eigen::Isometry3d stationary = Eigen::Isometry3d::Identity();
+  for ( std::int64_t frame = 1; frame <= 2; ++frame )
+  {
+    const auto result = estimator.update( makeFrame(
+        calibration, stationary, frame * 50'000'000, kNearAxisLandmarks,
+        ids ) );
+    ASSERT_EQ( result.status, UpdateStatus::kOk ) << result.message;
+  }
+
+  Eigen::Isometry3d slightly_wrong_pose = stationary;
+  slightly_wrong_pose.translation().z() = 0.25;
+  auto       noisy                      = makeFrame( calibration, slightly_wrong_pose, 150'000'000,
+                                                     kNearAxisLandmarks, ids );
+  const auto guess_measurement          = makeFrame(
+      calibration, stationary, 150'000'000, kNearAxisLandmarks, ids );
+  for ( std::size_t index = 0; index < kNearAxisLandmarks.size(); ++index )
+  {
+    noisy.observations[ index ].disparity_px =
+        guess_measurement.observations[ index ].disparity_px;
+  }
+
+  const auto accepted = estimator.update( noisy );
+  ASSERT_EQ( accepted.status, UpdateStatus::kOk ) << accepted.message;
+  ASSERT_TRUE( accepted.estimate.has_value() );
+  EXPECT_TRUE( accepted.estimate->T_W_B.matrix().allFinite() );
+  EXPECT_TRUE( accepted.diagnostics.pnp_success );
+  EXPECT_GE( accepted.diagnostics.pnp_inliers,
+             static_cast<std::uint32_t>( kNearAxisLandmarks.size() ) );
 }
 
 TEST( StereoVoPnpTest, FallsBackWhenTooFewShared )
