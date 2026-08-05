@@ -338,6 +338,7 @@ if(PHAD_BUILD_TESTS)
     tests/estimator/stereo_vo_outlier_cull_test.cpp
     tests/estimator/stereo_vo_outlier_reopt_test.cpp
     tests/estimator/stereo_vo_cull_rebirth_test.cpp
+    tests/estimator/keyframe_update_test.cpp
   )
   target_link_libraries(phad_estimator_tests PRIVATE
     phad::estimator gtsam GTest::gtest_main
@@ -379,6 +380,7 @@ if(PHAD_BUILD_TESTS)
   add_executable(phad_apps_tests
     tests/apps/offline_vo_session_test.cpp
     tests/apps/phad_vo_bench_cli_test.cpp
+    tests/apps/keyframe_selection_test.cpp
   )
   target_link_libraries(phad_apps_tests PRIVATE
     phad_offline_vo_session GTest::gtest_main opencv_imgcodecs
