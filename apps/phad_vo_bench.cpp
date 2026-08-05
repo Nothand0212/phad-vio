@@ -749,18 +749,6 @@ namespace
         std::cerr << "write tum failed: " << write_error->describe() << '\n';
         exit_code = 1;
       }
-      else if ( session.kf_trajectory.has_value() )
-      {
-        if ( const auto kf_error = phad::eval::writeTum(
-                 output_dir / "kf.tum", *session.kf_trajectory ) )
-        {
-          summary.status = phad::bench::RunStatus::kFailed;
-          summary.warnings.push_back( kf_error->describe() );
-          std::cerr << "write kf tum failed: " << kf_error->describe()
-                    << '\n';
-          exit_code = 1;
-        }
-      }
       else if ( const auto diag_error = phad::apps::writeDiagCsv(
                     output_dir / "diag.csv", session.diag ) )
       {
@@ -847,6 +835,19 @@ namespace
             exit_code = 0;
           }
         }
+      }
+    }
+
+    // kf.tum: independent of the est.tum/diag/eval chain above.
+    if ( exit_code == 0 && session.kf_trajectory.has_value() )
+    {
+      if ( const auto kf_error = phad::eval::writeTum(
+               output_dir / "kf.tum", *session.kf_trajectory ) )
+      {
+        summary.status = phad::bench::RunStatus::kFailed;
+        summary.warnings.push_back( kf_error->describe() );
+        std::cerr << "write kf tum failed: " << kf_error->describe() << '\n';
+        exit_code = 1;
       }
     }
 
