@@ -136,7 +136,8 @@ namespace phad::apps
 
   struct OfflineVoSessionResult
   {
-    std::optional<common::Trajectory> trajectory;
+    std::optional<common::Trajectory> trajectory;   // all accepted frames (est.tum)
+    std::optional<common::Trajectory> kf_trajectory;  // keyframes only (kf.tum)
     std::vector<VoDiagRow>            diag;
     FrameCounts                       counts;
     sync::StereoPairDiagnostics       sync;

@@ -24,14 +24,16 @@ namespace
 
   constexpr std::string_view kUsage =
       "usage: phad_stereo_vo_probe <sequence-root> --tum <path> "
-      "[--diag-csv <path>] [--probe-b <path>] [--defer-drop-topk <k>] "
-      "[--evict-skip-culled] [--zombie-drop-age <n>]\n";
+      "[--diag-csv <path>] [--kf-tum <path>] [--probe-b <path>] "
+      "[--defer-drop-topk <k>] [--evict-skip-culled] "
+      "[--zombie-drop-age <n>]\n";
 
   struct Arguments
   {
     std::filesystem::path sequence_root;
     std::filesystem::path tum_path;
     std::filesystem::path diag_csv;
+    std::filesystem::path kf_tum_path;
     std::filesystem::path probe_b_path;
     std::optional<int>    defer_drop_topk;
     bool                  evict_skip_culled = false;
@@ -68,6 +70,10 @@ namespace
       else if ( flag == "--diag-csv" )
       {
         arguments.diag_csv = value;
+      }
+      else if ( flag == "--kf-tum" )
+      {
+        arguments.kf_tum_path = value;
       }
       else if ( flag == "--probe-b" )
       {
@@ -158,6 +164,17 @@ namespace
       std::cerr << "write tum failed: " << write_error->describe() << '\n';
       return 1;
     }
+    if ( !arguments.kf_tum_path.empty() && result.kf_trajectory.has_value() )
+    {
+      if ( const auto write_error =
+               phad::eval::writeTum( arguments.kf_tum_path,
+                                     *result.kf_trajectory ) )
+      {
+        std::cerr << "write kf tum failed: " << write_error->describe()
+                  << '\n';
+        return 1;
+      }
+    }
 
     const double reject_rate =
         result.counts.image_frames == 0
@@ -194,7 +211,12 @@ namespace
               << "reproj_rms_after_median_px=" << result.reproj.median_px
               << '\n'
               << "reproj_rms_after_p95_px=" << result.reproj.p95_px << '\n'
-              << "tum=" << arguments.tum_path << '\n';
+              << "tum=" << arguments.tum_path << '\n'
+              << "kf_tum="
+              << ( arguments.kf_tum_path.empty()
+                       ? std::string_view{ "(not written)" }
+                       : std::string_view{ arguments.kf_tum_path.string() } )
+              << '\n';
     return 0;
   }
 

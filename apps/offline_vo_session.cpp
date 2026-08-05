@@ -256,6 +256,7 @@ namespace phad::apps
         };
 
     std::vector<common::TimedPose> poses;
+    std::vector<common::TimedPose> kf_poses;
     std::vector<double>            rms_after;
     std::vector<double>            rectify_s;
     std::vector<double>            frontend_s;
@@ -580,15 +581,16 @@ namespace phad::apps
       result.counts.outlier_reopts += d.outlier_reopt_rounds;
       if ( update.status == estimator::UpdateStatus::kOk )
       {
-        // Only keyframes contribute to trajectory and reprojection stats:
-        // non-keyframes have no optimization run (RMS == 0) and no estimate.
+        // All accepted frames write est.tum (non-keyframes carry PnP pose);
+        // keyframes additionally collect kf.tum.
+        rms_after.push_back( d.reproj_rms_after_px );
+        common::TimedPose pose;
+        pose.timestamp = update.estimate->timestamp;
+        pose.T_W_B     = update.estimate->T_W_B;
+        poses.push_back( pose );
         if ( is_kf )
         {
-          rms_after.push_back( d.reproj_rms_after_px );
-          common::TimedPose pose;
-          pose.timestamp = update.estimate->timestamp;
-          pose.T_W_B     = update.estimate->T_W_B;
-          poses.push_back( pose );
+          kf_poses.push_back( pose );
         }
 
         const std::uint32_t segment_id  = d.segment_id;
@@ -691,6 +693,19 @@ namespace phad::apps
       return result;
     }
     result.trajectory = std::move( trajectory.value() );
+
+    // Keyframe-only trajectory (kf.tum).
+    if ( !kf_poses.empty() )
+    {
+      auto kf_trajectory = common::Trajectory::create( std::move( kf_poses ) );
+      if ( !kf_trajectory )
+      {
+        result.error = SessionError{ "kf trajectory create failed: " +
+                                     kf_trajectory.error().detail };
+        return result;
+      }
+      result.kf_trajectory = std::move( kf_trajectory.value() );
+    }
     return result;
   }
 

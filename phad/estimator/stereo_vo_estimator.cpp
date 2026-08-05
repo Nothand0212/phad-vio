@@ -1228,12 +1228,17 @@ namespace phad::estimator
         return result;
       }
       // Non-keyframe: update last/prev chain only; no window/graph/LM.
+      // Still returns the PnP/guess pose so the caller can write est.tum.
       if ( !keyframe )
       {
         m_impl->prev_accepted_T_W_B = m_impl->last_accepted_T_W_B;
         m_impl->last_accepted_T_W_B = candidate.T_W_B;
         m_impl->initialized         = true;
         result.status               = UpdateStatus::kOk;
+        result.estimate             = VioEstimate{
+            .timestamp = measurement.timestamp,
+            .T_W_B     = candidate.T_W_B,
+        };
         result.diagnostics.window_size =
             static_cast<std::uint32_t>( m_impl->window.size() );
         if ( !m_impl->window.empty() )
