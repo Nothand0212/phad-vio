@@ -1,6 +1,10 @@
+.agents/
 .venv/
 .cache/
 .cursor/
+.claude/
+.code-review-graph/
+.superpowers/
 .vscode/
 .worktree/
 .reasonix/
