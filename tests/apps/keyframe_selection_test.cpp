@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstdint>
 #include <unordered_map>
 
@@ -23,6 +24,9 @@ struct KeyframeSelectorState
   std::unordered_map<LandmarkId, Eigen::Vector2d> last_kf_pixels;
   Timestamp     last_kf_timestamp{ 0 };
   std::uint32_t total_keyframes = 0;
+  // Rotation compensation (Slice ⑤b).
+  Eigen::Matrix3d last_accepted_rotation = Eigen::Matrix3d::Identity();
+  Eigen::Matrix3d last_kf_rotation       = Eigen::Matrix3d::Identity();
 };
 
 [[nodiscard]] bool isKeyframeTest(
@@ -30,7 +34,13 @@ struct KeyframeSelectorState
     const Timestamp       current_ts,
     KeyframeSelectorState& state )
 {
+  // Rule 0: empty observations never become keyframes (Slice ⑤b).
+  if ( tracks.observations.empty() ) return false;
+
   if ( state.total_keyframes < 2 ) return true;
+
+  // Rule 1b: too few tracks to run PnP -> force keyframe.
+  if ( tracks.observations.size() < 10U ) return true;
 
   const std::int64_t dt_ns =
       current_ts.nanoseconds() - state.last_kf_timestamp.nanoseconds();
@@ -46,14 +56,22 @@ struct KeyframeSelectorState
       std::max( state.last_kf_pixels.size(), std::size_t{ 1 } );
   if ( survive_ratio < 0.6 ) return true;
 
+  // Rule 4: rotation-compensated parallax (Slice ⑤b).
+  const Eigen::Matrix3d R_kf_to_cur =
+      state.last_accepted_rotation * state.last_kf_rotation.transpose();
   double      parallax_sum   = 0.0;
   std::size_t parallax_count = 0;
   for ( const auto& obs : tracks.observations )
   {
     auto it = state.last_kf_pixels.find( obs.id );
     if ( it == state.last_kf_pixels.end() ) continue;
-    const double dx = obs.left_pixel.x() - it->second.x();
-    const double dy = obs.left_pixel.y() - it->second.y();
+    const Eigen::Vector3d delta =
+        R_kf_to_cur * Eigen::Vector3d( it->second.x(), it->second.y(), 1.0 );
+    const Eigen::Vector2d p_comp(
+        delta.x() / std::max( delta.z(), 1e-6 ),
+        delta.y() / std::max( delta.z(), 1e-6 ) );
+    const double dx = obs.left_pixel.x() - p_comp.x();
+    const double dy = obs.left_pixel.y() - p_comp.y();
     parallax_sum += std::sqrt( dx * dx + dy * dy );
     ++parallax_count;
   }
@@ -73,6 +91,7 @@ void updateKeyframeSnapshotTest(
   for ( const auto& obs : tracks.observations )
     state.last_kf_pixels[ obs.id ] = obs.left_pixel;
   state.last_kf_timestamp = ts;
+  state.last_kf_rotation  = state.last_accepted_rotation;
   ++state.total_keyframes;
 }
 
@@ -195,10 +214,11 @@ TEST( KeyframeSelectionTest, EmptyTracksBoundary )
   isKeyframeTest( kf2, Timestamp{ 200'000'000 }, state );
   updateKeyframeSnapshotTest( kf2, Timestamp{ 200'000'000 }, state );
 
-  // Empty tracks, within time window → survive=0/5=0 < 0.6 → keyframe.
+  // Empty tracks are NOT keyframes (Slice ⑤b Rule 0; previously they
+  // cascaded as spurious keyframes: survive=0/1=0 < 0.6).
   FrameTracks empty;
   empty.timestamp = Timestamp{ 300'000'000 };
-  EXPECT_TRUE( isKeyframeTest( empty, Timestamp{ 300'000'000 }, state ) );
+  EXPECT_FALSE( isKeyframeTest( empty, Timestamp{ 300'000'000 }, state ) );
 }
 
 TEST( KeyframeSelectionTest, AllTracksNew )
@@ -216,4 +236,89 @@ TEST( KeyframeSelectionTest, AllTracksNew )
   // common_count=0, survive=0/10=0 < 0.6 → keyframe.
   auto t = makeTracks( 300'000'000, 10, { 105.0, 100.0 }, 100 );
   EXPECT_TRUE( isKeyframeTest( t, Timestamp{ 300'000'000 }, state ) );
+}
+
+TEST( KeyframeSelectionTest, LowTrackForcesKeyframe )
+{
+  KeyframeSelectorState state;
+  auto kf0 = makeTracks( 100'000'000, 10, { 100.0, 100.0 }, 0 );
+  isKeyframeTest( kf0, Timestamp{ 100'000'000 }, state );
+  updateKeyframeSnapshotTest( kf0, Timestamp{ 100'000'000 }, state );
+
+  auto kf1 = makeTracks( 200'000'000, 10, { 100.0, 100.0 }, 0 );
+  isKeyframeTest( kf1, Timestamp{ 200'000'000 }, state );
+  updateKeyframeSnapshotTest( kf1, Timestamp{ 200'000'000 }, state );
+
+  // Only 5 tracks (>=1 but < 10 = min_pnp_inliers): forced keyframe even
+  // though parallax=0, survival=1.0, dt small.
+  auto t = makeTracks( 300'000'000, 5, { 100.0, 100.0 }, 0 );
+  EXPECT_TRUE( isKeyframeTest( t, Timestamp{ 300'000'000 }, state ) );
+}
+
+TEST( KeyframeSelectionTest, EmptyTracksNotSpuriousKeyframe )
+{
+  KeyframeSelectorState state;
+  auto kf0 = makeTracks( 100'000'000, 10, { 100.0, 100.0 }, 0 );
+  isKeyframeTest( kf0, Timestamp{ 100'000'000 }, state );
+  updateKeyframeSnapshotTest( kf0, Timestamp{ 100'000'000 }, state );
+
+  auto kf1 = makeTracks( 200'000'000, 10, { 100.0, 100.0 }, 0 );
+  isKeyframeTest( kf1, Timestamp{ 200'000'000 }, state );
+  updateKeyframeSnapshotTest( kf1, Timestamp{ 200'000'000 }, state );
+
+  // Empty observations: NOT a keyframe (Slice ⑤b Rule 0). Previously this
+  // was a spurious keyframe (survive=0/1=0 < 0.6) that cascaded.
+  FrameTracks empty;
+  empty.timestamp = Timestamp{ 300'000'000 };
+  EXPECT_FALSE( isKeyframeTest( empty, Timestamp{ 300'000'000 }, state ) );
+}
+
+TEST( KeyframeSelectionTest, RotationCompensatedParallax )
+{
+  // Pure rotation between last-KF and current frame: raw parallax would
+  // exceed 30 px, but rotation compensation brings it near zero -> NOT a
+  // keyframe (VINS compensatedParallax2 idea).
+  KeyframeSelectorState state;
+  auto kf0 = makeTracks( 100'000'000, 10, { 100.0, 100.0 }, 0 );
+  isKeyframeTest( kf0, Timestamp{ 100'000'000 }, state );
+  updateKeyframeSnapshotTest( kf0, Timestamp{ 100'000'000 }, state );
+
+  auto kf1 = makeTracks( 200'000'000, 10, { 105.0, 100.0 }, 0 );
+  isKeyframeTest( kf1, Timestamp{ 200'000'000 }, state );
+  updateKeyframeSnapshotTest( kf1, Timestamp{ 200'000'000 }, state );
+  // total_keyframes = 2.
+
+  // Simulate a rotation: last-accepted rotation is 30° about Z, and the
+  // current observations are exactly the rotated last-KF pixels.
+  const double angle = 30.0 * M_PI / 180.0;
+  const double c     = std::cos( angle );
+  const double s     = std::sin( angle );
+  Eigen::Matrix3d R_cur;
+  R_cur << c, -s, 0.0, s, c, 0.0, 0.0, 0.0, 1.0;
+  state.last_accepted_rotation = R_cur;
+  state.last_kf_rotation       = Eigen::Matrix3d::Identity();
+
+  // Rotate the last-KF pixels by R_cur (in image plane, unit depth approx).
+  std::vector<Eigen::Vector2d> rotated;
+  for ( const auto& [ id, px ] : state.last_kf_pixels )
+  {
+    const Eigen::Vector3d v =
+        R_cur * Eigen::Vector3d( px.x(), px.y(), 1.0 );
+    rotated.emplace_back( v.x() / v.z(), v.y() / v.z() );
+  }
+
+  FrameTracks t;
+  t.timestamp = Timestamp{ 300'000'000 };
+  int i       = 0;
+  for ( const auto& [ id, px ] : state.last_kf_pixels )
+  {
+    TrackObservation obs;
+    obs.id           = id;
+    obs.left_pixel   = rotated[ i++ ];
+    obs.disparity_px = 1.0;
+    t.observations.push_back( obs );
+  }
+  // 10 tracks (>= min_pnp_inliers), all survive, dt small. Raw parallax
+  // (before compensation) would be large; compensated should be ~0.
+  EXPECT_FALSE( isKeyframeTest( t, Timestamp{ 300'000'000 }, state ) );
 }

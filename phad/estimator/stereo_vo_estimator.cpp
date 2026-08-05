@@ -1062,6 +1062,21 @@ namespace phad::estimator
       result.message = "not initialised (non-keyframe)";
       return result;
     }
+    // Non-keyframe with too few shared landmarks cannot run PnP; a raw CV
+    // guess would pollute the pose chain. Reject (Slice ⑤b gate).
+    if ( !keyframe && static_cast<int>( num_shared ) <
+                          m_impl->options.min_pnp_inliers )
+    {
+      result.status  = UpdateStatus::kRejected;
+      result.message = "insufficient shared landmarks (non-keyframe)";
+      result.diagnostics.window_size =
+          static_cast<std::uint32_t>( m_impl->window.size() );
+      if ( !m_impl->window.empty() )
+      {
+        result.diagnostics.prior_key = m_impl->window.front().frame_index;
+      }
+      return result;
+    }
     if ( overlap_broken &&
          static_cast<int>( measurement.observations.size() ) <
              m_impl->options.min_seed_observations )
@@ -1244,6 +1259,102 @@ namespace phad::estimator
       // Still returns the PnP/guess pose so the caller can write est.tum.
       if ( !keyframe )
       {
+        // Slice ⑤b: pose-only LM refinement over the PnP inlier set
+        // (ORB-SLAM3 PoseOptimization template, via cv::solvePnPRefineLM).
+        // Landmarks are fixed; only the new frame's pose is refined.
+        if ( result.diagnostics.pnp_success &&
+             candidate.observations.size() >= 4U )
+        {
+          std::vector<cv::Point3f> object_points;
+          std::vector<cv::Point2f> image_points;
+          object_points.reserve( candidate.observations.size() );
+          image_points.reserve( candidate.observations.size() );
+          for ( const StereoObservation& observation :
+                candidate.observations )
+          {
+            auto it = m_impl->landmarks_W.find( observation.id );
+            if ( it == m_impl->landmarks_W.end() )
+            {
+              continue;
+            }
+            object_points.emplace_back(
+                static_cast<float>( it->second.x() ),
+                static_cast<float>( it->second.y() ),
+                static_cast<float>( it->second.z() ) );
+            image_points.emplace_back(
+                static_cast<float>( observation.left_pixel.x() ),
+                static_cast<float>( observation.left_pixel.y() ) );
+          }
+          if ( object_points.size() >= 4U )
+          {
+            const double      fx = m_impl->calibration.fxPixels();
+            const double      fy = m_impl->calibration.fyPixels();
+            const double      cx = m_impl->calibration.cxPixels();
+            const double      cy = m_impl->calibration.cyPixels();
+            cv::Mat           camera_matrix =
+                ( cv::Mat_<double>( 3, 3 ) << fx, 0.0, cx, 0.0, fy, cy,
+                  0.0, 0.0, 1.0 );
+            cv::Mat           dist_coeffs = cv::Mat::zeros( 4, 1, CV_64F );
+            // solvePnPRefineLM works on world-to-camera rvec/tvec
+            // (T_left_W). Convert candidate T_W_B -> T_left_W first.
+            const Eigen::Isometry3d T_W_left =
+                candidate.T_W_B * toIsometry( m_impl->body_P_sensor );
+            const Eigen::Isometry3d T_left_W = T_W_left.inverse();
+            cv::Mat                 rvec;
+            cv::Mat                 tvec;
+            cv::Mat rot_mat( 3, 3, CV_64F );
+            for ( int row = 0; row < 3; ++row )
+            {
+              for ( int col = 0; col < 3; ++col )
+              {
+                rot_mat.at<double>( row, col ) =
+                    T_left_W.linear()( row, col );
+              }
+            }
+            cv::Rodrigues( rot_mat, rvec );
+            tvec = ( cv::Mat_<double>( 3, 1 )
+                         << T_left_W.translation().x(),
+                     T_left_W.translation().y(),
+                     T_left_W.translation().z() );
+            try
+            {
+              cv::solvePnPRefineLM( object_points, image_points,
+                                    camera_matrix, dist_coeffs, rvec,
+                                    tvec );
+              // Refined world-to-camera -> T_W_B.
+              cv::Mat           refined_rot;
+              cv::Rodrigues( rvec, refined_rot );
+              Eigen::Matrix3d   R_left_W;
+              Eigen::Vector3d   t_left_W;
+              for ( int row = 0; row < 3; ++row )
+              {
+                t_left_W( row ) = tvec.at<double>( row, 0 );
+                for ( int col = 0; col < 3; ++col )
+                {
+                  R_left_W( row, col ) =
+                      refined_rot.at<double>( row, col );
+                }
+              }
+              Eigen::Quaterniond quat( R_left_W );
+              quat.normalize();
+              Eigen::Isometry3d T_left_W_refined =
+                  Eigen::Isometry3d::Identity();
+              T_left_W_refined.linear() = quat.toRotationMatrix();
+              T_left_W_refined.translation() = t_left_W;
+              const Eigen::Isometry3d T_W_B_refined =
+                  T_left_W_refined.inverse() *
+                  toIsometry( m_impl->body_P_sensor ).inverse();
+              if ( isFinite( T_W_B_refined ) )
+              {
+                candidate.T_W_B = toIsometry( T_W_B_refined );
+              }
+            }
+            catch ( const cv::Exception& )
+            {
+              // Refinement failed; keep the PnP pose.
+            }
+          }
+        }
         const Eigen::Isometry3d normalized = toIsometry( candidate.T_W_B );
         m_impl->prev_accepted_T_W_B = m_impl->last_accepted_T_W_B;
         m_impl->last_accepted_T_W_B = normalized;

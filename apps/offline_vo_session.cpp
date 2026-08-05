@@ -51,6 +51,13 @@ namespace phad::apps
                          last_kf_pixels;
       common::Timestamp last_kf_timestamp{ 0 };
       std::uint32_t     total_keyframes = 0;
+      // Rotation compensation (Slice ⑤b): rotation of the last accepted
+      // pose (BA/PnP-refined) used to project last-KF observations into the
+      // current frame before measuring parallax. Identity until first accept.
+      Eigen::Matrix3d last_accepted_rotation =
+          Eigen::Matrix3d::Identity();
+      // Rotation of the last keyframe pose (snapshot at kf accept).
+      Eigen::Matrix3d last_kf_rotation = Eigen::Matrix3d::Identity();
     };
 
     [[nodiscard]] bool isKeyframeImpl(
@@ -58,8 +65,16 @@ namespace phad::apps
         const common::Timestamp      current_ts,
         KeyframeSelectorState&       state )
     {
+      // Rule 0: empty observations never become keyframes (Slice ⑤b; the
+      // estimator rejects them, and snapshot must not advance on reject).
+      if ( tracks.observations.empty() ) return false;
+
       // Rule 1: first 2 frames always keyframes.
       if ( state.total_keyframes < 2 ) return true;
+
+      // Rule 1b: too few tracks to run PnP -> force keyframe (VINS
+      // last_track_num < 20 rule; here min_pnp_inliers = 10).
+      if ( tracks.observations.size() < 10U ) return true;
 
       // Rule 2: time fallback (> 0.5 s).
       const std::int64_t dt_ns = current_ts.nanoseconds() -
@@ -80,15 +95,33 @@ namespace phad::apps
           std::max( state.last_kf_pixels.size(), std::size_t{ 1 } );
       if ( survive_ratio < 0.6 ) return true;
 
-      // Rule 4: average pixel parallax (> 30 px) on common tracks.
+      // Rule 4: rotation-compensated average parallax (> 30 px).
+      // Project last-KF observations into the current frame using the
+      // rotation between last-KF and last-accepted poses, then measure
+      // translational parallax. Pure rotation yields ~0 parallax and does
+      // not trigger a keyframe (VINS compensatedParallax2 idea).
+      const Eigen::Matrix3d R_kf_to_cur =
+          state.last_accepted_rotation * state.last_kf_rotation.transpose();
       double      parallax_sum   = 0.0;
       std::size_t parallax_count = 0;
       for ( const auto& obs : tracks.observations )
       {
         auto it = state.last_kf_pixels.find( obs.id );
         if ( it == state.last_kf_pixels.end() ) continue;
-        const double dx = obs.left_pixel.x() - it->second.x();
-        const double dy = obs.left_pixel.y() - it->second.y();
+        // Rotate the last-KF pixel offset (from principal point) to the
+        // current frame's orientation, assuming a unit-depth plane.
+        const Eigen::Vector2d p_lastkf = it->second;
+        const Eigen::Vector2d p_cur    = obs.left_pixel;
+        // Rotation in the image plane about the principal point (small-angle
+        // approximation of the 2D induced rotation); for strong rotations the
+        // un-compensated difference dominates and triggers a keyframe anyway.
+        const Eigen::Vector3d delta =
+            R_kf_to_cur * Eigen::Vector3d( p_lastkf.x(), p_lastkf.y(), 1.0 );
+        const Eigen::Vector2d p_comp(
+            delta.x() / std::max( delta.z(), 1e-6 ),
+            delta.y() / std::max( delta.z(), 1e-6 ) );
+        const double dx = p_cur.x() - p_comp.x();
+        const double dy = p_cur.y() - p_comp.y();
         parallax_sum += std::sqrt( dx * dx + dy * dy );
         ++parallax_count;
       }
@@ -108,6 +141,7 @@ namespace phad::apps
       for ( const auto& obs : tracks.observations )
         state.last_kf_pixels[ obs.id ] = obs.left_pixel;
       state.last_kf_timestamp = ts;
+      state.last_kf_rotation  = state.last_accepted_rotation;
       ++state.total_keyframes;
     }
 
@@ -396,8 +430,20 @@ namespace phad::apps
           estimator.update( measurement, is_kf );
       const auto estimator_end = std::chrono::steady_clock::now();
 
-      // Update keyframe snapshot AFTER estimator (PnP mask is internal).
-      if ( is_kf ) updateKeyframeSnapshot( tracks, tracks.timestamp );
+      // Update keyframe snapshot ONLY when the estimator accepted the
+      // keyframe (Slice ⑤b fix: rejected kf must not advance the parallax
+      // / time baselines).
+      if ( is_kf && update.status == estimator::UpdateStatus::kOk )
+      {
+        updateKeyframeSnapshot( tracks, tracks.timestamp );
+      }
+      // Track last-accepted rotation for rotation-compensated parallax.
+      if ( update.status == estimator::UpdateStatus::kOk &&
+           update.estimate.has_value() )
+      {
+        kf_state.last_accepted_rotation =
+            update.estimate->T_W_B.linear();
+      }
       const auto frame_end     = estimator_end;
 
       // Composition-root feedback: drop frontend tracks for ids the
