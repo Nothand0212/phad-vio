@@ -80,7 +80,7 @@ namespace
     summary.timing.rtf    = 14.0;
 
     const json root = json::parse( summary.toJson() );
-    EXPECT_EQ( root.at( "schema_version" ), 1 );
+    EXPECT_EQ( root.at( "schema_version" ), 2 );
     EXPECT_EQ( root.at( "status" ), "completed" );
     EXPECT_NEAR( root.at( "ate" ).at( "trans" ).at( "rmse" ).get<double>(),
                  0.15, 1e-12 );
@@ -155,7 +155,7 @@ namespace
 
     const json root = json::parse( summary.toJson() );
     EXPECT_EQ( root.at( "robustness" ).at( "outlier_reopts" ), 7 );
-    EXPECT_EQ( root.at( "schema_version" ), 1 );
+    EXPECT_EQ( root.at( "schema_version" ), 2 );
   }
 
   TEST( RunSummaryTest, DropsSkippedCounterSerialize )
@@ -228,7 +228,7 @@ namespace
     meta.warnings.emplace_back( "example" );
 
     const json root = json::parse( meta.toJson() );
-    EXPECT_EQ( root.at( "schema_version" ), 1 );
+    EXPECT_EQ( root.at( "schema_version" ), 2 );
     EXPECT_EQ( root.at( "code" ).at( "git_commit_short" ), "0123456" );
     EXPECT_EQ( root.at( "code" ).at( "git_branch" ), "main" );
     EXPECT_EQ( root.at( "config" ).at( "session.max_frames" ), 100 );

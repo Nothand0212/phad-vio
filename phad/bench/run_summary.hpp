@@ -36,14 +36,17 @@ namespace phad::bench
 
   struct TrajectorySummary
   {
-    std::uint64_t image_frames    = 0;
-    std::uint64_t poses_written   = 0;
-    std::uint64_t ok              = 0;
-    std::uint64_t rejected        = 0;
-    std::uint64_t failed          = 0;
-    double        completion_rate = 0.0;
-    double        coverage_rate   = 0.0;
-    std::uint64_t segments        = 0;
+    std::uint64_t image_frames          = 0;
+    std::uint64_t poses_written         = 0;
+    std::uint64_t ok                    = 0;
+    std::uint64_t rejected              = 0;
+    std::uint64_t failed                = 0;
+    double        completion_rate       = 0.0;
+    double        coverage_rate         = 0.0;
+    std::uint64_t segments              = 0;
+    // Slice ⑤: keyframe counts.
+    std::uint64_t total_keyframes       = 0;
+    std::uint64_t total_track_only_frames = 0;
   };
 
   struct SyncSummary
@@ -112,7 +115,7 @@ namespace phad::bench
 
   struct RunMeta
   {
-    int                      schema_version = 1;
+    int                      schema_version = 2;
     std::string              sequence;
     std::string              sequence_root;
     std::string              created_utc;
@@ -131,7 +134,7 @@ namespace phad::bench
 
   struct RunSummary
   {
-    int                         schema_version = 1;
+    int                         schema_version = 2;
     RunStatus                   status         = RunStatus::kFailed;
     std::string                 sequence;
     std::string                 git_commit_short = "unknown";

@@ -691,7 +691,10 @@ namespace
             : static_cast<double>( session.counts.ok ) /
                   static_cast<double>( session.counts.image_frames );
     summary.trajectory.coverage_rate    = coverageRate( session );
-    summary.trajectory.segments         = session.counts.segments;
+    summary.trajectory.segments               = session.counts.segments;
+    summary.trajectory.total_keyframes       = session.counts.total_keyframes;
+    summary.trajectory.total_track_only_frames =
+        session.counts.total_track_only_frames;
     summary.robustness.rejected         = session.counts.rejected;
     summary.robustness.failed           = session.counts.failed;
     summary.robustness.low_connectivity = session.counts.low_connectivity;

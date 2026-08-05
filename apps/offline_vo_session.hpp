@@ -77,6 +77,7 @@ namespace phad::apps
     std::uint32_t pnp_inliers              = 0;
     std::uint32_t outliers_culled          = 0;
     double        reproj_rms_after_cull_px = 0.0;
+    bool          is_keyframe              = false;  // Slice ⑤
   };
 
   struct FrameCounts
@@ -107,6 +108,9 @@ namespace phad::apps
     std::uint64_t zombie_age_drops = 0;
     /// Cumulative ids dropped by zombie-age probe.
     std::uint64_t zombie_age_drop_ids = 0;
+    /// Slice ⑤: keyframe counts.
+    std::uint64_t total_keyframes       = 0;
+    std::uint64_t total_track_only_frames = 0;
   };
 
   struct StageTiming

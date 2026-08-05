@@ -131,6 +131,9 @@ namespace phad::bench
           { "completion_rate", trajectory.completion_rate },
           { "coverage_rate", trajectory.coverage_rate },
           { "segments", trajectory.segments },
+          { "total_keyframes", trajectory.total_keyframes },
+          { "total_track_only_frames",
+            trajectory.total_track_only_frames },
     };
 
     if ( ate.has_value() )

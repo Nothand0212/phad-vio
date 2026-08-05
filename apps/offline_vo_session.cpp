@@ -43,6 +43,74 @@ namespace phad::apps
     constexpr std::string_view kSeedRejectedFirstSegment =
         "insufficient observations to seed first segment";
 
+    // ── Slice ⑤ keyframe selection ──────────────────────────────────────
+
+    struct KeyframeSelectorState
+    {
+      std::unordered_map<common::LandmarkId, Eigen::Vector2d>
+                         last_kf_pixels;
+      common::Timestamp last_kf_timestamp{ 0 };
+      std::uint32_t     total_keyframes = 0;
+    };
+
+    [[nodiscard]] bool isKeyframeImpl(
+        const frontend::FrameTracks& tracks,
+        const common::Timestamp      current_ts,
+        KeyframeSelectorState&       state )
+    {
+      // Rule 1: first 2 frames always keyframes.
+      if ( state.total_keyframes < 2 ) return true;
+
+      // Rule 2: time fallback (> 0.5 s).
+      const std::int64_t dt_ns = current_ts.nanoseconds() -
+                                 state.last_kf_timestamp.nanoseconds();
+      if ( dt_ns > 500'000'000 ) return true;  // > 0.5 s
+
+      // Rule 3: track survival ratio (< 60%).
+      std::size_t common_count = 0;
+      for ( const auto& obs : tracks.observations )
+      {
+        if ( state.last_kf_pixels.count( obs.id ) > 0U )
+        {
+          ++common_count;
+        }
+      }
+      const double survive_ratio =
+          static_cast<double>( common_count ) /
+          std::max( state.last_kf_pixels.size(), std::size_t{ 1 } );
+      if ( survive_ratio < 0.6 ) return true;
+
+      // Rule 4: average pixel parallax (> 30 px) on common tracks.
+      double      parallax_sum   = 0.0;
+      std::size_t parallax_count = 0;
+      for ( const auto& obs : tracks.observations )
+      {
+        auto it = state.last_kf_pixels.find( obs.id );
+        if ( it == state.last_kf_pixels.end() ) continue;
+        const double dx = obs.left_pixel.x() - it->second.x();
+        const double dy = obs.left_pixel.y() - it->second.y();
+        parallax_sum += std::sqrt( dx * dx + dy * dy );
+        ++parallax_count;
+      }
+      if ( parallax_count > 0 &&
+           ( parallax_sum / static_cast<double>( parallax_count ) ) > 30.0 )
+        return true;
+
+      return false;
+    }
+
+    void updateKeyframeSnapshotImpl(
+        const frontend::FrameTracks& tracks,
+        const common::Timestamp      ts,
+        KeyframeSelectorState&       state )
+    {
+      state.last_kf_pixels.clear();
+      for ( const auto& obs : tracks.observations )
+        state.last_kf_pixels[ obs.id ] = obs.left_pixel;
+      state.last_kf_timestamp = ts;
+      ++state.total_keyframes;
+    }
+
     [[nodiscard]] double percentile( std::vector<double> values, double q )
     {
       if ( values.empty() )
@@ -172,6 +240,19 @@ namespace phad::apps
             selected.resize( keep );
           }
           return selected;
+        };
+
+    // Slice ⑤ keyframe selector state.
+    KeyframeSelectorState kf_state;
+    const auto            isKeyframe =
+        [ &kf_state ]( const frontend::FrameTracks& tracks,
+                       const common::Timestamp      ts ) {
+          return isKeyframeImpl( tracks, ts, kf_state );
+        };
+    const auto updateKeyframeSnapshot =
+        [ &kf_state ]( const frontend::FrameTracks& tracks,
+                       const common::Timestamp      ts ) {
+          updateKeyframeSnapshotImpl( tracks, ts, kf_state );
         };
 
     std::vector<common::TimedPose> poses;
@@ -304,12 +385,18 @@ namespace phad::apps
         }
       }
 
-      const auto                           estimator_begin = std::chrono::steady_clock::now();
+      // Slice ⑤: keyframe selection.
+      const bool is_kf = isKeyframe( tracks, tracks.timestamp );
+      const auto estimator_begin =
+          std::chrono::steady_clock::now();
       const estimator::KeyframeMeasurement measurement =
           toKeyframeMeasurement( tracks );
       const estimator::VioUpdateResult update =
-          estimator.update( measurement );
+          estimator.update( measurement, is_kf );
       const auto estimator_end = std::chrono::steady_clock::now();
+
+      // Update keyframe snapshot AFTER estimator (PnP mask is internal).
+      if ( is_kf ) updateKeyframeSnapshot( tracks, tracks.timestamp );
       const auto frame_end     = estimator_end;
 
       // Composition-root feedback: drop frontend tracks for ids the
@@ -455,6 +542,15 @@ namespace phad::apps
       result.last_image_ts = tracks.timestamp;
       ++result.counts.image_frames;
 
+      if ( is_kf )
+      {
+        ++result.counts.total_keyframes;
+      }
+      else
+      {
+        ++result.counts.total_track_only_frames;
+      }
+
       switch ( update.status )
       {
         case estimator::UpdateStatus::kOk:
@@ -484,11 +580,16 @@ namespace phad::apps
       result.counts.outlier_reopts += d.outlier_reopt_rounds;
       if ( update.status == estimator::UpdateStatus::kOk )
       {
-        rms_after.push_back( d.reproj_rms_after_px );
-        common::TimedPose pose;
-        pose.timestamp = update.estimate->timestamp;
-        pose.T_W_B     = update.estimate->T_W_B;
-        poses.push_back( pose );
+        // Only keyframes contribute to trajectory and reprojection stats:
+        // non-keyframes have no optimization run (RMS == 0) and no estimate.
+        if ( is_kf )
+        {
+          rms_after.push_back( d.reproj_rms_after_px );
+          common::TimedPose pose;
+          pose.timestamp = update.estimate->timestamp;
+          pose.T_W_B     = update.estimate->T_W_B;
+          poses.push_back( pose );
+        }
 
         const std::uint32_t segment_id  = d.segment_id;
         const bool          is_reanchor = last_segment_id.has_value() &&
@@ -542,6 +643,7 @@ namespace phad::apps
           .pnp_inliers              = d.pnp_inliers,
           .outliers_culled          = d.outliers_culled,
           .reproj_rms_after_cull_px = d.reproj_rms_after_cull_px,
+          .is_keyframe              = is_kf,
       } );
 
       if ( options.collect_timing )
@@ -606,7 +708,7 @@ namespace phad::apps
            "reproj_rms_before_px,reproj_rms_after_px,num_cheirality,"
            "lm_iterations,max_window_pose_shift_m,segment_id,"
            "pnp_success,pnp_inliers,outliers_culled,"
-           "reproj_rms_after_cull_px\n";
+           "reproj_rms_after_cull_px,is_keyframe\n";
 
     for ( const VoDiagRow& row : rows )
     {
@@ -621,7 +723,8 @@ namespace phad::apps
           << row.lm_iterations << ',' << row.max_window_pose_shift_m << ','
           << row.segment_id << ',' << ( row.pnp_success ? 1 : 0 ) << ','
           << row.pnp_inliers << ',' << row.outliers_culled << ','
-          << row.reproj_rms_after_cull_px << '\n';
+          << row.reproj_rms_after_cull_px << ','
+          << ( row.is_keyframe ? 1 : 0 ) << '\n';
     }
 
     if ( !out )

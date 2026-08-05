@@ -257,10 +257,10 @@ namespace
     const auto header_end = text.find( '\n' );
     ASSERT_NE( header_end, std::string::npos );
     const std::string header = text.substr( 0, header_end );
-    EXPECT_EQ( std::count( header.begin(), header.end(), ',' ), 17 );
+    EXPECT_EQ( std::count( header.begin(), header.end(), ',' ), 18 );
     EXPECT_NE(
         text.find( "1403636579763555584,ok,136,0,0,0,1,0,0.000000,0.000000,0,"
-                   "0,0.000000,0,0,0,0,0.000000" ),
+                   "0,0.000000,0,0,0,0,0.000000,0" ),
         std::string::npos );
     std::filesystem::remove( path );
   }

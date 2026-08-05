@@ -970,7 +970,8 @@ namespace phad::estimator
   }
 
   VioUpdateResult StereoVoEstimator::update(
-      const KeyframeMeasurement& measurement )
+      const KeyframeMeasurement& measurement,
+      const bool                 keyframe )
   {
     VioUpdateResult result;
     result.diagnostics.culled_landmark_ids.clear();
@@ -1028,6 +1029,26 @@ namespace phad::estimator
       }
       return result;
     }
+    // Non-keyframe cannot re-anchor; reject when overlap is broken.
+    if ( overlap_broken && !keyframe )
+    {
+      result.status  = UpdateStatus::kRejected;
+      result.message = "zero shared landmarks (non-keyframe)";
+      result.diagnostics.window_size =
+          static_cast<std::uint32_t>( m_impl->window.size() );
+      if ( !m_impl->window.empty() )
+      {
+        result.diagnostics.prior_key = m_impl->window.front().frame_index;
+      }
+      return result;
+    }
+    // Non-keyframe cannot initialise the first segment; reject.
+    if ( !m_impl->initialized && !keyframe )
+    {
+      result.status  = UpdateStatus::kRejected;
+      result.message = "not initialised (non-keyframe)";
+      return result;
+    }
     if ( overlap_broken &&
          static_cast<int>( measurement.observations.size() ) <
              m_impl->options.min_seed_observations )
@@ -1056,16 +1077,29 @@ namespace phad::estimator
       return result;
     }
 
-    // Snapshot for transactional rollback.
-    const auto window_backup      = m_impl->window;
-    const auto landmarks_backup   = m_impl->landmarks_W;
-    const auto track_times_backup = m_impl->track_times;
-    const auto last_backup        = m_impl->last_accepted_T_W_B;
-    const auto prev_backup        = m_impl->prev_accepted_T_W_B;
-    const auto next_index_backup  = m_impl->next_frame_index;
-    const bool initialized_backup = m_impl->initialized;
-    const auto segment_id_backup  = m_impl->segment_id;
-    const auto culled_ids_backup  = m_impl->culled_ids_;
+    // Snapshot for transactional rollback (keyframe only; non-keyframe
+    // path does not modify window/landmarks and returns before LM).
+    decltype( m_impl->window )          window_backup;
+    decltype( m_impl->landmarks_W )     landmarks_backup;
+    decltype( m_impl->track_times )     track_times_backup;
+    decltype( m_impl->last_accepted_T_W_B ) last_backup;
+    decltype( m_impl->prev_accepted_T_W_B ) prev_backup;
+    decltype( m_impl->next_frame_index )    next_index_backup;
+    bool        initialized_backup = false;
+    decltype( m_impl->segment_id )  segment_id_backup;
+    decltype( m_impl->culled_ids_ ) culled_ids_backup;
+    if ( keyframe )
+    {
+      window_backup      = m_impl->window;
+      landmarks_backup   = m_impl->landmarks_W;
+      track_times_backup = m_impl->track_times;
+      last_backup        = m_impl->last_accepted_T_W_B;
+      prev_backup        = m_impl->prev_accepted_T_W_B;
+      next_index_backup  = m_impl->next_frame_index;
+      initialized_backup = m_impl->initialized;
+      segment_id_backup  = m_impl->segment_id;
+      culled_ids_backup  = m_impl->culled_ids_;
+    }
 
     std::vector<LandmarkId> frame_culled;
 
@@ -1188,9 +1222,38 @@ namespace phad::estimator
 
       if ( !isFinite( candidate.T_W_B ) )
       {
-        restore();
+        if ( keyframe ) restore();
         result.status  = UpdateStatus::kFailed;
         result.message = "non-finite pose initial value";
+        return result;
+      }
+      // Non-keyframe: update last/prev chain only; no window/graph/LM.
+      if ( !keyframe )
+      {
+        m_impl->prev_accepted_T_W_B = m_impl->last_accepted_T_W_B;
+        m_impl->last_accepted_T_W_B = candidate.T_W_B;
+        m_impl->initialized         = true;
+        result.status               = UpdateStatus::kOk;
+        result.diagnostics.window_size =
+            static_cast<std::uint32_t>( m_impl->window.size() );
+        if ( !m_impl->window.empty() )
+        {
+          result.diagnostics.prior_key =
+              m_impl->window.front().frame_index;
+        }
+        if ( m_impl->options.enable_pnp_init &&
+             static_cast<int>( num_shared ) >=
+                 m_impl->options.min_pnp_inliers &&
+             result.diagnostics.pnp_success )
+        {
+          // Pose already set from PnP block above; diagnostics already filled.
+        }
+        else
+        {
+          // PnP not attempted or failed: use poseInitialValue guess.
+          result.diagnostics.pnp_success = false;
+          result.diagnostics.pnp_inliers = 0;
+        }
         return result;
       }
       // CRITICAL: track_times must see the full measurement (including

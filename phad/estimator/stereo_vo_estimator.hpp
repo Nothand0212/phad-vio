@@ -23,7 +23,8 @@ namespace phad::estimator
     StereoVoEstimator& operator=( StereoVoEstimator&& ) noexcept;
 
     [[nodiscard]] VioUpdateResult update(
-        const KeyframeMeasurement& measurement );
+        const KeyframeMeasurement& measurement,
+        bool                       keyframe = true );
 
     /// Timestamps of accepted frames that observed `id` (diagnostic; survives
     /// window/landmark pruning).
