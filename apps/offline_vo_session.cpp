@@ -5,6 +5,7 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <span>
@@ -20,6 +21,7 @@
 #include "apps/probe_b_writer.hpp"
 #include "apps/stereo_pair_stream.hpp"
 #include "apps/stereo_vo_glue.hpp"
+#include "phad/camera/rectified_stereo_calibration.hpp"
 #include "phad/camera/stereo_rectifier.hpp"
 #include "phad/common/landmark_id.hpp"
 #include "phad/estimator/stereo_vo_estimator.hpp"
@@ -63,7 +65,8 @@ namespace phad::apps
     [[nodiscard]] bool isKeyframeImpl(
         const frontend::FrameTracks& tracks,
         const common::Timestamp      current_ts,
-        KeyframeSelectorState&       state )
+        KeyframeSelectorState&       state,
+        const camera::RectifiedStereoCalibration& calibration )
     {
       // Rule 0: empty observations never become keyframes (Slice ⑤b; the
       // estimator rejects them, and snapshot must not advance on reject).
@@ -100,26 +103,38 @@ namespace phad::apps
       // rotation between last-KF and last-accepted poses, then measure
       // translational parallax. Pure rotation yields ~0 parallax and does
       // not trigger a keyframe (VINS compensatedParallax2 idea).
+      // Camera-frame rotation: R_kf_to_cur = R_cur^T * R_kf (transforms a
+      // direction expressed in the last-KF camera frame into the current
+      // frame).
       const Eigen::Matrix3d R_kf_to_cur =
-          state.last_accepted_rotation * state.last_kf_rotation.transpose();
+          state.last_accepted_rotation.transpose() *
+          state.last_kf_rotation;
+      // Normalized-coordinate projection of the rotation-compensated ray:
+      // pixel -> normalized ray, rotate, back to pixel. This avoids the
+      // degenerate z~0 blow-up of rotating raw pixel coordinates.
+      const double fx = calibration.fxPixels();
+      const double fy = calibration.fyPixels();
+      const double cx = calibration.cxPixels();
+      const double cy = calibration.cyPixels();
       double      parallax_sum   = 0.0;
       std::size_t parallax_count = 0;
       for ( const auto& obs : tracks.observations )
       {
         auto it = state.last_kf_pixels.find( obs.id );
         if ( it == state.last_kf_pixels.end() ) continue;
-        // Rotate the last-KF pixel offset (from principal point) to the
-        // current frame's orientation, assuming a unit-depth plane.
+        // Last-KF observation as a unit-depth normalized ray.
         const Eigen::Vector2d p_lastkf = it->second;
         const Eigen::Vector2d p_cur    = obs.left_pixel;
-        // Rotation in the image plane about the principal point (small-angle
-        // approximation of the 2D induced rotation); for strong rotations the
-        // un-compensated difference dominates and triggers a keyframe anyway.
-        const Eigen::Vector3d delta =
-            R_kf_to_cur * Eigen::Vector3d( p_lastkf.x(), p_lastkf.y(), 1.0 );
+        const Eigen::Vector3d ray_kf(
+            ( p_lastkf.x() - cx ) / fx, ( p_lastkf.y() - cy ) / fy, 1.0 );
+        const Eigen::Vector3d ray_cur = R_kf_to_cur * ray_kf;
+        if ( ray_cur.z() <= 1e-6 )
+        {
+          continue;  // behind camera after rotation; skip
+        }
         const Eigen::Vector2d p_comp(
-            delta.x() / std::max( delta.z(), 1e-6 ),
-            delta.y() / std::max( delta.z(), 1e-6 ) );
+            ray_cur.x() / ray_cur.z() * fx + cx,
+            ray_cur.y() / ray_cur.z() * fy + cy );
         const double dx = p_cur.x() - p_comp.x();
         const double dy = p_cur.y() - p_comp.y();
         parallax_sum += std::sqrt( dx * dx + dy * dy );
@@ -279,9 +294,9 @@ namespace phad::apps
     // Slice ⑤ keyframe selector state.
     KeyframeSelectorState kf_state;
     const auto            isKeyframe =
-        [ &kf_state ]( const frontend::FrameTracks& tracks,
-                       const common::Timestamp      ts ) {
-          return isKeyframeImpl( tracks, ts, kf_state );
+        [ &kf_state, &rectified_cal ]( const frontend::FrameTracks& tracks,
+                                       const common::Timestamp      ts ) {
+          return isKeyframeImpl( tracks, ts, kf_state, rectified_cal );
         };
     const auto updateKeyframeSnapshot =
         [ &kf_state ]( const frontend::FrameTracks& tracks,

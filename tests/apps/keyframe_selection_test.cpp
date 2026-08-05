@@ -57,19 +57,30 @@ struct KeyframeSelectorState
   if ( survive_ratio < 0.6 ) return true;
 
   // Rule 4: rotation-compensated parallax (Slice ⑤b).
+  // Normalized-coordinate projection: pixel -> normalized ray, rotate,
+  // back to pixel.
   const Eigen::Matrix3d R_kf_to_cur =
-      state.last_accepted_rotation * state.last_kf_rotation.transpose();
+      state.last_accepted_rotation.transpose() * state.last_kf_rotation;
+  const double fx = 400.0;  // makeCalibration()
+  const double fy = 400.0;
+  const double cx = 320.0;
+  const double cy = 240.0;
   double      parallax_sum   = 0.0;
   std::size_t parallax_count = 0;
   for ( const auto& obs : tracks.observations )
   {
     auto it = state.last_kf_pixels.find( obs.id );
     if ( it == state.last_kf_pixels.end() ) continue;
-    const Eigen::Vector3d delta =
-        R_kf_to_cur * Eigen::Vector3d( it->second.x(), it->second.y(), 1.0 );
+    const Eigen::Vector3d ray_kf(
+        ( it->second.x() - cx ) / fx, ( it->second.y() - cy ) / fy, 1.0 );
+    const Eigen::Vector3d ray_cur = R_kf_to_cur * ray_kf;
+    if ( ray_cur.z() <= 1e-6 )
+    {
+      continue;
+    }
     const Eigen::Vector2d p_comp(
-        delta.x() / std::max( delta.z(), 1e-6 ),
-        delta.y() / std::max( delta.z(), 1e-6 ) );
+        ray_cur.x() / ray_cur.z() * fx + cx,
+        ray_cur.y() / ray_cur.z() * fy + cy );
     const double dx = obs.left_pixel.x() - p_comp.x();
     const double dy = obs.left_pixel.y() - p_comp.y();
     parallax_sum += std::sqrt( dx * dx + dy * dy );
@@ -298,13 +309,17 @@ TEST( KeyframeSelectionTest, RotationCompensatedParallax )
   state.last_accepted_rotation = R_cur;
   state.last_kf_rotation       = Eigen::Matrix3d::Identity();
 
-  // Rotate the last-KF pixels by R_cur (in image plane, unit depth approx).
+  // Rotate the last-KF rays into the current camera frame:
+  // ray_cur = R_cur^T * R_kf * ray_kf (R_kf = Identity here), then
+  // project back to pixels with the same normalized-coordinate pipeline.
   std::vector<Eigen::Vector2d> rotated;
   for ( const auto& [ id, px ] : state.last_kf_pixels )
   {
-    const Eigen::Vector3d v =
-        R_cur * Eigen::Vector3d( px.x(), px.y(), 1.0 );
-    rotated.emplace_back( v.x() / v.z(), v.y() / v.z() );
+    const Eigen::Vector3d ray_kf(
+        ( px.x() - 320.0 ) / 400.0, ( px.y() - 240.0 ) / 400.0, 1.0 );
+    const Eigen::Vector3d ray_cur = R_cur.transpose() * ray_kf;
+    rotated.emplace_back( ray_cur.x() / ray_cur.z() * 400.0 + 320.0,
+                          ray_cur.y() / ray_cur.z() * 400.0 + 240.0 );
   }
 
   FrameTracks t;
