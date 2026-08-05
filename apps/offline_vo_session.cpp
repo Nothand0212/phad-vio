@@ -47,6 +47,14 @@ namespace phad::apps
 
     // ── Slice ⑤ keyframe selection ──────────────────────────────────────
 
+    // Parallax threshold for keyframe selection (pixels). VINS uses 10 px
+    // (EuRoC); we use 15 px (VGGT-Motion) — denser keyframes help fast
+    // rotation where non-keyframe poses are weaker. Slice ⑤b lowered from
+    // 30 px after V1_01 showed sparse keyframes degrade accuracy.
+    constexpr double kKeyframeParallaxPx = 10.0;
+    // Minimum track count to run PnP (matches estimator.min_pnp_inliers).
+    constexpr std::size_t kKeyframeMinPnpTracks = 10U;
+
     struct KeyframeSelectorState
     {
       std::unordered_map<common::LandmarkId, Eigen::Vector2d>
@@ -77,7 +85,7 @@ namespace phad::apps
 
       // Rule 1b: too few tracks to run PnP -> force keyframe (VINS
       // last_track_num < 20 rule; here min_pnp_inliers = 10).
-      if ( tracks.observations.size() < 10U ) return true;
+      if ( tracks.observations.size() < kKeyframeMinPnpTracks ) return true;
 
       // Rule 2: time fallback (> 0.5 s).
       const std::int64_t dt_ns = current_ts.nanoseconds() -
@@ -141,7 +149,8 @@ namespace phad::apps
         ++parallax_count;
       }
       if ( parallax_count > 0 &&
-           ( parallax_sum / static_cast<double>( parallax_count ) ) > 30.0 )
+           ( parallax_sum / static_cast<double>( parallax_count ) ) >
+               kKeyframeParallaxPx )
         return true;
 
       return false;
