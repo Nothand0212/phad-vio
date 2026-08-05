@@ -61,6 +61,19 @@ namespace phad::estimator
       return T_a_b;
     }
 
+    // Normalize rotation of a raw Eigen isometry (PnP/guess results may
+    // drift slightly off SO(3)); Trajectory::create requires proper rotation.
+    [[nodiscard]] Eigen::Isometry3d toIsometry(
+        const Eigen::Isometry3d& transform )
+    {
+      Eigen::Quaterniond rotation( transform.linear() );
+      rotation.normalize();
+      Eigen::Isometry3d T_a_b = Eigen::Isometry3d::Identity();
+      T_a_b.linear()          = rotation.toRotationMatrix();
+      T_a_b.translation()     = transform.translation();
+      return T_a_b;
+    }
+
     [[nodiscard]] gtsam::StereoPoint2 toStereoPoint(
         const StereoObservation& observation )
     {
@@ -1231,13 +1244,14 @@ namespace phad::estimator
       // Still returns the PnP/guess pose so the caller can write est.tum.
       if ( !keyframe )
       {
+        const Eigen::Isometry3d normalized = toIsometry( candidate.T_W_B );
         m_impl->prev_accepted_T_W_B = m_impl->last_accepted_T_W_B;
-        m_impl->last_accepted_T_W_B = candidate.T_W_B;
+        m_impl->last_accepted_T_W_B = normalized;
         m_impl->initialized         = true;
         result.status               = UpdateStatus::kOk;
         result.estimate             = VioEstimate{
             .timestamp = measurement.timestamp,
-            .T_W_B     = candidate.T_W_B,
+            .T_W_B     = normalized,
         };
         result.diagnostics.window_size =
             static_cast<std::uint32_t>( m_impl->window.size() );
