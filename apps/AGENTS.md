@@ -72,6 +72,14 @@ Slice ④b / ④e（剔点后 reopt）**保持 18 列**：不追加 `outlier_reo
 `robustness.outlier_reopts`，以及 probe stdout `outlier_reopts=`；失败回退
 不计、也不进 `warnings`。
 
+M3.3 Slice ⑤ **有意**再扩到 **19 列**：在 `reproj_rms_after_cull_px` 后追加
+`is_keyframe`（`0/1` 整数）。非关键帧的优化相关列（`reproj_rms_before/after`、
+`num_cheirality`、`lm_iterations`、`outliers_culled` 等）填 0。
+`summary.json` 侧对应 `trajectory.total_keyframes` /
+`trajectory.total_track_only_frames`。关键帧选择逻辑在 session 层
+（`isKeyframe()` 组合标准：视差 > 30 px / track 率 < 60% / 时间 > 0.5s），
+不在 estimator。
+
 健康序列（如 MH_01）仍应 `segment_id` 全程为 0；断裂序列上段边界表现为
 该列跳变。`summary.json` 侧对应 `robustness.reanchors` /
 `robustness.pnp_successes` / `robustness.pnp_fallbacks` /

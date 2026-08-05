@@ -14,7 +14,7 @@ include 标 SYSTEM）。
 
 | 做 | 不做 |
 |---|---|
-| 固定窗口 pose / landmark / 窗口内观测 | 关键帧决策、feature track 生命周期 |
+| 固定窗口 pose / landmark / 窗口内观测 | 关键帧决策（由 apps/session 决定）、feature track 生命周期 |
 | `GenericStereoFactor` + LM、最老帧 Prior gauge | 边缘化、smart factor、IMU |
 | 重叠断裂时 re-anchor（`enable_reanchor`） | 分段 TUM / Atlas 式多轨迹 |
 | 共视 / cheirality / 重投影 / `segment_id` / PnP 诊断 | ATE（`phad::eval`） |
@@ -72,6 +72,33 @@ prior 与由该帧 backproject 得到的 landmark 初值自洽，优化不会移
 
 `min_seed_observations`（默认 10）首段初始化与 re-anchor **共用**，避免
 「1 个观测建窗口」或「输出等于 anchor 的假位姿」刷高 completion。
+
+## 关键帧参数（M3.3 Slice ⑤）
+
+`update()` 新增 `bool keyframe = true` 参数（默认 `true` 保持向后兼容）：
+
+```cpp
+VioUpdateResult update(const KeyframeMeasurement& measurement,
+                       bool keyframe = true);
+```
+
+| 路径 | keyframe=true | keyframe=false |
+|---|---|---|
+| 触发 | apps/session `isKeyframe()` 返回 true | session `isKeyframe()` 返回 false |
+| 校验 | 共享 | 共享 |
+| reanchor/首帧 | 可 | **不可**（非关键帧 `shared=0` → `kRejected`） |
+| PnP + 仲裁 | 正常 | 正常（复用同一 `tryPnpInit` + stereo RMS 仲裁） |
+| landmark backproject | 是 | **不** |
+| 窗口 push/pop | 是 | **不** |
+| buildGraph + LM | 是 | **不** |
+| cull + reopt | 是 | **不** |
+| 位姿输出 | `estimate` 字段有值 → 写 `est.tum` | `estimate` 为 `nullopt` → **不**写轨迹 |
+| last/prev_accepted | LM 后更新 | PnP 后更新（保持恒速预测链） |
+
+非关键帧 `shared < min_pnp_inliers` 时返回 `kRejected`（不更新 last/prev）。
+snapshot 回退备份仅在 `keyframe=true` 时执行。
+
+关键帧选择逻辑（`isKeyframe()`）在 apps/session 层，不在 estimator。
 
 ## `segment_id` 语义
 
@@ -174,20 +201,18 @@ phad_stereo_vo_probe <sequence-root> --tum <path> [--diag-csv <path>]
 timestamp_ns,status,num_obs,num_landmarks,num_shared,low_connectivity,
 window_size,prior_key,reproj_rms_before_px,reproj_rms_after_px,
 num_cheirality,lm_iterations,max_window_pose_shift_m,segment_id,
-pnp_success,pnp_inliers,outliers_culled,reproj_rms_after_cull_px
+pnp_success,pnp_inliers,outliers_culled,reproj_rms_after_cull_px,
+is_keyframe
 ```
 
-共 **18 列**（Slice ① 在 M2.3 的 13 列尾追加 `segment_id` → 14；Slice ③
+共 **19 列**（Slice ① 在 M2.3 的 13 列尾追加 `segment_id` → 14；Slice ③
 再追加 `pnp_success,pnp_inliers` → 16；Slice ④ 再追加
-`outliers_culled,reproj_rms_after_cull_px` → 18；有意的契约变更）。
-`pnp_success` 为 `0/1` 整数。`status` 为 `ok` / `rejected` / `failed`。
-stdout summary 含帧数、各状态计数、拒帧比例、`low_connectivity` 帧数、
-`pnp_successes` / `pnp_fallbacks`、`outliers_culled` /
-`outliers_culled_unique`、`outlier_reopts`、重投影 RMS 中位数与 p95；
-session 还会在 `warnings` 里按需汇总 `segments` / `reanchors` /
-`seed_rejected` 与 PnP summary（剔点 / reopt 累计只进 `FrameCounts` /
-`summary.json` robustness，不进 `warnings`；见 `apps/AGENTS.md`）。
-`diag.csv` **保持 18 列**（不追加 `outlier_reopt`）。
+`outliers_culled,reproj_rms_after_cull_px` → 18；Slice ⑤ 再追加
+`is_keyframe` → 19；有意的契约变更）。
+`pnp_success` 为 `0/1` 整数，`is_keyframe` 为 `0/1` 整数。`status` 为
+`ok` / `rejected` / `failed`。非关键帧的优化相关列
+（`reproj_rms_before/after`、`num_cheirality`、`lm_iterations`、`outliers_culled`
+等）填 0。stdout summary 增加 `total_keyframes` / `total_track_only_frames`。
 
 ## 相关入口
 
