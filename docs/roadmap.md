@@ -504,9 +504,19 @@ checkpoint 见
   [zombie-drop-age](research/m3.3-zombie-drop-age-probe-design.md)、
   [全序列 baseline](research/m3.3-full-suite-baseline-773ea011.md)）；勿默认再
   整批 drop / 跳 ⑤ / 关整个 skip / 关整个 block / 单独去 Huber / 观测级；⑤ 与
-  M4 耦合，**先对齐再开**。MH_02 已按归因完成 PnP stereo 一致性仲裁；下一片
-  需先结合 MH_03 回归与 V1_03/V2_02/V2_03 剩余 failure 债重新对齐，不用调
-  session/cull 阈值或任意放大 `stereo_sigma_px` 代替诊断。
+  M4 耦合，**先对齐再开**。MH_02 已按归因完成 PnP stereo 一致性仲裁；
+  **⑤ 关键帧策略设计已对齐**（组合标准：视差>30px / track率<60% / 时间>0.5s；非关键帧
+  track-only；关键帧=IMU预积分边界；window_size=10 只含关键帧；见
+  [设计](research/m3.3-keyframe-design.md)、
+  [开源对照](research/m3.3-keyframe-open-source-refs.md)、
+  [计划](../plans/2026-08-05_m3.3_slice5_keyframe_790dd106.plan.md)）；**MH_03 回归根因已诊断**
+  （i=1388 仲裁正确拒绝 358 px RMS proposal，但 CV guess 收敛到更差的
+  LM 局部极小值——帧级 RMS 比较的内在权衡，不修复；见
+  [诊断](research/m3.3-mh03-regression-diagnosis.md)）；下一片
+  需结合 V1_03/V2_02/V2_03 剩余 failure 债（已归因为前端跟踪极限 + LandmarkId 重用，
+  不修 estimator；见
+  [诊断](research/m3.3-remaining-failure-debt.md)），不用调 session/cull
+  阈值或任意放大 `stereo_sigma_px` 代替诊断。
 
 设计见
 [M3.3 VO 加固设计](research/m3.3-vo-hardening-design.md)、
