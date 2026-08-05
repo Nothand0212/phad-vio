@@ -7,4 +7,5 @@
 - 实施计划命名与格式见 `docs/plans/README.md`（`YYYY-MM-DD_<slug>_<plan_id>.plan.md` + YAML frontmatter）
 - `.cursor/plans/` 是工作副本，`docs/plans/` 是入库权威副本，用同一 `plan_id` 对照
 - 面向 agent 的持久规则优先写 `docs/agents/`（跨库）或各模块目录下的 `AGENTS.md`（模块作用域），并在根 `AGENTS.md` 链接
+- `docs/benchmark/` 是关键行为 checkpoint 的 benchmark 权威账本（规则、命名与必填字段见 `docs/benchmark/README.md`）；原始 raw 产物不进 Git
 - `docs/architecture.md` 与 `docs/roadmap.md` 是模块边界与里程碑顺序的权威来源

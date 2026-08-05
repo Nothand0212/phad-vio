@@ -308,19 +308,24 @@ record-only baseline 已建立 → **先对齐再开** ⑤）：
 - **④f 大剔跳过 dropTracks（已完成）**：`session.skip_drop_min_culled=4` 已编码
   （`c446ac5` / `default_a5e90dc7`）；MH_01 硬门 **PASS**（ATE **0.0987839**；
   `drops_skipped=0`）；MH_05 软门 **PASS**（ATE **3.057** vs ④e **4.565**；
-  `drops_skipped=1`）；纯 ④f 当时未扩全序列，当前默认叠加 zombie age 后已跑
-  11/11；设计见
+  `drops_skipped=1`）；纯 ④f 当时未扩全序列，2026-08-04 已补跑 clean 11/11
+  （checkpoint 见 [benchmark/m3.3/slice-4f](benchmark/m3.3/slice-4f_c446ac5_a5e90dc7.md)）；
+  设计见
   [Slice ④f](research/m3.3-slice4f-skip-drop-design.md)；
 - **④g skip-drop 后延后 drop zombie（证伪 / 编排已回退）**：曾编码并门控失败
-  （ATE **4.565**=④e；zombie 归零）；事后诊断 ④g≡④e bit-identical → 删除
-  `pending_drop`，默认恢复 ④f；`deferred_*` 合同保留；见
+  （ATE **4.565**=④e；zombie 归零）；事后诊断 ④g≡④e bit-identical（2026-08-04
+  补跑 clean 11/11，全序列 est.tum 均 ≡ ④e；checkpoint 见
+  [benchmark/m3.3/slice-4g](benchmark/m3.3/slice-4g_3ee5dea_a5e90dc7.md)）→
+  删除 `pending_drop`，默认恢复 ④f；`deferred_*` 合同保留；见
   [Slice ④g](research/m3.3-slice4g-zombie-drop-design.md)、
   [postmortem](research/m3.3-slice4g-postmortem.md)；
 - **④g 后候选 B：多帧 zombie 龄 drop（已产品化 / 当前默认）**：
   `session.zombie_drop_age=5`，相对 ④f 新增该唯一 config 键；默认 hash
   `773ea011`。MH_01 ATE **0.0987839** 硬门 PASS；MH_05 ATE
   **2.455726**（相对 ④f 改善 19.67%）软门 PASS。`4cf55ca` 已完成 EuRoC
-  11/11 正式 baseline；全序列只记录、不作硬门，见
+  11/11 正式 baseline（checkpoint 见
+  [benchmark/m3.3/zombie-age](benchmark/m3.3/zombie-age_4cf55ca_773ea011.md)）；
+  全序列只记录、不作硬门，见
   [全序列 baseline](research/m3.3-full-suite-baseline-773ea011.md)；
 - **⑤** 关键帧策略（视差、跟踪数、时间间隔）— MH_01 硬门已满足；会改
   `est.tum` 输出语义且与 M4 IMU 预积分边界耦合；MH_05 当前锚≈2.456 m，且
@@ -415,7 +420,8 @@ Slice ④e 出口（commit `0ced28b` / `default_3a21162e`；
   `outlier_reopts=0`；
 - MH_05 ATE **4.565065** == ④d（bit-identical metrics）→ **无软改善**；
   `outlier_reopts=1`（次数语义；无 `rounds>1` 帧 → 多轮预算未动用）；
-- **未跑**其余 EuRoC；
+- **未跑**其余 EuRoC（2026-08-04 已补跑 clean 11/11；checkpoint 见
+  [benchmark/m3.3/slice-4e](benchmark/m3.3/slice-4e_0ced28b_3a21162e.md)）；
 - 设计 / 计划 / 数字见
   [Slice ④e 设计](research/m3.3-slice4e-multiround-reopt-design.md)、
   [Slice ④e 计划](plans/2026-08-02_m3.3_slice4e_multiround_reopt_e0517b9a.plan.md)、
@@ -431,7 +437,9 @@ Slice ④f 出口（commit `c446ac5` / `default_a5e90dc7`；
   culled 3/3；
 - MH_05 ATE **3.056878** vs ④e **4.565065**（Δ≈−1.51）；优于 no_drop A/B
   **3.972**；`drops_skipped=1`；`seg/re/failed=1/0/0`；completion ≈0.998；
-- 纯 ④f 当时**未跑**其余 EuRoC；当前默认全序列数字见
+- 纯 ④f 当时**未跑**其余 EuRoC；2026-08-04 已补跑 clean 11/11（checkpoint 见
+  [benchmark/m3.3/slice-4f](benchmark/m3.3/slice-4f_c446ac5_a5e90dc7.md)）；
+  当前默认全序列数字见
   [`default_773ea011` baseline](research/m3.3-full-suite-baseline-773ea011.md)；
 - 设计 / 数字见
   [Slice ④f 设计](research/m3.3-slice4f-skip-drop-design.md)、
@@ -463,14 +471,17 @@ Slice ④g 出口（commit `3ee5dea` / `default_a5e90dc7`；
 - **MH_02 首次发散诊断与 PnP stereo 一致性仲裁已完成**：根因是“左目 inlier
   数即采用 PnP proposal → LM₁ 中间位姿授权不可逆 cheirality 删除 → 后续零度
   pose”。仲裁在同一 PnP inlier 集上比较 proposal/guess 的完整 stereo RMS，
-  通过后才授权 pose 与 mask；见
+  通过后才授权 pose 与 mask（clean 11/11 见
+  [benchmark/m3.3/pnp-stereo](benchmark/m3.3/pnp-stereo_afe3829_773ea011.md)）；见
   [诊断](research/m3.3-mh02-divergence-diagnosis.md)、
   [设计](research/m3.3-pnp-stereo-consistency-design.md)与
   [dirty 验证结果](research/m3.3-pnp-stereo-arbitration-results.md)。
 
-PnP stereo 一致性仲裁出口（实现已提交；验证产物为
+PnP stereo 一致性仲裁出口（实现已提交；提交前验证产物为
 `4e42517_dirty/default_773ea011`，**非正式 baseline**；对照
-`4cf55ca/default_773ea011`）：
+`4cf55ca/default_773ea011`；2026-08-04 已在 clean `afe3829` 上补跑正式 11/11，
+checkpoint 见
+[benchmark/m3.3/pnp-stereo](benchmark/m3.3/pnp-stereo_afe3829_773ea011.md)）：
 
 - estimator tests 58/58；MH_02 390 帧因果门 PASS；
 - MH_01 ATE **0.0987839 m**，`est.tum` 与正式基线逐字节一致，硬门 PASS；
