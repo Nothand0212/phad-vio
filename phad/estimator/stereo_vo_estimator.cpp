@@ -124,6 +124,7 @@ namespace phad::estimator
       common::Timestamp              timestamp{ 0 };
       Eigen::Isometry3d              T_W_B = Eigen::Isometry3d::Identity();
       std::vector<StereoObservation> observations;
+      bool                           is_keyframe = true;  // Slice ⑤c
     };
 
     [[nodiscard]] double stereoReprojRms(
@@ -460,6 +461,7 @@ namespace phad::estimator
       candidate.timestamp    = measurement.timestamp;
       candidate.observations = measurement.observations;
       candidate.T_W_B        = anchor_T_W_B;
+      candidate.is_keyframe  = true;  // seed/re-anchor frames are keyframes
 
       for ( const StereoObservation& observation : measurement.observations )
       {
@@ -1186,6 +1188,7 @@ namespace phad::estimator
       candidate.frame_index  = m_impl->next_frame_index;
       candidate.timestamp    = measurement.timestamp;
       candidate.observations = measurement.observations;
+      candidate.is_keyframe  = keyframe;  // Slice ⑤c
 
       const Eigen::Isometry3d guess_T_W_B = m_impl->poseInitialValue();
       candidate.T_W_B                     = guess_T_W_B;
@@ -1255,137 +1258,6 @@ namespace phad::estimator
         result.message = "non-finite pose initial value";
         return result;
       }
-      // Non-keyframe: update last/prev chain only; no window/graph/LM.
-      // Still returns the PnP/guess pose so the caller can write est.tum.
-      if ( !keyframe )
-      {
-        // Slice ⑤b: pose-only LM refinement over the PnP inlier set
-        // (ORB-SLAM3 PoseOptimization template, via cv::solvePnPRefineLM).
-        // Landmarks are fixed; only the new frame's pose is refined.
-        if ( result.diagnostics.pnp_success &&
-             candidate.observations.size() >= 4U )
-        {
-          std::vector<cv::Point3f> object_points;
-          std::vector<cv::Point2f> image_points;
-          object_points.reserve( candidate.observations.size() );
-          image_points.reserve( candidate.observations.size() );
-          for ( const StereoObservation& observation :
-                candidate.observations )
-          {
-            auto it = m_impl->landmarks_W.find( observation.id );
-            if ( it == m_impl->landmarks_W.end() )
-            {
-              continue;
-            }
-            object_points.emplace_back(
-                static_cast<float>( it->second.x() ),
-                static_cast<float>( it->second.y() ),
-                static_cast<float>( it->second.z() ) );
-            image_points.emplace_back(
-                static_cast<float>( observation.left_pixel.x() ),
-                static_cast<float>( observation.left_pixel.y() ) );
-          }
-          if ( object_points.size() >= 4U )
-          {
-            const double      fx = m_impl->calibration.fxPixels();
-            const double      fy = m_impl->calibration.fyPixels();
-            const double      cx = m_impl->calibration.cxPixels();
-            const double      cy = m_impl->calibration.cyPixels();
-            cv::Mat           camera_matrix =
-                ( cv::Mat_<double>( 3, 3 ) << fx, 0.0, cx, 0.0, fy, cy,
-                  0.0, 0.0, 1.0 );
-            cv::Mat           dist_coeffs = cv::Mat::zeros( 4, 1, CV_64F );
-            // solvePnPRefineLM works on world-to-camera rvec/tvec
-            // (T_left_W). Convert candidate T_W_B -> T_left_W first.
-            const Eigen::Isometry3d T_W_left =
-                candidate.T_W_B * toIsometry( m_impl->body_P_sensor );
-            const Eigen::Isometry3d T_left_W = T_W_left.inverse();
-            cv::Mat                 rvec;
-            cv::Mat                 tvec;
-            cv::Mat rot_mat( 3, 3, CV_64F );
-            for ( int row = 0; row < 3; ++row )
-            {
-              for ( int col = 0; col < 3; ++col )
-              {
-                rot_mat.at<double>( row, col ) =
-                    T_left_W.linear()( row, col );
-              }
-            }
-            cv::Rodrigues( rot_mat, rvec );
-            tvec = ( cv::Mat_<double>( 3, 1 )
-                         << T_left_W.translation().x(),
-                     T_left_W.translation().y(),
-                     T_left_W.translation().z() );
-            try
-            {
-              cv::solvePnPRefineLM( object_points, image_points,
-                                    camera_matrix, dist_coeffs, rvec,
-                                    tvec );
-              // Refined world-to-camera -> T_W_B.
-              cv::Mat           refined_rot;
-              cv::Rodrigues( rvec, refined_rot );
-              Eigen::Matrix3d   R_left_W;
-              Eigen::Vector3d   t_left_W;
-              for ( int row = 0; row < 3; ++row )
-              {
-                t_left_W( row ) = tvec.at<double>( row, 0 );
-                for ( int col = 0; col < 3; ++col )
-                {
-                  R_left_W( row, col ) =
-                      refined_rot.at<double>( row, col );
-                }
-              }
-              Eigen::Quaterniond quat( R_left_W );
-              quat.normalize();
-              Eigen::Isometry3d T_left_W_refined =
-                  Eigen::Isometry3d::Identity();
-              T_left_W_refined.linear() = quat.toRotationMatrix();
-              T_left_W_refined.translation() = t_left_W;
-              const Eigen::Isometry3d T_W_B_refined =
-                  T_left_W_refined.inverse() *
-                  toIsometry( m_impl->body_P_sensor ).inverse();
-              if ( isFinite( T_W_B_refined ) )
-              {
-                candidate.T_W_B = toIsometry( T_W_B_refined );
-              }
-            }
-            catch ( const cv::Exception& )
-            {
-              // Refinement failed; keep the PnP pose.
-            }
-          }
-        }
-        const Eigen::Isometry3d normalized = toIsometry( candidate.T_W_B );
-        m_impl->prev_accepted_T_W_B = m_impl->last_accepted_T_W_B;
-        m_impl->last_accepted_T_W_B = normalized;
-        m_impl->initialized         = true;
-        result.status               = UpdateStatus::kOk;
-        result.estimate             = VioEstimate{
-            .timestamp = measurement.timestamp,
-            .T_W_B     = normalized,
-        };
-        result.diagnostics.window_size =
-            static_cast<std::uint32_t>( m_impl->window.size() );
-        if ( !m_impl->window.empty() )
-        {
-          result.diagnostics.prior_key =
-              m_impl->window.front().frame_index;
-        }
-        if ( m_impl->options.enable_pnp_init &&
-             static_cast<int>( num_shared ) >=
-                 m_impl->options.min_pnp_inliers &&
-             result.diagnostics.pnp_success )
-        {
-          // Pose already set from PnP block above; diagnostics already filled.
-        }
-        else
-        {
-          // PnP not attempted or failed: use poseInitialValue guess.
-          result.diagnostics.pnp_success = false;
-          result.diagnostics.pnp_inliers = 0;
-        }
-        return result;
-      }
       // CRITICAL: track_times must see the full measurement (including
       // shared outliers masked out of candidate.observations).
       for ( const StereoObservation& observation : measurement.observations )
@@ -1394,6 +1266,10 @@ namespace phad::estimator
             measurement.timestamp );
       }
       // New ids only: backproject from masked candidate.observations.
+      // Slice ⑤c: only keyframes seed new landmarks; non-keyframes enter
+      // the window/BA but do not grow the map.
+      if ( keyframe )
+      {
       for ( const StereoObservation& observation : candidate.observations )
       {
         if ( m_impl->landmarks_W.find( observation.id ) !=
@@ -1422,15 +1298,55 @@ namespace phad::estimator
         m_impl->landmarks_W[ observation.id ] = point_W;
         ++result.diagnostics.probe_new_lm_n;
       }
+      }  // keyframe-only landmark seeding
 
       m_impl->window.push_back( std::move( candidate ) );
       ++m_impl->next_frame_index;
     }
 
-    while ( static_cast<int>( m_impl->window.size() ) >
-            m_impl->options.window_size )
+    // Slice ⑤c: Basalt-style eviction — cap keyframes at 7, then total at
+    // window_size (10), preferring to evict the oldest non-keyframe so the
+    // 3 most recent frames stay as temporal states.
     {
-      m_impl->window.pop_front();
+      std::size_t keyframe_count = 0;
+      for ( const WindowFrame& frame : m_impl->window )
+      {
+        if ( frame.is_keyframe ) ++keyframe_count;
+      }
+      while ( keyframe_count > 7U )
+      {
+        for ( auto it = m_impl->window.begin(); it != m_impl->window.end();
+              ++it )
+        {
+          if ( it->is_keyframe )
+          {
+            m_impl->window.erase( it );
+            --keyframe_count;
+            break;
+          }
+        }
+      }
+      while ( static_cast<int>( m_impl->window.size() ) >
+              m_impl->options.window_size )
+      {
+        // Evict the oldest non-keyframe first; fall back to pop_front.
+        bool evicted = false;
+        for ( auto it = m_impl->window.begin(); it != m_impl->window.end();
+              ++it )
+        {
+          if ( !it->is_keyframe &&
+               it->frame_index != m_impl->window.back().frame_index )
+          {
+            m_impl->window.erase( it );
+            evicted = true;
+            break;
+          }
+        }
+        if ( !evicted )
+        {
+          m_impl->window.pop_front();
+        }
+      }
     }
     m_impl->pruneLandmarksNotInWindow();
 
