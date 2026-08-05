@@ -263,7 +263,7 @@ adapter 移到独立的同步器——那里同时是 M4 的 IMU 包络与未来
 [M3.2 双目配对同步器](plans/2026-07-31_m3.2_stereo_pair_synchronizer_5b7d1c93.plan.md)。
 Issue：[#22](https://github.com/Nothand0212/phad-vio/issues/22)。
 
-### M3.3 VO 加固（依赖 M3.2；Slice ①②③④d 已完成；④f + zombie age=5 为当前默认且全序列 baseline 已建立；PnP stereo 一致性仲裁已验证；④g 证伪并回退编排；④e 部分完成；④/④b 不够；④c 部分；⑤ 先对齐再开）
+### M3.3 VO 加固（依赖 M3.2；Slice ①②③④d 已完成；④f + zombie age=5 为当前默认且全序列 baseline 已建立；PnP stereo 一致性仲裁已验证；④g 证伪并回退编排；④e 部分完成；④/④b 不够；④c 部分；⑤ 已实现但全序列恶化 → ⑤b 诊断并修复中）
 
 M3.2 全序列基线暴露的主导失败不是精度，而是一个**吸收态**：估计器一旦因
 `num_shared == 0` 拒帧，事务回滚会冻结窗口与 landmark 表，而前端跟踪断裂后
@@ -327,9 +327,12 @@ record-only baseline 已建立 → **先对齐再开** ⑤）：
   [benchmark/m3.3/zombie-age](benchmark/m3.3/zombie-age_4cf55ca_773ea011.md)）；
   全序列只记录、不作硬门，见
   [全序列 baseline](research/m3.3-full-suite-baseline-773ea011.md)；
-- **⑤** 关键帧策略（视差、跟踪数、时间间隔）— MH_01 硬门已满足；会改
-  `est.tum` 输出语义且与 M4 IMU 预积分边界耦合；MH_05 当前锚≈2.456 m，且
-  全序列已暴露其它回归风险 → ⑤ **先对齐再开**（勿在现有债未决时直接开工）。
+- **⑤** 关键帧策略（视差、跟踪数、时间间隔）— 已实现（`7f08c01` 起）；
+  MH_01/MH_05 门控通过但**全序列 5 改善 / 6 恶化**（V2_02 +5400% 灾难）；
+  根因与非 KF 位姿质量、CV 链污染、关键帧选择对旋转不敏感相关；
+  est.tum 改为逐帧（含非 KF PnP 位姿）+ kf.tum 关键帧双轨输出；
+  与 M4 IMU 预积分边界耦合。→ **⑤b 诊断 + 修复中**（pose-only 精修 +
+  旋转补偿视差 + 门控）。
 
 Slice ① 出口（commit `0b0cd34` / `default_030a0197`，对照 `4780660`）：
 
@@ -509,7 +512,17 @@ checkpoint 见
   track-only；关键帧=IMU预积分边界；window_size=10 只含关键帧；见
   [设计](research/m3.3-keyframe-design.md)、
   [开源对照](research/m3.3-keyframe-open-source-refs.md)、
-  [计划](../plans/2026-08-05_m3.3_slice5_keyframe_790dd106.plan.md)）；**MH_03 回归根因已诊断**
+  [计划](../plans/2026-08-05_m3.3_slice5_keyframe_790dd106.plan.md)）；
+  **Slice ⑤ 实施后全序列恶化已诊断**（5 改善 / 6 恶化，V2_02 +5400% 灾难；
+  根因：非 KF PnP 位姿质量差 + CV 链污染 + 关键帧选择对旋转不敏感；见
+  [诊断](research/m3.3-slice5-full-suite-results.md)、
+  [调研](research/m3.3-slice5-keyframe-research-refs.md)）；
+  **Slice ⑤b 方案已对齐**（非 KF pose-only LM 精修 [ORB-SLAM3 模板] +
+  shared<min_pnp_inliers 拒绝门控 + 旋转补偿视差 + 低 track 强制关键帧 +
+  snapshot 条件更新；见
+  [设计](research/m3.3-slice5b-pose-refine-design.md)、
+  [计划](../plans/2026-08-05_m3.3_slice5b_pose_refine_b42c4a2b.plan.md)）；
+  **MH_03 回归根因已诊断**
   （i=1388 仲裁正确拒绝 358 px RMS proposal，但 CV guess 收敛到更差的
   LM 局部极小值——帧级 RMS 比较的内在权衡，不修复；见
   [诊断](research/m3.3-mh03-regression-diagnosis.md)）；下一片
