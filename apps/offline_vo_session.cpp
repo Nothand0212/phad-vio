@@ -47,19 +47,13 @@ namespace phad::apps
 
     // ── Slice ⑤ keyframe selection ──────────────────────────────────────
 
+    // Parallax threshold for keyframe selection (pixels). VINS uses 10 px
+    // (EuRoC); we use 15 px (VGGT-Motion) — denser keyframes help fast
+    // rotation where non-keyframe poses are weaker. Slice ⑤b lowered from
+    // 30 px after V1_01 showed sparse keyframes degrade accuracy.
+    constexpr double kKeyframeParallaxPx = 30.0;
     // Minimum track count to run PnP (matches estimator.min_pnp_inliers).
     constexpr std::size_t kKeyframeMinPnpTracks = 10U;
-    // Slice ⑤d: adaptive threshold bounds (DKB-SLAM T = T_max − F·ΔT).
-    constexpr double kKeyframeParallaxMinPx = 10.0;
-    constexpr double kKeyframeParallaxMaxPx = 30.0;
-    // Slice ⑤d: motion history window (DKB-SLAM N=10).
-    constexpr std::size_t kMotionWindowSize = 10;
-    // Slice ⑤d: accumulated rotation force-keyframe cap (RD-VIO Θ_max).
-    constexpr double kRotationAccumForceDeg = 45.0;
-    // Slice ⑤d: hysteresis — T lowering must be confirmed for this many
-    // consecutive frames before it takes effect (filters MH_03 critical
-    // band 27-30px flicker; V1_01 sustained rotation passes).
-    constexpr std::size_t kHysteresisConfirmFrames = 7;
 
     struct KeyframeSelectorState
     {
@@ -74,104 +68,7 @@ namespace phad::apps
           Eigen::Matrix3d::Identity();
       // Rotation of the last keyframe pose (snapshot at kf accept).
       Eigen::Matrix3d last_kf_rotation = Eigen::Matrix3d::Identity();
-      // Slice ⑤d: motion history for the adaptive threshold (DKB-SLAM).
-      std::deque<double> rotation_deg_history;    // per-frame Δθ (deg)
-      std::deque<double> translation_m_history;   // per-frame Δt (m)
-      // Accumulated rotation since the last keyframe (force-kf rule).
-      double accumulated_rotation_deg = 0.0;
-      // Last accepted pose (for inter-frame Δθ/Δt computation).
-      Eigen::Isometry3d last_accepted_pose =
-          Eigen::Isometry3d::Identity();
-      // Whether a previous accepted pose exists (motion history gate).
-      bool has_prev_pose = false;
-      // Slice ⑤d hysteresis: consecutive frames where the raw (unconfirmed)
-      // adaptive T is below the current effective T.
-      std::size_t low_t_consecutive = 0;
-      // Effective (hysteresis-filtered) threshold.
-      double effective_threshold = kKeyframeParallaxMaxPx;
     };
-
-    [[nodiscard]] double rotationAngleDeg( const Eigen::Matrix3d& R_prev,
-                                           const Eigen::Matrix3d& R_cur )
-    {
-      const Eigen::Matrix3d delta = R_cur * R_prev.transpose();
-      const double          cos_theta =
-          std::clamp( ( delta.trace() - 1.0 ) / 2.0, -1.0, 1.0 );
-      return std::acos( cos_theta ) * 180.0 / M_PI;
-    }
-
-    // Slice ⑤d: DKB-SLAM adaptive parallax threshold from the motion
-    // history. Straight-line motion -> F~0 -> T near 30 px (sparse KFs);
-    // fast rotation -> F~1 -> T near 10 px (dense KFs).
-    // Hysteresis: lowering T requires kHysteresisConfirmFrames consecutive
-    // frames below the current effective T; raising T is immediate.
-    [[nodiscard]] double computeAdaptiveThreshold(
-        KeyframeSelectorState& state )
-    {
-      double raw_T = kKeyframeParallaxMaxPx;
-      if ( state.rotation_deg_history.size() >= kMotionWindowSize )
-      {
-        double sum_rot = 0.0;
-        double sum_tr  = 0.0;
-        for ( const double d : state.rotation_deg_history )
-        {
-          sum_rot += d;
-        }
-        for ( const double d : state.translation_m_history )
-        {
-          sum_tr += d;
-        }
-        const double dR_mean =
-            sum_rot / static_cast<double>( kMotionWindowSize );
-        const double dt_mean =
-            sum_tr / static_cast<double>( kMotionWindowSize );
-
-        constexpr double kEps = 1e-5;
-        // Normalized weights: Δθ (deg) and Δt (m) have incompatible units;
-        // divide each by its saturation point so a small translation is not
-        // numerically crushed by a small rotation (V2_02 slow corridor).
-        constexpr double kRotNormDeg = 5.0;
-        constexpr double kTransNormM = 0.1;
-        const double rot_norm  = dR_mean / kRotNormDeg;
-        const double trans_norm = dt_mean / kTransNormM;
-        const double w_rot =
-            rot_norm / ( rot_norm + trans_norm + kEps );
-        const double w_tr =
-            trans_norm / ( rot_norm + trans_norm + kEps );
-
-        const double M_rot = std::log1p( w_rot * dR_mean );
-        const double M_tr  = std::log1p( w_tr * dt_mean );
-
-        constexpr double kThetaMaxDeg = 5.0;
-        constexpr double kTransMaxM   = 10.0;
-        const double denom = std::log1p( w_rot * kThetaMaxDeg ) +
-                             std::log1p( w_tr * kTransMaxM );
-        const double F = denom > 0.0 ? ( M_rot + M_tr ) / denom : 0.0;
-
-        const double T = kKeyframeParallaxMaxPx -
-                         F * ( kKeyframeParallaxMaxPx -
-                               kKeyframeParallaxMinPx );
-        raw_T = std::clamp( T, kKeyframeParallaxMinPx,
-                            kKeyframeParallaxMaxPx );
-      }
-
-      // Hysteresis on lowering.
-      if ( raw_T < state.effective_threshold )
-      {
-        ++state.low_t_consecutive;
-        if ( state.low_t_consecutive >= kHysteresisConfirmFrames )
-        {
-          state.effective_threshold = raw_T;
-        }
-      }
-      else
-      {
-        // Raising is immediate (V1_01 sustained rotation must respond fast).
-        state.low_t_consecutive = 0;
-        state.effective_threshold = raw_T;
-      }
-      return state.effective_threshold;
-    }
 
     [[nodiscard]] bool isKeyframeImpl(
         const frontend::FrameTracks& tracks,
@@ -185,13 +82,6 @@ namespace phad::apps
 
       // Rule 1: first 2 frames always keyframes.
       if ( state.total_keyframes < 2 ) return true;
-
-      // Rule 0.5: accumulated rotation since last keyframe > 45° forces a
-      // keyframe even with small parallax (RD-VIO rotation cap).
-      if ( state.accumulated_rotation_deg > kRotationAccumForceDeg )
-      {
-        return true;
-      }
 
       // Rule 1b: too few tracks to run PnP -> force keyframe (VINS
       // last_track_num < 20 rule; here min_pnp_inliers = 10).
@@ -258,11 +148,9 @@ namespace phad::apps
         parallax_sum += std::sqrt( dx * dx + dy * dy );
         ++parallax_count;
       }
-      // Slice ⑤d: adaptive threshold (DKB-SLAM) replaces the fixed 30 px.
-      const double adaptive_T = computeAdaptiveThreshold( state );
       if ( parallax_count > 0 &&
            ( parallax_sum / static_cast<double>( parallax_count ) ) >
-               adaptive_T )
+               kKeyframeParallaxPx )
         return true;
 
       return false;
@@ -278,9 +166,6 @@ namespace phad::apps
         state.last_kf_pixels[ obs.id ] = obs.left_pixel;
       state.last_kf_timestamp = ts;
       state.last_kf_rotation  = state.last_accepted_rotation;
-      // Slice ⑤d: keyframe accepted — reset the accumulated-rotation
-      // force-keyframe accumulator.
-      state.accumulated_rotation_deg = 0.0;
       ++state.total_keyframes;
     }
 
@@ -576,39 +461,12 @@ namespace phad::apps
       {
         updateKeyframeSnapshot( tracks, tracks.timestamp );
       }
-      // Track last-accepted pose for rotation-compensated parallax and the
-      // Slice ⑤d motion history (adaptive threshold).
+      // Track last-accepted rotation for rotation-compensated parallax.
       if ( update.status == estimator::UpdateStatus::kOk &&
            update.estimate.has_value() )
       {
-        const Eigen::Isometry3d prev_pose = kf_state.last_accepted_pose;
         kf_state.last_accepted_rotation =
             update.estimate->T_W_B.linear();
-        kf_state.last_accepted_pose = update.estimate->T_W_B;
-        if ( kf_state.has_prev_pose )
-        {
-          const double dR_deg =
-              rotationAngleDeg( prev_pose.linear(),
-                                kf_state.last_accepted_rotation );
-          const double dt_m =
-              ( kf_state.last_accepted_pose.translation() -
-                prev_pose.translation() )
-                  .norm();
-          kf_state.rotation_deg_history.push_back( dR_deg );
-          kf_state.translation_m_history.push_back( dt_m );
-          while ( kf_state.rotation_deg_history.size() >
-                  kMotionWindowSize )
-          {
-            kf_state.rotation_deg_history.pop_front();
-          }
-          while ( kf_state.translation_m_history.size() >
-                  kMotionWindowSize )
-          {
-            kf_state.translation_m_history.pop_front();
-          }
-          kf_state.accumulated_rotation_deg += dR_deg;
-        }
-        kf_state.has_prev_pose = true;
       }
       const auto frame_end     = estimator_end;
 
