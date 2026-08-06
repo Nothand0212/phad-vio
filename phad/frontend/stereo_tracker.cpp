@@ -609,7 +609,11 @@ namespace phad::frontend
     // Slice ⑥: CLAHE equalization (ORB-SLAM3 practice). V1_03/V2_03 have
     // exposure inconsistencies that break LK brightness constancy and the
     // raw-SAD stereo match; one pre-pass fixes GFTT/LK/SAD at once.
-    cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE( 3.0, cv::Size( 8, 8 ) );
+    // Slice ⑥: CLAHE equalization (ORB-SLAM3 practice). V1_03/V2_03 have
+    // exposure inconsistencies that break LK brightness constancy and the
+    // raw-SAD stereo match. Milder params (clip 2.0, tile 16x16) to avoid
+    // hurting MH sequences with normal lighting.
+    cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE( 2.0, cv::Size( 16, 16 ) );
     cv::Mat            left, right;
     clahe->apply( left_raw, left );
     clahe->apply( right_raw, right );
