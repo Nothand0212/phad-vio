@@ -333,8 +333,10 @@ record-only baseline 已建立 → **先对齐再开** ⑤）：
   est.tum 改为逐帧（含非 KF PnP 位姿）+ kf.tum 关键帧双轨输出；
   与 M4 IMU 预积分边界耦合。→ **⑤b 已实施**（pose-only 精修 + 旋转补偿
   视差 + 门控，V2_02 灾难消除）→ **⑤c 已实施**（非关键帧进窗口 BA +
-  Basalt 7KF+3temporal，MH_05 改善至 0.306）→ **阈值冲突待解**（MH 系列
-  30px 最优，V1_01 10px 最优；动态阈值方案调研中）。
+  Basalt 7KF+3temporal，MH_05 改善至 0.306）→ **⑤d 动态阈值已尝试并回退**（量纲不匹配 + MH_03 临界带相位敏感——KF 位置
+  对 T 微变交错，滞回无效；见 [调研](research/m3.3-slice5-dynamic-threshold-refs.md)）→
+  **回退 ⑤c(30px) 收尾**（`9015ae7`：门控全过，MH_03/MH_05 最优；V1_01 0.514
+  记账为已知债，留给 M4 IMU）。
 
 Slice ① 出口（commit `0b0cd34` / `default_030a0197`，对照 `4780660`）：
 
