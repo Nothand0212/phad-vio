@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <deque>
 #include <unordered_map>
 
 #include "phad/common/landmark_id.hpp"
@@ -27,7 +28,36 @@ struct KeyframeSelectorState
   // Rotation compensation (Slice ⑤b).
   Eigen::Matrix3d last_accepted_rotation = Eigen::Matrix3d::Identity();
   Eigen::Matrix3d last_kf_rotation       = Eigen::Matrix3d::Identity();
+  // Slice ⑤d motion history (adaptive threshold).
+  std::deque<double> rotation_deg_history;
+  std::deque<double> translation_m_history;
+  double accumulated_rotation_deg = 0.0;
 };
+
+// Test copy of the DKB-SLAM adaptive threshold (Slice ⑤d).
+[[nodiscard]] double adaptiveThresholdTest(
+    const KeyframeSelectorState& state )
+{
+  constexpr std::size_t kWindow = 10;
+  if ( state.rotation_deg_history.size() < kWindow )
+  {
+    return 30.0;
+  }
+  double sum_rot = 0.0, sum_tr = 0.0;
+  for ( const double d : state.rotation_deg_history ) sum_rot += d;
+  for ( const double d : state.translation_m_history ) sum_tr += d;
+  const double dR_mean = sum_rot / kWindow;
+  const double dt_mean = sum_tr / kWindow;
+  const double eps     = 1e-5;
+  const double w_rot   = dR_mean / ( dR_mean + dt_mean + eps );
+  const double w_tr    = dt_mean / ( dR_mean + dt_mean + eps );
+  const double M_rot   = std::log1p( w_rot * dR_mean );
+  const double M_tr    = std::log1p( w_tr * dt_mean );
+  const double denom = std::log1p( w_rot * 5.0 ) + std::log1p( w_tr * 10.0 );
+  const double F = denom > 0.0 ? ( M_rot + M_tr ) / denom : 0.0;
+  const double T = 30.0 - F * ( 30.0 - 10.0 );
+  return std::clamp( T, 10.0, 30.0 );
+}
 
 [[nodiscard]] bool isKeyframeTest(
     const FrameTracks&    tracks,
@@ -38,6 +68,9 @@ struct KeyframeSelectorState
   if ( tracks.observations.empty() ) return false;
 
   if ( state.total_keyframes < 2 ) return true;
+
+  // Rule 0.5: accumulated rotation forces keyframe (Slice ⑤d).
+  if ( state.accumulated_rotation_deg > 45.0 ) return true;
 
   // Rule 1b: too few tracks to run PnP -> force keyframe.
   if ( tracks.observations.size() < 10U ) return true;
@@ -56,9 +89,7 @@ struct KeyframeSelectorState
       std::max( state.last_kf_pixels.size(), std::size_t{ 1 } );
   if ( survive_ratio < 0.6 ) return true;
 
-  // Rule 4: rotation-compensated parallax (Slice ⑤b).
-  // Normalized-coordinate projection: pixel -> normalized ray, rotate,
-  // back to pixel.
+  // Rule 4: rotation-compensated parallax (Slice ⑤b) vs adaptive T (⑤d).
   const Eigen::Matrix3d R_kf_to_cur =
       state.last_accepted_rotation.transpose() * state.last_kf_rotation;
   const double fx = 400.0;  // makeCalibration()
@@ -87,7 +118,8 @@ struct KeyframeSelectorState
     ++parallax_count;
   }
   if ( parallax_count > 0 &&
-       ( parallax_sum / static_cast<double>( parallax_count ) ) > 30.0 )
+       ( parallax_sum / static_cast<double>( parallax_count ) ) >
+           adaptiveThresholdTest( state ) )
     return true;
 
   return false;
@@ -103,6 +135,7 @@ void updateKeyframeSnapshotTest(
     state.last_kf_pixels[ obs.id ] = obs.left_pixel;
   state.last_kf_timestamp = ts;
   state.last_kf_rotation  = state.last_accepted_rotation;
+  state.accumulated_rotation_deg = 0.0;  // Slice ⑤d
   ++state.total_keyframes;
 }
 
@@ -336,4 +369,102 @@ TEST( KeyframeSelectionTest, RotationCompensatedParallax )
   // 10 tracks (>= min_pnp_inliers), all survive, dt small. Raw parallax
   // (before compensation) would be large; compensated should be ~0.
   EXPECT_FALSE( isKeyframeTest( t, Timestamp{ 300'000'000 }, state ) );
+}
+
+TEST( KeyframeSelectionTest, AdaptiveThresholdStaticMotionIs30 )
+{
+  // Slice ⑤d: no motion history -> T = 30 (sparse default).
+  KeyframeSelectorState state;
+  EXPECT_EQ( adaptiveThresholdTest( state ), 30.0 );
+
+  // All-zero motion -> w_t dominates, F small -> T near 30.
+  for ( int i = 0; i < 10; ++i )
+  {
+    state.rotation_deg_history.push_back( 0.1 );
+    state.translation_m_history.push_back( 1.0 );
+  }
+  const double T = adaptiveThresholdTest( state );
+  EXPECT_NEAR( T, 30.0, 5.0 );  // translation-dominated -> sparse
+}
+
+TEST( KeyframeSelectionTest, AdaptiveThresholdFastRotationLowersT )
+{
+  // Slice ⑤d: pure fast rotation lowers T below the static 30 (DKB-SLAM
+  // progressive behavior; T approaches 10 as Δθ̄ → Θ_max=45°).
+  KeyframeSelectorState state;
+  for ( int i = 0; i < 10; ++i )
+  {
+    state.rotation_deg_history.push_back( 4.0 );   // 4 deg/frame
+    state.translation_m_history.push_back( 0.001 ); // ~no translation
+  }
+  const double T_rot = adaptiveThresholdTest( state );
+
+  // Static-motion baseline.
+  KeyframeSelectorState state_static;
+  for ( int i = 0; i < 10; ++i )
+  {
+    state_static.rotation_deg_history.push_back( 0.1 );
+    state_static.translation_m_history.push_back( 1.0 );
+  }
+  const double T_static = adaptiveThresholdTest( state_static );
+
+  EXPECT_LT( T_rot, T_static );  // rotation lowers the threshold
+  EXPECT_GE( T_rot, 10.0 );
+  EXPECT_LE( T_rot, 30.0 );
+
+  // Extreme rotation (approaching Θ_max) pulls T toward the 10 bound.
+  KeyframeSelectorState state_extreme;
+  for ( int i = 0; i < 10; ++i )
+  {
+    state_extreme.rotation_deg_history.push_back( 40.0 );
+    state_extreme.translation_m_history.push_back( 0.001 );
+  }
+  const double T_extreme = adaptiveThresholdTest( state_extreme );
+  EXPECT_LT( T_extreme, 13.0 );
+}
+
+TEST( KeyframeSelectionTest, AdaptiveThresholdBounds )
+{
+  // Slice ⑤d: T always within [10, 30].
+  KeyframeSelectorState state;
+  for ( int i = 0; i < 10; ++i )
+  {
+    state.rotation_deg_history.push_back( 0.0 );
+    state.translation_m_history.push_back( 0.0 );
+  }
+  const double T_zero = adaptiveThresholdTest( state );
+  EXPECT_GE( T_zero, 10.0 );
+  EXPECT_LE( T_zero, 30.0 );
+
+  for ( int i = 0; i < 10; ++i )
+  {
+    state.rotation_deg_history.push_back( 10.0 );
+    state.translation_m_history.push_back( 0.0 );
+  }
+  const double T_rot = adaptiveThresholdTest( state );
+  EXPECT_GE( T_rot, 10.0 );
+  EXPECT_LE( T_rot, 30.0 );
+}
+
+TEST( KeyframeSelectionTest, AccumulatedRotationForcesKeyframe )
+{
+  // Slice ⑤d: accumulated rotation > 45° forces keyframe even with
+  // zero parallax.
+  KeyframeSelectorState state;
+  auto kf0 = makeTracks( 100'000'000, 10, { 100.0, 100.0 }, 0 );
+  isKeyframeTest( kf0, Timestamp{ 100'000'000 }, state );
+  updateKeyframeSnapshotTest( kf0, Timestamp{ 100'000'000 }, state );
+
+  auto kf1 = makeTracks( 200'000'000, 10, { 100.0, 100.0 }, 0 );
+  isKeyframeTest( kf1, Timestamp{ 200'000'000 }, state );
+  updateKeyframeSnapshotTest( kf1, Timestamp{ 200'000'000 }, state );
+
+  // Zero motion otherwise, but accumulated rotation > 45°.
+  state.accumulated_rotation_deg = 46.0;
+  auto t = makeTracks( 300'000'000, 10, { 100.0, 100.0 }, 0 );
+  EXPECT_TRUE( isKeyframeTest( t, Timestamp{ 300'000'000 }, state ) );
+
+  // Reset on keyframe accept.
+  updateKeyframeSnapshotTest( t, Timestamp{ 300'000'000 }, state );
+  EXPECT_EQ( state.accumulated_rotation_deg, 0.0 );
 }
