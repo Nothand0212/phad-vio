@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <opencv2/calib3d.hpp>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/video/tracking.hpp>
@@ -214,6 +215,9 @@ namespace phad::frontend
     std::vector<LiveTrack>             tracks;
     LandmarkId                         next_id  = 1;
     bool                               has_prev = false;
+    // Slice ⑥: median inter-frame flow of the last accepted pair, used as
+    // the LK initial guess on the next frame (constant-velocity model).
+    std::optional<cv::Point2f> median_flow;
 
     explicit Impl( camera::RectifiedStereoCalibration calib,
                    StereoTrackerOptions               opts )
@@ -600,9 +604,16 @@ namespace phad::frontend
           "rectified stereo frame size does not match tracker calibration" );
     }
 
-    const cv::Mat left  = toGrayMat( rectified.left );
-    const cv::Mat right = toGrayMat( rectified.right );
-    FrameStats    stats{};
+    const cv::Mat left_raw  = toGrayMat( rectified.left );
+    const cv::Mat right_raw = toGrayMat( rectified.right );
+    // Slice ⑥: CLAHE equalization (ORB-SLAM3 practice). V1_03/V2_03 have
+    // exposure inconsistencies that break LK brightness constancy and the
+    // raw-SAD stereo match; one pre-pass fixes GFTT/LK/SAD at once.
+    cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE( 3.0, cv::Size( 8, 8 ) );
+    cv::Mat            left, right;
+    clahe->apply( left_raw, left );
+    clahe->apply( right_raw, right );
+    FrameStats stats{};
 
     if ( !m_impl->has_prev || m_impl->tracks.empty() )
     {
@@ -624,9 +635,26 @@ namespace phad::frontend
       std::vector<float>        forward_error;
       const cv::Size            win( m_impl->options.lk_window_px,
                                      m_impl->options.lk_window_px );
+      // Slice ⑥: seed LK with the constant-velocity median-flow guess so
+      // fast yaw (V-series) does not push displacement out of the LK
+      // convergence region.
+      const bool use_initial_flow =
+          m_impl->median_flow.has_value() && !prev_pts.empty();
+      curr_pts.resize( prev_pts.size() );
+      if ( use_initial_flow )
+      {
+        for ( std::size_t i = 0; i < prev_pts.size(); ++i )
+        {
+          curr_pts[ i ] = prev_pts[ i ] + *m_impl->median_flow;
+        }
+      }
       cv::calcOpticalFlowPyrLK(
           m_impl->prev_left, left, prev_pts, curr_pts, forward_status,
-          forward_error, win, m_impl->options.lk_pyramid_levels );
+          forward_error, win, m_impl->options.lk_pyramid_levels,
+          cv::TermCriteria( cv::TermCriteria::COUNT + cv::TermCriteria::EPS,
+                            30, 0.01 ),
+          use_initial_flow ? cv::OPTFLOW_USE_INITIAL_FLOW : 0,
+          1e-4 );
 
       std::vector<cv::Point2f>  back_pts;
       std::vector<std::uint8_t> backward_status;
@@ -637,6 +665,10 @@ namespace phad::frontend
 
       std::vector<LiveTrack> survivors;
       survivors.reserve( m_impl->tracks.size() );
+      std::vector<std::size_t> survivor_indices;  // original track indices
+      survivor_indices.reserve( m_impl->tracks.size() );
+      std::vector<cv::Point2f> flows;  // Slice ⑥: survivor displacements
+      flows.reserve( m_impl->tracks.size() );
       const double fb_limit_sq =
           m_impl->options.forward_backward_px *
           m_impl->options.forward_backward_px;
@@ -661,6 +693,73 @@ namespace phad::frontend
         track.pixel     = curr_pts[ index ];
         ++track.length;
         survivors.push_back( track );
+        survivor_indices.push_back( index );
+        flows.push_back( cv::Point2f(
+            curr_pts[ index ].x - prev_pts[ index ].x,
+            curr_pts[ index ].y - prev_pts[ index ].y ) );
+      }
+      // Slice ⑥: F-matrix RANSAC geometric check after FB (VINS/Kimera
+      // practice). FB rejects "inconsistent" tracks but not "consistently
+      // wrong" ones under motion blur; geometry culls them before they
+      // pollute PnP/BA.
+      if ( survivor_indices.size() >= 8U )
+      {
+        std::vector<cv::Point2f> prev_f, curr_f;
+        prev_f.reserve( survivor_indices.size() );
+        curr_f.reserve( survivor_indices.size() );
+        for ( const std::size_t orig : survivor_indices )
+        {
+          prev_f.push_back( prev_pts[ orig ] );
+          curr_f.push_back( curr_pts[ orig ] );
+        }
+        std::vector<uchar> geo_status;
+        cv::findFundamentalMat( prev_f, curr_f, cv::FM_RANSAC, 3.0, 0.99,
+                                geo_status );
+        if ( !geo_status.empty() &&
+             geo_status.size() == survivor_indices.size() )
+        {
+          std::vector<LiveTrack>       geo_survivors;
+          std::vector<std::size_t>     geo_indices;
+          std::vector<cv::Point2f>     geo_flows;
+          geo_survivors.reserve( survivors.size() );
+          geo_indices.reserve( survivor_indices.size() );
+          geo_flows.reserve( flows.size() );
+          for ( std::size_t i = 0; i < survivor_indices.size(); ++i )
+          {
+            if ( geo_status[ i ] == 0 )
+            {
+              ++stats.forward_backward_rejected;
+              continue;
+            }
+            geo_survivors.push_back( survivors[ i ] );
+            geo_indices.push_back( survivor_indices[ i ] );
+            geo_flows.push_back( flows[ i ] );
+          }
+          survivors         = std::move( geo_survivors );
+          survivor_indices  = std::move( geo_indices );
+          flows             = std::move( geo_flows );
+        }
+      }
+
+      // Slice ⑥: update the median-flow guess from survivor displacements.
+      if ( flows.size() >= 5U )
+      {
+        std::vector<float> fx, fy;
+        fx.reserve( flows.size() );
+        fy.reserve( flows.size() );
+        for ( const cv::Point2f& f : flows )
+        {
+          fx.push_back( f.x );
+          fy.push_back( f.y );
+        }
+        std::sort( fx.begin(), fx.end() );
+        std::sort( fy.begin(), fy.end() );
+        m_impl->median_flow = cv::Point2f(
+            fx[ fx.size() / 2U ], fy[ fy.size() / 2U ] );
+      }
+      else
+      {
+        m_impl->median_flow.reset();
       }
       m_impl->tracks = std::move( survivors );
       stats.tracked  = static_cast<std::uint32_t>( m_impl->tracks.size() );
