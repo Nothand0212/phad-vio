@@ -49,8 +49,11 @@ struct KeyframeSelectorState
   const double dR_mean = sum_rot / kWindow;
   const double dt_mean = sum_tr / kWindow;
   const double eps     = 1e-5;
-  const double w_rot   = dR_mean / ( dR_mean + dt_mean + eps );
-  const double w_tr    = dt_mean / ( dR_mean + dt_mean + eps );
+  // Normalized weights (Slice ⑤d fix): Δθ deg vs Δt m unit mismatch.
+  const double rot_norm  = dR_mean / 5.0;
+  const double trans_norm = dt_mean / 0.1;
+  const double w_rot   = rot_norm / ( rot_norm + trans_norm + eps );
+  const double w_tr    = trans_norm / ( rot_norm + trans_norm + eps );
   const double M_rot   = std::log1p( w_rot * dR_mean );
   const double M_tr    = std::log1p( w_tr * dt_mean );
   const double denom = std::log1p( w_rot * 5.0 ) + std::log1p( w_tr * 10.0 );

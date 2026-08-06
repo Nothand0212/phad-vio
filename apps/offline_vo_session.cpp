@@ -114,9 +114,18 @@ namespace phad::apps
       const double dR_mean = sum_rot / static_cast<double>( kMotionWindowSize );
       const double dt_mean = sum_tr / static_cast<double>( kMotionWindowSize );
 
-      constexpr double kEps   = 1e-5;
-      const double     w_rot  = dR_mean / ( dR_mean + dt_mean + kEps );
-      const double     w_tr   = dt_mean / ( dR_mean + dt_mean + kEps );
+      constexpr double kEps = 1e-5;
+      // Normalized weights: Δθ (deg) and Δt (m) have incompatible units;
+      // divide each by its saturation point so a small translation is not
+      // numerically crushed by a small rotation (V2_02 slow corridor).
+      constexpr double kRotNormDeg = 5.0;
+      constexpr double kTransNormM = 0.1;
+      const double rot_norm  = dR_mean / kRotNormDeg;
+      const double trans_norm = dt_mean / kTransNormM;
+      const double w_rot =
+          rot_norm / ( rot_norm + trans_norm + kEps );
+      const double w_tr =
+          trans_norm / ( rot_norm + trans_norm + kEps );
 
       const double M_rot = std::log1p( w_rot * dR_mean );
       const double M_tr  = std::log1p( w_tr * dt_mean );
@@ -133,6 +142,12 @@ namespace phad::apps
       const double T_clamped =
           std::clamp( T, kKeyframeParallaxMinPx,
                       kKeyframeParallaxMaxPx );
+      static std::size_t debug_count = 0;
+      if ( ( ++debug_count % 25U ) == 0U )
+      {
+        std::cerr << "[kf5d] T=" << T_clamped << " dR=" << dR_mean
+                  << " dt=" << dt_mean << "\n";
+      }
       return T_clamped;
     }
 
