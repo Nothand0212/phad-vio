@@ -145,6 +145,8 @@ namespace
   EstimatorOptions defaultReoptOptions()
   {
     EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
+    options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.window_size           = 8;
     options.min_shared_landmarks  = 3;
     options.min_seed_observations = 10;
@@ -186,6 +188,7 @@ namespace
 TEST( StereoVoOutlierReoptTest, DefaultsMaxReoptsThreeAndRoundsZero )
 {
   EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   EXPECT_EQ( options.max_outlier_reopts, 3 );
   UpdateDiagnostics d;
   EXPECT_EQ( d.outlier_reopt_rounds, 0U );
@@ -194,6 +197,7 @@ TEST( StereoVoOutlierReoptTest, DefaultsMaxReoptsThreeAndRoundsZero )
 TEST( StereoVoOutlierReoptTest, RejectsNegativeMaxOutlierReopts )
 {
   EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.max_outlier_reopts = -1;
   EXPECT_THROW( StereoVoEstimator( makeCalibration(), options ),
                 std::invalid_argument );

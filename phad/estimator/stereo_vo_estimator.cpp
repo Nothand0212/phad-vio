@@ -1268,6 +1268,9 @@ namespace phad::estimator
       // New ids only: backproject from masked candidate.observations.
       // Slice ⑤c: only keyframes seed new landmarks; non-keyframes enter
       // the window/BA but do not grow the map.
+      // Slice ⑥b: require the track to have >= 3 observations before
+      // seeding — a single-frame disparity can be a SAD mismatch under
+      // fast motion, producing a bad-depth anchor that drags the BA.
       if ( keyframe )
       {
       for ( const StereoObservation& observation : candidate.observations )
@@ -1283,6 +1286,20 @@ namespace phad::estimator
         {
           ++result.diagnostics.probe_rejected_block_n;
           continue;
+        }
+        const auto track_it = m_impl->track_times.find( observation.id );
+        const std::size_t seed_thresh = static_cast<std::size_t>(
+            m_impl->options.min_track_observations_for_seed );
+        if ( track_it == m_impl->track_times.end() ||
+             track_it->second.size() < seed_thresh )
+        {
+          std::cerr << "[6b] skip seed id=" << observation.id
+                    << " times="
+                    << ( track_it == m_impl->track_times.end()
+                             ? -1
+                             : static_cast<int>( track_it->second.size() ) )
+                    << " thresh=" << seed_thresh << "\n";
+          continue;  // ⑥b: not yet stable enough to seed
         }
         const Eigen::Vector3d point_W =
             m_impl->backprojectWorld( candidate.T_W_B, observation );

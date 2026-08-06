@@ -417,6 +417,9 @@ namespace
               estimator.use_constant_velocity_init );
     snap.set( "estimator.min_seed_observations",
               static_cast<std::int64_t>( estimator.min_seed_observations ) );
+    snap.set( "estimator.min_track_observations_for_seed",
+              static_cast<std::int64_t>(
+                  estimator.min_track_observations_for_seed ) );
     snap.set( "estimator.enable_reanchor", estimator.enable_reanchor );
     snap.set( "estimator.enable_pnp_init", estimator.enable_pnp_init );
     snap.set( "estimator.pnp_reproj_px", estimator.pnp_reproj_px );

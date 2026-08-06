@@ -135,6 +135,8 @@ namespace
   EstimatorOptions defaultCullOptions()
   {
     EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
+    options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.window_size           = 8;
     options.min_shared_landmarks  = 3;
     options.min_seed_observations = 10;
@@ -156,6 +158,7 @@ namespace
 TEST( StereoVoOutlierReoptTest, DefaultsEnableReoptAndDiagFlagsOff )
 {
   EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   EXPECT_TRUE( options.enable_outlier_reopt );
   UpdateDiagnostics d;
   EXPECT_FALSE( d.outlier_reopt );
@@ -165,6 +168,7 @@ TEST( StereoVoOutlierReoptTest, DefaultsEnableReoptAndDiagFlagsOff )
 TEST( StereoVoOutlierCullTest, RejectsNonPositiveOutlierAvgReproj )
 {
   EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.outlier_avg_reproj_px = 0.0;
   EXPECT_THROW( ( StereoVoEstimator{ makeCalibration(), options } ),
                 std::invalid_argument );
@@ -405,6 +409,7 @@ TEST( StereoVoOutlierCullTest, CheiralityClearsWindowObservations )
   // Cull off: after_cull RMS must equal after RMS even when cheirality erases.
   const auto       calibration = makeCalibration();
   EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.window_size               = 8;
   options.min_shared_landmarks      = 2;
   options.min_landmark_observations = 2;

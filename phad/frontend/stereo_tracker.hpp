@@ -54,9 +54,9 @@ namespace phad::frontend
     int    lk_pyramid_levels      = 4;
     double forward_backward_px    = 0.5;
     double max_epipolar_px        = 1.5;
-    double min_disparity_px       = 0.5;
+    double min_disparity_px       = 2.0;
     double min_depth_m            = 0.3;
-    double max_depth_m            = 40.0;
+    double max_depth_m            = 25.0;
     int    stereo_sad_half_win_px = 7;
     int    stereo_row_tol_px      = 0;
     double stereo_bidir_px        = 0.5;

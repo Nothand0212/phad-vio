@@ -162,6 +162,8 @@ namespace
   EstimatorOptions defaultPnpOptions()
   {
     EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
+    options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.window_size          = 5;
     options.min_shared_landmarks = 3;
     options.min_pnp_inliers      = 10;
@@ -174,6 +176,7 @@ namespace
 TEST( StereoVoPnpTest, RejectsNonPositivePnpReproj )
 {
   EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.pnp_reproj_px = 0.0;
   EXPECT_THROW( ( StereoVoEstimator{ makeCalibration(), options } ),
                 std::invalid_argument );
@@ -182,6 +185,7 @@ TEST( StereoVoPnpTest, RejectsNonPositivePnpReproj )
 TEST( StereoVoPnpTest, RejectsInvalidPnpConfidence )
 {
   EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.pnp_confidence = 1.0;  // 要求 ∈ (0, 1)
   EXPECT_THROW( ( StereoVoEstimator{ makeCalibration(), options } ),
                 std::invalid_argument );
@@ -190,6 +194,7 @@ TEST( StereoVoPnpTest, RejectsInvalidPnpConfidence )
 TEST( StereoVoPnpTest, RejectsMinPnpInliersBelowFour )
 {
   EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.min_pnp_inliers = 3;
   EXPECT_THROW( ( StereoVoEstimator{ makeCalibration(), options } ),
                 std::invalid_argument );

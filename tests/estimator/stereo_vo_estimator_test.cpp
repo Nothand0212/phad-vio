@@ -113,6 +113,7 @@ TEST( StereoVoEstimator, RecoversTranslationAndLowersReprojRms )
 {
   const Scene      scene = makeTranslatingScene( 8 );
   EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.window_size                = 5;
   options.min_shared_landmarks       = 3;
   options.use_constant_velocity_init = true;
@@ -148,6 +149,7 @@ TEST( StereoVoEstimator, PriorStaysOnOldestAndCapsWindow )
 {
   const Scene      scene = makeTranslatingScene( 6 );
   EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.window_size          = 3;
   options.min_shared_landmarks = 3;
 
@@ -186,6 +188,7 @@ TEST( StereoVoEstimator, SingleObservationLandmarksStayOutOfGraph )
 {
   const Scene      scene = makeTranslatingScene( 2 );
   EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.window_size               = 10;
   options.min_landmark_observations = 2;
   options.min_shared_landmarks      = 1;
@@ -206,6 +209,8 @@ TEST( StereoVoEstimator, HuberReducesOutlierPosePull )
 
   auto run_with_outlier = [ & ]( double huber_k_px ) {
     EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
+    options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.window_size          = 5;
     options.min_shared_landmarks = 3;
     options.huber_k_px           = huber_k_px;

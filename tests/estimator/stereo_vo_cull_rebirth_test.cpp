@@ -133,6 +133,8 @@ namespace
   EstimatorOptions defaultCullOptions()
   {
     EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
+    options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.window_size           = 8;
     options.min_shared_landmarks  = 3;
     options.min_seed_observations = 10;
@@ -158,6 +160,7 @@ namespace
 TEST( StereoVoCullRebirthTest, DefaultsBlockRebirthAndEmptyList )
 {
   EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   EXPECT_TRUE( options.block_culled_rebirth );
   UpdateDiagnostics d;
   EXPECT_TRUE( d.culled_landmark_ids.empty() );
@@ -235,6 +238,7 @@ TEST( StereoVoCullRebirthTest, CheiralityIdsAppearInCulledLandmarkIds )
   // the obs stays in-window for dropCheiralityLandmarks).
   const auto       calibration = makeCalibration();
   EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.window_size                = 8;
   options.min_shared_landmarks       = 2;
   options.min_landmark_observations  = 2;
