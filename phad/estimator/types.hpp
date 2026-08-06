@@ -37,7 +37,7 @@ namespace phad::estimator
     // Slice ⑥b: a new landmark must be observed this many frames before
     // seeding (single-frame disparity can be a SAD mismatch). 1 restores
     // the pre-⑥b behavior (tests use 1).
-    int    min_track_observations_for_seed = 3;
+    int    min_track_observations_for_seed = 2;
     int    min_shared_landmarks       = 10;
     double stereo_sigma_px            = 1.0;
     double huber_k_px                 = 3.0;  // <= 0 disables Robust wrapper
