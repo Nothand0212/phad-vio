@@ -166,7 +166,12 @@ namespace phad::frontend
           best_u   = u_r;
         }
       }
-      if ( !found || best_u == u_lo || best_u == u_hi )
+      // Only reject a peak clipped at the upper (far-depth) bound: the true
+      // match may lie beyond the search window. A peak at u_hi (parallax ==
+      // min_disparity) is a legitimate minimal-disparity match and must be
+      // kept — rejecting it discarded all far points exactly at the gate
+      // (Slice ⑥ audit).
+      if ( !found || best_u == u_lo )
       {
         return peak;
       }
