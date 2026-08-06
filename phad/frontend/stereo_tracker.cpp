@@ -622,6 +622,9 @@ namespace phad::frontend
     if ( !m_impl->has_prev || m_impl->tracks.empty() )
     {
       m_impl->tracks.clear();
+      // All tracks lost: the old median-flow guess is stale and must not
+      // seed the newly detected tracks (Slice ⑥ audit).
+      m_impl->median_flow.reset();
       m_impl->detectNewTracks( left, stats.detected, stats.evicted );
       stats.tracked = 0U;
     }
