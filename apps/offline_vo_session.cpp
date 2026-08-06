@@ -56,6 +56,10 @@ namespace phad::apps
     constexpr std::size_t kMotionWindowSize = 10;
     // Slice ⑤d: accumulated rotation force-keyframe cap (RD-VIO Θ_max).
     constexpr double kRotationAccumForceDeg = 45.0;
+    // Slice ⑤d: hysteresis — T lowering must be confirmed for this many
+    // consecutive frames before it takes effect (filters MH_03 critical
+    // band 27-30px flicker; V1_01 sustained rotation passes).
+    constexpr std::size_t kHysteresisConfirmFrames = 7;
 
     struct KeyframeSelectorState
     {
@@ -80,6 +84,11 @@ namespace phad::apps
           Eigen::Isometry3d::Identity();
       // Whether a previous accepted pose exists (motion history gate).
       bool has_prev_pose = false;
+      // Slice ⑤d hysteresis: consecutive frames where the raw (unconfirmed)
+      // adaptive T is below the current effective T.
+      std::size_t low_t_consecutive = 0;
+      // Effective (hysteresis-filtered) threshold.
+      double effective_threshold = kKeyframeParallaxMaxPx;
     };
 
     [[nodiscard]] double rotationAngleDeg( const Eigen::Matrix3d& R_prev,
@@ -94,61 +103,74 @@ namespace phad::apps
     // Slice ⑤d: DKB-SLAM adaptive parallax threshold from the motion
     // history. Straight-line motion -> F~0 -> T near 30 px (sparse KFs);
     // fast rotation -> F~1 -> T near 10 px (dense KFs).
+    // Hysteresis: lowering T requires kHysteresisConfirmFrames consecutive
+    // frames below the current effective T; raising T is immediate.
     [[nodiscard]] double computeAdaptiveThreshold(
-        const KeyframeSelectorState& state )
+        KeyframeSelectorState& state )
     {
-      if ( state.rotation_deg_history.size() < kMotionWindowSize )
+      double raw_T = kKeyframeParallaxMaxPx;
+      if ( state.rotation_deg_history.size() >= kMotionWindowSize )
       {
-        return kKeyframeParallaxMaxPx;  // not enough history; default sparse
+        double sum_rot = 0.0;
+        double sum_tr  = 0.0;
+        for ( const double d : state.rotation_deg_history )
+        {
+          sum_rot += d;
+        }
+        for ( const double d : state.translation_m_history )
+        {
+          sum_tr += d;
+        }
+        const double dR_mean =
+            sum_rot / static_cast<double>( kMotionWindowSize );
+        const double dt_mean =
+            sum_tr / static_cast<double>( kMotionWindowSize );
+
+        constexpr double kEps = 1e-5;
+        // Normalized weights: Δθ (deg) and Δt (m) have incompatible units;
+        // divide each by its saturation point so a small translation is not
+        // numerically crushed by a small rotation (V2_02 slow corridor).
+        constexpr double kRotNormDeg = 5.0;
+        constexpr double kTransNormM = 0.1;
+        const double rot_norm  = dR_mean / kRotNormDeg;
+        const double trans_norm = dt_mean / kTransNormM;
+        const double w_rot =
+            rot_norm / ( rot_norm + trans_norm + kEps );
+        const double w_tr =
+            trans_norm / ( rot_norm + trans_norm + kEps );
+
+        const double M_rot = std::log1p( w_rot * dR_mean );
+        const double M_tr  = std::log1p( w_tr * dt_mean );
+
+        constexpr double kThetaMaxDeg = 5.0;
+        constexpr double kTransMaxM   = 10.0;
+        const double denom = std::log1p( w_rot * kThetaMaxDeg ) +
+                             std::log1p( w_tr * kTransMaxM );
+        const double F = denom > 0.0 ? ( M_rot + M_tr ) / denom : 0.0;
+
+        const double T = kKeyframeParallaxMaxPx -
+                         F * ( kKeyframeParallaxMaxPx -
+                               kKeyframeParallaxMinPx );
+        raw_T = std::clamp( T, kKeyframeParallaxMinPx,
+                            kKeyframeParallaxMaxPx );
       }
-      double sum_rot = 0.0;
-      double sum_tr  = 0.0;
-      for ( const double d : state.rotation_deg_history )
+
+      // Hysteresis on lowering.
+      if ( raw_T < state.effective_threshold )
       {
-        sum_rot += d;
+        ++state.low_t_consecutive;
+        if ( state.low_t_consecutive >= kHysteresisConfirmFrames )
+        {
+          state.effective_threshold = raw_T;
+        }
       }
-      for ( const double d : state.translation_m_history )
+      else
       {
-        sum_tr += d;
+        // Raising is immediate (V1_01 sustained rotation must respond fast).
+        state.low_t_consecutive = 0;
+        state.effective_threshold = raw_T;
       }
-      const double dR_mean = sum_rot / static_cast<double>( kMotionWindowSize );
-      const double dt_mean = sum_tr / static_cast<double>( kMotionWindowSize );
-
-      constexpr double kEps = 1e-5;
-      // Normalized weights: Δθ (deg) and Δt (m) have incompatible units;
-      // divide each by its saturation point so a small translation is not
-      // numerically crushed by a small rotation (V2_02 slow corridor).
-      constexpr double kRotNormDeg = 5.0;
-      constexpr double kTransNormM = 0.1;
-      const double rot_norm  = dR_mean / kRotNormDeg;
-      const double trans_norm = dt_mean / kTransNormM;
-      const double w_rot =
-          rot_norm / ( rot_norm + trans_norm + kEps );
-      const double w_tr =
-          trans_norm / ( rot_norm + trans_norm + kEps );
-
-      const double M_rot = std::log1p( w_rot * dR_mean );
-      const double M_tr  = std::log1p( w_tr * dt_mean );
-
-      constexpr double kThetaMaxDeg = 5.0;
-      constexpr double kTransMaxM   = 10.0;
-      const double denom = std::log1p( w_rot * kThetaMaxDeg ) +
-                           std::log1p( w_tr * kTransMaxM );
-      const double F = denom > 0.0 ? ( M_rot + M_tr ) / denom : 0.0;
-
-      const double T = kKeyframeParallaxMaxPx -
-                       F * ( kKeyframeParallaxMaxPx -
-                             kKeyframeParallaxMinPx );
-      const double T_clamped =
-          std::clamp( T, kKeyframeParallaxMinPx,
-                      kKeyframeParallaxMaxPx );
-      static std::size_t debug_count = 0;
-      if ( ( ++debug_count % 25U ) == 0U )
-      {
-        std::cerr << "[kf5d] T=" << T_clamped << " dR=" << dR_mean
-                  << " dt=" << dt_mean << "\n";
-      }
-      return T_clamped;
+      return state.effective_threshold;
     }
 
     [[nodiscard]] bool isKeyframeImpl(

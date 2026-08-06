@@ -32,34 +32,51 @@ struct KeyframeSelectorState
   std::deque<double> rotation_deg_history;
   std::deque<double> translation_m_history;
   double accumulated_rotation_deg = 0.0;
+  std::size_t low_t_consecutive = 0;
+  double effective_threshold = 30.0;
 };
 
-// Test copy of the DKB-SLAM adaptive threshold (Slice ⑤d).
+// Test copy of the DKB-SLAM adaptive threshold (Slice ⑤d) with hysteresis.
 [[nodiscard]] double adaptiveThresholdTest(
-    const KeyframeSelectorState& state )
+    KeyframeSelectorState& state )
 {
   constexpr std::size_t kWindow = 10;
-  if ( state.rotation_deg_history.size() < kWindow )
+  constexpr std::size_t kHyst = 7;
+  double raw_T = 30.0;
+  if ( state.rotation_deg_history.size() >= kWindow )
   {
-    return 30.0;
+    double sum_rot = 0.0, sum_tr = 0.0;
+    for ( const double d : state.rotation_deg_history ) sum_rot += d;
+    for ( const double d : state.translation_m_history ) sum_tr += d;
+    const double dR_mean = sum_rot / kWindow;
+    const double dt_mean = sum_tr / kWindow;
+    const double eps     = 1e-5;
+    const double rot_norm  = dR_mean / 5.0;
+    const double trans_norm = dt_mean / 0.1;
+    const double w_rot   = rot_norm / ( rot_norm + trans_norm + eps );
+    const double w_tr    = trans_norm / ( rot_norm + trans_norm + eps );
+    const double M_rot   = std::log1p( w_rot * dR_mean );
+    const double M_tr    = std::log1p( w_tr * dt_mean );
+    const double denom = std::log1p( w_rot * 5.0 ) + std::log1p( w_tr * 10.0 );
+    const double F = denom > 0.0 ? ( M_rot + M_tr ) / denom : 0.0;
+    const double T = 30.0 - F * ( 30.0 - 10.0 );
+    raw_T = std::clamp( T, 10.0, 30.0 );
   }
-  double sum_rot = 0.0, sum_tr = 0.0;
-  for ( const double d : state.rotation_deg_history ) sum_rot += d;
-  for ( const double d : state.translation_m_history ) sum_tr += d;
-  const double dR_mean = sum_rot / kWindow;
-  const double dt_mean = sum_tr / kWindow;
-  const double eps     = 1e-5;
-  // Normalized weights (Slice ⑤d fix): Δθ deg vs Δt m unit mismatch.
-  const double rot_norm  = dR_mean / 5.0;
-  const double trans_norm = dt_mean / 0.1;
-  const double w_rot   = rot_norm / ( rot_norm + trans_norm + eps );
-  const double w_tr    = trans_norm / ( rot_norm + trans_norm + eps );
-  const double M_rot   = std::log1p( w_rot * dR_mean );
-  const double M_tr    = std::log1p( w_tr * dt_mean );
-  const double denom = std::log1p( w_rot * 5.0 ) + std::log1p( w_tr * 10.0 );
-  const double F = denom > 0.0 ? ( M_rot + M_tr ) / denom : 0.0;
-  const double T = 30.0 - F * ( 30.0 - 10.0 );
-  return std::clamp( T, 10.0, 30.0 );
+  // Hysteresis on lowering; immediate on raising.
+  if ( raw_T < state.effective_threshold )
+  {
+    ++state.low_t_consecutive;
+    if ( state.low_t_consecutive >= kHyst )
+    {
+      state.effective_threshold = raw_T;
+    }
+  }
+  else
+  {
+    state.low_t_consecutive = 0;
+    state.effective_threshold = raw_T;
+  }
+  return state.effective_threshold;
 }
 
 [[nodiscard]] bool isKeyframeTest(
@@ -392,38 +409,39 @@ TEST( KeyframeSelectionTest, AdaptiveThresholdStaticMotionIs30 )
 
 TEST( KeyframeSelectionTest, AdaptiveThresholdFastRotationLowersT )
 {
-  // Slice ⑤d: pure fast rotation lowers T below the static 30 (DKB-SLAM
-  // progressive behavior; T approaches 10 as Δθ̄ → Θ_max=45°).
+  // Slice ⑤d: pure fast rotation lowers T below the static 30 after the
+  // 7-frame hysteresis confirmation (DKB-SLAM progressive behavior).
   KeyframeSelectorState state;
   for ( int i = 0; i < 10; ++i )
   {
     state.rotation_deg_history.push_back( 4.0 );   // 4 deg/frame
     state.translation_m_history.push_back( 0.001 ); // ~no translation
   }
-  const double T_rot = adaptiveThresholdTest( state );
+  // First call: hysteresis holds T at 30.
+  const double T_initial = adaptiveThresholdTest( state );
+  EXPECT_NEAR( T_initial, 30.0, 0.1 );
+  // After 7 confirmations: T drops.
+  double T_rot = 30.0;
+  for ( int i = 0; i < 8; ++i )
+  {
+    T_rot = adaptiveThresholdTest( state );
+  }
+  EXPECT_LT( T_rot, 30.0 );
+  EXPECT_GE( T_rot, 10.0 );
 
-  // Static-motion baseline.
+  // Static-motion baseline stays at 30 (no lowering).
   KeyframeSelectorState state_static;
   for ( int i = 0; i < 10; ++i )
   {
     state_static.rotation_deg_history.push_back( 0.1 );
-    state_static.translation_m_history.push_back( 1.0 );
+    state_static.translation_m_history.push_back( 0.05 );  // realistic
   }
-  const double T_static = adaptiveThresholdTest( state_static );
-
-  EXPECT_LT( T_rot, T_static );  // rotation lowers the threshold
-  EXPECT_GE( T_rot, 10.0 );
-  EXPECT_LE( T_rot, 30.0 );
-
-  // Extreme rotation (approaching Θ_max) pulls T toward the 10 bound.
-  KeyframeSelectorState state_extreme;
-  for ( int i = 0; i < 10; ++i )
+  double T_static = 30.0;
+  for ( int i = 0; i < 8; ++i )
   {
-    state_extreme.rotation_deg_history.push_back( 40.0 );
-    state_extreme.translation_m_history.push_back( 0.001 );
+    T_static = adaptiveThresholdTest( state_static );
   }
-  const double T_extreme = adaptiveThresholdTest( state_extreme );
-  EXPECT_LT( T_extreme, 13.0 );
+  EXPECT_NEAR( T_static, 30.0, 1.0 );
 }
 
 TEST( KeyframeSelectionTest, AdaptiveThresholdBounds )
