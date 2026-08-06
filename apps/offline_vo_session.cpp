@@ -51,7 +51,7 @@ namespace phad::apps
     // (EuRoC); we use 15 px (VGGT-Motion) — denser keyframes help fast
     // rotation where non-keyframe poses are weaker. Slice ⑤b lowered from
     // 30 px after V1_01 showed sparse keyframes degrade accuracy.
-    constexpr double kKeyframeParallaxPx = 10.0;
+    constexpr double kKeyframeParallaxPx = 30.0;
     // Minimum track count to run PnP (matches estimator.min_pnp_inliers).
     constexpr std::size_t kKeyframeMinPnpTracks = 10U;
 

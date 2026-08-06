@@ -87,7 +87,7 @@ struct KeyframeSelectorState
     ++parallax_count;
   }
   if ( parallax_count > 0 &&
-       ( parallax_sum / static_cast<double>( parallax_count ) ) > 10.0 )
+       ( parallax_sum / static_cast<double>( parallax_count ) ) > 30.0 )
     return true;
 
   return false;
@@ -174,7 +174,7 @@ TEST( KeyframeSelectionTest, HighParallaxIsKeyframe )
   updateKeyframeSnapshotTest( kf1, Timestamp{ 200'000'000 }, state );
   // total_keyframes = 2.
 
-  // Same IDs but moved 50 px right → avg parallax 50 > 10.
+  // Same IDs but moved 50 px right → avg parallax 50 > 30.
   auto t = makeTracks( 300'000'000, 10, { 200.0, 100.0 }, 0 );
   EXPECT_TRUE( isKeyframeTest( t, Timestamp{ 300'000'000 }, state ) );
 }
