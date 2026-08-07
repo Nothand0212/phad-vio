@@ -89,6 +89,13 @@ namespace
     std::optional<int>           zombie_drop_age;
     std::optional<double>        hanging_gate_m;
     std::optional<double>        far_refresh_px;
+
+    // Attribution A/B overrides (Slice ⑥ frontend mechanisms).
+    std::optional<double> tracker_quality_level;
+    std::optional<int>    tracker_lk_pyramid_levels;
+    bool                  no_clahe       = false;
+    bool                  no_median_flow = false;
+    bool                  no_fransac     = false;
   };
 
   [[nodiscard]] bool parseDouble( std::string_view text, double& value )
@@ -151,6 +158,21 @@ namespace
       if ( flag == "--evict-skip-culled" )
       {
         arguments.evict_skip_culled = true;
+        continue;
+      }
+      if ( flag == "--no-clahe" )
+      {
+        arguments.no_clahe = true;
+        continue;
+      }
+      if ( flag == "--no-median-flow" )
+      {
+        arguments.no_median_flow = true;
+        continue;
+      }
+      if ( flag == "--no-fransac" )
+      {
+        arguments.no_fransac = true;
         continue;
       }
       if ( index + 1 >= argc )
@@ -315,6 +337,27 @@ namespace
         }
         arguments.far_refresh_px = parsed;
       }
+      else if ( flag == "--tracker-quality-level" )
+      {
+        double parsed = 0.0;
+        if ( !parseDouble( value, parsed ) || !( parsed > 0.0 ) )
+        {
+          std::cerr << "--tracker-quality-level expects a positive number\n";
+          return false;
+        }
+        arguments.tracker_quality_level = parsed;
+      }
+      else if ( flag == "--tracker-lk-pyramid-levels" )
+      {
+        std::uint64_t parsed = 0;
+        if ( !parseUint64( value, parsed ) || parsed < 1U )
+        {
+          std::cerr
+              << "--tracker-lk-pyramid-levels expects a positive integer\n";
+          return false;
+        }
+        arguments.tracker_lk_pyramid_levels = static_cast<int>( parsed );
+      }
       else
       {
         std::cerr << "unknown flag " << flag << '\n';
@@ -426,6 +469,9 @@ namespace
     snap.set( "tracker.stereo_bidir_px", tracker.stereo_bidir_px );
     snap.set( "tracker.stereo_uniq_ratio", tracker.stereo_uniq_ratio );
     snap.set( "tracker.stereo_check_bidir", tracker.stereo_check_bidir );
+    // enable_clahe / enable_median_flow / enable_fransac are CLI-only
+    // attribution switches: not in config_hash (probe convention), use
+    // --config-label to distinguish artifact directories.
 
     snap.set( "estimator.window_size",
               static_cast<std::int64_t>( estimator.window_size ) );
@@ -597,6 +643,19 @@ namespace
     {
       session_options.skip_drop_min_culled = *arguments.skip_drop_min_culled;
     }
+    // Attribution A/B: Slice ⑥ frontend mechanism overrides.
+    if ( arguments.tracker_quality_level.has_value() )
+    {
+      session_options.tracker.quality_level = *arguments.tracker_quality_level;
+    }
+    if ( arguments.tracker_lk_pyramid_levels.has_value() )
+    {
+      session_options.tracker.lk_pyramid_levels =
+          *arguments.tracker_lk_pyramid_levels;
+    }
+    session_options.tracker.enable_clahe       = !arguments.no_clahe;
+    session_options.tracker.enable_median_flow = !arguments.no_median_flow;
+    session_options.tracker.enable_fransac     = !arguments.no_fransac;
     if ( arguments.outlier_avg_reproj_px.has_value() )
     {
       session_options.estimator.outlier_avg_reproj_px =

@@ -618,10 +618,22 @@ namespace phad::frontend
     // exposure inconsistencies that break LK brightness constancy and the
     // raw-SAD stereo match. Milder params (clip 2.0, tile 16x16) to avoid
     // hurting MH sequences with normal lighting.
-    cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE( 2.0, cv::Size( 16, 16 ) );
-    cv::Mat            left, right;
-    clahe->apply( left_raw, left );
-    clahe->apply( right_raw, right );
+    cv::Mat left, right;
+    if ( m_impl->options.enable_clahe )
+    {
+      // Slice ⑥: CLAHE equalization (ORB-SLAM3 practice). V1_03/V2_03 have
+      // exposure inconsistencies that break LK brightness constancy and the
+      // raw-SAD stereo match. Milder params (clip 2.0, tile 16x16) to avoid
+      // hurting MH sequences with normal lighting.
+      cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE( 2.0, cv::Size( 16, 16 ) );
+      clahe->apply( left_raw, left );
+      clahe->apply( right_raw, right );
+    }
+    else
+    {
+      left  = left_raw;
+      right = right_raw;
+    }
     FrameStats stats{};
 
     if ( !m_impl->has_prev || m_impl->tracks.empty() )
@@ -651,6 +663,7 @@ namespace phad::frontend
       // fast yaw (V-series) does not push displacement out of the LK
       // convergence region.
       const bool use_initial_flow =
+          m_impl->options.enable_median_flow &&
           m_impl->median_flow.has_value() && !prev_pts.empty();
       curr_pts.resize( prev_pts.size() );
       if ( use_initial_flow )
@@ -714,7 +727,8 @@ namespace phad::frontend
       // practice). FB rejects "inconsistent" tracks but not "consistently
       // wrong" ones under motion blur; geometry culls them before they
       // pollute PnP/BA.
-      if ( survivor_indices.size() >= 8U )
+      if ( m_impl->options.enable_fransac &&
+           survivor_indices.size() >= 8U )
       {
         std::vector<cv::Point2f> prev_f, curr_f;
         prev_f.reserve( survivor_indices.size() );

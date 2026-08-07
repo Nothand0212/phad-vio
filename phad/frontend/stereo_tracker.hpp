@@ -62,6 +62,13 @@ namespace phad::frontend
     double stereo_bidir_px        = 0.5;
     double stereo_uniq_ratio      = 0.5;
     bool   stereo_check_bidir     = true;
+
+    // Attribution A/B switches (Slice ⑥ mechanisms, default on). Disabling
+    // any of these recreates a pre-slice-⑥ frontend behaviour for
+    // per-mechanism contribution measurement. Not a production knob.
+    bool enable_clahe       = true;
+    bool enable_median_flow = true;
+    bool enable_fransac     = true;
   };
 
   /**
