@@ -263,7 +263,7 @@ adapter 移到独立的同步器——那里同时是 M4 的 IMU 包络与未来
 [M3.2 双目配对同步器](plans/2026-07-31_m3.2_stereo_pair_synchronizer_5b7d1c93.plan.md)。
 Issue：[#22](https://github.com/Nothand0212/phad-vio/issues/22)。
 
-### M3.3 VO 加固（依赖 M3.2；Slice ①②③④d 已完成；④f + zombie age=5 为当前默认且全序列 baseline 已建立；PnP stereo 一致性仲裁已验证；④g 证伪并回退编排；④e 部分完成；④/④b 不够；④c 部分；⑤ 已实现 → ⑤b 已实施（V2_02 灾难消除）→ ⑤c 已实施（非 KF 进窗口 BA）→ 阈值冲突待解）
+### M3.3 VO 加固（依赖 M3.2；Slice ①②③④d 已完成；④f + zombie age=5 为当前默认且全序列 baseline 已建立；PnP stereo 一致性仲裁已验证；④g 证伪并回退编排；④e 部分完成；④/④b 不够；④c 部分；⑤ 已实现 → ⑤b 已实施（V2_02 灾难消除）→ ⑤c 已实施（非 KF 进窗口 BA）→ 阈值冲突待解；pre-M4 小片两轮全否决（Census + round 2 七变体，默认回退 slice-7）→ M4 前零剩余 VO 候选）
 
 M3.2 全序列基线暴露的主导失败不是精度，而是一个**吸收态**：估计器一旦因
 `num_shared == 0` 拒帧，事务回滚会冻结窗口与 landmark 表，而前端跟踪断裂后
@@ -554,6 +554,19 @@ checkpoint 见
   [诊断](research/m3.3-remaining-failure-debt.md)），不用调 session/cull
   阈值或任意放大 `stereo_sigma_px` 代替诊断。
 
+**pre-M4 小片（已完成，两轮全否决，`cbb4505` + `8906684` dirty）**：
+Census 兜底（V2_03 7937m/225 锚跳）与 round 2 七变体（② 累积播种 /
+③ 曝光归一化 / 零均值 SAD / no-CV 锚 / seed 门 20 / 首段累积，
+V2_03 3.642~6.715 vs 3.628 门）**全灭**——匹配/播种层不是瓶颈：
+所有变体段内质量 ≥ baseline（加权 RMS 0.538-0.889），ATE 损失 100%
+来自 re-anchor 对齐税（+2.9~+5.6m），且对齐税与 re-anchor 数量/门槛
+无单调关系；首段饿死不是绑定约束（Exp E 覆盖 0.766 仍微劣于门）。
+默认逐项回退 slice-7（`default_revert` 复验一致），变体代码保留在
+CLI flag 后供 M4 复测。**M4 前零剩余 VO 候选**；结构性修复在 M4
+（IMU 预积分锚，消灭 re-anchor 对齐税）。checkpoint：
+[prem4-diag-census](benchmark/m3.3/prem4_diag_census_cbb4505_402d1925.md)、
+[prem4-round2](benchmark/m3.3/prem4_round2_8906684_402d1925.md)。
+
 设计见
 [M3.3 VO 加固设计](research/m3.3-vo-hardening-design.md)、
 [M3.3 Slice ② 右目匹配设计](research/m3.3-slice2-right-match-design.md)、
@@ -592,6 +605,11 @@ Slice ④/④b/④c/④d/④e/④f/④g：[#24](https://github.com/Nothand0212/p
 PnP stereo 一致性仲裁：[#25](https://github.com/Nothand0212/phad-vio/issues/25)。
 
 ## M4：接入 IMU
+
+M3.3 出口已由 pre-M4 小片（两轮全否决，见上）锁定：纯 VO 内覆盖率的
+代价是 re-anchor 对齐税且无法在匹配/播种层消除 —— re-anchor 锚必须
+来自 IMU 预积分外推（消除 CV 锚错位），段间错位税结构性消失。这是
+本里程碑的第一动机，先于纯精度提升。
 
 范围：
 
