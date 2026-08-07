@@ -98,6 +98,7 @@ namespace phad::estimator
     std::uint32_t num_observations         = 0;
     std::uint32_t num_landmarks            = 0;  // in the graph
     std::uint32_t num_shared               = 0;  // new frame ∩ window landmark table
+    std::uint32_t num_disparity            = 0;  // obs with disparity_px > 0 (regardless of landmark table)
     std::uint32_t num_cheirality           = 0;
     std::uint32_t lm_iterations            = 0;
     std::uint32_t window_size              = 0;

@@ -64,6 +64,7 @@ namespace phad::apps
     std::uint32_t num_observations        = 0;
     std::uint32_t num_landmarks           = 0;
     std::uint32_t num_shared              = 0;
+    std::uint32_t num_disparity           = 0;  // Slice: obs with disparity_px > 0
     bool          low_connectivity        = false;
     std::uint32_t window_size             = 0;
     std::uint64_t prior_key               = 0;

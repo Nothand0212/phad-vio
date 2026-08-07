@@ -105,7 +105,8 @@ namespace phad::apps
       }
       const double survive_ratio =
           static_cast<double>( common_count ) /
-          std::max( state.last_kf_pixels.size(), std::size_t{ 1 } );
+          static_cast<double>(
+              std::max( state.last_kf_pixels.size(), std::size_t{ 1 } ) );
       if ( survive_ratio < 0.6 ) return true;
 
       // Rule 4: rotation-compensated average parallax (> 30 px).
@@ -704,6 +705,7 @@ namespace phad::apps
           .num_observations         = d.num_observations,
           .num_landmarks            = d.num_landmarks,
           .num_shared               = d.num_shared,
+          .num_disparity            = d.num_disparity,
           .low_connectivity         = d.low_connectivity,
           .window_size              = d.window_size,
           .prior_key                = d.prior_key,
@@ -795,7 +797,7 @@ namespace phad::apps
            "reproj_rms_before_px,reproj_rms_after_px,num_cheirality,"
            "lm_iterations,max_window_pose_shift_m,segment_id,"
            "pnp_success,pnp_inliers,outliers_culled,"
-           "reproj_rms_after_cull_px,is_keyframe\n";
+           "reproj_rms_after_cull_px,is_keyframe,num_disparity\n";
 
     for ( const VoDiagRow& row : rows )
     {
@@ -811,7 +813,8 @@ namespace phad::apps
           << row.segment_id << ',' << ( row.pnp_success ? 1 : 0 ) << ','
           << row.pnp_inliers << ',' << row.outliers_culled << ','
           << row.reproj_rms_after_cull_px << ','
-          << ( row.is_keyframe ? 1 : 0 ) << '\n';
+          << ( row.is_keyframe ? 1 : 0 ) << ','
+          << row.num_disparity << '\n';
     }
 
     if ( !out )
