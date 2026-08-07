@@ -47,10 +47,12 @@ namespace phad::apps
 
     // ── Slice ⑤ keyframe selection ──────────────────────────────────────
 
-    // Parallax threshold for keyframe selection (pixels). VINS uses 10 px
-    // (EuRoC); we use 15 px (VGGT-Motion) — denser keyframes help fast
-    // rotation where non-keyframe poses are weaker. Slice ⑤b lowered from
-    // 30 px after V1_01 showed sparse keyframes degrade accuracy.
+    // Parallax threshold for keyframe selection (pixels). Fixed 30 px since
+    // Slice ⑤c (f07cb93 briefly tried VINS' 10 px, ⑤d tried DKB-SLAM's
+    // dynamic Θ_max=5°; both reverted). Rotation-compensated parallax ≈ 0
+    // under pure rotation, so this rule only fires in translation segments;
+    // fast rotation is governed by Rule 1b/3 (track decay → forced
+    // keyframe). See docs/research/m3.3-keyframe-design.md §D1.
     constexpr double kKeyframeParallaxPx = 30.0;
     // Minimum track count to run PnP (matches estimator.min_pnp_inliers).
     constexpr std::size_t kKeyframeMinPnpTracks = 10U;
