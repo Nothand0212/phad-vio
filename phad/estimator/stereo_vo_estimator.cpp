@@ -1,6 +1,8 @@
 #include "phad/estimator/stereo_vo_estimator.hpp"
 
+#include <gtsam/geometry/Cal3_S2.h>
 #include <gtsam/geometry/Cal3_S2Stereo.h>
+#include <gtsam/geometry/PinholeCamera.h>
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/geometry/StereoCamera.h>
 #include <gtsam/geometry/StereoPoint2.h>
@@ -57,19 +59,6 @@ namespace phad::estimator
     {
       Eigen::Isometry3d T_a_b = Eigen::Isometry3d::Identity();
       T_a_b.linear()          = transform.rotation();
-      T_a_b.translation()     = transform.translation();
-      return T_a_b;
-    }
-
-    // Normalize rotation of a raw Eigen isometry (PnP/guess results may
-    // drift slightly off SO(3)); Trajectory::create requires proper rotation.
-    [[nodiscard]] Eigen::Isometry3d toIsometry(
-        const Eigen::Isometry3d& transform )
-    {
-      Eigen::Quaterniond rotation( transform.linear() );
-      rotation.normalize();
-      Eigen::Isometry3d T_a_b = Eigen::Isometry3d::Identity();
-      T_a_b.linear()          = rotation.toRotationMatrix();
       T_a_b.translation()     = transform.translation();
       return T_a_b;
     }
@@ -328,7 +317,11 @@ namespace phad::estimator
           bool observes = false;
           for ( const StereoObservation& observation : frame.observations )
           {
-            if ( observation.id == id )
+            // Slice ⑦: zero-disparity frames carry no constraint on the
+            // landmark; count only stereo observations (mirrors
+            // dropCheiralityLandmarks).
+            if ( observation.id == id &&
+                 observation.disparity_px > 0.0 )
             {
               observes = true;
               break;
@@ -471,6 +464,13 @@ namespace phad::estimator
           ++probe_rejected_block_n;
           continue;
         }
+        // Slice ⑦: seed/re-anchor has no window history — a zero-disparity
+        // observation cannot be backprojected (infinite depth); it is
+        // seeded on a later keyframe once the window is rebuilt.
+        if ( observation.disparity_px <= 0.0 )
+        {
+          continue;
+        }
         const Eigen::Vector3d point_W =
             backprojectWorld( candidate.T_W_B, observation );
         const gtsam::Pose3 T_W_left =
@@ -552,6 +552,14 @@ namespace phad::estimator
         {
           return std::nullopt;
         }
+        // Slice ⑦: a zero-disparity observation carries no stereo
+        // information — toStereoPoint would fabricate a right pixel equal to
+        // the left one and inflate this pose's RMS (it still supports the PnP
+        // correspondence itself via its left pixel).
+        if ( observation->disparity_px <= 0.0 )
+        {
+          continue;
+        }
         const auto landmark_it = landmarks_W.find( observation->id );
         if ( landmark_it == landmarks_W.end() ||
              !isFinite( landmark_it->second ) )
@@ -613,6 +621,13 @@ namespace phad::estimator
       {
         const auto landmark_it = landmarks_W.find( observation.id );
         if ( landmark_it == landmarks_W.end() )
+        {
+          continue;
+        }
+        // Slice ⑦: zero-disparity observations cannot constrain PnP — they
+        // have no stereo depth, and the stereo RMS acceptance gate cannot
+        // see them.
+        if ( observation.disparity_px <= 0.0 )
         {
           continue;
         }
@@ -751,6 +766,27 @@ namespace phad::estimator
       }
     }
 
+    // Slice ⑦: count only stereo observations in a measurement — those are
+    // the ones that can seed a segment / constrain the BA graph. Zero-disparity
+    // observations must not inflate the init / re-anchor gates (a gate that
+    // passes on ~180 no-depth observations but seeds ~18 weak landmarks leaves
+    // an almost factor-free graph that drifts freely).
+    [[nodiscard]] std::size_t countStereoObservations(
+        const KeyframeMeasurement& measurement ) const
+    {
+      return static_cast<std::size_t>( std::count_if(
+          measurement.observations.begin(), measurement.observations.end(),
+          []( const StereoObservation& observation ) {
+            return observation.disparity_px > 0.0;
+          } ) );
+    }
+
+    // Slice ⑦: count only stereo observations (disparity_px > 0) — those are
+    // the ones that become BA factors. A landmark whose window observations
+    // are all zero-disparity must NOT enter the graph: it would carry no
+    // factor, and counting a mixed landmark's zero-disparity observations
+    // toward min_landmark_observations could admit a 1-factor point that
+    // slides freely along its ray.
     [[nodiscard]] std::unordered_map<LandmarkId, int> countObservations()
         const
     {
@@ -759,7 +795,10 @@ namespace phad::estimator
       {
         for ( const StereoObservation& observation : frame.observations )
         {
-          ++counts[ observation.id ];
+          if ( observation.disparity_px > 0.0 )
+          {
+            ++counts[ observation.id ];
+          }
         }
       }
       return counts;
@@ -814,11 +853,17 @@ namespace phad::estimator
                                landmark_it->second.z() ) );
             ++num_landmarks_out;
           }
-          graph.emplace_shared<
-              gtsam::GenericStereoFactor<gtsam::Pose3, gtsam::Point3>>(
-              toStereoPoint( observation ), stereo_noise,
-              X( frame.frame_index ), L( observation.id ), K,
-              body_P_sensor );
+          // Slice ⑦: zero-disparity observations are not stereo measurements
+          // — building a StereoFactor from them would project a degenerate
+          // right pixel.
+          if ( observation.disparity_px > 0.0 )
+          {
+            graph.emplace_shared<
+                gtsam::GenericStereoFactor<gtsam::Pose3, gtsam::Point3>>(
+                toStereoPoint( observation ), stereo_noise,
+                X( frame.frame_index ), L( observation.id ), K,
+                body_P_sensor );
+          }
         }
       }
     }
@@ -843,7 +888,11 @@ namespace phad::estimator
           bool observes = false;
           for ( const StereoObservation& observation : frame.observations )
           {
-            if ( observation.id == id )
+            // Slice ⑦: only stereo observations constrain the landmark — a
+            // zero-disparity frame's pose drift must not be able to cull a
+            // good landmark.
+            if ( observation.id == id &&
+                 observation.disparity_px > 0.0 )
             {
               observes = true;
               break;
@@ -1000,14 +1049,16 @@ namespace phad::estimator
       result.message = "empty observations";
       return result;
     }
+    // Slice ⑦: disparity_px == 0 is legal — it marks "stereo failed, no
+    // depth"; negative or non-finite is not.
     for ( const StereoObservation& observation : measurement.observations )
     {
-      if ( !( observation.disparity_px > 0.0 ) ||
+      if ( observation.disparity_px < 0.0 ||
            !observation.left_pixel.allFinite() ||
            !std::isfinite( observation.disparity_px ) )
       {
         result.status  = UpdateStatus::kRejected;
-        result.message = "non-finite pixel or non-positive disparity";
+        result.message = "non-finite pixel or negative disparity";
         return result;
       }
     }
@@ -1022,8 +1073,12 @@ namespace phad::estimator
     std::uint32_t num_shared = 0;
     for ( const StereoObservation& observation : measurement.observations )
     {
-      if ( m_impl->landmarks_W.find( observation.id ) !=
-           m_impl->landmarks_W.end() )
+      // E3 experiment: zero-disparity observations cannot constrain PnP or
+      // BA, so exclude them from the shared-overlap accounting that gates PnP
+      // and low-connectivity.
+      if ( observation.disparity_px > 0.0 &&
+           m_impl->landmarks_W.find( observation.id ) !=
+               m_impl->landmarks_W.end() )
       {
         ++num_shared;
       }
@@ -1080,7 +1135,7 @@ namespace phad::estimator
       return result;
     }
     if ( overlap_broken &&
-         static_cast<int>( measurement.observations.size() ) <
+         static_cast<int>( m_impl->countStereoObservations( measurement ) ) <
              m_impl->options.min_seed_observations )
     {
       result.status  = UpdateStatus::kRejected;
@@ -1099,7 +1154,7 @@ namespace phad::estimator
         static_cast<int>( num_shared ) < m_impl->options.min_shared_landmarks;
 
     if ( !m_impl->initialized &&
-         static_cast<int>( measurement.observations.size() ) <
+         static_cast<int>( m_impl->countStereoObservations( measurement ) ) <
              m_impl->options.min_seed_observations )
     {
       result.status  = UpdateStatus::kRejected;
@@ -1204,14 +1259,16 @@ namespace phad::estimator
           candidate.T_W_B = pnp.T_W_B;
 
           // Map inlier indices → shared LandmarkIds (same scan order as
-          // tryPnpInit), then drop shared outliers; keep new ids.
+          // tryPnpInit: zero-disparity observations skipped there), then drop
+          // shared outliers; keep new ids.
           std::vector<LandmarkId> shared_ids;
           shared_ids.reserve( static_cast<std::size_t>( num_shared ) );
           for ( const StereoObservation& observation :
                 measurement.observations )
           {
-            if ( m_impl->landmarks_W.find( observation.id ) !=
-                 m_impl->landmarks_W.end() )
+            if ( observation.disparity_px > 0.0 &&
+                 m_impl->landmarks_W.find( observation.id ) !=
+                     m_impl->landmarks_W.end() )
             {
               shared_ids.push_back( observation.id );
             }
@@ -1236,7 +1293,10 @@ namespace phad::estimator
             const bool is_shared =
                 m_impl->landmarks_W.find( observation.id ) !=
                 m_impl->landmarks_W.end();
-            if ( is_shared &&
+            // Slice ⑦: zero-disparity observations never enter the PnP
+            // inlier set, so never drop them here either — they stay in the
+            // window for when stereo returns.
+            if ( observation.disparity_px > 0.0 && is_shared &&
                  inlier_ids.find( observation.id ) == inlier_ids.end() )
             {
               continue;
@@ -1301,18 +1361,29 @@ namespace phad::estimator
                     << " thresh=" << seed_thresh << "\n";
           continue;  // ⑥b: not yet stable enough to seed
         }
-        const Eigen::Vector3d point_W =
-            m_impl->backprojectWorld( candidate.T_W_B, observation );
-        const gtsam::Pose3 T_W_left =
-            toPose3( candidate.T_W_B ) * m_impl->body_P_sensor;
-        const gtsam::Point3 point_left =
-            T_W_left.transformTo( gtsam::Point3(
-                point_W.x(), point_W.y(), point_W.z() ) );
-        if ( !isFinite( point_W ) || point_left.z() <= 0.0 )
+        // Slice ⑦: a zero-disparity observation has no stereo depth, and
+        // multi-frame triangulation seeding is disabled (Slice ⑦ gate
+        // outcome — see docs/benchmark/m3.3/slice-7_*.md). The landmark is
+        // seeded later by a stereo (disparity > 0) observation instead.
+        if ( observation.disparity_px <= 0.0 )
         {
           continue;
         }
-        m_impl->landmarks_W[ observation.id ] = point_W;
+        const std::optional<Eigen::Vector3d> point_W =
+            m_impl->backprojectWorld( candidate.T_W_B, observation );
+        if ( !point_W.has_value() )
+        {
+          continue;
+        }
+        const gtsam::Pose3 T_W_left =
+            toPose3( candidate.T_W_B ) * m_impl->body_P_sensor;
+        const gtsam::Point3 point_left = T_W_left.transformTo(
+            gtsam::Point3( point_W->x(), point_W->y(), point_W->z() ) );
+        if ( !isFinite( *point_W ) || point_left.z() <= 0.0 )
+        {
+          continue;
+        }
+        m_impl->landmarks_W[ observation.id ] = *point_W;
         ++result.diagnostics.probe_new_lm_n;
       }
       }  // keyframe-only landmark seeding

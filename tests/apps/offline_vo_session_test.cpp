@@ -250,10 +250,12 @@ namespace
     EXPECT_NE( text.find( "pnp_success,pnp_inliers,outliers_culled,"
                            "reproj_rms_after_cull_px" ),
                std::string::npos );
-    // Slice ④e / Probe B keep the 18-column contract; Probe B is a
+    // Slice ④e / Probe B keep the 19-column contract; Probe B is a
     // separate jsonl side-channel. outlier_reopt_rounds stay off diag
     // (session/summary only). culled_landmark_ids remain in-memory only
-    // (session dropTracks; not a diag column).
+    // (session dropTracks; not a diag column). Slice ⑦'s
+    // num_triangulated_seed column was dropped again post-gate (the
+    // diagnostic never increments: triangulation seeding is disabled).
     const auto header_end = text.find( '\n' );
     ASSERT_NE( header_end, std::string::npos );
     const std::string header = text.substr( 0, header_end );

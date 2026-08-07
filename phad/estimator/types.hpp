@@ -20,7 +20,10 @@ namespace phad::estimator
   {
     LandmarkId      id;
     Eigen::Vector2d left_pixel;    // rectified left
-    double          disparity_px;  // must be > 0
+    // > 0: stereo disparity (depth via backproject); == 0: stereo failed —
+    // no depth, kept in the window until stereo returns (Slice ⑦). < 0 is
+    // invalid.
+    double          disparity_px;
   };
 
   struct KeyframeMeasurement
