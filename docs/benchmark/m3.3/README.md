@@ -6,6 +6,7 @@
 
 ```text
 Slice ④e → Slice ④f → Slice ④g → zombie-age=5 → PnP stereo 一致性仲裁
+→ ⑤c → Slice ⑥ → Slice ⑦
 ```
 
 其中 ④g 已被证伪并回退，但仍保留为独立历史 checkpoint；④f 与 ④g 的 config
@@ -23,6 +24,8 @@ Issue：[#26](https://github.com/Nothand0212/phad-vio/issues/26)。
 | Slice ④g | `3ee5dea` | `default_a5e90dc7` | Slice ④f | clean 11/11 ✓（≡ ④e） | 已证伪并回退 | [slice-4g](slice-4g_3ee5dea_a5e90dc7.md) |
 | zombie-age=5 | `4cf55ca` | `default_773ea011` | Slice ④f | clean 11/11 ✓（复用历史 raw） | 当前生命周期默认 | [zombie-age](zombie-age_4cf55ca_773ea011.md) |
 | PnP stereo 仲裁 | `afe3829` | `default_773ea011` | zombie-age=5 | clean 11/11 ✓ | 当前 estimator 默认 | [pnp-stereo](pnp-stereo_afe3829_773ea011.md) |
+| Slice ⑥ | `167478e` | `default_773ea011` | ⑤c（`86212e0`） | clean 11/11 ✓ | 当前前端默认 | [slice-6](slice-6_167478e_773ea011.md) |
+| Slice ⑦ | `e77ee5d` | `default_402d1925` | Slice ⑥ | clean 11/11 ✓ | 当前生命周期默认（E13 composed g1） | [slice-7](slice-7_e77ee5d_402d1925.md) |
 
 表格中的 predecessor 指算法血缘，不强制等于 Git 一阶父提交。④g 的产品 successor
 是回退后的 ④f，再由 zombie-age=5 扩展；不能把 ④g 当成 zombie-age 的直接基线。

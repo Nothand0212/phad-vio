@@ -343,7 +343,7 @@ record-only baseline 已建立 → **先对齐再开** ⑤）：
   vs ⑥ checkpoint：V2_01 -15.3%、V2_02 -39.3% 两增益，MH_01 -1.1% 门限内，
   MH_03 +35.7%、V2_03 +25.4% 两回归（全变体最小）；机制与完整数字见
   [Slice ⑦ 设计 §8](research/m3.3-slice7-multiframe-triangulation-design.md)，
-  checkpoint 见 [slice-7](benchmark/m3.3/slice-7_xxxxxxxx_xxxxxxxx.md)）。
+  checkpoint 见 [slice-7](benchmark/m3.3/slice-7_e77ee5d_402d1925.md)）。
 
 Slice ① 出口（commit `0b0cd34` / `default_030a0197`，对照 `4780660`）：
 
