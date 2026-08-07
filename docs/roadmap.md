@@ -336,7 +336,14 @@ record-only baseline 已建立 → **先对齐再开** ⑤）：
   Basalt 7KF+3temporal，MH_05 改善至 0.306）→ **⑤d 动态阈值已尝试并回退**（量纲不匹配 + MH_03 临界带相位敏感——KF 位置
   对 T 微变交错，滞回无效；见 [调研](research/m3.3-slice5-dynamic-threshold-refs.md)）→
   **回退 ⑤c(30px) 收尾**（`9015ae7`：门控全过，MH_03/MH_05 最优；V1_01 0.514
-  记账为已知债，留给 M4 IMU）。
+  记账为已知债，留给 M4 IMU）。→ **⑥ 已实施**（立体右目 SAD 瓶颈定位 + 硬门
+  baseline，checkpoint `167478e`，[slice-6](benchmark/m3.3/slice-6_167478e_773ea011.md)）
+  → **⑦ 已结案**（零视差通道 + 悬挂机制；多帧三角化实现后门控禁用；逐步证伪
+  后**最终采用 E13 composed g1**：悬挂距离门 1m + 投影一致性刷新 6px。
+  vs ⑥ checkpoint：V2_01 -15.3%、V2_02 -39.3% 两增益，MH_01 -1.1% 门限内，
+  MH_03 +35.7%、V2_03 +25.4% 两回归（全变体最小）；机制与完整数字见
+  [Slice ⑦ 设计 §8](research/m3.3-slice7-multiframe-triangulation-design.md)，
+  checkpoint 见 [slice-7](benchmark/m3.3/slice-7_xxxxxxxx_xxxxxxxx.md)）。
 
 Slice ① 出口（commit `0b0cd34` / `default_030a0197`，对照 `4780660`）：
 
