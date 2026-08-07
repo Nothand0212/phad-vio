@@ -358,6 +358,13 @@ namespace phad::estimator
     std::unordered_map<LandmarkId, Eigen::Vector3d> landmarks_W;
     std::unordered_map<LandmarkId, std::vector<common::Timestamp>>
                                      track_times;
+    // Slice ⑦ E13: body pose at each landmark's most recent stereo
+    // observation, kept beyond the window. The hang-distance gate measures
+    // against this — findLastStereoFrameInWindow's pose evaporates once the
+    // stereo frame leaves the window, silently turning every gate value into
+    // "drop all far-return candidates" (E11's bug, never a real distance
+    // test). Updated with the BA-refined pose; erased with the landmark.
+    std::unordered_map<LandmarkId, Eigen::Isometry3d> last_stereo_pose_W;
     std::optional<Eigen::Isometry3d> last_accepted_T_W_B;
     std::optional<Eigen::Isometry3d> prev_accepted_T_W_B;
     std::uint64_t                    next_frame_index = 0;
@@ -742,21 +749,98 @@ namespace phad::estimator
       return result;
     }
 
+    // Slice ⑦: most recent frame in the window that observed `id` with
+    // stereo (disparity > 0), if any.
+    [[nodiscard]] std::optional<Eigen::Isometry3d> findLastStereoFrameInWindow(
+        LandmarkId id ) const
+    {
+      std::optional<Eigen::Isometry3d> last_stereo_pose;
+      for ( auto it = window.rbegin(); it != window.rend(); ++it )
+      {
+        for ( const StereoObservation& observation : it->observations )
+        {
+          if ( observation.id == id && observation.disparity_px > 0.0 )
+          {
+            last_stereo_pose = it->T_W_B;
+            break;
+          }
+        }
+        if ( last_stereo_pose.has_value() )
+        {
+          break;
+        }
+      }
+      return last_stereo_pose;
+    }
+
+    // Slice ⑦: a landmark kept alive only by zero-disparity observations
+    // ("hanging") carries a 3D point that is stale once the body has moved
+    // far since its last stereo observation — E10 showed the hanging
+    // mechanism is the sole carrier of the Slice ⑦ effect, good (V2_02) or
+    // bad (MH_03/V2_01). Gate the stale half out.
+    [[nodiscard]] bool hangingLandmarkStale(
+        LandmarkId id, const Eigen::Isometry3d& current_T_W_B ) const
+    {
+      // 0 disables the gate entirely (e9a21b3 behavior — keep every
+      // hanging landmark). MUST be checked before the no-stereo-in-window
+      // early return: with the gate off, an absent last stereo frame is
+      // not a reason to drop (E12d2 caught this: the early return fired
+      // unconditionally, silently turning gate=0 runs into the E11
+      // full-revert and making every E12 experiment dead code).
+      if ( options.hanging_landmark_gate_m <= 0.0 )
+      {
+        return false;
+      }
+      // E13: measure against the persistent last-stereo pose (survives the
+      // frame leaving the window). findLastStereoFrameInWindow would return
+      // nullopt for every far-return candidate — an unconditional drop that
+      // made E11's gate sweep a never-tested distance hypothesis.
+      const auto it = last_stereo_pose_W.find( id );
+      if ( it == last_stereo_pose_W.end() )
+      {
+        // No stereo observation on record (e.g. triangulated-only seed) —
+        // infinitely stale.
+        return true;
+      }
+      const double moved_m =
+          ( it->second.translation() - current_T_W_B.translation() ).norm();
+      // Gate configurable via options.hanging_landmark_gate_m (bench CLI
+      // --hanging-gate-m).
+      return moved_m > options.hanging_landmark_gate_m;
+    }
+
     void pruneLandmarksNotInWindow()
     {
       std::unordered_set<LandmarkId> live;
+      std::unordered_set<LandmarkId> zero_live;
       for ( const WindowFrame& frame : window )
       {
         for ( const StereoObservation& observation : frame.observations )
         {
-          live.insert( observation.id );
+          if ( observation.disparity_px > 0.0 )
+          {
+            live.insert( observation.id );
+          }
+          else
+          {
+            zero_live.insert( observation.id );
+          }
         }
       }
       for ( auto it = landmarks_W.begin(); it != landmarks_W.end(); )
       {
         if ( live.find( it->first ) == live.end() )
         {
+          if ( zero_live.find( it->first ) != zero_live.end() &&
+               !hangingLandmarkStale( it->first, window.back().T_W_B ) )
+          {
+            // Fresh hanging landmark (Slice ⑦): keep — it constrains the
+            // BA once stereo returns and stabilizes the track.
+            ++it;
+            continue;
+          }
           // Keep track_times for diagnostics across the whole run.
+          last_stereo_pose_W.erase( it->first );
           it = landmarks_W.erase( it );
         }
         else
@@ -1167,6 +1251,7 @@ namespace phad::estimator
     decltype( m_impl->window )          window_backup;
     decltype( m_impl->landmarks_W )     landmarks_backup;
     decltype( m_impl->track_times )     track_times_backup;
+    decltype( m_impl->last_stereo_pose_W ) last_stereo_pose_backup;
     decltype( m_impl->last_accepted_T_W_B ) last_backup;
     decltype( m_impl->prev_accepted_T_W_B ) prev_backup;
     decltype( m_impl->next_frame_index )    next_index_backup;
@@ -1178,6 +1263,7 @@ namespace phad::estimator
       window_backup      = m_impl->window;
       landmarks_backup   = m_impl->landmarks_W;
       track_times_backup = m_impl->track_times;
+      last_stereo_pose_backup = m_impl->last_stereo_pose_W;
       last_backup        = m_impl->last_accepted_T_W_B;
       prev_backup        = m_impl->prev_accepted_T_W_B;
       next_index_backup  = m_impl->next_frame_index;
@@ -1192,6 +1278,7 @@ namespace phad::estimator
       m_impl->window                = window_backup;
       m_impl->landmarks_W           = landmarks_backup;
       m_impl->track_times           = track_times_backup;
+      m_impl->last_stereo_pose_W    = last_stereo_pose_backup;
       m_impl->last_accepted_T_W_B   = last_backup;
       m_impl->prev_accepted_T_W_B   = prev_backup;
       m_impl->next_frame_index      = next_index_backup;
@@ -1324,6 +1411,77 @@ namespace phad::estimator
       {
         m_impl->track_times[ observation.id ].push_back(
             measurement.timestamp );
+      }
+      // Slice ⑦ (E12g, final: part of the E13-composed gate): a far-return
+      // landmark — one whose last stereo observation left the window while
+      // it hung on zero-disparity observations — carries a 3D frozen at
+      // that old pose. E10/E11 showed this population is the sole carrier
+      // of the Slice ⑦ effect, good (V2_02 -39%: the stale multi-frame
+      // point beats unreliable single-frame SAD backprojects) or bad
+      // (MH_03/V2_01 +36%/+15%-gain: the return must not be anchored to a
+      // drifted point). E13's hang-distance gate (hanging_landmark_gate_m)
+      // drops the far band where the damage concentrates; the near band
+      // survives and is resolved here: keep the stale 3D while it still
+      // projects to the observed left pixel; refresh to the current
+      // backproject when the stale point is grossly off (drifted track) or
+      // behind the camera. Threshold and on/off via
+      // options.far_return_refresh_px (bench CLI --far-refresh-px;
+      // <= 0 disables the refresh — pure-gate runs).
+      for ( const StereoObservation& observation : candidate.observations )
+      {
+        if ( observation.disparity_px <= 0.0 )
+        {
+          continue;
+        }
+        auto landmark_it = m_impl->landmarks_W.find( observation.id );
+        if ( landmark_it == m_impl->landmarks_W.end() )
+        {
+          continue;  // new id — seeded below
+        }
+        if ( m_impl->findLastStereoFrameInWindow( observation.id )
+                 .has_value() )
+        {
+          continue;  // fresh return — untouched (zero-impact population)
+        }
+        if ( m_impl->options.far_return_refresh_px <= 0.0 )
+        {
+          continue;  // E13 pure: refresh disabled — gate-only runs
+        }
+        const gtsam::Pose3 T_W_left =
+            toPose3( candidate.T_W_B ) * m_impl->body_P_sensor;
+        const gtsam::Point3 point_W( landmark_it->second.x(),
+                                     landmark_it->second.y(),
+                                     landmark_it->second.z() );
+        gtsam::StereoPoint2 projected;
+        double proj_error = -1.0;
+        try
+        {
+          projected = gtsam::StereoCamera( T_W_left, m_impl->K ).project(
+              point_W );
+          proj_error =
+              std::sqrt( std::pow( projected.uL() - observation.left_pixel.x(),
+                                   2 ) +
+                         std::pow( projected.v() - observation.left_pixel.y(),
+                                   2 ) );
+        }
+        catch ( const gtsam::StereoCheiralityException& )
+        {
+          proj_error = -1.0;  // stale point behind the camera — refresh
+        }
+        const bool refresh =
+            proj_error < 0.0 ||
+            proj_error > m_impl->options.far_return_refresh_px;
+        if ( !refresh )
+        {
+          continue;  // stale 3D still projects to the observed pixel — e9 path
+        }
+        const std::optional<Eigen::Vector3d> point_W_new =
+            m_impl->backprojectWorld( candidate.T_W_B, observation );
+        if ( !point_W_new.has_value() || !isFinite( *point_W_new ) )
+        {
+          continue;
+        }
+        landmark_it->second = *point_W_new;  // drifted track — refresh (ck path)
       }
       // New ids only: backproject from masked candidate.observations.
       // Slice ⑤c: only keyframes seed new landmarks; non-keyframes enter
@@ -1531,6 +1689,23 @@ namespace phad::estimator
         }
       }
       frame.T_W_B = T_W_B;
+    }
+
+    // E13: record the BA-refined pose of every stereo observation of the new
+    // frame, so the hang-distance gate keeps measuring after this frame
+    // leaves the window. (Older frames' entries were written when each was
+    // the back frame, with the pose refined up to that point — later BA
+    // shifts are sub-cm, negligible against meter-scale gates.)
+    {
+      const Eigen::Isometry3d& T_W_B = m_impl->window.back().T_W_B;
+      for ( const StereoObservation& observation :
+            m_impl->window.back().observations )
+      {
+        if ( observation.disparity_px > 0.0 )
+        {
+          m_impl->last_stereo_pose_W[ observation.id ] = T_W_B;
+        }
+      }
     }
     if ( m_impl->options.enable_probe_b )
     {

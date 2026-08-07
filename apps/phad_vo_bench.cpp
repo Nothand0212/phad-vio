@@ -53,7 +53,9 @@ namespace
       "                     [--probe-b <path>]\n"
       "                     [--defer-drop-topk <k>]\n"
       "                     [--evict-skip-culled]\n"
-      "                     [--zombie-drop-age <n>]\n";
+      "                     [--zombie-drop-age <n>]\n"
+      "                     [--hanging-gate-m <meters>]\n"
+      "                     [--far-refresh-px <px>]\n";
 
 #ifndef PHAD_SOURCE_DIR
 #define PHAD_SOURCE_DIR ""
@@ -85,6 +87,8 @@ namespace
     std::optional<int>           defer_drop_topk;
     bool                         evict_skip_culled = false;
     std::optional<int>           zombie_drop_age;
+    std::optional<double>        hanging_gate_m;
+    std::optional<double>        far_refresh_px;
   };
 
   [[nodiscard]] bool parseDouble( std::string_view text, double& value )
@@ -289,6 +293,28 @@ namespace
         }
         arguments.zombie_drop_age = static_cast<int>( parsed );
       }
+      else if ( flag == "--hanging-gate-m" )
+      {
+        double parsed = 0.0;
+        if ( !parseDouble( value, parsed ) || parsed < 0.0 )
+        {
+          std::cerr
+              << "--hanging-gate-m expects a non-negative number (meters)\n";
+          return false;
+        }
+        arguments.hanging_gate_m = parsed;
+      }
+      else if ( flag == "--far-refresh-px" )
+      {
+        double parsed = 0.0;
+        if ( !parseDouble( value, parsed ) || parsed < 0.0 )
+        {
+          std::cerr
+              << "--far-refresh-px expects a non-negative number (pixels)\n";
+          return false;
+        }
+        arguments.far_refresh_px = parsed;
+      }
       else
       {
         std::cerr << "unknown flag " << flag << '\n';
@@ -435,6 +461,10 @@ namespace
               static_cast<std::int64_t>( estimator.max_outlier_reopts ) );
     snap.set( "estimator.block_culled_rebirth",
               estimator.block_culled_rebirth );
+    snap.set( "estimator.hanging_landmark_gate_m",
+              estimator.hanging_landmark_gate_m );
+    snap.set( "estimator.far_return_refresh_px",
+              estimator.far_return_refresh_px );
 
     snap.set( "session.dataset_format", std::string( "euroc" ) );
     snap.set( "session.drop_culled_tracks", session.drop_culled_tracks );
@@ -590,6 +620,19 @@ namespace
     if ( arguments.zombie_drop_age.has_value() )
     {
       session_options.zombie_drop_age = *arguments.zombie_drop_age;
+    }
+    // Slice ⑦ hanging-landmark freshness gate; enters flattenConfig.
+    if ( arguments.hanging_gate_m.has_value() )
+    {
+      session_options.estimator.hanging_landmark_gate_m =
+          *arguments.hanging_gate_m;
+    }
+    // Slice ⑦ E12g far-return 3D refresh (proj-consistency gate); enters
+    // flattenConfig. <= 0 disables (E13 pure-gate runs).
+    if ( arguments.far_refresh_px.has_value() )
+    {
+      session_options.estimator.far_return_refresh_px =
+          *arguments.far_refresh_px;
     }
 
     phad::bench::ConfigSnapshot config =

@@ -61,6 +61,21 @@ namespace phad::estimator
     // After mean-cull / cheirality erase: refuse same LandmarkId backproject.
     // false → allow rebirth (Slice ④ pseudo-permanent; A/B only).
     bool block_culled_rebirth = true;
+    // Slice ⑦: a hanging landmark (kept alive only by zero-disparity
+    // observations) is dropped once the body has moved this far since its
+    // last stereo observation (E13: measured against the persistent
+    // per-landmark last-stereo pose, not the window scan). 1.0 m is the
+    // E13-composed gate (final decision: V2_02 -39% / V2_01 -15% vs
+    // checkpoint, MH_03/V2_03 the smallest regressions of any variant).
+    // <= 0 disables (keep all hanging landmarks — e9a21b3 behavior).
+    // Bench CLI: --hanging-gate-m.
+    double hanging_landmark_gate_m = 1.0;
+    // Slice ⑦ E12g: refresh a far-return landmark's 3D to the current
+    // backproject when its stale 3D projects this far off the observed left
+    // pixel (or behind the camera); keep the stale 3D otherwise. <= 0
+    // disables the refresh entirely (E13 pure-gate runs). Bench CLI:
+    // --far-refresh-px.
+    double far_return_refresh_px = 6.0;
     // Session sets true when probe_b_path non-empty; NOT in flattenConfig.
     bool enable_probe_b = false;
   };
