@@ -131,6 +131,39 @@ namespace phad::frontend
       return sad;
     }
 
+    // Census 变换 5×5 窗: 中心像素 vs 周围 24 邻域, 产出 24bit 描述子。
+    // 对单调整亮度差(增益/曝光)不变 —— 非归一化 SAD 在 cam1 过暗时全败
+    // (V2_03 诊断链 A/B1), Census 是该场景的行业标准替代。
+    // 调用方需保证 (u,v) ± 2 在图像内。
+    [[nodiscard]] std::uint32_t census5x5( const cv::Mat& image, int u, int v )
+    {
+      const std::uint8_t center = image.at<std::uint8_t>( v, u );
+      std::uint32_t      desc   = 0;
+      std::uint32_t      bit    = 0;
+      for ( int dy = -2; dy <= 2; ++dy )
+      {
+        const auto* row = image.ptr<std::uint8_t>( v + dy );
+        for ( int dx = -2; dx <= 2; ++dx )
+        {
+          if ( dx == 0 && dy == 0 )
+          {
+            continue;
+          }
+          if ( row[ u + dx ] > center )
+          {
+            desc |= ( 1u << bit );
+          }
+          ++bit;
+        }
+      }
+      return desc;
+    }
+
+    [[nodiscard]] int hammingDist( std::uint32_t a, std::uint32_t b )
+    {
+      return __builtin_popcount( a ^ b );
+    }
+
     struct SadPeak
     {
       int  u   = 0;
@@ -140,7 +173,7 @@ namespace phad::frontend
 
     [[nodiscard]] SadPeak searchRow( const cv::Mat& left, const cv::Mat& right,
                                      int u_l, int v_l, int v_r, int u_lo,
-                                     int u_hi, int half )
+                                     int u_hi, int half, bool use_census )
     {
       SadPeak peak;
       if ( u_lo > u_hi || !patchInBounds( left, u_l, v_l, half ) )
@@ -148,22 +181,41 @@ namespace phad::frontend
         return peak;
       }
 
-      int  best_u   = u_lo;
-      int  best_sad = std::numeric_limits<int>::max();
-      bool found    = false;
+      const std::uint32_t desc_l =
+          use_census ? census5x5( left, u_l, v_l ) : 0;
+      // 平坦邻域(全零描述子)在 Census 下与任何平坦区域 Hamming 0, 无判别
+      // 力 → 反向搜索同样退回 SAD(与 matchRight 的 per-track 规则一致)。
+      const bool census_effective = use_census && desc_l != 0;
+      const auto cost = [&]( int u_r, int v_r ) {
+        return census_effective
+                   ? hammingDist( desc_l, census5x5( right, u_r, v_r ) )
+                   : sadPatch( left, right, u_l, v_l, u_r, v_r, half );
+      };
+
+      int  best_u       = u_lo;
+      int  best_sad     = std::numeric_limits<int>::max();
+      int  best_tie_sad = std::numeric_limits<int>::max();
+      bool found        = false;
       for ( int u_r = u_lo; u_r <= u_hi; ++u_r )
       {
         if ( !patchInBounds( right, u_r, v_r, half ) )
         {
           continue;
         }
-        const int sad =
-            sadPatch( left, right, u_l, v_l, u_r, v_r, half );
-        if ( !found || sad < best_sad )
+        const int sad = cost( u_r, v_r );
+        // 与 matchRight 相同的 tiebreak: hamming 并列时取 SAD 最小者。
+        const int tie_sad =
+            census_effective && ( !found || sad <= best_sad )
+                ? sadPatch( left, right, u_l, v_l, u_r, v_r, half )
+                : 0;
+        if ( !found || sad < best_sad ||
+             ( census_effective && sad == best_sad &&
+               tie_sad < best_tie_sad ) )
         {
-          found    = true;
-          best_sad = sad;
-          best_u   = u_r;
+          found        = true;
+          best_sad     = sad;
+          best_tie_sad = tie_sad;
+          best_u       = u_r;
         }
       }
       // Only reject a peak clipped at the upper (far-depth) bound: the true
@@ -385,101 +437,184 @@ namespace phad::frontend
         const int u_hi =
             u_l - static_cast<int>( std::ceil( d_min ) );
 
-        // Global SAD minimum over the epipolar band (single peak; no cascade).
-        // Uniqueness compares rivals outside ±1 px of the peak.
+        // Global minimum over the epipolar band (single peak; no cascade).
+        // Uniqueness 比较 ±1 px 之外的对手峰。
+        const bool left_in_bounds = patchInBounds( left, u_l, v_l, half );
+        const std::uint32_t desc_l =
+            options.enable_census && left_in_bounds
+                ? census5x5( left, u_l, v_l )
+                : 0;
+        // 全零描述子 = 5×5 平坦邻域(中心 ≥ 全部邻居)。此时 Census 与
+        // 任何平坦区域(含纯黑背景)Hamming 距离都为 0, 无判别力 → 不可用。
+        // (合成高斯 blob 顶部平坦即触发;真实暗场景有纹理, 描述子非零,
+        // 曝光鲁棒性不受影响)
+        const bool census_available =
+            options.enable_census && left_in_bounds && desc_l != 0;
+
         int  best_u     = 0;
         int  best_v     = v_l;
-        int  best_sad   = std::numeric_limits<int>::max();
-        bool found_peak = false;
-        if ( patchInBounds( left, u_l, v_l, half ) && u_lo <= u_hi )
-        {
-          for ( int v_r = v_l - options.stereo_row_tol_px;
-                v_r <= v_l + options.stereo_row_tol_px; ++v_r )
+        double u_r_sub  = 0.0;
+        bool  used_census = false;
+        // 一次带验收的匹配尝试。
+        // census=false → 非归一化 SAD(主路径, 原行为: 选择+相对裕度唯一性+
+        // SAD 抛物线子像素)。census=true → Census 选择 + SAD tiebreak +
+        // Hamming 唯一性 + 同样的 SAD 抛物线子像素(offset 在 ±1px 内
+        // 局部常数, 抛物线拟合不受影响)。
+        const auto try_match = [&]( bool census, int& out_u, int& out_v,
+                                    double& out_sub ) -> bool {
+          int  best_cost    = std::numeric_limits<int>::max();
+          int  best_tie_sad = std::numeric_limits<int>::max();
+          bool found_peak   = false;
+          if ( left_in_bounds && u_lo <= u_hi )
           {
-            for ( int u_r = u_lo; u_r <= u_hi; ++u_r )
+            for ( int v_r = v_l - options.stereo_row_tol_px;
+                  v_r <= v_l + options.stereo_row_tol_px; ++v_r )
             {
-              if ( !patchInBounds( right, u_r, v_r, half ) )
+              for ( int u_r = u_lo; u_r <= u_hi; ++u_r )
               {
-                continue;
-              }
-              const int sad =
-                  sadPatch( left, right, u_l, v_l, u_r, v_r, half );
-              if ( !found_peak || sad < best_sad )
-              {
-                best_sad   = sad;
-                best_u     = u_r;
-                best_v     = v_r;
-                found_peak = true;
+                if ( !patchInBounds( right, u_r, v_r, half ) )
+                {
+                  continue;
+                }
+                const int cost_val =
+                    census ? hammingDist( desc_l, census5x5( right, u_r, v_r ) )
+                           : sadPatch( left, right, u_l, v_l, u_r, v_r,
+                                       half );
+                // Census 量化 → 相邻列 Hamming 常并列。用 SAD 作 tiebreak:
+                // 在 hamming 相同的位置里取 SAD 最小者, 使 best_u 落在真实
+                // 匹配处(子像素抛物线的代价函数才有正确极小)。
+                const int tie_sad =
+                    census && ( !found_peak || cost_val <= best_cost )
+                        ? sadPatch( left, right, u_l, v_l, u_r, v_r, half )
+                        : 0;
+                if ( !found_peak || cost_val < best_cost ||
+                     ( census && cost_val == best_cost &&
+                       tie_sad < best_tie_sad ) )
+                {
+                  best_cost    = cost_val;
+                  best_tie_sad = tie_sad;
+                  out_u        = u_r;
+                  out_v        = v_r;
+                  found_peak   = true;
+                }
               }
             }
           }
-        }
-        if ( !found_peak )
-        {
-          continue;
-        }
-        if ( options.stereo_uniq_ratio > 0.0 )
-        {
-          int second_sad = std::numeric_limits<int>::max();
-          for ( int v_r = v_l - options.stereo_row_tol_px;
-                v_r <= v_l + options.stereo_row_tol_px; ++v_r )
+          if ( !found_peak )
           {
-            for ( int u_r = u_lo; u_r <= u_hi; ++u_r )
+            return false;
+          }
+          if ( options.stereo_uniq_ratio > 0.0 )
+          {
+            if ( census )
             {
-              if ( std::abs( u_r - best_u ) <= 1 && v_r == best_v )
+              // Hamming 唯一性: 绝对阈值 1 位。实测 Hamming 在真匹配
+              // ±2-3px 处是平顶(margin 中位 0-1 位), 阈值 2+ 会把多数
+              // 真匹配拒掉; SAD 相对裕度不能用于 Census 验收 —— 暗帧的
+              // 亮度偏移不均匀, SAD 极小位置漂移(实测 SAD@hamming-best
+              // 的 margin 为负)。只拒绝"远处有第二个同样好匹配"的歧义。
+              int second = std::numeric_limits<int>::max();
+              for ( int v_r = v_l - options.stereo_row_tol_px;
+                    v_r <= v_l + options.stereo_row_tol_px; ++v_r )
               {
-                continue;
+                for ( int u_r = u_lo; u_r <= u_hi; ++u_r )
+                {
+                  if ( std::abs( u_r - out_u ) <= 1 && v_r == out_v )
+                  {
+                    continue;
+                  }
+                  if ( !patchInBounds( right, u_r, v_r, half ) )
+                  {
+                    continue;
+                  }
+                  const int h = hammingDist( desc_l,
+                                             census5x5( right, u_r, v_r ) );
+                  second = std::min( second, h );
+                }
               }
-              if ( !patchInBounds( right, u_r, v_r, half ) )
+              if ( second == std::numeric_limits<int>::max() ||
+                   second - best_cost < 1 )
               {
-                continue;
+                return false;
               }
-              const int sad =
-                  sadPatch( left, right, u_l, v_l, u_r, v_r, half );
-              second_sad = std::min( second_sad, sad );
+            }
+            else
+            {
+              // 原 SAD 相对裕度 (s2-s1)/s1 ≥ ratio。
+              int second_sad = std::numeric_limits<int>::max();
+              for ( int v_r = v_l - options.stereo_row_tol_px;
+                    v_r <= v_l + options.stereo_row_tol_px; ++v_r )
+              {
+                for ( int u_r = u_lo; u_r <= u_hi; ++u_r )
+                {
+                  if ( std::abs( u_r - out_u ) <= 1 && v_r == out_v )
+                  {
+                    continue;
+                  }
+                  if ( !patchInBounds( right, u_r, v_r, half ) )
+                  {
+                    continue;
+                  }
+                  const int sad = sadPatch( left, right, u_l, v_l, u_r, v_r,
+                                            half );
+                  second_sad = std::min( second_sad, sad );
+                }
+              }
+              if ( second_sad == std::numeric_limits<int>::max() )
+              {
+                return false;
+              }
+              if ( best_cost == 0 )
+              {
+                if ( second_sad <= 0 )
+                {
+                  return false;
+                }
+              }
+              else
+              {
+                const double margin =
+                    static_cast<double>( second_sad - best_cost ) /
+                    static_cast<double>( best_cost );
+                if ( margin < options.stereo_uniq_ratio )
+                {
+                  return false;
+                }
+              }
             }
           }
-          if ( second_sad == std::numeric_limits<int>::max() )
+          return refineSubpixel( left, right, u_l, v_l, out_u, out_v, half,
+                                 out_sub );
+        };
+
+        // 主路径 SAD;被拒(无峰/唯一性/子像素)时,暗曝光帧(如 V2_03
+        // cam1 欠曝光)走 Census 兜底 —— SAD 极小漂移是数据侧 offset,
+        // Census 对单调亮度差不变。
+        if ( !try_match( false, best_u, best_v, u_r_sub ) )
+        {
+          if ( !census_available ||
+               !try_match( true, best_u, best_v, u_r_sub ) )
           {
             continue;
           }
-          if ( best_sad == 0 )
-          {
-            if ( second_sad <= 0 )
-            {
-              continue;
-            }
-          }
-          else
-          {
-            const double margin =
-                static_cast<double>( second_sad - best_sad ) /
-                static_cast<double>( best_sad );
-            if ( margin < options.stereo_uniq_ratio )
-            {
-              continue;
-            }
-          }
+          used_census = true;
         }
 
-        double u_r_sub = 0.0;
-        if ( !refineSubpixel( left, right, u_l, v_l, best_u, best_v, half,
-                              u_r_sub ) )
-        {
-          continue;
-        }
 
-        // Reverse 1D SAD on the same row; do not touch
-        // forward_backward_rejected (temporal FB only).
-        if ( options.stereo_check_bidir )
-        {
-          const int back_lo =
-              best_u + static_cast<int>( std::ceil( d_min ) );
-          const int back_hi =
-              best_u + static_cast<int>( std::floor( d_max ) );
-          const SadPeak back =
-              searchRow( right, left, best_u, best_v, best_v, back_lo,
-                         back_hi, half );
+          // Reverse 1D search on the same row; do not touch
+          // forward_backward_rejected (temporal FB only).
+          // 反搜必须与主路径同一 mode: Census 命中(暗帧)时反搜的右图
+          // 暗 patch 描述子同样对曝光不变;若暗 patch 平坦(desc=0),
+          // searchRow 内部自动退回 SAD。
+          if ( options.stereo_check_bidir )
+          {
+            const int back_lo =
+                best_u + static_cast<int>( std::ceil( d_min ) );
+            const int back_hi =
+                best_u + static_cast<int>( std::floor( d_max ) );
+            const SadPeak back =
+                searchRow( right, left, best_u, best_v, best_v, back_lo,
+                           back_hi, half, used_census );
           if ( !back.ok ||
                std::abs( static_cast<double>( back.u - u_l ) ) >
                    options.stereo_bidir_px )

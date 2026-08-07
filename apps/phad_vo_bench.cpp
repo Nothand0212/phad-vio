@@ -55,7 +55,8 @@ namespace
       "                     [--evict-skip-culled]\n"
       "                     [--zombie-drop-age <n>]\n"
       "                     [--hanging-gate-m <meters>]\n"
-      "                     [--far-refresh-px <px>]\n";
+      "                     [--far-refresh-px <px>]\n"
+      "                     [--tracker-enable-census]\n";
 
 #ifndef PHAD_SOURCE_DIR
 #define PHAD_SOURCE_DIR ""
@@ -96,6 +97,7 @@ namespace
     bool                  no_clahe       = false;
     bool                  no_median_flow = false;
     bool                  no_fransac     = false;
+    bool                  no_census      = true;  // census 默认关闭(实测否决)
   };
 
   [[nodiscard]] bool parseDouble( std::string_view text, double& value )
@@ -173,6 +175,13 @@ namespace
       if ( flag == "--no-fransac" )
       {
         arguments.no_fransac = true;
+        continue;
+      }
+      // Census 默认关闭(实测否决, 见 stereoTracker.hpp enable_census 注释);
+      // 显式 --tracker-enable-census 打开(对照/复测用)。
+      if ( flag == "--tracker-enable-census" )
+      {
+        arguments.no_census = false;
         continue;
       }
       if ( index + 1 >= argc )
@@ -469,9 +478,9 @@ namespace
     snap.set( "tracker.stereo_bidir_px", tracker.stereo_bidir_px );
     snap.set( "tracker.stereo_uniq_ratio", tracker.stereo_uniq_ratio );
     snap.set( "tracker.stereo_check_bidir", tracker.stereo_check_bidir );
-    // enable_clahe / enable_median_flow / enable_fransac are CLI-only
-    // attribution switches: not in config_hash (probe convention), use
-    // --config-label to distinguish artifact directories.
+    // enable_clahe / enable_median_flow / enable_fransac / enable_census
+    // are CLI-only attribution switches: not in config_hash (probe
+    // convention), use --config-label to distinguish artifact directories.
 
     snap.set( "estimator.window_size",
               static_cast<std::int64_t>( estimator.window_size ) );
@@ -656,6 +665,7 @@ namespace
     session_options.tracker.enable_clahe       = !arguments.no_clahe;
     session_options.tracker.enable_median_flow = !arguments.no_median_flow;
     session_options.tracker.enable_fransac     = !arguments.no_fransac;
+    session_options.tracker.enable_census      = !arguments.no_census;
     if ( arguments.outlier_avg_reproj_px.has_value() )
     {
       session_options.estimator.outlier_avg_reproj_px =

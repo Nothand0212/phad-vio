@@ -80,6 +80,19 @@ M3.3 Slice ⑤ **有意**再扩到 **19 列**：在 `reproj_rms_after_cull_px` �
 （`isKeyframe()` 组合标准：视差 > 30 px / track 率 < 60% / 时间 > 0.5s），
 不在 estimator。
 
+pre-M4 小片（2026-08-07）**有意**再扩到 **20 列**：在 `is_keyframe` 后追加
+`num_disparity`（本帧 `disparity_px > 0` 的观测数，**不**查 landmark 表）。
+与 `num_shared`（disparity>0 **且** ID 在地图中）联立即可区分「前端立体
+匹配死」（num_disparity 小）与「地图 overlap 死」（num_disparity 正常但
+num_shared 小）——V2_03 诊断链 A/B 的决定性指标。
+
+pre-M4 小片（2026-08-07）**Census 实测否决**：`enable_census` 默认 **false**。
+实测(cbb4505 双路径, MH_01 + V2_03):V2_03 SAD-only ATE 3.628m/0 锚跳
+vs census 兜底 on 7937m/225 次 >5m 锚跳(census 暗帧匹配污染 PnP → 反复
+丢跟踪 → 重建锚错);MH_01 SAD-only 0.0810 vs census on 0.0915(+13%)。
+CLI 为 `--tracker-enable-census`(显式打开, 对照/复测用; 旧
+`--tracker-disable-census` 已移除)。census 代码保留但默认路径不执行。
+
 健康序列（如 MH_01）仍应 `segment_id` 全程为 0；断裂序列上段边界表现为
 该列跳变。`summary.json` 侧对应 `robustness.reanchors` /
 `robustness.pnp_successes` / `robustness.pnp_fallbacks` /

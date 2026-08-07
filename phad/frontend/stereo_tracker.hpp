@@ -63,6 +63,17 @@ namespace phad::frontend
     double stereo_uniq_ratio      = 0.5;
     bool   stereo_check_bidir     = true;
 
+    // pre-M4 小片: Census 变换立体匹配(5×5 窗, 24bit Hamming 距离)。
+    // 实测否决(2026-08-07, cbb4505 双路径):
+    //   V2_03  SAD-only ATE 3.628m(≈ORB-SLAM3 官方)/0 锚跳 vs census
+    //          兜底 on 7937m/225 次 >5m 锚跳 —— census 在暗帧产出的匹配
+    //          污染 PnP → 反复丢跟踪 → 重建锚错。
+    //   MH_01  SAD-only 0.0810 vs census on 0.0915(+13%)。
+    // 旧的"cam1 欠曝光 → SAD 全败"诊断基于 census-primary 时代观察,
+    // 双路径下 SAD 主路径在 V2_03 暗段正常产视差(启动段 296 视差观测),
+    // 无需兜底。默认关闭;代码与 flag 保留供 M4 复测。
+    bool enable_census = false;
+
     // Attribution A/B switches (Slice ⑥ mechanisms, default on). Disabling
     // any of these recreates a pre-slice-⑥ frontend behaviour for
     // per-mechanism contribution measurement. Not a production knob.
