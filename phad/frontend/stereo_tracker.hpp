@@ -74,6 +74,22 @@ namespace phad::frontend
     // 无需兜底。默认关闭;代码与 flag 保留供 M4 复测。
     bool enable_census = false;
 
+    // pre-M4 小片 round 2: 帧级曝光归一化 —— CLAHE 后、matchRight 前,
+    // 估计 cam0/cam1 全图均值亮度差, 对右图施加饱和偏移校正 (参照 SVO
+    // affine offset 的帧级形态)。实测否决 (2026-08-07): V2_03 覆盖率
+    // 0.758 → 0.933 但 ATE 3.628 → 5.213 (暗帧校正后多产出的匹配质量
+    // 退化 + re-anchor 9→37 的段错位税); 阈值 1.0 时 MH_01 +41%
+    // (cv::add 饱和裁剪毁对比度), 阈值 20 才零回归。默认关闭;
+    // CLI: --tracker-enable-exposure-norm (A/B)。
+    bool enable_exposure_normalize = false;
+
+    // pre-M4 小片 round 2 后续升级 (A/B, 默认关): patch 级零均值 SAD ——
+    // 左右 patch 各自去均值后计算 SAD, 对单调整亮度差(offset)不变, 且
+    // 不改写像素(帧级 cv::add 饱和校正实测反效果: 255 处裁剪毁对比度,
+    // MH_01 ATE +41% @阈值1.0)。代价 ~2×(两遍扫描)。
+    // CLI: --tracker-enable-zero-mean-sad。
+    bool enable_zero_mean_sad = false;
+
     // Attribution A/B switches (Slice ⑥ mechanisms, default on). Disabling
     // any of these recreates a pre-slice-⑥ frontend behaviour for
     // per-mechanism contribution measurement. Not a production knob.

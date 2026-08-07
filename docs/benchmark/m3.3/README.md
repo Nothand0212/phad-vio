@@ -27,6 +27,7 @@ Issue：[#26](https://github.com/Nothand0212/phad-vio/issues/26)。
 | Slice ⑥ | `167478e` | `default_773ea011` | ⑤c（`86212e0`） | clean 11/11 ✓ | 当前前端默认 | [slice-6](slice-6_167478e_773ea011.md) |
 | Slice ⑦ | `e77ee5d` | `default_402d1925` | Slice ⑥ | clean 11/11 ✓ | 当前生命周期默认（E13 composed g1） | [slice-7](slice-7_e77ee5d_402d1925.md) |
 | pre-M4 小片 | `cbb4505`(dirty) | `sad_baseline_402d1925` | Slice ⑦ | 诊断收尾 + Census 实测否决（SAD-only ≡ Slice ⑦，无回归） | 非产品改动（B1/B2 诊断列 + 脚本） | [prem4-diag-census](prem4_diag_census_cbb4505_402d1925.md) |
+| pre-M4 round 2 | `8906684`(dirty) | `default_402d1925` | pre-M4 小片 | ②③/零均值/no-CV/seed-20/首段累积 7 变体全否决（默认 ≡ Slice ⑦ 逐项一致） | 非产品改动（变体全在 CLI flag 后，默认回退） | [prem4-round2](prem4_round2_8906684_402d1925.md) |
 
 表格中的 predecessor 指算法血缘，不强制等于 Git 一阶父提交。④g 的产品 successor
 是回退后的 ④f，再由 zombie-age=5 扩展；不能把 ④g 当成 zombie-age 的直接基线。

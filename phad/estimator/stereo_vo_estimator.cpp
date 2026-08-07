@@ -372,6 +372,16 @@ namespace phad::estimator
     std::uint32_t                    segment_id       = 0;
     // Cross-segment reject set: mean-cull ∪ cheirality erasures (block rebirth).
     std::unordered_set<LandmarkId> culled_ids_;
+    // pre-M4 round 2: accumulated seeding buffer. While overlap is broken
+    // (or before first-segment init) and a frame's stereo yield is below
+    // min_seed_observations, the frame's valid stereo observations accumulate
+    // here (latest observation wins per track — pixels stay as fresh as the
+    // track allows). Once the buffer holds min_seed_observations unique
+    // tracks, a synthetic measurement built from it replaces the frame
+    // measurement for seeding (SVO DepthFilter-style evidence accumulation).
+    // Cleared when a single frame passes the gate, when overlap recovers
+    // (num_shared > 0), or after a successful accumulated seeding.
+    std::unordered_map<LandmarkId, StereoObservation> pending_seed_obs;
 
     explicit Impl( camera::RectifiedStereoCalibration calibration_in,
                    EstimatorOptions                   options_in )
@@ -1175,6 +1185,13 @@ namespace phad::estimator
     result.diagnostics.num_shared    = num_shared;
     result.diagnostics.num_disparity = num_disparity;
 
+    // pre-M4 round 2: overlap recovered (normal tracking) — the
+    // accumulated-seeding buffer is stale; drop it.
+    if ( num_shared > 0 )
+    {
+      m_impl->pending_seed_obs.clear();
+    }
+
     const bool overlap_broken = m_impl->initialized && num_shared == 0;
 
     if ( overlap_broken && !m_impl->options.enable_reanchor )
@@ -1224,32 +1241,86 @@ namespace phad::estimator
       }
       return result;
     }
-    if ( overlap_broken &&
-         static_cast<int>( m_impl->countStereoObservations( measurement ) ) <
-             m_impl->options.min_seed_observations )
-    {
-      result.status  = UpdateStatus::kRejected;
-      result.message = "insufficient observations to seed new segment";
-      result.diagnostics.window_size =
-          static_cast<std::uint32_t>( m_impl->window.size() );
-      if ( !m_impl->window.empty() )
+    // pre-M4 round 2 残存: 首段跨帧累积播种。enable_accumulated_seed 时,
+    // 未初始化帧的视差观测跨帧累积进 pending_seed_obs (最新覆盖), 累积到
+    // min_seed_observations 个唯一 track 后用合成 measurement 播种 —— 只
+    // 用于 Gate F (首段), V2_03 启动段暗帧 1-7 obs/帧饿死的突破手段。
+    // Gate E (re-anchor) 保持 slice-7 原拒绝: 实测放宽 re-anchor 门槛使
+    // V2_03 re-anchor 9 → 32-68、段错位 +2.739 → +3.9~+5.6m、ATE 3.628 →
+    // 5.2-6.7 —— 门槛是质量门, 只放行足以滋养健康段的富帧。
+    KeyframeMeasurement       accumulated_measurement;
+    const KeyframeMeasurement* effective_measurement = &measurement;
+    const auto accumulate = [ & ]() -> bool {
+      for ( const StereoObservation& obs : measurement.observations )
       {
-        result.diagnostics.prior_key = m_impl->window.front().frame_index;
+        if ( obs.disparity_px > 0.0 )
+        {
+          m_impl->pending_seed_obs[ obs.id ] = obs;  // latest wins
+        }
       }
-      return result;
+      if ( static_cast<int>( m_impl->pending_seed_obs.size() ) <
+           m_impl->options.min_seed_observations )
+      {
+        return false;
+      }
+      accumulated_measurement.timestamp = measurement.timestamp;
+      accumulated_measurement.observations.reserve(
+          m_impl->pending_seed_obs.size() );
+      for ( const auto& [ id, obs ] : m_impl->pending_seed_obs )
+      {
+        ( void )id;
+        accumulated_measurement.observations.push_back( obs );
+      }
+      effective_measurement = &accumulated_measurement;
+      return true;
+    };
+
+    if ( overlap_broken )
+    {
+      const int stereo_count =
+          static_cast<int>( m_impl->countStereoObservations( measurement ) );
+      if ( stereo_count < m_impl->options.min_seed_observations )
+      {
+        result.status  = UpdateStatus::kRejected;
+        result.message = "insufficient observations to seed new segment";
+        result.diagnostics.window_size =
+            static_cast<std::uint32_t>( m_impl->window.size() );
+        if ( !m_impl->window.empty() )
+        {
+          result.diagnostics.prior_key = m_impl->window.front().frame_index;
+        }
+        return result;
+      }
+      m_impl->pending_seed_obs.clear();
     }
     result.diagnostics.low_connectivity =
         m_impl->initialized &&
         num_shared > 0 &&
         static_cast<int>( num_shared ) < m_impl->options.min_shared_landmarks;
 
-    if ( !m_impl->initialized &&
-         static_cast<int>( m_impl->countStereoObservations( measurement ) ) <
-             m_impl->options.min_seed_observations )
+    if ( !m_impl->initialized )
     {
-      result.status  = UpdateStatus::kRejected;
-      result.message = "insufficient observations to seed first segment";
-      return result;
+      const int stereo_count =
+          static_cast<int>( m_impl->countStereoObservations( measurement ) );
+      if ( stereo_count >= m_impl->options.min_seed_observations )
+      {
+        m_impl->pending_seed_obs.clear();
+      }
+      else if ( m_impl->options.enable_accumulated_seed )
+      {
+        if ( !accumulate() )
+        {
+          result.status  = UpdateStatus::kRejected;
+          result.message = "accumulating seed observations (first segment)";
+          return result;
+        }
+      }
+      else
+      {
+        result.status  = UpdateStatus::kRejected;
+        result.message = "insufficient observations to seed first segment";
+        return result;
+      }
     }
 
     // Snapshot for transactional rollback (keyframe only; non-keyframe
@@ -1298,7 +1369,8 @@ namespace phad::estimator
 
     if ( !m_impl->initialized )
     {
-      if ( !m_impl->seedSegment( Eigen::Isometry3d::Identity(), measurement,
+      if ( !m_impl->seedSegment( Eigen::Isometry3d::Identity(),
+                                 *effective_measurement,
                                  result.diagnostics.probe_rejected_block_n,
                                  result.diagnostics.probe_new_lm_n ) )
       {
@@ -1307,6 +1379,7 @@ namespace phad::estimator
         result.message = "failed to backproject landmark on first frame";
         return result;
       }
+      m_impl->pending_seed_obs.clear();
     }
     else if ( overlap_broken )
     {
@@ -1318,7 +1391,7 @@ namespace phad::estimator
         result.message = "non-finite pose initial value";
         return result;
       }
-      if ( !m_impl->seedSegment( anchor, measurement,
+      if ( !m_impl->seedSegment( anchor, *effective_measurement,
                                  result.diagnostics.probe_rejected_block_n,
                                  result.diagnostics.probe_new_lm_n ) )
       {
@@ -1327,6 +1400,7 @@ namespace phad::estimator
         result.message = "failed to backproject landmark on re-anchor frame";
         return result;
       }
+      m_impl->pending_seed_obs.clear();
       ++m_impl->segment_id;
       result.diagnostics.segment_id = m_impl->segment_id;
     }

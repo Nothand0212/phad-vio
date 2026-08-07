@@ -36,7 +36,12 @@ namespace phad::estimator
   {
     int    window_size                = 10;
     int    min_landmark_observations  = 2;
-    int    min_seed_observations      = 10;  // init and re-anchor
+    // init and re-anchor. 10 为 slice-7 原值。pre-M4 round 2 实测否决
+    // (2026-08-07): 阈值 5 与跨帧累积使 V2_03 re-anchor 9 → 32-68, 每段
+    // 只带自身观测、锚误差无法修正 → 段错位贡献 +2.739 → +3.9~+5.6m,
+    // ATE 3.628 → 5.2-6.7。门槛是质量门: 只放行足以滋养健康段的富帧。
+    // CLI: --min-seed-observations。
+    int min_seed_observations = 10;
     // Slice ⑥b: a new landmark must be observed this many frames before
     // seeding (single-frame disparity can be a SAD mismatch). 1 restores
     // the pre-⑥b behavior (tests use 1).
@@ -76,6 +81,12 @@ namespace phad::estimator
     // disables the refresh entirely (E13 pure-gate runs). Bench CLI:
     // --far-refresh-px.
     double far_return_refresh_px = 6.0;
+    // pre-M4 round 2 残存: 首段跨帧累积播种 (SVO DepthFilter 式证据累积)。
+    // 全量累积(含 re-anchor)已被实测否决 —— re-anchor 放宽是纯毒(见
+    // min_seed_observations 注释); 此处仅保留「首段专用」作用域: Gate F
+    // (未初始化) 累积, Gate E (re-anchor) 保持原拒绝。默认关;
+    // CLI: --estimator-enable-accumulated-seed (A/B, 不进 config_hash)。
+    bool enable_accumulated_seed = false;
     // Session sets true when probe_b_path non-empty; NOT in flattenConfig.
     bool enable_probe_b = false;
   };

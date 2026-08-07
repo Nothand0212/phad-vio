@@ -215,6 +215,8 @@ TEST( StereoVoReanchor, SeedGateRejectsWithoutPoisoningState )
   EXPECT_EQ( starved.status, UpdateStatus::kRejected );
   EXPECT_FALSE( starved.estimate.has_value() );
   EXPECT_EQ( starved.diagnostics.segment_id, 0U );
+  // pre-M4 round 2 否决后: re-anchor 门 (Gate E) 恢复原拒绝, 累积只用于
+  // 首段 (Gate F)。
   EXPECT_EQ( starved.message, "insufficient observations to seed new segment" );
 
   // State must be untouched: a fully-observed break frame right after
@@ -268,6 +270,7 @@ TEST( StereoVoReanchor, FirstSegmentSeedGate )
   options.window_size           = 5;
   options.min_shared_landmarks  = 3;
   options.min_seed_observations = 10;
+  options.enable_accumulated_seed = true;  // 首段累积 (默认关, 显式开)
 
   StereoVoEstimator estimator( calibration, options );
 
@@ -280,13 +283,70 @@ TEST( StereoVoReanchor, FirstSegmentSeedGate )
   EXPECT_EQ( starved.status, UpdateStatus::kRejected );
   EXPECT_FALSE( starved.estimate.has_value() );
   EXPECT_EQ( starved.message,
-             "insufficient observations to seed first segment" );
+             "accumulating seed observations (first segment)" );
 
   const auto seeded = estimator.update( makeFrame(
       calibration, Eigen::Isometry3d::Identity(), 100'000'000, kLandmarksA,
       ids_a ) );
   ASSERT_EQ( seeded.status, UpdateStatus::kOk ) << seeded.message;
   EXPECT_EQ( seeded.diagnostics.segment_id, 0U );
+}
+
+TEST( StereoVoReanchor, AccumulatedSeedingSeedsAfterSparseFrames )
+{
+  const auto calibration = makeCalibration();
+  const auto ids_a       = sequentialIds( kLandmarksA.size(), 1 );
+
+  EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
+  options.window_size           = 5;
+  options.min_shared_landmarks  = 3;
+  options.min_seed_observations = 10;
+  options.enable_accumulated_seed = true;  // 首段累积 (默认关, 显式开)
+
+  StereoVoEstimator estimator( calibration, options );
+
+  // Three consecutive sparse frames: each contributes 4 stereo observations,
+  // none reaches min_seed_observations=10 alone. Across frames the buffer
+  // accumulates 10 unique tracks and the third frame seeds from the
+  // accumulated evidence (SVO DepthFilter-style) instead of dying.
+  const auto sparse = [ & ]( std::int64_t t, std::size_t begin,
+                             std::size_t count ) {
+    std::vector<Eigen::Vector3d> landmarks;
+    std::vector<LandmarkId>      ids;
+    for ( std::size_t index = begin; index < begin + count; ++index )
+    {
+      landmarks.push_back( kLandmarksA[ index ] );
+      ids.push_back( ids_a[ index ] );
+    }
+    return estimator.update( makeFrame(
+        calibration, Eigen::Isometry3d::Identity(), t, landmarks, ids ) );
+  };
+
+  const auto first = sparse( 50'000'000, 0, 4 );  // ids 1-4
+  EXPECT_EQ( first.status, UpdateStatus::kRejected );
+  EXPECT_EQ( first.message,
+             "accumulating seed observations (first segment)" );
+
+  const auto second = sparse( 100'000'000, 4, 4 );  // ids 5-8
+  EXPECT_EQ( second.status, UpdateStatus::kRejected );
+  EXPECT_EQ( second.message,
+             "accumulating seed observations (first segment)" );
+
+  // ids 7-10 (two overlap the buffer) → 10 unique tracks → seeded.
+  const auto seeded = sparse( 150'000'000, 6, 4 );
+  ASSERT_EQ( seeded.status, UpdateStatus::kOk ) << seeded.message;
+  EXPECT_TRUE( seeded.estimate.has_value() );
+  EXPECT_EQ( seeded.diagnostics.segment_id, 0U );
+
+  // The seeded segment must keep accepting normal frames afterward, and the
+  // accumulation buffer must be drained (no stale re-seed).
+  const auto continued = estimator.update( makeFrame(
+      calibration, Eigen::Isometry3d::Identity(), 200'000'000,
+      std::vector<Eigen::Vector3d>( kLandmarksA.begin(),
+                                    kLandmarksA.begin() + 10 ),
+      std::vector<LandmarkId>( ids_a.begin(), ids_a.begin() + 10 ) ) );
+  EXPECT_EQ( continued.status, UpdateStatus::kOk ) << continued.message;
 }
 
 TEST( StereoVoReanchor, AnchorFollowsConstantVelocityOption )

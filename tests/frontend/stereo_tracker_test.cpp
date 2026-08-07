@@ -75,6 +75,47 @@ namespace
     return best;
   }
 
+  // 确定性伪随机纹理, 值域 [80, 200) —— 纯 (x,y) 函数, 左右图可复用同一
+  // 纹理, 精确仿射差(右 = 左平移 d 再 -60)下零均值 SAD 真匹配代价恰为 0。
+  [[nodiscard]] double textureValue( int x, int y )
+  {
+    double v = std::sin( 12.9898 * static_cast<double>( x ) +
+                         78.233 * static_cast<double>( y ) ) *
+               43758.5453;
+    v -= std::floor( v );
+    return 80.0 + 120.0 * v;
+  }
+
+  // 纹理立体帧: 右图 = 左图水平平移 disparity_px 后整体减 right_dim。
+  // 真视差恰为 disparity_px(整像素), 无噪声 —— 隔离 SAD 代价层本身。
+  [[nodiscard]] phad::sensor::StereoFrame renderTextureStereo(
+      const phad::camera::RectifiedStereoCalibration& calibration,
+      phad::common::Timestamp timestamp, int disparity_px, double right_dim )
+  {
+    const int width  = calibration.imageWidth();
+    const int height = calibration.imageHeight();
+    std::vector<std::uint8_t> left_pixels(
+        static_cast<std::size_t>( width * height ), 0U );
+    std::vector<std::uint8_t> right_pixels(
+        static_cast<std::size_t>( width * height ), 0U );
+    for ( int y = 0; y < height; ++y )
+    {
+      for ( int x = 0; x < width; ++x )
+      {
+        const double t = textureValue( x, y );
+        const double r = textureValue( x + disparity_px, y ) - right_dim;
+        left_pixels[ static_cast<std::size_t>( y * width + x ) ] =
+            static_cast<std::uint8_t>( std::clamp( t, 0.0, 255.0 ) );
+        right_pixels[ static_cast<std::size_t>( y * width + x ) ] =
+            static_cast<std::uint8_t>( std::clamp( r, 0.0, 255.0 ) );
+      }
+    }
+    return phad::sensor::StereoFrame{
+        timestamp,
+        phad::sensor::Image{ width, height, 1, std::move( left_pixels ) },
+        phad::sensor::Image{ width, height, 1, std::move( right_pixels ) } };
+  }
+
   TEST( StereoTrackerTest, SurvivesPureTranslationWithStableIds )
   {
     const auto                         calibration = makeRectifiedCalibration();
@@ -370,6 +411,71 @@ namespace
     }
     ASSERT_GE( valid_count, points.size() / 2U );
     EXPECT_LT( tracks.stats.epipolar_median_px, 1.0 );
+  }
+
+  TEST( StereoTrackerTest, ZeroMeanSadRecoversDimmedRightExposure )
+  {
+    const auto calibration = makeRectifiedCalibration();
+
+    // 帧 2 右图 = 左图平移 9 px 后整体减 60 灰阶(V2_03 式 cam1 欠曝光):
+    // 任意像素处 L−R ≡ 60 → 零均值 SAD 真匹配代价恰为 0, 非归一化 SAD
+    // 的 225×60 固定惩罚使唯一性相对裕度 (s2−s1)/s1 ≈ 33% << 0.5 → 全拒。
+    // CLAHE 与帧级曝光校正(③)都关闭, 隔离 SAD 代价层本身。注意黑底 blob
+    // 场景不能用: 黑背景在零均值下也是零代价(无判别), 纹理场景才能复现
+    // V2_03 暗帧"平坦区噪声底 vs 真匹配"的判别结构。
+    const auto run = [ & ]( bool zero_mean ) {
+      StereoTrackerOptions options = testOptions( 12 );
+      options.enable_clahe              = false;
+      options.enable_exposure_normalize = false;
+      options.stereo_check_bidir        = false;
+      options.enable_zero_mean_sad      = zero_mean;
+      StereoTracker tracker( calibration, options );
+      ( void )tracker.process( renderTextureStereo(
+          calibration, phad::common::Timestamp{ kStereoEpochNs }, 9,
+          0.0 ) );
+      return tracker.process( renderTextureStereo(
+          calibration,
+          phad::common::Timestamp{ kStereoEpochNs + kStereoStepNs }, 9,
+          60.0 ) );
+    };
+
+    const FrameTracks raw = run( false );
+    const FrameTracks zm  = run( true );
+
+    std::size_t raw_valid = 0;
+    std::size_t zm_valid  = 0;
+    for ( const auto& observation : raw.observations )
+    {
+      if ( observation.status == StereoStatus::kValid )
+      {
+        ++raw_valid;
+      }
+    }
+    for ( const auto& observation : zm.observations )
+    {
+      if ( observation.status == StereoStatus::kValid )
+      {
+        ++zm_valid;
+      }
+    }
+
+    EXPECT_LT( raw_valid, zm_valid );
+    EXPECT_GE( zm_valid, 3U );
+
+    // 零均值路径产出的视差必须仍然符合场景几何(真位移 9 px)。
+    std::size_t disp_ok = 0;
+    for ( const auto& observation : zm.observations )
+    {
+      if ( observation.status != StereoStatus::kValid )
+      {
+        continue;
+      }
+      if ( std::abs( observation.disparity_px - 9.0 ) < 1.0 )
+      {
+        ++disp_ok;
+      }
+    }
+    EXPECT_GE( disp_ok, zm_valid / 2U );
   }
 
   TEST( StereoTrackerTest, MissingRightBlobBecomesNoRightMatch )

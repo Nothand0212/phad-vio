@@ -115,20 +115,54 @@ namespace phad::frontend
     }
 
     [[nodiscard]] int sadPatch( const cv::Mat& left, const cv::Mat& right,
-                                int u_l, int v_l, int u_r, int v_r, int half )
+                                int u_l, int v_l, int u_r, int v_r, int half,
+                                bool zero_mean = false )
     {
-      int sad = 0;
+      if ( !zero_mean )
+      {
+        int sad = 0;
+        for ( int dy = -half; dy <= half; ++dy )
+        {
+          const auto* lrow = left.ptr<std::uint8_t>( v_l + dy );
+          const auto* rrow = right.ptr<std::uint8_t>( v_r + dy );
+          for ( int dx = -half; dx <= half; ++dx )
+          {
+            sad += std::abs( static_cast<int>( lrow[ u_l + dx ] ) -
+                             static_cast<int>( rrow[ u_r + dx ] ) );
+          }
+        }
+        return sad;
+      }
+      // 零均值 SAD: 先算 patch 均值差 c=(ΣL-ΣR)/N, 再 Σ|(L-R)-c| —— 等价于
+      // 左右 patch 各自去均值后的 SAD, 对单调整亮度差(offset)不变。与帧级
+      // ③(cv::add 饱和偏移)的关键区别: 不改写像素, 无饱和裁剪毁对比度。
+      // 代价 ~2×(两遍扫描); 仅当 enable_zero_mean_sad 打开时走此路径。
+      const int   n     = ( 2 * half + 1 ) * ( 2 * half + 1 );
+      long long   sum_l = 0;
+      long long   sum_r = 0;
       for ( int dy = -half; dy <= half; ++dy )
       {
         const auto* lrow = left.ptr<std::uint8_t>( v_l + dy );
         const auto* rrow = right.ptr<std::uint8_t>( v_r + dy );
         for ( int dx = -half; dx <= half; ++dx )
         {
-          sad += std::abs( static_cast<int>( lrow[ u_l + dx ] ) -
-                           static_cast<int>( rrow[ u_r + dx ] ) );
+          sum_l += lrow[ u_l + dx ];
+          sum_r += rrow[ u_r + dx ];
         }
       }
-      return sad;
+      const double c   = static_cast<double>( sum_l - sum_r ) / n;
+      double       sad = 0.0;
+      for ( int dy = -half; dy <= half; ++dy )
+      {
+        const auto* lrow = left.ptr<std::uint8_t>( v_l + dy );
+        const auto* rrow = right.ptr<std::uint8_t>( v_r + dy );
+        for ( int dx = -half; dx <= half; ++dx )
+        {
+          sad += std::abs(
+              static_cast<double>( lrow[ u_l + dx ] ) - rrow[ u_r + dx ] - c );
+        }
+      }
+      return static_cast<int>( std::llround( sad ) );
     }
 
     // Census 变换 5×5 窗: 中心像素 vs 周围 24 邻域, 产出 24bit 描述子。
@@ -173,7 +207,8 @@ namespace phad::frontend
 
     [[nodiscard]] SadPeak searchRow( const cv::Mat& left, const cv::Mat& right,
                                      int u_l, int v_l, int v_r, int u_lo,
-                                     int u_hi, int half, bool use_census )
+                                     int u_hi, int half, bool use_census,
+                                     bool zero_mean )
     {
       SadPeak peak;
       if ( u_lo > u_hi || !patchInBounds( left, u_l, v_l, half ) )
@@ -189,7 +224,8 @@ namespace phad::frontend
       const auto cost = [&]( int u_r, int v_r ) {
         return census_effective
                    ? hammingDist( desc_l, census5x5( right, u_r, v_r ) )
-                   : sadPatch( left, right, u_l, v_l, u_r, v_r, half );
+                   : sadPatch( left, right, u_l, v_l, u_r, v_r, half,
+                               zero_mean );
       };
 
       int  best_u       = u_lo;
@@ -206,7 +242,7 @@ namespace phad::frontend
         // 与 matchRight 相同的 tiebreak: hamming 并列时取 SAD 最小者。
         const int tie_sad =
             census_effective && ( !found || sad <= best_sad )
-                ? sadPatch( left, right, u_l, v_l, u_r, v_r, half )
+                ? sadPatch( left, right, u_l, v_l, u_r, v_r, half, zero_mean )
                 : 0;
         if ( !found || sad < best_sad ||
              ( census_effective && sad == best_sad &&
@@ -235,7 +271,8 @@ namespace phad::frontend
 
     [[nodiscard]] bool refineSubpixel( const cv::Mat& left, const cv::Mat& right,
                                        int u_l, int v_l, int u_r, int v_r,
-                                       int half, double& u_r_sub )
+                                       int half, bool zero_mean,
+                                       double& u_r_sub )
     {
       if ( !patchInBounds( left, u_l, v_l, half ) ||
            !patchInBounds( right, u_r - 1, v_r, half ) ||
@@ -243,9 +280,12 @@ namespace phad::frontend
       {
         return false;
       }
-      const int    s0 = sadPatch( left, right, u_l, v_l, u_r - 1, v_r, half );
-      const int    s1 = sadPatch( left, right, u_l, v_l, u_r, v_r, half );
-      const int    s2 = sadPatch( left, right, u_l, v_l, u_r + 1, v_r, half );
+      const int s0 =
+          sadPatch( left, right, u_l, v_l, u_r - 1, v_r, half, zero_mean );
+      const int s1 =
+          sadPatch( left, right, u_l, v_l, u_r, v_r, half, zero_mean );
+      const int s2 =
+          sadPatch( left, right, u_l, v_l, u_r + 1, v_r, half, zero_mean );
       const double denom =
           static_cast<double>( s0 - 2 * s1 + s2 );
       if ( std::abs( denom ) < 1e-12 )
@@ -478,14 +518,15 @@ namespace phad::frontend
                 }
                 const int cost_val =
                     census ? hammingDist( desc_l, census5x5( right, u_r, v_r ) )
-                           : sadPatch( left, right, u_l, v_l, u_r, v_r,
-                                       half );
+                           : sadPatch( left, right, u_l, v_l, u_r, v_r, half,
+                                       options.enable_zero_mean_sad );
                 // Census 量化 → 相邻列 Hamming 常并列。用 SAD 作 tiebreak:
                 // 在 hamming 相同的位置里取 SAD 最小者, 使 best_u 落在真实
                 // 匹配处(子像素抛物线的代价函数才有正确极小)。
                 const int tie_sad =
                     census && ( !found_peak || cost_val <= best_cost )
-                        ? sadPatch( left, right, u_l, v_l, u_r, v_r, half )
+                        ? sadPatch( left, right, u_l, v_l, u_r, v_r, half,
+                                    options.enable_zero_mean_sad )
                         : 0;
                 if ( !found_peak || cost_val < best_cost ||
                      ( census && cost_val == best_cost &&
@@ -555,8 +596,9 @@ namespace phad::frontend
                   {
                     continue;
                   }
-                  const int sad = sadPatch( left, right, u_l, v_l, u_r, v_r,
-                                            half );
+                  const int sad = sadPatch(
+                      left, right, u_l, v_l, u_r, v_r, half,
+                      options.enable_zero_mean_sad );
                   second_sad = std::min( second_sad, sad );
                 }
               }
@@ -584,7 +626,7 @@ namespace phad::frontend
             }
           }
           return refineSubpixel( left, right, u_l, v_l, out_u, out_v, half,
-                                 out_sub );
+                                 options.enable_zero_mean_sad, out_sub );
         };
 
         // 主路径 SAD;被拒(无峰/唯一性/子像素)时,暗曝光帧(如 V2_03
@@ -614,7 +656,8 @@ namespace phad::frontend
                 best_u + static_cast<int>( std::floor( d_max ) );
             const SadPeak back =
                 searchRow( right, left, best_u, best_v, best_v, back_lo,
-                           back_hi, half, used_census );
+                           back_hi, half, used_census,
+                           options.enable_zero_mean_sad );
           if ( !back.ok ||
                std::abs( static_cast<double>( back.u - u_l ) ) >
                    options.stereo_bidir_px )
@@ -768,6 +811,28 @@ namespace phad::frontend
     {
       left  = left_raw;
       right = right_raw;
+    }
+    // pre-M4 round 2: frame-level exposure normalization. CLAHE equalizes
+    // each camera independently and does not remove a systematic cam0/cam1
+    // brightness offset; on V2_03 dark frames the raw-SAD cost carries a
+    // 225-px × |offset| penalty that drowns the true minimum. Align the
+    // right image's mean to the left before matching (SVO-style affine
+    // offset, frame-level form). Saturation is safe: cv::add clamps [0,255].
+    if ( m_impl->options.enable_exposure_normalize )
+    {
+      const double mean_l = cv::mean( left )[0];
+      const double mean_r = cv::mean( right )[0];
+      const double offset = mean_l - mean_r;
+      // Threshold 20 px: only correct systematic large exposure mismatch.
+      // Measured on all 11 EuRoC sequences (2026-08-07): healthy sequences
+      // stay |offset| < 20 (MH_04 max 17.9, V1_01 max 20.7), while V2_03
+      // dark frames reach +38~+89. A small correction (MH_01 +2.2) hurt
+      // MH_01 ATE +41% — the saturating cv::add clips bright pixels and
+      // destroys contrast, so leave small offsets to the raw SAD.
+      if ( std::abs( offset ) > 20.0 )
+      {
+        cv::add( right, cv::Scalar( offset ), right );
+      }
     }
     FrameStats stats{};
 

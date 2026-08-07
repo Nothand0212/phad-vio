@@ -93,6 +93,24 @@ vs census 兜底 on 7937m/225 次 >5m 锚跳(census 暗帧匹配污染 PnP → �
 CLI 为 `--tracker-enable-census`(显式打开, 对照/复测用; 旧
 `--tracker-disable-census` 已移除)。census 代码保留但默认路径不执行。
 
+pre-M4 round 2（2026-08-07, `8906684` dirty）**7 变体全实测否决**：② 累积
+播种 / ③ 帧级曝光归一化 / 零均值 SAD / no-CV 锚 / seed 门 20 / 首段专用
+累积——默认全部回退 slice-7（`default_revert` 复验 MH_01 0.080964 /
+V2_03 3.6278 / 9 re-anchor / 913 rejected / 500 pnp，逐项一致）。变更：
+- `--tracker-enable-exposure-norm`（替代旧 `--tracker-disable-exposure-norm`；
+  默认关；A/B 不进 config_hash——tracker attribution 约定）
+- `--tracker-enable-zero-mean-sad`（默认关；A/B；代价 ~2×）
+- `--no-cv-init`（`estimator.use_constant_velocity_init=false`；默认关；
+  A/B）
+- `--estimator-enable-accumulated-seed`（Gate F 首段累积 only；默认关；
+  A/B）
+- `--min-seed-observations <n>` 保持可调（进 `flattenConfig` →
+  `config_hash`；默认 10）
+- ③ 阈值 1.0 时 MH_01 +41%（`cv::add` 饱和裁剪毁对比度）——零均值 SAD
+  的 patch 级双遍扫描（不改像素）是曝光问题的安全升级路径，M4 复测候选。
+详情与全实验矩阵见
+`docs/benchmark/m3.3/prem4_round2_8906684_402d1925.md`。
+
 健康序列（如 MH_01）仍应 `segment_id` 全程为 0；断裂序列上段边界表现为
 该列跳变。`summary.json` 侧对应 `robustness.reanchors` /
 `robustness.pnp_successes` / `robustness.pnp_fallbacks` /

@@ -56,7 +56,9 @@ namespace
       "                     [--zombie-drop-age <n>]\n"
       "                     [--hanging-gate-m <meters>]\n"
       "                     [--far-refresh-px <px>]\n"
-      "                     [--tracker-enable-census]\n";
+      "                     [--tracker-enable-census]\n"
+      "                     [--tracker-disable-exposure-norm]\n"
+      "                     [--min-seed-observations <n>]\n";
 
 #ifndef PHAD_SOURCE_DIR
 #define PHAD_SOURCE_DIR ""
@@ -90,6 +92,9 @@ namespace
     std::optional<int>           zombie_drop_age;
     std::optional<double>        hanging_gate_m;
     std::optional<double>        far_refresh_px;
+    // pre-M4 round 2: 首段/re-anchor 播种阈值(默认 5, 含跨帧累积);
+    // 进 flattenConfig → config_hash。
+    std::optional<int> min_seed_observations;
 
     // Attribution A/B overrides (Slice ⑥ frontend mechanisms).
     std::optional<double> tracker_quality_level;
@@ -98,6 +103,18 @@ namespace
     bool                  no_median_flow = false;
     bool                  no_fransac     = false;
     bool                  no_census      = true;  // census 默认关闭(实测否决)
+    // 曝光归一化默认关 (实测否决, 见 stereoTracker.hpp 注释);
+    // --tracker-enable-exposure-norm 打开 (A/B)。
+    bool enable_exposure_norm = false;
+    // 零均值 SAD 默认关 (enable_zero_mean_sad=false), --tracker-enable-
+    // zero-mean-sad 打开 (A/B)。
+    bool enable_zero_mean_sad = false;
+    // CV 常量速度初始化默认开; --no-cv-init 关闭 → re-anchor 锚与 BA init
+    // 回退到最后接受位姿 (A/B, 进 config_hash)。
+    bool no_cv_init = false;
+    // 首段累积播种默认关 (实测否决全量版, 残存首段专用版);
+    // --estimator-enable-accumulated-seed 打开 (A/B)。
+    bool enable_accumulated_seed = false;
   };
 
   [[nodiscard]] bool parseDouble( std::string_view text, double& value )
@@ -182,6 +199,26 @@ namespace
       if ( flag == "--tracker-enable-census" )
       {
         arguments.no_census = false;
+        continue;
+      }
+      if ( flag == "--tracker-enable-exposure-norm" )
+      {
+        arguments.enable_exposure_norm = true;
+        continue;
+      }
+      if ( flag == "--tracker-enable-zero-mean-sad" )
+      {
+        arguments.enable_zero_mean_sad = true;
+        continue;
+      }
+      if ( flag == "--no-cv-init" )
+      {
+        arguments.no_cv_init = true;
+        continue;
+      }
+      if ( flag == "--estimator-enable-accumulated-seed" )
+      {
+        arguments.enable_accumulated_seed = true;
         continue;
       }
       if ( index + 1 >= argc )
@@ -345,6 +382,16 @@ namespace
           return false;
         }
         arguments.far_refresh_px = parsed;
+      }
+      else if ( flag == "--min-seed-observations" )
+      {
+        std::uint64_t parsed = 0;
+        if ( !parseUint64( value, parsed ) || parsed < 1 )
+        {
+          std::cerr << "--min-seed-observations expects a positive integer\n";
+          return false;
+        }
+        arguments.min_seed_observations = static_cast<int>( parsed );
       }
       else if ( flag == "--tracker-quality-level" )
       {
@@ -666,6 +713,21 @@ namespace
     session_options.tracker.enable_median_flow = !arguments.no_median_flow;
     session_options.tracker.enable_fransac     = !arguments.no_fransac;
     session_options.tracker.enable_census      = !arguments.no_census;
+    session_options.tracker.enable_exposure_normalize =
+        arguments.enable_exposure_norm;
+    session_options.tracker.enable_zero_mean_sad =
+        arguments.enable_zero_mean_sad;
+    if ( arguments.no_cv_init )
+    {
+      session_options.estimator.use_constant_velocity_init = false;
+    }
+    session_options.estimator.enable_accumulated_seed =
+        arguments.enable_accumulated_seed;
+    if ( arguments.min_seed_observations.has_value() )
+    {
+      session_options.estimator.min_seed_observations =
+          *arguments.min_seed_observations;
+    }
     if ( arguments.outlier_avg_reproj_px.has_value() )
     {
       session_options.estimator.outlier_avg_reproj_px =
