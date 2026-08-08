@@ -547,14 +547,15 @@ namespace phad::estimator
             Eigen::Matrix3d::Identity() * 1e-8 );
         // - biasAccOmegaInit (预积分 biasHat 初始不确定度) 在安装的 4.3a0
         //   中默认 I_6x6·1.0, 逐样本注入 dt·1.0 到 ΔR/ΔV/Δp 协方差
-        //   (σ ≈ √dt, 因子权重为 0)。取 bias prior sigma² (C15 固定值)。
+        //   (σ ≈ √dt, 因子权重为 0)。M4.3d 起与 bias prior 解耦: prior
+        //   sigma 已放宽到 1e-1 (图权重), 但 biasHat 的初始不确定度应反映
+        //   静止 init 的实际精度 (~1e-3 rad/s), 固定取 gyro 1e-3² /
+        //   acc 1e-1² (原 C15 数值, 不随 prior 扫参)。
         gtsam::Matrix6 bias_init_cov = gtsam::Matrix6::Zero();
         bias_init_cov.block<3, 3>( 0, 0 ) =
-            Eigen::Matrix3d::Identity() * options.imu_prior_bias_gyro_sigma *
-            options.imu_prior_bias_gyro_sigma;
+            Eigen::Matrix3d::Identity() * 1e-3 * 1e-3;
         bias_init_cov.block<3, 3>( 3, 3 ) =
-            Eigen::Matrix3d::Identity() * options.imu_prior_bias_acc_sigma *
-            options.imu_prior_bias_acc_sigma;
+            Eigen::Matrix3d::Identity() * 1e-1 * 1e-1;
         imu_params->setBiasAccOmegaInit( bias_init_cov );
         imu_pose_prior_noise = makeImuPosePriorNoise( options );
         imu_vel_prior_noise  = gtsam::noiseModel::Isotropic::Sigma(

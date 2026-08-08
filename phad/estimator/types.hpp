@@ -113,15 +113,18 @@ namespace phad::estimator
     double imu_gyr_rw       = 1.9393e-5;
     // 最老帧 / gap 恢复帧 priors（C11/C15，中等 sigma 不扫参）：
     // X prior 放松（IMU 因子约束重力/速度）；V prior 0 ± 1.0 m/s；
-    // B prior 0 ± gyro 1e-3 rad/s / acc 1e-1 m/s²。
-    // C15 原值 acc 1e-2 在 IMU 因子权重修复 (integrationCovariance/
-    // biasAccOmegaInit) 后过紧: 真实 acc bias (EuRoC ~2e-2-5e-2, 合成
-    // KnownBias 注入 0.3) 无法被图吸收 → 泄漏进速度 (重力量级下预积分链
-    // 的零残差模式, V prior σ=1.0 太松) → 位姿漂移。1e-1 让 B 吸收,
-    // 观测性 (IMU 因子 + 视觉) 仍主导偏置估计。C15 门不过时扫参路径。
+    // B prior 0 ± gyro 1e-1 rad/s / acc 1e-1 m/s²。
+    // C15: acc 原 1e-2 过紧 (EuRoC ~2e-2-5e-2, KnownBias 注入 0.3 无法
+    // 被图吸收 → 泄漏进速度 → 位姿漂移) → 1e-1。
+    // M4.3d: gyro 原 1e-3 有同样问题且更严重 —— prior 信息量 (1/σ²=1e6)
+    // 远大于短链上 IMU 因子的局部 bias 信息 (0.5s 悬停段实测 ≈324),
+    // 首帧 LM 一步把正确的 init bias (EuRoC 实测 z 轴 0.080 rad/s) 压回 0,
+    // 之后预积分以错误 bias 重建 → 航向按 (b_true−b_est)·t 累积漂移
+    // (MH_01 转误差 ±30°, ATE 0.458 vs 视觉门 0.100)。1e-1 后 bias 由
+    // init 初值 + 因子链观测性决定 (yaw 方向由视觉+地标世界位锚定)。
     double imu_prior_pose_sigma        = 1e-2;
     double imu_prior_vel_sigma         = 1.0;
-    double imu_prior_bias_gyro_sigma   = 1e-3;
+    double imu_prior_bias_gyro_sigma   = 1e-1;
     double imu_prior_bias_acc_sigma    = 1e-1;
     // ---- M4.3 静止初始化（进 config_hash）----
     // 检测窗口（累积缓冲尾部的连续 IMU 样本跨度）与方差阈值：窗口内
