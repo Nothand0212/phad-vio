@@ -162,6 +162,7 @@ namespace
   EstimatorOptions defaultPnpOptions()
   {
     EstimatorOptions options;
+    options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.window_size          = 5;
@@ -176,6 +177,7 @@ namespace
 TEST( StereoVoPnpTest, RejectsNonPositivePnpReproj )
 {
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.pnp_reproj_px = 0.0;
   EXPECT_THROW( ( StereoVoEstimator{ makeCalibration(), options } ),
@@ -185,6 +187,7 @@ TEST( StereoVoPnpTest, RejectsNonPositivePnpReproj )
 TEST( StereoVoPnpTest, RejectsInvalidPnpConfidence )
 {
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.pnp_confidence = 1.0;  // 要求 ∈ (0, 1)
   EXPECT_THROW( ( StereoVoEstimator{ makeCalibration(), options } ),
@@ -194,6 +197,7 @@ TEST( StereoVoPnpTest, RejectsInvalidPnpConfidence )
 TEST( StereoVoPnpTest, RejectsMinPnpInliersBelowFour )
 {
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.min_pnp_inliers = 3;
   EXPECT_THROW( ( StereoVoEstimator{ makeCalibration(), options } ),

@@ -133,6 +133,7 @@ namespace
   EstimatorOptions defaultCullOptions()
   {
     EstimatorOptions options;
+    options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.window_size           = 8;
@@ -160,6 +161,7 @@ namespace
 TEST( StereoVoCullRebirthTest, DefaultsBlockRebirthAndEmptyList )
 {
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   EXPECT_TRUE( options.block_culled_rebirth );
   UpdateDiagnostics d;
@@ -238,6 +240,7 @@ TEST( StereoVoCullRebirthTest, CheiralityIdsAppearInCulledLandmarkIds )
   // the obs stays in-window for dropCheiralityLandmarks).
   const auto       calibration = makeCalibration();
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.window_size                = 8;
   options.min_shared_landmarks       = 2;

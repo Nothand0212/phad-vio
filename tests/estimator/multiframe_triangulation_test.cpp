@@ -144,7 +144,9 @@ TEST( MultiFrameTriangulationTest, BuildGraphSkipsZeroDisparity )
   // min_landmark_observations: the landmark enters the BA graph only once it
   // has two real stereo observations (frame 4), never earlier.
   Scene             scene;
-  StereoVoEstimator estimator( scene.calibration );
+  EstimatorOptions  options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
+  StereoVoEstimator estimator( scene.calibration, options );
 
   auto r0 = estimator.update( scene.frame( translated( 0.0 ), 0,
                               /*include_stereo_target=*/false,

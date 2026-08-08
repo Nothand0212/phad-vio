@@ -425,6 +425,25 @@ namespace phad::estimator
     // D12: overlap 断开后 landmark 表只重建一次;重建窗口内的种子持续累积,
     // 直到 overlap 恢复 (num_shared > 0) 重置。
     bool imu_window_rebuilt = false;
+    // ---- M4.3 静止初始化 ----
+    // kNone: IMU-off (状态机不激活); kCollecting: init 期帧拒绝, 段累积;
+    // kReady: 检测通过, 虚拟 t0 状态帧已播种; kFailed: sticky (C9)。
+    enum class InitPhase : std::uint8_t { kNone, kCollecting, kReady, kFailed };
+    InitPhase                                init_phase = InitPhase::kNone;
+    // 累积缓冲 (被拒帧段拼接, 共享边界去重同 pending 语义)。
+    std::vector<sensor::ImuMeasurement>      init_imu;
+    // 数据起点 (首个被拒帧时刻;gap 重置后更新) —— 超时判定基准。
+    common::Timestamp                        init_start_ts{ 0 };
+    // 检测通过时缓冲尾窗口的起点 (t0 = 第一个状态帧时刻, D10)。
+    common::Timestamp                        init_t0{ 0 };
+    // init 状态: 虚拟帧 (R_W_I0, V=0, B=bias0) 与测量重力幅值 (C10)。
+    Eigen::Isometry3d                        init_T_W_I0 =
+        Eigen::Isometry3d::Identity();
+    gtsam::imuBias::ConstantBias             init_bias0;
+    double                                   init_g = 0.0;
+    std::string                              init_failure;
+    // 被拒帧 diag bias 回填用 (上一接受值;IMU-off 恒 0)。
+    gtsam::imuBias::ConstantBias             last_reported_bias;
 
     explicit Impl( camera::RectifiedStereoCalibration calibration_in,
                    EstimatorOptions                   options_in )
@@ -497,6 +516,14 @@ namespace phad::estimator
           throw std::invalid_argument(
               "EstimatorOptions IMU prior sigmas must be > 0" );
         }
+        if ( !( options.imu_init_window_s > 0.0 ) ||
+             !( options.imu_init_gyro_std > 0.0 ) ||
+             !( options.imu_init_accel_std > 0.0 ) ||
+             !( options.imu_init_timeout_s > 0.0 ) )
+        {
+          throw std::invalid_argument(
+              "EstimatorOptions IMU init thresholds must be > 0" );
+        }
         imu_params =
             gtsam::PreintegratedCombinedMeasurements::Params::MakeSharedU(
                 options.imu_gravity );
@@ -513,6 +540,22 @@ namespace phad::estimator
         imu_params->setBiasOmegaCovariance(
             Eigen::Matrix3d::Identity() * options.imu_gyr_rw *
             options.imu_gyr_rw );
+        // 两个易漏项 (GTSAM 默认值会毁掉权重):
+        // - integrationCovariance 默认 I·1.0, 逐样本注入 dt·1.0 到 Δp 协方差
+        //   → 位置约束几乎失效。取 GTSAM 例值 1e-8 (积分离散误差)。
+        imu_params->setIntegrationCovariance(
+            Eigen::Matrix3d::Identity() * 1e-8 );
+        // - biasAccOmegaInit (预积分 biasHat 初始不确定度) 在安装的 4.3a0
+        //   中默认 I_6x6·1.0, 逐样本注入 dt·1.0 到 ΔR/ΔV/Δp 协方差
+        //   (σ ≈ √dt, 因子权重为 0)。取 bias prior sigma² (C15 固定值)。
+        gtsam::Matrix6 bias_init_cov = gtsam::Matrix6::Zero();
+        bias_init_cov.block<3, 3>( 0, 0 ) =
+            Eigen::Matrix3d::Identity() * options.imu_prior_bias_gyro_sigma *
+            options.imu_prior_bias_gyro_sigma;
+        bias_init_cov.block<3, 3>( 3, 3 ) =
+            Eigen::Matrix3d::Identity() * options.imu_prior_bias_acc_sigma *
+            options.imu_prior_bias_acc_sigma;
+        imu_params->setBiasAccOmegaInit( bias_init_cov );
         imu_pose_prior_noise = makeImuPosePriorNoise( options );
         imu_vel_prior_noise  = gtsam::noiseModel::Isotropic::Sigma(
             3, options.imu_prior_vel_sigma );
@@ -694,6 +737,111 @@ namespace phad::estimator
       vel_out  = v;
       bias_out = last.bias;
       return true;
+    }
+
+    // M4.3: 静止检测 (设计稿 §5.1)。窗口 = init_imu 尾部跨度 ≥
+    // imu_init_window_s 的连续样本;逐轴 std 全部低于阈值 → 静止。
+    // 通过: 填充 init 状态 (t0 / R_W_I0 / bias0 / g), 缓冲裁剪为窗口
+    // 部分 (首条预积分段 = [t0, t_cur])。失败: 不裁剪, 滑动窗口下帧
+    // 重试。返回 false 也可能表示缓冲尚不足窗口长度。
+    [[nodiscard]] bool runStaticInitDetection()
+    {
+      if ( init_imu.size() < 2 )
+      {
+        return false;
+      }
+      const std::int64_t window_ns = static_cast<std::int64_t>(
+          std::llround( options.imu_init_window_s * 1e9 ) );
+      std::size_t start = init_imu.size() - 1;
+      const std::int64_t t_end = init_imu.back().timestamp.nanoseconds();
+      while ( start > 0 &&
+              t_end - init_imu[ start ].timestamp.nanoseconds() <
+                  window_ns )
+      {
+        --start;  // 当前起点跨窗不足 → 前移一位 (更早起点)
+      }
+      if ( t_end - init_imu[ start ].timestamp.nanoseconds() < window_ns )
+      {
+        return false;  // 缓冲不足一个窗口
+      }
+
+      Eigen::Vector3d g_sum = Eigen::Vector3d::Zero();
+      Eigen::Vector3d a_sum = Eigen::Vector3d::Zero();
+      const std::size_t n = init_imu.size() - start;
+      for ( std::size_t i = start; i < init_imu.size(); ++i )
+      {
+        const auto& m = init_imu[ i ];
+        g_sum += Eigen::Vector3d( m.gyro_radps[ 0 ], m.gyro_radps[ 1 ],
+                                  m.gyro_radps[ 2 ] );
+        a_sum += Eigen::Vector3d( m.accel_mps2[ 0 ], m.accel_mps2[ 1 ],
+                                  m.accel_mps2[ 2 ] );
+      }
+      const Eigen::Vector3d g_mean = g_sum / static_cast<double>( n );
+      const Eigen::Vector3d a_mean = a_sum / static_cast<double>( n );
+      Eigen::Vector3d       g_var  = Eigen::Vector3d::Zero();
+      Eigen::Vector3d       a_var  = Eigen::Vector3d::Zero();
+      for ( std::size_t i = start; i < init_imu.size(); ++i )
+      {
+        const auto& m = init_imu[ i ];
+        const Eigen::Vector3d g( m.gyro_radps[ 0 ], m.gyro_radps[ 1 ],
+                                 m.gyro_radps[ 2 ] );
+        const Eigen::Vector3d a( m.accel_mps2[ 0 ], m.accel_mps2[ 1 ],
+                                 m.accel_mps2[ 2 ] );
+        const Eigen::Vector3d dg = g - g_mean;
+        const Eigen::Vector3d da = a - a_mean;
+        g_var += dg.cwiseProduct( dg );
+        a_var += da.cwiseProduct( da );
+      }
+      const Eigen::Vector3d g_std =
+          ( g_var / static_cast<double>( n ) ).cwiseSqrt();
+      const Eigen::Vector3d a_std =
+          ( a_var / static_cast<double>( n ) ).cwiseSqrt();
+      if ( g_std.maxCoeff() >= options.imu_init_gyro_std ||
+           a_std.maxCoeff() >= options.imu_init_accel_std )
+      {
+        return false;  // 运动中: 滑动窗口下帧重试
+      }
+
+      // 通过: t0 = 窗口起点 (第一个状态帧, D10); R_W_I0 使 body 系"上"
+      // (gravity_dir = 静止时比力方向, 即 -n_gravity 方向) 对齐世界 Z
+      // (roll/pitch), yaw 自由 (C5, ATE 吸收)。静止时世界 Z 即与 -g_w
+      // 对齐。注意目标必须是 +UnitZ: FromTwoVectors(gravity_dir, -UnitZ)
+      // 会把传感器"上"映射到世界"下" (π 翻转, 非 gauge, 首个运动段
+      // IMU 残差 -2g·Δt 与 X prior 冲突)。
+      init_t0      = init_imu[ start ].timestamp;
+      const Eigen::Vector3d gravity_dir = a_mean.normalized();
+      init_g       = a_mean.norm();
+      if ( !std::isfinite( init_g ) || init_g <= 0.0 )
+      {
+        init_g = options.imu_gravity;  // C10 兜底
+      }
+      init_T_W_I0  = Eigen::Isometry3d( Eigen::Quaterniond::FromTwoVectors(
+          gravity_dir, Eigen::Vector3d::UnitZ() ) );
+      const Eigen::Vector3d acc_bias = a_mean - init_g * gravity_dir;
+      init_bias0    = gtsam::imuBias::ConstantBias( acc_bias, g_mean );
+      init_imu.erase(
+          init_imu.begin(),
+          init_imu.begin() + static_cast<std::ptrdiff_t>( start ) );
+      return true;
+    }
+
+    // M4.3: 播种锚 = 从 init 状态 (R_W_I0, V=0, B=bias0) 对 pending 段
+    // [t0, t_cur] Predict。失败 (段不可积分) → 调用方回退 Identity 锚。
+    [[nodiscard]] bool initPredict( Eigen::Isometry3d& pose_out,
+                                    Eigen::Vector3d&   vel_out ) const
+    {
+      if ( pending_imu.size() < 2 )
+      {
+        return false;
+      }
+      const auto preint = rebuildPreintegration( pending_imu, init_bias0 );
+      const gtsam::NavState predicted = preint->predict(
+          gtsam::NavState( toPose3( init_T_W_I0 ),
+                           Eigen::Vector3d::Zero() ),
+          init_bias0 );
+      pose_out = toIsometry( predicted.pose() );
+      vel_out  = Eigen::Vector3d( predicted.velocity() );
+      return pose_out.matrix().allFinite() && vel_out.allFinite();
     }
 
     // 帧是否有 V/B 变量: 最老帧恒有 (段头锚, priors);其余帧非 gap 且段
@@ -1375,12 +1523,89 @@ namespace phad::estimator
     result.diagnostics.num_observations =
         static_cast<std::uint32_t>( measurement.observations.size() );
     result.diagnostics.segment_id = m_impl->segment_id;
+    // M4.3: 被拒/接受帧 diag bias 缺省 = 上一接受值 (IMU-off 恒 0, 字节
+    // 回归);接受帧在 LM 后覆盖为优化值。
+    result.diagnostics.bias_gyro = m_impl->last_reported_bias.gyroscope();
+    result.diagnostics.bias_acc =
+        m_impl->last_reported_bias.accelerometer();
 
-    // M4.2 (D9): IMU 段记账 —— 每帧的段先追加到 pending (共享边界样本去
-    // 重: 相邻段右端 = 下段左端, 同 stamp 只留一份);成功帧在末尾消费
-    // (pending 清空), 被拒/失败帧的段保留, 下帧从最后接受位姿继续预积分。
-    if ( m_impl->options.enable_imu )
+    // ---- M4.3 静止初始化相位 (D10/C9): init 完成前帧拒绝, IMU 段累积
+    // 进 init_imu (共享边界去重同 pending);检测通过 → 缓冲转 pending
+    // (首条预积分段 [t0, t_cur], 检测所用 IMU 段进入第一条预积分段),
+    // 本帧继续走播种路径;失败 (超时) → sticky kFailed, 不静默用伪初始化
+    // 冒充成功。----
+    if ( m_impl->options.enable_imu &&
+         m_impl->init_phase != Impl::InitPhase::kReady )
     {
+      if ( m_impl->init_phase == Impl::InitPhase::kFailed )
+      {
+        result.status                        = UpdateStatus::kFailed;
+        result.message                       = m_impl->init_failure;
+        result.diagnostics.init_failed       = true;
+        result.diagnostics.init_failure_reason = m_impl->init_failure;
+        return result;
+      }
+      if ( m_impl->init_phase == Impl::InitPhase::kNone )
+      {
+        m_impl->init_phase    = Impl::InitPhase::kCollecting;
+        m_impl->init_start_ts = measurement.timestamp;
+      }
+      if ( measurement.imu_gap )
+      {
+        // gap: 缓冲不连续 → 重置重试 (plan 定案 B)。
+        m_impl->init_imu.clear();
+        m_impl->init_start_ts = measurement.timestamp;
+      }
+      else if ( !measurement.imu_samples.empty() )
+      {
+        auto first = measurement.imu_samples.begin();
+        if ( !m_impl->init_imu.empty() &&
+             m_impl->init_imu.back().timestamp == first->timestamp )
+        {
+          ++first;  // 共享边界样本
+        }
+        m_impl->init_imu.insert( m_impl->init_imu.end(), first,
+                                 measurement.imu_samples.end() );
+      }
+      const double elapsed_s =
+          static_cast<double>( measurement.timestamp.nanoseconds() -
+                               m_impl->init_start_ts.nanoseconds() ) *
+          1e-9;
+      if ( elapsed_s > m_impl->options.imu_init_timeout_s )
+      {
+        m_impl->init_phase = Impl::InitPhase::kFailed;
+        m_impl->init_failure =
+            "stationary init failed: no static window within " +
+            std::to_string( m_impl->options.imu_init_timeout_s ) +
+            " s (gyro/accel variance above thresholds)";
+        result.status                        = UpdateStatus::kFailed;
+        result.message                       = m_impl->init_failure;
+        result.diagnostics.init_failed       = true;
+        result.diagnostics.init_failure_reason = m_impl->init_failure;
+        return result;
+      }
+      if ( !m_impl->runStaticInitDetection() )
+      {
+        result.status  = UpdateStatus::kRejected;
+        result.message = "stationary init in progress (need " +
+                         std::to_string( m_impl->options.imu_init_window_s ) +
+                         " s low-variance IMU)";
+        result.diagnostics.init_pending = true;
+        return result;
+      }
+      m_impl->init_phase               = Impl::InitPhase::kReady;
+      m_impl->pending_imu              = std::move( m_impl->init_imu );
+      m_impl->pending_from             = m_impl->init_t0;
+      m_impl->pending_gap              = false;
+      // 继续往下: 本帧段已含在 pending, 走 !initialized 播种路径
+      // (锚 = Predict(init 状态, [t0, t_cur])).
+    }
+    else if ( m_impl->options.enable_imu )
+    {
+      // M4.2 (D9): IMU 段记账 —— 每帧的段先追加到 pending (共享边界样本
+      // 去重: 相邻段右端 = 下段左端, 同 stamp 只留一份);成功帧在末尾消
+      // 费 (pending 清空), 被拒/失败帧的段保留, 下帧从最后接受位姿继续
+      // 预积分。kReady 后 pending_from 已 = t0 (init 检测帧设置)。
       if ( m_impl->pending_imu.empty() )
       {
         m_impl->pending_from = measurement.t_prev;
@@ -1660,8 +1885,34 @@ namespace phad::estimator
 
     if ( !m_impl->initialized )
     {
-      if ( !m_impl->seedSegment( Eigen::Isometry3d::Identity(),
-                                 *effective_measurement,
+      // M4.3: init 完成后播种锚 = Predict(init 状态, pending 段 [t0,
+      // t_cur]);伪初始化 / IMU-off 保持 Identity 锚。
+      Eigen::Isometry3d anchor     = Eigen::Isometry3d::Identity();
+      Eigen::Vector3d   pred_vel   = Eigen::Vector3d::Zero();
+      bool              init_ready = m_impl->options.enable_imu &&
+                                      m_impl->init_phase ==
+                                          Impl::InitPhase::kReady;
+      if ( init_ready )
+      {
+        ( void )m_impl->initPredict( anchor, pred_vel );  // 失败回退 Identity
+      }
+      // 虚拟 t0 状态帧 (D10: t0 = 第一个状态帧)。构造在播种前以占
+      // frame_index;播种成功后 push_front (最老位, 无观测, 段头锚)。
+      WindowFrame virtual_frame;
+      if ( init_ready )
+      {
+        virtual_frame.frame_index = m_impl->next_frame_index++;
+        virtual_frame.timestamp   = m_impl->init_t0;
+        virtual_frame.T_W_B       = m_impl->init_T_W_I0;
+        virtual_frame.velocity_W  = Eigen::Vector3d::Zero();
+        virtual_frame.bias        = m_impl->init_bias0;
+        virtual_frame.observations = {};
+        virtual_frame.is_keyframe = false;
+        virtual_frame.imu_gap     = true;  // 无自有段;其段由播种帧携带
+        virtual_frame.t_prev      = m_impl->init_t0;
+      }
+
+      if ( !m_impl->seedSegment( anchor, *effective_measurement,
                                  result.diagnostics.probe_rejected_block_n,
                                  result.diagnostics.probe_new_lm_n ) )
       {
@@ -1671,6 +1922,22 @@ namespace phad::estimator
         return result;
       }
       m_impl->pending_seed_obs.clear();
+
+      if ( init_ready )
+      {
+        // 播种成功: 虚拟帧入最老位;播种帧段修正 = pending [t0, t_cur]
+        // (检测所用 IMU 段进入第一条预积分段), 速度/bias 取 init 值。
+        m_impl->window.push_front( std::move( virtual_frame ) );
+        WindowFrame& seed = m_impl->window.back();
+        seed.imu_gap     = false;
+        seed.imu_samples = std::move( m_impl->pending_imu );
+        seed.t_prev      = m_impl->pending_from;  // = init_t0
+        seed.velocity_W  = pred_vel;
+        seed.bias        = m_impl->init_bias0;
+        m_impl->pending_imu.clear();
+        m_impl->pending_gap  = false;
+        m_impl->pending_from = common::Timestamp{ 0 };
+      }
     }
     else if ( overlap_broken && !m_impl->options.enable_imu )
     {
@@ -1957,6 +2224,32 @@ namespace phad::estimator
     // Slice ⑤c: Basalt-style eviction — cap keyframes at 7, then total at
     // window_size (10), preferring to evict the oldest non-keyframe so the
     // 3 most recent frames stay as temporal states.
+    // M4.3: IMU-on 下驱逐只允许发生在最老帧 (pop_front) —— IMU 链每帧段
+    // [t_prev, t_cur] 只在窗口帧连续时构成正确预积分 (buildGraph 用
+    // cur.imu_samples 重建); 逐出中间帧 (关键帧上限的首关键帧 / 非关键帧
+    // 优先) 会时段错配。M4.3 实测: 全关键帧合成链的关键帧上限逐出种子帧
+    // → (virtual, f1) 对 dT 0.05 vs 0.55, LM 用错误速度妥协, 轨迹冻结。
+    // 虚拟帧无观测在最老位, 自然先被逐出 (C3 重积分安全)。
+    // IMU-off 保持原行为逐字节 (c1d3481 参考回归)。
+    if ( m_impl->options.enable_imu )
+    {
+      std::size_t keyframe_count = 0;
+      for ( const WindowFrame& frame : m_impl->window )
+      {
+        if ( frame.is_keyframe ) ++keyframe_count;
+      }
+      while ( static_cast<int>( m_impl->window.size() ) >
+                  m_impl->options.window_size ||
+              keyframe_count > 7U )
+      {
+        if ( m_impl->window.front().is_keyframe )
+        {
+          --keyframe_count;
+        }
+        m_impl->window.pop_front();
+      }
+    }
+    else
     {
       std::size_t keyframe_count = 0;
       for ( const WindowFrame& frame : m_impl->window )
@@ -2295,6 +2588,16 @@ namespace phad::estimator
     m_impl->pending_imu.clear();
     m_impl->pending_gap  = false;
     m_impl->pending_from = common::Timestamp{ 0 };
+
+    // M4.3: diag bias = 本帧 (窗口尾) 优化后的 bias;被拒帧沿用上一值
+    // (IMU-off 恒 0)。接受帧在此更新 last_reported_bias。
+    if ( m_impl->options.enable_imu )
+    {
+      m_impl->last_reported_bias = m_impl->window.back().bias;
+    }
+    result.diagnostics.bias_gyro = m_impl->last_reported_bias.gyroscope();
+    result.diagnostics.bias_acc =
+        m_impl->last_reported_bias.accelerometer();
 
     result.status   = UpdateStatus::kOk;
     result.estimate = VioEstimate{ measurement.timestamp,

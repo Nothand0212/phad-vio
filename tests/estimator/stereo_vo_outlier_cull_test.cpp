@@ -135,6 +135,7 @@ namespace
   EstimatorOptions defaultCullOptions()
   {
     EstimatorOptions options;
+    options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.window_size           = 8;
@@ -158,6 +159,7 @@ namespace
 TEST( StereoVoOutlierReoptTest, DefaultsEnableReoptAndDiagFlagsOff )
 {
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   EXPECT_TRUE( options.enable_outlier_reopt );
   UpdateDiagnostics d;
@@ -168,6 +170,7 @@ TEST( StereoVoOutlierReoptTest, DefaultsEnableReoptAndDiagFlagsOff )
 TEST( StereoVoOutlierCullTest, RejectsNonPositiveOutlierAvgReproj )
 {
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.outlier_avg_reproj_px = 0.0;
   EXPECT_THROW( ( StereoVoEstimator{ makeCalibration(), options } ),
@@ -409,6 +412,7 @@ TEST( StereoVoOutlierCullTest, CheiralityClearsWindowObservations )
   // Cull off: after_cull RMS must equal after RMS even when cheirality erases.
   const auto       calibration = makeCalibration();
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.window_size               = 8;
   options.min_shared_landmarks      = 2;

@@ -152,6 +152,7 @@ TEST( StereoVoReanchor, RecoversAfterLandmarkIdTurnover )
   const auto ids_b       = sequentialIds( kLandmarksB.size(), 1000 );
 
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.window_size          = 5;
   options.min_shared_landmarks = 3;
@@ -198,6 +199,7 @@ TEST( StereoVoReanchor, SeedGateRejectsWithoutPoisoningState )
   const auto ids_b       = sequentialIds( kLandmarksB.size(), 1000 );
 
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.window_size           = 5;
   options.min_shared_landmarks  = 3;
@@ -239,6 +241,7 @@ TEST( StereoVoReanchor, ReanchorDisabledReproducesLegacyReject )
   const auto ids_b       = sequentialIds( kLandmarksB.size(), 1000 );
 
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.window_size          = 5;
   options.min_shared_landmarks = 3;
@@ -272,6 +275,7 @@ TEST( StereoVoReanchor, FirstSegmentSeedGate )
   const auto ids_a       = sequentialIds( kLandmarksA.size(), 1 );
 
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.window_size           = 5;
   options.min_shared_landmarks  = 3;
@@ -304,6 +308,7 @@ TEST( StereoVoReanchor, AccumulatedSeedingSeedsAfterSparseFrames )
   const auto ids_a       = sequentialIds( kLandmarksA.size(), 1 );
 
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.window_size           = 5;
   options.min_shared_landmarks  = 3;
@@ -364,6 +369,7 @@ TEST( StereoVoReanchor, AnchorFollowsConstantVelocityOption )
 
   auto run_and_break = [ & ]( bool use_cv ) {
     EstimatorOptions options;
+    options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.window_size                = 5;
@@ -409,6 +415,7 @@ TEST( StereoVoReanchor, CtorRejectsMinSeedObservationsBelowOne )
   const auto calibration = makeCalibration();
 
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.min_seed_observations = 0;
   EXPECT_THROW( StereoVoEstimator( calibration, options ),

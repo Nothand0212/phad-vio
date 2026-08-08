@@ -145,6 +145,7 @@ namespace
   EstimatorOptions defaultReoptOptions()
   {
     EstimatorOptions options;
+    options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.window_size           = 8;
@@ -188,6 +189,7 @@ namespace
 TEST( StereoVoOutlierReoptTest, DefaultsMaxReoptsThreeAndRoundsZero )
 {
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   EXPECT_EQ( options.max_outlier_reopts, 3 );
   UpdateDiagnostics d;
@@ -197,6 +199,7 @@ TEST( StereoVoOutlierReoptTest, DefaultsMaxReoptsThreeAndRoundsZero )
 TEST( StereoVoOutlierReoptTest, RejectsNegativeMaxOutlierReopts )
 {
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.max_outlier_reopts = -1;
   EXPECT_THROW( StereoVoEstimator( makeCalibration(), options ),

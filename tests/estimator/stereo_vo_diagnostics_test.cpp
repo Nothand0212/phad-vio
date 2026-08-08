@@ -123,6 +123,7 @@ TEST( StereoVoDiagnostics, ZeroSharedRejectsWithoutMutatingWindow )
   const auto ids         = sequentialIds( kLandmarks.size() );
 
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.window_size          = 5;
   options.min_shared_landmarks = 3;
@@ -166,6 +167,7 @@ TEST( StereoVoDiagnostics, RejectedFrameSkippedByConstantVelocity )
   const auto ids         = sequentialIds( kLandmarks.size() );
 
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.window_size                = 5;
   options.min_shared_landmarks       = 3;
@@ -228,6 +230,7 @@ TEST( StereoVoDiagnostics, BehindCameraCountedAndSequenceContinues )
 {
   const auto       calibration = makeCalibration();
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.window_size               = 8;
   options.min_shared_landmarks      = 2;
@@ -303,6 +306,7 @@ TEST( StereoVoDiagnostics, ObservationTimestampsAccumulateById )
   const auto ids         = sequentialIds( kLandmarks.size() );
 
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.window_size          = 2;  // force pruning of oldest frame
   options.min_shared_landmarks = 2;
@@ -333,6 +337,7 @@ TEST( StereoVoDiagnostics, LowConnectivityFlagWhenSharedBelowThreshold )
   const auto ids         = sequentialIds( kLandmarks.size() );
 
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.window_size          = 5;
   options.min_shared_landmarks = 100;  // force flag while still optimizing
@@ -372,6 +377,7 @@ TEST( StereoVoExtrinsics, RecoversBodyPoseNotLeftCamera )
 
   const auto       ids = sequentialIds( kLandmarks.size() );
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.window_size          = 6;
   options.min_shared_landmarks = 3;
@@ -428,6 +434,7 @@ TEST( StereoVoExtrinsics, WrongExtrinsicRaisesResidualNotStatusFailure )
   const auto ids = sequentialIds( kLandmarks.size() );
 
   EstimatorOptions options;
+  options.enable_imu = false;  // M4.3: 纯视觉链, IMU-off 显式退出 (plan F, init 不激活)
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.window_size          = 5;
   options.min_shared_landmarks = 3;

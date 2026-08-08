@@ -113,11 +113,25 @@ namespace phad::estimator
     double imu_gyr_rw       = 1.9393e-5;
     // 最老帧 / gap 恢复帧 priors（C11/C15，中等 sigma 不扫参）：
     // X prior 放松（IMU 因子约束重力/速度）；V prior 0 ± 1.0 m/s；
-    // B prior 0 ± gyro 1e-3 rad/s / acc 1e-2 m/s²。
+    // B prior 0 ± gyro 1e-3 rad/s / acc 1e-1 m/s²。
+    // C15 原值 acc 1e-2 在 IMU 因子权重修复 (integrationCovariance/
+    // biasAccOmegaInit) 后过紧: 真实 acc bias (EuRoC ~2e-2-5e-2, 合成
+    // KnownBias 注入 0.3) 无法被图吸收 → 泄漏进速度 (重力量级下预积分链
+    // 的零残差模式, V prior σ=1.0 太松) → 位姿漂移。1e-1 让 B 吸收,
+    // 观测性 (IMU 因子 + 视觉) 仍主导偏置估计。C15 门不过时扫参路径。
     double imu_prior_pose_sigma        = 1e-2;
     double imu_prior_vel_sigma         = 1.0;
     double imu_prior_bias_gyro_sigma   = 1e-3;
-    double imu_prior_bias_acc_sigma    = 1e-2;
+    double imu_prior_bias_acc_sigma    = 1e-1;
+    // ---- M4.3 静止初始化（进 config_hash）----
+    // 检测窗口（累积缓冲尾部的连续 IMU 样本跨度）与方差阈值：窗口内
+    // gyro/accel 逐轴 std 全部低于阈值 → 静止（设计稿 §5.1）。
+    double imu_init_window_s     = 0.5;
+    double imu_init_gyro_std     = 1e-2;  // rad/s
+    double imu_init_accel_std    = 2e-2;  // m/s²
+    // 自首帧起未完成检测的总时长上限；超时 → init 失败返回原因（C9，
+    // 不静默用伪初始化冒充成功）。
+    double imu_init_timeout_s    = 5.0;
   };
 
   enum class UpdateStatus : std::uint8_t
@@ -161,6 +175,17 @@ namespace phad::estimator
     // Probe B 旁路字段；不进 diag.csv
     std::uint32_t probe_rejected_block_n = 0;
     std::uint32_t probe_new_lm_n         = 0;
+    // ---- M4.3 静止初始化 ----
+    // init 未完成时每帧为 true（session 计数 init_dropped_frames，C8）；
+    // init 失败 sticky 为 true（C9，session → SessionError → kFailed）。
+    // IMU-off 恒 false。
+    bool          init_pending = false;
+    bool          init_failed  = false;
+    std::string   init_failure_reason;
+    // 本帧优化后的 bias（接受帧 = LM 回写值；被拒帧 = 上一接受值）。
+    // IMU-off 恒 0。进 diag.csv（Q3/C12：IMU-off 填 0 保证原列回归）。
+    Eigen::Vector3d bias_gyro = Eigen::Vector3d::Zero();
+    Eigen::Vector3d bias_acc  = Eigen::Vector3d::Zero();
     // 仅当 enable_probe_b 时填充；默认保持 0/空
     std::vector<std::pair<std::uint64_t, double>> probe_shift_top;  // key, |Δt|
     double                                        probe_res_mean_px = 0.0;
