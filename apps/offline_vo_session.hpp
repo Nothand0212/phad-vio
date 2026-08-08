@@ -79,6 +79,16 @@ namespace phad::apps
     std::uint32_t outliers_culled          = 0;
     double        reproj_rms_after_cull_px = 0.0;
     bool          is_keyframe              = false;  // Slice ⑤
+    // ---- M4.3 bias 三轴 (Q3/C12) ----
+    // 优化后 bias (接受帧 = LM 回写值; 被拒帧 = 上一接受值)。
+    // IMU-off 恒 0.0。列追加在 CSV 末尾, 保证原列与 c1d3481 逐字节
+    // 一致 (plan F 定案)。
+    double bias_gyro_x = 0.0;
+    double bias_gyro_y = 0.0;
+    double bias_gyro_z = 0.0;
+    double bias_acc_x  = 0.0;
+    double bias_acc_y  = 0.0;
+    double bias_acc_z  = 0.0;
   };
 
   struct FrameCounts
@@ -112,6 +122,9 @@ namespace phad::apps
     /// Slice ⑤: keyframe counts.
     std::uint64_t total_keyframes       = 0;
     std::uint64_t total_track_only_frames = 0;
+    /// M4.3 C8: init 未完成期间被拒帧数 (init_pending 计数; 进 summary.json,
+    /// 不进 config_hash)。IMU-off 恒 0。
+    std::uint64_t init_dropped_frames = 0;
   };
 
   struct StageTiming

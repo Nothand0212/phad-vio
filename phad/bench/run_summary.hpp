@@ -47,6 +47,8 @@ namespace phad::bench
     // Slice ⑤: keyframe counts.
     std::uint64_t total_keyframes       = 0;
     std::uint64_t total_track_only_frames = 0;
+    // M4.3 C8: init 期被拒帧数 (session FrameCounts 透传; 不进 config_hash)。
+    std::uint64_t init_dropped_frames = 0;
   };
 
   struct SyncSummary

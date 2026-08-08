@@ -134,6 +134,7 @@ namespace phad::bench
           { "total_keyframes", trajectory.total_keyframes },
           { "total_track_only_frames",
             trajectory.total_track_only_frames },
+          { "init_dropped_frames", trajectory.init_dropped_frames },
     };
 
     if ( ate.has_value() )

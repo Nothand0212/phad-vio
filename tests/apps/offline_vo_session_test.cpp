@@ -258,13 +258,16 @@ namespace
     // diagnostic never increments: triangulation seeding is disabled).
     // pre-M4 小片 (2026-08-07): num_disparity appended after is_keyframe →
     // 20-column contract.
+    // M4.3 (Q3/C12, plan F): bias 三轴 6 列追加在末尾 → 26-column contract。
+    // 原列顺序与写入格式不动 (IMU-off 时新列恒 0.0, 原列逐字节回归)。
     const auto header_end = text.find( '\n' );
     ASSERT_NE( header_end, std::string::npos );
     const std::string header = text.substr( 0, header_end );
-    EXPECT_EQ( std::count( header.begin(), header.end(), ',' ), 19 );
+    EXPECT_EQ( std::count( header.begin(), header.end(), ',' ), 25 );
     EXPECT_NE(
         text.find( "1403636579763555584,ok,136,0,0,0,1,0,0.000000,0.000000,0,"
-                   "0,0.000000,0,0,0,0,0.000000,0" ),
+                   "0,0.000000,0,0,0,0,0.000000,0,0,0.000000,0.000000,"
+                   "0.000000,0.000000,0.000000,0.000000" ),
         std::string::npos );
     std::filesystem::remove( path );
   }

@@ -591,6 +591,11 @@ namespace
               estimator.imu_prior_bias_gyro_sigma );
     snap.set( "estimator.imu_prior_bias_acc_sigma",
               estimator.imu_prior_bias_acc_sigma );
+    // ---- M4.3 静止初始化 (进 config_hash) ----
+    snap.set( "estimator.imu_init_window_s", estimator.imu_init_window_s );
+    snap.set( "estimator.imu_init_gyro_std", estimator.imu_init_gyro_std );
+    snap.set( "estimator.imu_init_accel_std", estimator.imu_init_accel_std );
+    snap.set( "estimator.imu_init_timeout_s", estimator.imu_init_timeout_s );
 
     snap.set( "session.dataset_format", std::string( "euroc" ) );
     snap.set( "session.drop_culled_tracks", session.drop_culled_tracks );
@@ -901,6 +906,8 @@ namespace
     summary.trajectory.total_keyframes       = session.counts.total_keyframes;
     summary.trajectory.total_track_only_frames =
         session.counts.total_track_only_frames;
+    summary.trajectory.init_dropped_frames =
+        session.counts.init_dropped_frames;  // M4.3 C8
     summary.robustness.rejected         = session.counts.rejected;
     summary.robustness.failed           = session.counts.failed;
     summary.robustness.low_connectivity = session.counts.low_connectivity;

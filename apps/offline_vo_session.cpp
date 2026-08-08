@@ -646,9 +646,20 @@ namespace phad::apps
           {
             ++result.counts.seed_rejected;
           }
+          if ( update.diagnostics.init_pending )
+          {
+            ++result.counts.init_dropped_frames;  // M4.3 C8
+          }
           break;
         case estimator::UpdateStatus::kFailed:
           ++result.counts.failed;
+          if ( update.diagnostics.init_failed )
+          {
+            // M4.3 C9: init 超时失败 → SessionError (bench kFailed), 不
+            // 静默继续; trajectory 不写 (error 优先于 poses 路径)。
+            result.error = SessionError{ update.diagnostics.init_failure_reason };
+            return result;
+          }
           break;
       }
       if ( update.diagnostics.low_connectivity )
@@ -729,6 +740,12 @@ namespace phad::apps
           .outliers_culled          = d.outliers_culled,
           .reproj_rms_after_cull_px = d.reproj_rms_after_cull_px,
           .is_keyframe              = is_kf,
+          .bias_gyro_x              = d.bias_gyro.x(),
+          .bias_gyro_y              = d.bias_gyro.y(),
+          .bias_gyro_z              = d.bias_gyro.z(),
+          .bias_acc_x               = d.bias_acc.x(),
+          .bias_acc_y               = d.bias_acc.y(),
+          .bias_acc_z               = d.bias_acc.z(),
       } );
 
       if ( options.collect_timing )
@@ -806,7 +823,11 @@ namespace phad::apps
            "reproj_rms_before_px,reproj_rms_after_px,num_cheirality,"
            "lm_iterations,max_window_pose_shift_m,segment_id,"
            "pnp_success,pnp_inliers,outliers_culled,"
-           "reproj_rms_after_cull_px,is_keyframe,num_disparity\n";
+           "reproj_rms_after_cull_px,is_keyframe,num_disparity,"
+           // M4.3 (Q3/C12): bias 三轴列追加在末尾 —— 原列顺序不动, IMU-off
+           // 参考 (c1d3481) 原列逐字节回归成立, 新列恒 0.0 (plan F)。
+           "bias_gyro_x,bias_gyro_y,bias_gyro_z,"
+           "bias_acc_x,bias_acc_y,bias_acc_z\n";
 
     for ( const VoDiagRow& row : rows )
     {
@@ -823,7 +844,10 @@ namespace phad::apps
           << row.pnp_inliers << ',' << row.outliers_culled << ','
           << row.reproj_rms_after_cull_px << ','
           << ( row.is_keyframe ? 1 : 0 ) << ','
-          << row.num_disparity << '\n';
+          << row.num_disparity << ',' << row.bias_gyro_x << ','
+          << row.bias_gyro_y << ',' << row.bias_gyro_z << ','
+          << row.bias_acc_x << ',' << row.bias_acc_y << ','
+          << row.bias_acc_z << '\n';
     }
 
     if ( !out )
