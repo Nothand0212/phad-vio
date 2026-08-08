@@ -1261,10 +1261,24 @@ namespace phad::estimator
         values.insert( B( oldest ), window.front().bias );
         graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(
             V( oldest ), window.front().velocity_W, imu_vel_prior_noise );
+        // M4.3d: 首图 B prior 目标 = init bias (非 Zero)。首图 (虚拟 t0 帧 +
+        // seed) 无视觉因子 (新地标 count=1 < min_landmark_observations=2),
+        // yaw gauge 使 CombinedImuFactor 对 z-gyro-bias 的观测信息 ≈ 局部
+        // 100 (与 B prior 1e-1 同量级) → Zero 目标下 LM 把 init bias (EuRoC
+        // 悬停 z 轴实测 0.080) 压到 0.026, 之后预积分以错误 bias 重建 → 航向
+        // 按 (b_true−b_est)·t 累积漂移 (MH_01 ATE 0.458→0.281 vs 门①
+        // 0.100)。目标改为 init bias 后 (b=biasHat, 种子位姿) 全图误差即 0
+        // → LM 无动机移动, bias 精确保留 (独立复现验证: err0≈0, 0 迭代)。
+        // 后续图有跨帧共享地标 (count≥2) 自然锚定, 因子链观测性 (2e7) 主导,
+        // B prior 回归 Zero 目标。
+        gtsam::imuBias::ConstantBias b0_target;
+        if ( !initialized && window.size() == 2 )
+        {
+          b0_target = window.front().bias;
+        }
         graph.emplace_shared<
             gtsam::PriorFactor<gtsam::imuBias::ConstantBias>>(
-            B( oldest ), gtsam::imuBias::ConstantBias(),
-            imu_bias_prior_noise );
+            B( oldest ), b0_target, imu_bias_prior_noise );
 
         for ( std::size_t j = 1; j < window.size(); ++j )
         {
@@ -1311,21 +1325,6 @@ namespace phad::estimator
               B( prev.frame_index ), B( cur.frame_index ),
               gtsam::imuBias::ConstantBias(),
               gtsam::noiseModel::Diagonal::Sigmas( bias_sigmas ) );
-        }
-
-        // M4.3d: 首图 (虚拟 t0 帧 + seed) 的 yaw gauge 退化修复。视觉因子
-        // 只约束 pose↔landmark 相对几何, 关于重力轴的共旋 (X(seed)+新地标)
-        // 不改变 IMU 因子 gravity 项 → LM 零成本吸收 init bias 误差
-        // (EuRoC 悬停 z 轴实测 0.080 rad/s 被压到 0, 之后预积分以错误 bias
-        // 重建 → 航向按 (b_true−b_est)·t 累积漂移)。给 seed 帧加 pose
-        // prior (σ=1e-2, 同 X0 锚): 共旋 0.04 rad = 4σ (cost 8) vs 保持
-        // bias 0.080 (cost 0.34) → LM 保持 bias。后续图有跨帧共享地标
-        // (landmarks_W 世界系固定) 自然锚定, 无需此 prior。
-        if ( !initialized && window.size() == 2 )
-        {
-          graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
-              X( window[ 1 ].frame_index ), toPose3( window[ 1 ].T_W_B ),
-              imu_pose_prior_noise );
         }
       }
 

@@ -121,9 +121,10 @@ namespace phad::estimator
     // 首帧 LM 一步把正确的 init bias (EuRoC 实测 z 轴 0.080 rad/s) 压回 0,
     // 之后预积分以错误 bias 重建 → 航向按 (b_true−b_est)·t 累积漂移
     // (MH_01 转误差 ±30°, ATE 0.458 vs 视觉门 0.100)。1e-1 后 bias prior
-    // 信息量 100 已可被因子链吸收; 首图 yaw gauge (视觉因子只约束相对
-    // 几何, 共旋零成本) 由 buildGraph 的 seed pose prior 单独关闭
-    // (M4.3d), 之后 bias 由 init 初值 + 因子链观测性决定。
+    // 信息量 100 已可被因子链吸收; 首图 yaw gauge (无视觉因子, 因子对
+    // z-gyro-bias 的观测信息 ≈100 与 prior 同量级) 由 buildGraph 的 B0
+    // prior 重定向单独关闭 (M4.3d: 首图目标 = init bias), 之后 bias 由
+    // init 初值 + 因子链观测性决定。
     double imu_prior_pose_sigma        = 1e-2;
     double imu_prior_vel_sigma         = 1.0;
     double imu_prior_bias_gyro_sigma   = 1e-1;
