@@ -128,10 +128,22 @@ namespace phad::estimator
     // gyro/accel 逐轴 std 全部低于阈值 → 静止（设计稿 §5.1）。
     double imu_init_window_s     = 0.5;
     double imu_init_gyro_std     = 1e-2;  // rad/s
-    double imu_init_accel_std    = 2e-2;  // m/s²
-    // 自首帧起未完成检测的总时长上限；超时 → init 失败返回原因（C9，
-    // 不静默用伪初始化冒充成功）。
-    double imu_init_timeout_s    = 5.0;
+    double imu_init_accel_std    = 2e-1;  // m/s²
+    // 超时自首帧起算（init 缓冲从首帧样本累积），需覆盖首个静止期出现的
+    // 最晚时刻；EuRoC 全序列扫描（11 seq, 0.5s 滑窗）：MH_01/02 首个
+    // 悬停分别在 t≈21.7s/26.4s，其余序列 ≤11s 或起飞前地面静止。30s
+    // 给 MH_02 的 26.9s 检测终点留 ~3s 裕量；超时 → init 失败返回原因
+    // （C9，不静默用伪初始化冒充成功）。
+    double imu_init_timeout_s    = 30.0;
+    // accel 方差阈值 2e-1 依据 EuRoC 数据（C15 式扫参替代, plan 风险行
+    // "滑动重试 + 超时（宽容）"）：旋翼振动底噪使真实静止窗口
+    // (gt 速度 <0.01 m/s) 的 accel std 达 0.08-0.19 —— 原 2e-2 在
+    // MH_01 首个悬停 (0.080) 前就超时失败; V2_01 地面静止 0.191、
+    // V1_01 起飞前静止 0.148 也超 1e-1。2e-1 覆盖全部 11 序列的首个
+    // 静止窗口 (最坏裕量 ~5%, V2_01)。误接受分析: 飞行中 0.5s 窗口
+    // 要么 gyr_std ≥ 1e-2 (旋转/机动, 被 gyro 门拦下), 要么匀速平移
+    // (比力恒定 = −g, 均值估计仍正确); 实际机动段 accel std 0.2-1.2
+    // 远离阈值。g 估计误差 = 窗口内比力变化, ≤0.2/9.8 ≈ 2%。
   };
 
   enum class UpdateStatus : std::uint8_t
