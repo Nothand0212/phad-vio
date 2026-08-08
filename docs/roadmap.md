@@ -615,16 +615,20 @@ grill 定案；决策链 D1–D13 / C1–C17）。
 
 切片（每片独立可观察收尾）：
 
-- **M4.1 数据路径**：`StereoPairSynchronizer` 扩展 `pushImu`（单调性
-  sticky 校验、有界队列与溢出计数沿用 M3.2）；图像边界 IMU 线性插值
-  与 `StereoImuPacket` 构造（段内 ΣΔt ≡ 图像间隔，原始样本 + 两端插值，
-  左端样本归新段）；大间断标 `imu_gap`；不新建 synchronizer；
-- **M4.2 估计器机制**：状态由 `X` 扩展为 `X/V/B`，新增
-  `CombinedImuFactor` 与 `BetweenFactor<ConstantBias>`；GTSAM preintegration
-  参数构造与噪声单位转换只发生在一处（acc_nd² / gyr_nd² / rw² 连续密度
-  平方）；位姿初值 = IMU 预积分外推，PnP/恒速降级为 IMU 不可用兜底；
-  **re-anchor 整体退役**：链跨段保持，事务回滚只回滚 landmark/观测；
-  伪初始化（bias=0 / v0=0 / g=9.81007）跑通，数字只记录不门控；
+- **M4.1 数据路径（已实施，`52040a7`，issue #31）**：`StereoPairSynchronizer`
+  扩展 `pushImu`（单调性 sticky 校验、有界队列与溢出计数沿用 M3.2）；图像
+  边界 IMU 线性插值与 `StereoImuPacket` 构造（段内 ΣΔt ≡ 图像间隔，原始
+  样本 + 两端插值，左端样本归新段）；大间断标 `imu_gap`；不新建
+  synchronizer；
+- **M4.2 估计器机制（已实施，`0a9faaa` + `c346201`，issue #32）**：状态由
+  `X` 扩展为 `X/V/B`，新增 `CombinedImuFactor` 与
+  `BetweenFactor<ConstantBias>`；GTSAM preintegration 参数构造与噪声单位
+  转换只发生在一处（acc_nd² / gyr_nd² / rw² 连续密度平方）；位姿初值 =
+  IMU 预积分外推，PnP/恒速降级为 IMU 不可用兜底；**re-anchor 整体退役**：
+  链跨段保持，事务回滚只回滚 landmark/观测；伪初始化（bias=0 / v0=0 /
+  g=9.81007）跑通，数字只记录不门控（MH_01 IMU-on ATE trans 0.682 m /
+  rot 24.2°，yaw 未对齐，待 M4.3 静止初始化；IMU-off 与 M3.3 基线
+  `8906684/default_revert_402d1925` 逐字节相同）；
 - **M4.3 静止初始化 + 端到端门**：静止检测（gyro/accel 方差阈值）→
   gyro bias → 重力方向 → roll/pitch → 零初速 → priors；检测失败返回
   原因不冒充成功；初始化期间视觉等待（丢前 ~10–20 帧，

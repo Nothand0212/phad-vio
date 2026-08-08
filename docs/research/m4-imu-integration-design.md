@@ -262,15 +262,56 @@ Params::MakeSharedU(g)                       // Z-up 世界系
 
 ### 4.7 测试(合成对拍,新测试文件,不动现有)
 
+`tests/estimator/stereo_vo_imu_test.cpp`: 视觉观测与 IMU 测量由**同一地面真值
+运动**生成(a_m = R^T(a_w − g_w),ω_m = ω_b),逐帧与真值对拍。
+
 | 用例 | 断言 |
 |---|---|
-| 静止 | 预积分 Predict 位移 ≈ 0,旋转 ≈ 0 |
-| 匀速 | 位移 = v·Δt,误差 < 容差 |
-| 恒定角速度 | 旋转 = ω·Δt,位置闭合(圆形/直线) |
-| 已知 bias | first-order bias correction 与重新积分一致 |
-| rad/s vs deg/s 错用 | 测试可检出(积分结果差 57.3×) |
-| covariance | 对称且特征值在容差内非负 |
-| ΣΔt | packet 段内 ΣΔt ≡ 图像间隔(§3.2 不变式) |
+| 静止 0.5 s | 位移 ≈ 0、旋转 ≈ 0;pnp_success 恒 false(D8: 初值走 Predict) |
+| 匀速 0.3 m/s | 逐帧位姿 ≈ 真值;累计位移相对误差 < 1%(ΣΔt 尺度) |
+| 恒定角速度 ω=0.2 rad/s | 姿态角误差 < 0.02 rad(rad-vs-deg 隐含: 按 rad 合成才闭合) |
+| 已知 bias | 静止 + bias → 位姿不漂移(< 3 cm;无估计则漂移 ≈ 6 cm,可检出) |
+| 噪声 IMU | 高斯噪声(密度量级×10)下轨迹 < 5 cm(协方差 = 密度² 权重失当会漂移) |
+| 两样本最小段 | 左端 + 右端整段一步积分,位移仍精确(ΣΔt 语义) |
+| imu_gap | 跳因子不崩,gap 帧 PnP 兜底(pnp_success=true),链断恢复 < 10 cm |
+| pending 拼接 | 被拒帧段保留,成功帧拼接后 ΣΔt = 2 图像间隔,位姿 ≈ 真值 |
+| overlap 断裂(D12) | 全新 id 帧仍 ok,segment_id 恒 0,新路标进窗口,后续帧继续 |
+| IMU-off 等价性 | enable_imu=false 走原链: PnP 初值复现,轨迹仍贴合真值 |
+
+IMU-off 零回归: 现有 67 测试全部通过;10 个 M3.3 语义用例显式
+`enable_imu=false` 固化(默认 enable_imu=true 下走 IMU-on 路径)。
+
+### 4.8 实施状态(M4.2,已落地)
+
+- [x] 类型:`KeyframeMeasurement` 增 `imu_samples`/`t_prev`/`imu_gap`;
+      `EstimatorOptions` 增 `enable_imu`(默认 true)+ gravity/噪声密度/prior
+      sigma 共 10 键(进 config_hash;`--no-imu` CLI 关闭);
+- [x] `WindowFrame` 增 `velocity_W`/`bias`/段;`imu_params` 构造时按 §2.3 一处
+      换算(`MakeSharedU(g)` + 密度²,仅 enable_imu 时创建);
+- [x] pending 拼接(共享边界去重 + `pending_gap` 累积;被拒帧段保留,成功帧
+      消费清空);
+- [x] buildGraph: 最老帧 X/V/B priors(放松 sigma)+ 相邻非 gap 对
+      `CombinedImuFactor` + bias rw `BetweenFactor`(σ = rw·√dt);gap 帧跳过、
+      gap 后第一帧 V/B weak prior 防 indeterminant;enable_imu=false 时 V/B
+      完全不进 graph;
+- [x] 初值链: 非 gap 帧 `preint.Predict`(D8),PnP/恒速保留为 gap / IMU-off
+      兜底;伪初始化 bias=0/v0=0/g=9.81007(C4/C5);
+- [x] re-anchor 退役(D12): overlap_broken 只清一次 `landmarks_W`
+      (`imu_window_rebuilt`),candidate 照常 Predict 进窗口,segment_id 不增;
+      事务回滚(D9)不回滚位姿链与 pending 段;
+- [x] session 集成: `stream.nextPacket()` 取 packet,IMU 段填进
+      `KeyframeMeasurement`;`--no-imu` + flattenConfig 10 新键;
+- [x] 合成对拍 10 项(§4.7)+ 现有 67 测试零回归;
+- [x] MH_01 双跑(`c346201`,config_hash 因新键而异,比较语义而非目录名):
+  - IMU-off(`1f50fcd5`): `est.tum`/`diag.csv`/`kf.tum` 与
+    `8906684/default_revert_402d1925` 参考**逐字节相同**,robustness 字段零
+    差异,ATE = 0.080964(完全一致)—— enable_imu=false 走原 M3.3 链;
+  - IMU-on(`28c179ac`): 3682/3682 帧 ok(0 rejected / 0 failed, completion
+    与 coverage 均 1.0),segments=1、reanchors=0(D12),pnp_successes=0
+    (D8 全 Predict 兜底,设计上属正常),RPE trans 0.0214 m;
+    ATE trans 0.682 m / rot 24.2°(伪初始化 yaw 未对齐所致,**只记录不
+    门控**,M4.3 静止初始化解决);estimator mean 35.6 ms/帧,rtf 0.72
+    (预积分开销在风险表预估内)。
 
 ## 5. M4.3 静止初始化与端到端
 

@@ -15,8 +15,9 @@ include 标 SYSTEM）。
 | 做 | 不做 |
 |---|---|
 | 固定窗口 pose / landmark / 窗口内观测 | 关键帧决策（由 apps/session 决定）、feature track 生命周期 |
-| `GenericStereoFactor` + LM、最老帧 Prior gauge | 边缘化、smart factor、IMU |
-| 重叠断裂时 re-anchor（`enable_reanchor`） | 分段 TUM / Atlas 式多轨迹 |
+| `GenericStereoFactor` + LM、最老帧 Prior gauge | 边缘化、smart factor |
+| M4.2：IMU 预积分因子（`CombinedImuFactor` + bias 随机游走 `BetweenFactor`）、伪初始化、`preint.Predict` 初值链（`enable_imu` 开关） | IMU 原始数据消费（由 sync 切段；estimator 只吃帧间段） |
+| 重叠断裂时 re-anchor（`enable_reanchor`）；M4.2 IMU-on 时退役（窗口重建只清 landmark 表） | 分段 TUM / Atlas 式多轨迹 |
 | 共视 / cheirality / 重投影 / `segment_id` / PnP 诊断 | ATE（`phad::eval`） |
 | 正常路径 `solvePnPRansac` proposal + stereo 一致性仲裁 + 本帧 inlier 掩码 | frontend track 生命周期 |
 | BA 后 mean-reproj / cheirality 剔点 + 拒同 id 复生 | frontend track 生命周期（由 apps 回传 drop） |
@@ -32,13 +33,14 @@ include 标 SYSTEM）。
 ## 数据流
 
 ```text
-FrameTracks (frontend)
-        │
-        ▼
-apps/stereo_vo_glue.hpp  ── filter kValid ──► KeyframeMeasurement
+FrameTracks (frontend)        IMU 原始样本 (sync 切段插值, M4.1)
+        │                              │
+        ▼                              ▼
+apps/stereo_vo_glue.hpp  ──► KeyframeMeasurement + imu_samples / t_prev / imu_gap
                                                       │
                                                       ▼
                                             StereoVoEstimator::update
+                                    (M4.2: pending 拼接段 → 窗口 → 即时重建预积分)
                                                       │
                                                       ▼
                                                VioUpdateResult
@@ -48,6 +50,60 @@ apps/stereo_vo_glue.hpp  ── filter kValid ──► KeyframeMeasurement
                     dropTracks(culled ids)                 估计轨迹叠加
                     → probe / phad_vo_bench
 ```
+
+## IMU 机制（M4.2）
+
+`enable_imu`（默认 true，进 config_hash；CLI `--no-imu` 关闭）打开后，
+estimator 在固定窗口 batch BA 上叠加 IMU 因子与 V/B 变量；关闭时完整走原
+M3.3 链（V/B 完全不进 graph，IMU-off 字节回归保证）。
+
+### 段语义（与 sync 对齐）
+
+- `KeyframeMeasurement.imu_samples` 是本帧与上一帧之间的 IMU 段
+  `[t_prev, timestamp]`（`StereoImuPacket` 切段语义）：样本 `i` 覆盖区间
+  `[t_i, t_{i+1}]`，右端样本不积分，段内 ΣΔt ≡ 图像间隔；相邻段共享右端
+  样本（右端 = 下段左端）。
+- 无 IMU 数据源时段恒空且 `imu_gap = true` → estimator 走 IMU-off 路径
+  （PnP/恒速初值、无 V/B 因子）。
+
+### pending 拼接（D9）
+
+- 每帧的段**先**追加到 `pending_imu`（共享边界样本去重：与 pending 尾部同
+  stamp 时只留一份），`pending_gap |= 本帧 gap`；
+- 被拒/失败帧的段保留在 pending，下一帧从最后接受位姿继续预积分（段链不
+  因失败帧断裂，拼接后 ΣΔt 不变式仍成立）；
+- 成功帧：`candidate.imu_samples = pending`（含本帧段），帧入窗口后 pending
+  清空。
+
+### 因子图（buildGraph）
+
+- 最老帧 = 段头锚：X prior（sigma 放松至 `imu_prior_pose_sigma`，IMU 因子
+  约束重力/速度）+ `PriorFactor<Velocity>(0)` + `PriorFactor<ConstantBias>(0)`
+  （C11/C15，中等 sigma 不扫参）；
+- 相邻非 gap 帧对：从 j 帧原始样本即时重建预积分
+  （`PreintegratedCombinedMeasurements(params, biasHat)`，biasHat = i 帧 bias
+  当前值，C3）→ `CombinedImuFactor(X_i, V_i, X_j, V_j, B_i, B_j, preint)` +
+  `BetweenFactor<ConstantBias>(B_i, B_j, Δbias=0, σ = rw·√dt)`；
+- gap 帧（`imu_gap` 或段样本 < 2）：不建 V/B 变量、跳过其 IMU 因子（视觉
+  照常）；gap 后第一帧（无入链）加 V/B weak prior 防 indeterminant LM；
+- 噪声换算（设计稿 §2.3）：协方差 = 密度平方（acc/gyr 白噪声 + bias 随机
+  游走 4 参数进 config）。
+
+### 初值链与伪初始化（D8 / C4 / C5）
+
+- IMU-on 且段可积分 → 位姿初值 = `preint.Predict(last_X, last_V, last_B)`
+  （V/B 初值 = Predict 输出 / 上一帧 bias）；
+- PnP 与恒速保留为 `imu_gap` / IMU-off 的兜底链；
+- 伪初始化：首帧种子段 V=0、B=0，重力 g=9.81007（Z-up，`MakeSharedU`）。
+
+### re-anchor 退役与回滚（D12 / D9）
+
+- IMU-on 时 `overlap_broken` 不再 seedSegment：清一次 `landmarks_W`
+  （`imu_window_rebuilt` 标记），候选帧照常进窗口（Predict 初值），
+  `segment_id` 不增（segments/reanchors 恒 1/0）；观测不足不拒帧（图 = 仅
+  IMU 因子 + priors 亦有解）；
+- 事务回滚：IMU-on 时 `restore()` 不回滚 `last_accepted/prev` 与 pending
+  段（失败帧的段已在入口挂入 pending），只回滚 landmark/观测/窗口结构。
 
 ## 段生命周期（M3.3）
 
