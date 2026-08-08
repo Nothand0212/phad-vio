@@ -55,6 +55,13 @@ namespace phad::apps
     /// FrameTracks. Default 5 (M3.3 candidate B productized). 0 = off.
     /// In flattenConfig / config_hash; CLI --zombie-drop-age may override.
     int zombie_drop_age = 5;
+    // ---- M4.3 dropout 注入 (plan 定案 G; CLI-only, 不进 config_hash) ----
+    // 帧号 ∈ [start, start+frames) 时对观测做无放回子采样 (keep_ratio 0 =
+    // 全清; 0.3 = 保留 ~30%) 后再传 estimator。前端 tracker 照跑不注入。
+    // 三参数齐备才激活 (bench CLI 校验)。参照 enable_probe_b 模式。
+    std::optional<std::uint64_t> dropout_start_frame;
+    std::optional<std::uint64_t> dropout_frames;
+    std::optional<double>        dropout_keep_ratio;
   };
 
   struct VoDiagRow

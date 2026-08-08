@@ -59,7 +59,9 @@ namespace
       "                     [--tracker-enable-census]\n"
       "                     [--tracker-disable-exposure-norm]\n"
       "                     [--min-seed-observations <n>]\n"
-      "                     [--no-imu]\n";
+      "                     [--no-imu]\n"
+      "                     [--dropout-start-frame <n> --dropout-frames <n>\n"
+      "                      --dropout-keep-ratio <0..1>]\n";
 
 #ifndef PHAD_SOURCE_DIR
 #define PHAD_SOURCE_DIR ""
@@ -119,6 +121,11 @@ namespace
     // M4.2: IMU 机制默认开 (进 config_hash); --no-imu 关闭 → 完整走
     // M3.3 链 (IMU-off 字节回归)。
     bool no_imu = false;
+    // M4.3 dropout 注入 (CLI-only, 不进 config_hash; 三参数齐备才激活,
+    // 参照 enable_probe_b 模式)。
+    std::optional<std::uint64_t> dropout_start_frame;
+    std::optional<std::uint64_t> dropout_frames;
+    std::optional<double>        dropout_keep_ratio;
   };
 
   [[nodiscard]] bool parseDouble( std::string_view text, double& value )
@@ -402,6 +409,37 @@ namespace
         }
         arguments.min_seed_observations = static_cast<int>( parsed );
       }
+      else if ( flag == "--dropout-start-frame" )
+      {
+        std::uint64_t parsed = 0;
+        if ( !parseUint64( value, parsed ) )
+        {
+          std::cerr << "--dropout-start-frame expects a non-negative integer\n";
+          return false;
+        }
+        arguments.dropout_start_frame = parsed;
+      }
+      else if ( flag == "--dropout-frames" )
+      {
+        std::uint64_t parsed = 0;
+        if ( !parseUint64( value, parsed ) || parsed == 0U )
+        {
+          std::cerr << "--dropout-frames expects a positive integer\n";
+          return false;
+        }
+        arguments.dropout_frames = parsed;
+      }
+      else if ( flag == "--dropout-keep-ratio" )
+      {
+        double parsed = 0.0;
+        if ( !parseDouble( value, parsed ) || parsed < 0.0 || parsed > 1.0 )
+        {
+          std::cerr
+              << "--dropout-keep-ratio expects a number in [0, 1]\n";
+          return false;
+        }
+        arguments.dropout_keep_ratio = parsed;
+      }
       else if ( flag == "--tracker-quality-level" )
       {
         double parsed = 0.0;
@@ -455,6 +493,21 @@ namespace
     if ( arguments.gt_euroc.empty() )
     {
       arguments.gt_euroc = arguments.sequence_root;
+    }
+    // M4.3 dropout: 三参数齐备才激活 (plan 定案 G); 缺任一 → 报错, 不
+    // 静默忽略部分参数。
+    const std::size_t dropout_set =
+        arguments.dropout_start_frame.has_value() ? 1U : 0U;
+    const std::size_t dropout_set_frames =
+        arguments.dropout_frames.has_value() ? 1U : 0U;
+    const std::size_t dropout_set_ratio =
+        arguments.dropout_keep_ratio.has_value() ? 1U : 0U;
+    if ( dropout_set + dropout_set_frames + dropout_set_ratio != 0U &&
+         dropout_set + dropout_set_frames + dropout_set_ratio != 3U )
+    {
+      std::cerr << "--dropout-start-frame/--dropout-frames/"
+                   "--dropout-keep-ratio must be set together\n";
+      return false;
     }
     return true;
   }
@@ -755,6 +808,10 @@ namespace
     {
       session_options.estimator.enable_imu = false;
     }
+    // M4.3 dropout 注入 (CLI-only, 不进 config_hash; 三参数齐备才激活)。
+    session_options.dropout_start_frame = arguments.dropout_start_frame;
+    session_options.dropout_frames      = arguments.dropout_frames;
+    session_options.dropout_keep_ratio  = arguments.dropout_keep_ratio;
     session_options.estimator.enable_accumulated_seed =
         arguments.enable_accumulated_seed;
     if ( arguments.min_seed_observations.has_value() )

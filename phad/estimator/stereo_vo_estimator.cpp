@@ -1252,10 +1252,14 @@ namespace phad::estimator
       if ( options.enable_imu )
       {
         // 最老帧 = 段头锚: V/B priors (C11, 中等 sigma 不扫参 C15)。
+        // M4.3c (plan G): V prior 目标 = 当前速度而非 Zero —— 预积分钟链存在
+        // 速度规范自由度 (e_v 只约束差, e_p 对整体平移不变), 全观测丢失时
+        // Zero 目标会让 LM 整链滑向静止 (实测 dropout 期 v 逐帧减半→冻结)。
+        // 锚定当前速度: 链保持上次视觉锚定的速度外推 (dropout 语义)。
         values.insert( V( oldest ), window.front().velocity_W );
         values.insert( B( oldest ), window.front().bias );
         graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(
-            V( oldest ), gtsam::Vector3::Zero(), imu_vel_prior_noise );
+            V( oldest ), window.front().velocity_W, imu_vel_prior_noise );
         graph.emplace_shared<
             gtsam::PriorFactor<gtsam::imuBias::ConstantBias>>(
             B( oldest ), gtsam::imuBias::ConstantBias(),
@@ -1274,9 +1278,10 @@ namespace phad::estimator
           if ( !frameHasImuState( j - 1 ) )
           {
             // 链断 (前帧 gap / 样本不足): 本帧接 weak priors 防 indeterminant
-            // (B 无任何因子约束时对应块全零, LM 奇异)。
+            // (B 无任何因子约束时对应块全零, LM 奇异)。V prior 目标 = 当前
+            // 速度 (同最老帧锚, M4.3c): Zero 目标在纯链图上会拖停链头。
             graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(
-                V( cur.frame_index ), gtsam::Vector3::Zero(),
+                V( cur.frame_index ), cur.velocity_W,
                 imu_vel_prior_noise );
             graph.emplace_shared<
                 gtsam::PriorFactor<gtsam::imuBias::ConstantBias>>(
@@ -1626,9 +1631,16 @@ namespace phad::estimator
 
     if ( measurement.observations.empty() )
     {
-      result.status  = UpdateStatus::kRejected;
-      result.message = "empty observations";
-      return result;
+      // M4.3c (plan G): IMU-on 且本帧段可积分 (非 gap) 时空观测放行 ——
+      // num_shared=0 → overlap_broken → 图 = 仅 IMU 因子 + priors 有解,
+      // 位姿由预积分外推 (dropout 注入语义; 真实场景零特征帧同理)。
+      // IMU-off / gap 帧保持原拒绝: 视觉链无约束可建 (M3.3 冻结语义)。
+      if ( !( m_impl->options.enable_imu && !measurement.imu_gap ) )
+      {
+        result.status  = UpdateStatus::kRejected;
+        result.message = "empty observations";
+        return result;
+      }
     }
     // Slice ⑦: disparity_px == 0 is legal — it marks "stereo failed, no
     // depth"; negative or non-finite is not.

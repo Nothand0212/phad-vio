@@ -610,8 +610,9 @@ TEST( StereoVoImu, ImuGapFallsBackToVision )
   }
 }
 
-// ── §4.7-h pending 拼接: 被拒帧 (空观测) 的段保留, 成功帧拼接后 ΣΔt 跨越
-// 两个图像间隔, 位姿从最后接受位姿外推仍贴合真值。 ──
+// ── §4.7-h pending 拼接: 被拒帧的段保留, 成功帧拼接后 ΣΔt 跨越两个图像
+// 间隔, 位姿从最后接受位姿外推仍贴合真值。M4.3c (plan G) 起空观测非 gap
+// 帧已放行, 故改用畸形观测触发拒绝 (段同样已入 pending)。 ──
 TEST( StereoVoImu, PendingAppendsOnRejectAndConsumesOnAccept )
 {
   const Eigen::Vector3d v{ 0.3, 0.0, 0.0 };
@@ -619,20 +620,24 @@ TEST( StereoVoImu, PendingAppendsOnRejectAndConsumesOnAccept )
   StereoVoEstimator estimator( makeCalibration(), imuOptions() );
   const std::vector<LandmarkId> ids = sequentialIds( kLandmarks.size() );
   // M4.3: 静止 init 前缀 (播种帧 = accepted[0]), 场景帧 j ≥ 1; 场景
-  // j=5 被拒 (空观测), 其段 (已入 pending) 保留。
+  // j=5 被拒 (畸形观测: 负 disparity → rejected), 其段 (已入 pending) 保留。
   std::vector<Eigen::Isometry3d> accepted{
     runStaticInitPrefix( estimator, makeCalibration(), 0.05 )
   };
   for ( int j = 1; j < 10; ++j )
   {
     const ScenarioInput in = scenarioInput( motion, 0.05, j, 6 );
-    if ( j == 5 )  // 被拒帧: 空观测 → rejected, 段 (已入 pending) 保留
+    if ( j == 5 )  // 被拒帧: 畸形观测 → rejected, 段 (已入 pending) 保留
     {
       KeyframeMeasurement rejected;
       rejected.timestamp   = phad::common::Timestamp{ in.t_cur_ns };
       rejected.t_prev      = phad::common::Timestamp{ in.t_prev_ns };
       rejected.imu_samples = in.segment;
       rejected.imu_gap     = false;
+      StereoObservation bad;
+      bad.left_pixel   = Eigen::Vector2d{ 0.0, 0.0 };
+      bad.disparity_px = -1.0;  // 触发 "negative disparity" 拒绝
+      rejected.observations.push_back( bad );
       const auto result = estimator.update( rejected, true );
       EXPECT_EQ( result.status, UpdateStatus::kRejected );
       continue;
@@ -720,4 +725,107 @@ TEST( StereoVoImu, DisabledImuReproducesVisionChain )
   expectAllOkAndClose( run, motion, 0.05, 2e-2 );
   // IMU-off: 非 gap 帧走 PnP 初值。
   EXPECT_TRUE( run.results[ 3 ].diagnostics.pnp_success );
+}
+
+// ── M4.3 dropout 注入 (plan 定案 G, 合成断言 1): IMU-on 观测全清 →
+// 图 = 仅 IMU 因子 + priors 有解 → 注入期每帧 accepted, 轨迹连续 (预积分
+// 外推, 相对真值偏差 ≤ 阈值);恢复后 50 帧内 ATE 回基线 (无永久损伤)。
+// 等价于 session 侧 --dropout-keep-ratio 0 对观测子采样后的估计器行为。 ──
+TEST( StereoVoImu, DropoutInjectionKeepsChainWithImu )
+{
+  const Eigen::Vector3d v{ 0.3, 0.0, 0.0 };
+  const ImuMotion       motion = constantVelocityMotion( v );
+  StereoVoEstimator estimator( makeCalibration(), imuOptions() );
+  const std::vector<LandmarkId> ids = sequentialIds( kLandmarks.size() );
+  // M4.3: 静止 init 前缀 (播种帧 = accepted[0], τ=0), 场景帧 j ≥ 1。
+  ( void )runStaticInitPrefix( estimator, makeCalibration(), 0.05 );
+
+  constexpr int kDropoutStart = 5;  // 场景帧号 (播种帧之后)
+  constexpr int kDropoutEnd   = 9;  // 含
+  for ( int j = 1; j <= 16; ++j )
+  {
+    const ScenarioInput in = scenarioInput( motion, 0.05, j, 6 );
+    const bool          dropped = j >= kDropoutStart && j <= kDropoutEnd;
+    auto result = estimator.update( makeFrameWithImu(
+        makeCalibration(), in.T_W_B, in.t_prev_ns, in.t_cur_ns,
+        dropped ? std::vector<Eigen::Vector3d>{} : kLandmarks,
+        dropped ? std::vector<LandmarkId>{} : ids, in.segment ), true );
+    ASSERT_EQ( result.status, UpdateStatus::kOk )
+        << "frame " << j << ": " << result.message;
+    EXPECT_EQ( result.diagnostics.segment_id, 0U )
+        << "IMU-on 注入期与恢复期均不 re-anchor (D12)";
+    ASSERT_TRUE( result.estimate.has_value() );
+    const Eigen::Isometry3d& est   = result.estimate->T_W_B;
+    const Eigen::Isometry3d& truth = motion.pose_at(
+        static_cast<double>( j ) * 0.05 );
+    const double err_m = ( est.translation() - truth.translation() ).norm();
+    if ( dropped )
+    {
+      // 注入期: 仅 IMU 因子 + priors, 位姿由预积分外推 → 连续但不逐帧
+      // 视觉锚定, 允许小漂移 (0.25 s 窗口)。
+      EXPECT_LE( err_m, 5e-2 ) << "frame " << j;
+    }
+    else
+    {
+      // 恢复后: 视觉回到图里, ATE 回基线 (50 帧内; 合成 16 帧内即达)。
+      EXPECT_LE( err_m, 2e-2 ) << "frame " << j;
+    }
+  }
+}
+
+// ── M4.3 dropout 注入 (合成断言 2): IMU-off 对照 —— 观测全清 → PnP 无点
+// 可解 → 注入期拒帧冻结语义 (无新轨迹点: 不产生 accepted 位姿); 恢复后
+// 重锚回到 kOk。与 M3.3 同源行为, 只断言「冻结 = 无新轨迹点」。 ──
+TEST( StereoVoImu, DropoutInjectionFreezesWithoutImu )
+{
+  const Eigen::Vector3d v{ 0.3, 0.0, 0.0 };
+  const ImuMotion       motion = constantVelocityMotion( v );
+  EstimatorOptions      options = imuOptions();
+  options.enable_imu            = false;
+  StereoVoEstimator estimator( makeCalibration(), options );
+  const std::vector<LandmarkId> ids = sequentialIds( kLandmarks.size() );
+
+  constexpr int kDropoutStart = 5;
+  constexpr int kDropoutEnd   = 9;  // 含
+  std::size_t   accepted_before = 0;
+  std::size_t   accepted_after  = 0;
+  for ( int j = 0; j <= 14; ++j )
+  {
+    const std::int64_t t_cur_ns =
+        static_cast<std::int64_t>( static_cast<double>( j ) * 0.05 * 1e9 );
+    const std::int64_t t_prev_ns = j == 0
+                                       ? 0
+                                       : static_cast<std::int64_t>(
+                                             ( static_cast<double>( j ) -
+                                               1.0 ) *
+                                             0.05 * 1e9 );
+    const bool dropped = j >= kDropoutStart && j <= kDropoutEnd;
+    auto result = estimator.update( makeFrameWithImu(
+        makeCalibration(), motion.pose_at( static_cast<double>( j ) * 0.05 ),
+        t_prev_ns, t_cur_ns,
+        dropped ? std::vector<Eigen::Vector3d>{} : kLandmarks,
+        dropped ? std::vector<LandmarkId>{} : ids, {} ), true );
+    if ( dropped )
+    {
+      // 冻结语义: 注入期全部拒帧, 无新轨迹点。
+      EXPECT_EQ( result.status, UpdateStatus::kRejected )
+          << "frame " << j << ": " << result.message;
+      EXPECT_FALSE( result.estimate.has_value() );
+    }
+    else if ( j < kDropoutStart )
+    {
+      ASSERT_EQ( result.status, UpdateStatus::kOk )
+          << "frame " << j << ": " << result.message;
+      ++accepted_before;
+    }
+    else
+    {
+      ASSERT_EQ( result.status, UpdateStatus::kOk )
+          << "frame " << j << ": " << result.message;
+      ++accepted_after;
+    }
+  }
+  // 注入期 5 帧全冻结: 14 帧中只接受 10 帧 (0..4 与 10..14)。
+  EXPECT_EQ( accepted_before, 5U );
+  EXPECT_EQ( accepted_after, 5U );
 }

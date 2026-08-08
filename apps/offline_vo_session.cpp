@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <random>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -45,6 +46,43 @@ namespace phad::apps
         "insufficient observations to seed new segment";
     constexpr std::string_view kSeedRejectedFirstSegment =
         "insufficient observations to seed first segment";
+
+    // M4.3 dropout 注入 (plan 定案 G): 帧号 ∈ [start, start+frames) 时对
+    // 观测做无放回子采样 (keep_ratio 0 = 全清; 0.3 = 保留 ~30%) 后再传
+    // estimator。确定性: 每帧以 (start + 帧号) 为种子独立重排 (同一注入
+    // 窗口内同帧号 → 同子集, 可复现)。三参数齐备才激活; 观测裁剪只影响
+    // 估计器, 前端 tracker 照跑不注入。
+    void applyDropout( estimator::KeyframeMeasurement& measurement,
+                       std::uint64_t                   frame_number,
+                       const OfflineVoSessionOptions&  options )
+    {
+      if ( !options.dropout_start_frame.has_value() ||
+           !options.dropout_frames.has_value() ||
+           !options.dropout_keep_ratio.has_value() )
+      {
+        return;
+      }
+      const std::uint64_t start  = *options.dropout_start_frame;
+      const std::uint64_t frames = *options.dropout_frames;
+      if ( frame_number < start || frame_number >= start + frames )
+      {
+        return;
+      }
+      const double ratio = std::clamp( *options.dropout_keep_ratio, 0.0, 1.0 );
+      const std::size_t n = measurement.observations.size();
+      std::size_t       keep = static_cast<std::size_t>(
+          std::ceil( static_cast<double>( n ) * ratio ) );
+      if ( keep >= n )
+      {
+        return;
+      }
+      std::vector<estimator::StereoObservation> shuffled =
+          measurement.observations;
+      std::mt19937_64 rng( 0x9E3779B97F4A7C15ULL ^ ( start + frame_number ) );
+      std::shuffle( shuffled.begin(), shuffled.end(), rng );
+      shuffled.resize( keep );
+      measurement.observations = std::move( shuffled );
+    }
 
     // ── Slice ⑤ keyframe selection ──────────────────────────────────────
 
@@ -457,6 +495,9 @@ namespace phad::apps
           std::chrono::steady_clock::now();
       estimator::KeyframeMeasurement measurement =
           toKeyframeMeasurement( tracks );
+      // M4.3 dropout 注入 (plan G): 帧号 ∈ 注入窗口 → 观测子采样。
+      // counts.image_frames 此刻 = 本帧 0 基帧号 (其后才自增)。
+      applyDropout( measurement, result.counts.image_frames, options );
       // M4.2: 携带帧间 IMU 段 (sync 切段插值语义, 见 StereoImuPacket)。
       // 无 IMU 数据源时段恒空且 imu_gap=true → estimator 走 IMU-off 路径。
       measurement.imu_samples = packet.samples;
