@@ -21,7 +21,7 @@ namespace phad::apps
   {
   }
 
-  StereoPairReadResult StereoPairStream::next()
+  StereoImuPacketReadResult StereoPairStream::nextPacket()
   {
     if ( m_terminal_error.has_value() )
     {
@@ -30,9 +30,9 @@ namespace phad::apps
 
     while ( true )
     {
-      if ( auto frame = m_sync.tryPop() )
+      if ( auto packet = m_sync.tryPopPacket() )
       {
-        return std::move( *frame );
+        return std::move( *packet );
       }
 
       if ( m_flushed )
@@ -46,9 +46,9 @@ namespace phad::apps
         m_sync.flush();
         m_flushed = true;
         noteDiagnosticsWarnings();
-        if ( auto frame = m_sync.tryPop() )
+        if ( auto packet = m_sync.tryPopPacket() )
         {
-          return std::move( *frame );
+          return std::move( *packet );
         }
         return io::EndOfStream{};
       }
@@ -60,14 +60,12 @@ namespace phad::apps
       }
 
       auto& event = std::get<io::SensorEvent>( read );
-      if ( std::holds_alternative<sensor::ImuMeasurement>( event ) )
-      {
-        // M3.2 StereoOnly：IMU 先计数后丢弃（不进 sync）。
-        continue;
-      }
-
-      const sync::PushStatus status = m_sync.pushImage(
-          std::move( std::get<sensor::ImageFrameEvent>( event ) ) );
+      // M4.1: IMU 进 sync(单调性校验 + 队列切段),不再丢弃。
+      const sync::PushStatus status =
+          std::holds_alternative<sensor::ImuMeasurement>( event )
+              ? m_sync.pushImu( std::get<sensor::ImuMeasurement>( event ) )
+              : m_sync.pushImage(
+                    std::move( std::get<sensor::ImageFrameEvent>( event ) ) );
       noteDiagnosticsWarnings();
       if ( status != sync::PushStatus::kOk )
       {
@@ -75,6 +73,21 @@ namespace phad::apps
         return *m_terminal_error;
       }
     }
+  }
+
+  StereoPairReadResult StereoPairStream::next()
+  {
+    StereoImuPacketReadResult result = nextPacket();
+    if ( const auto* packet =
+             std::get_if<sensor::StereoImuPacket>( &result ) )
+    {
+      return std::move( packet->frame );
+    }
+    if ( std::holds_alternative<io::EndOfStream>( result ) )
+    {
+      return io::EndOfStream{};
+    }
+    return std::get<StreamError>( result );
   }
 
   const sync::StereoPairDiagnostics& StereoPairStream::diagnostics()
