@@ -128,6 +128,8 @@ TEST( StereoVoDiagnostics, ZeroSharedRejectsWithoutMutatingWindow )
   options.min_shared_landmarks = 3;
   // This test targets the permanent zero-overlap reject, not re-anchoring.
   options.enable_reanchor = false;
+  // M4.2: 该用例测试 M3.3 拒绝门语义, 属 IMU-off 回归。
+  options.enable_imu = false;
 
   StereoVoEstimator estimator( calibration, options );
   ASSERT_EQ( estimator
@@ -170,6 +172,8 @@ TEST( StereoVoDiagnostics, RejectedFrameSkippedByConstantVelocity )
   options.use_constant_velocity_init = true;
   // This test targets the permanent zero-overlap reject, not re-anchoring.
   options.enable_reanchor = false;
+  // M4.2: 该用例测试 M3.3 拒绝门语义, 属 IMU-off 回归。
+  options.enable_imu = false;
 
   auto run_clean = [ & ]() {
     StereoVoEstimator                           estimator( calibration, options );

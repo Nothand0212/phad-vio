@@ -58,7 +58,8 @@ namespace
       "                     [--far-refresh-px <px>]\n"
       "                     [--tracker-enable-census]\n"
       "                     [--tracker-disable-exposure-norm]\n"
-      "                     [--min-seed-observations <n>]\n";
+      "                     [--min-seed-observations <n>]\n"
+      "                     [--no-imu]\n";
 
 #ifndef PHAD_SOURCE_DIR
 #define PHAD_SOURCE_DIR ""
@@ -115,6 +116,9 @@ namespace
     // 首段累积播种默认关 (实测否决全量版, 残存首段专用版);
     // --estimator-enable-accumulated-seed 打开 (A/B)。
     bool enable_accumulated_seed = false;
+    // M4.2: IMU 机制默认开 (进 config_hash); --no-imu 关闭 → 完整走
+    // M3.3 链 (IMU-off 字节回归)。
+    bool no_imu = false;
   };
 
   [[nodiscard]] bool parseDouble( std::string_view text, double& value )
@@ -219,6 +223,11 @@ namespace
       if ( flag == "--estimator-enable-accumulated-seed" )
       {
         arguments.enable_accumulated_seed = true;
+        continue;
+      }
+      if ( flag == "--no-imu" )
+      {
+        arguments.no_imu = true;
         continue;
       }
       if ( index + 1 >= argc )
@@ -567,6 +576,21 @@ namespace
               estimator.hanging_landmark_gate_m );
     snap.set( "estimator.far_return_refresh_px",
               estimator.far_return_refresh_px );
+    // ---- M4.2 IMU 机制 (进 config_hash; CLI: --no-imu) ----
+    snap.set( "estimator.enable_imu", estimator.enable_imu );
+    snap.set( "estimator.imu_gravity", estimator.imu_gravity );
+    snap.set( "estimator.imu_acc_noise_nd", estimator.imu_acc_noise_nd );
+    snap.set( "estimator.imu_gyr_noise_nd", estimator.imu_gyr_noise_nd );
+    snap.set( "estimator.imu_acc_rw", estimator.imu_acc_rw );
+    snap.set( "estimator.imu_gyr_rw", estimator.imu_gyr_rw );
+    snap.set( "estimator.imu_prior_pose_sigma",
+              estimator.imu_prior_pose_sigma );
+    snap.set( "estimator.imu_prior_vel_sigma",
+              estimator.imu_prior_vel_sigma );
+    snap.set( "estimator.imu_prior_bias_gyro_sigma",
+              estimator.imu_prior_bias_gyro_sigma );
+    snap.set( "estimator.imu_prior_bias_acc_sigma",
+              estimator.imu_prior_bias_acc_sigma );
 
     snap.set( "session.dataset_format", std::string( "euroc" ) );
     snap.set( "session.drop_culled_tracks", session.drop_culled_tracks );
@@ -720,6 +744,11 @@ namespace
     if ( arguments.no_cv_init )
     {
       session_options.estimator.use_constant_velocity_init = false;
+    }
+    // M4.2: --no-imu → 完整 IMU-off 链 (IMU-off 字节回归)。
+    if ( arguments.no_imu )
+    {
+      session_options.estimator.enable_imu = false;
     }
     session_options.estimator.enable_accumulated_seed =
         arguments.enable_accumulated_seed;

@@ -519,6 +519,8 @@ TEST( StereoVoPnpTest, SeedAndReanchorSkipPnp )
   const auto ids_b       = sequentialIds( kLandmarksB.size(), 1000 );
 
   EstimatorOptions options = defaultPnpOptions();
+  // M4.2: 该用例验证 seed/re-anchor 帧跳过 PnP 的 M3.3 语义, 属 IMU-off 回归。
+  options.enable_imu = false;
   StereoVoEstimator estimator( calibration, options );
 
   const auto poses = translatingPoses( 4, 0.05 );

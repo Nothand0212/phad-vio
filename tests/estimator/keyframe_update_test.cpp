@@ -55,7 +55,10 @@ TEST( KeyframeUpdateTest, NonKeyframeEntersWindow )
 {
   // Slice ⑤c: non-keyframes enter the window and participate in BA.
   auto calib = makeCalibration();
-  StereoVoEstimator estimator( calib );
+  // M4.2: 该用例验证 M3.3 keyframe 拒绝门, 属 IMU-off 回归。
+  EstimatorOptions options;
+  options.enable_imu = false;
+  StereoVoEstimator estimator( calib, options );
   EstimatorOptions opts;
   auto ids0 = std::vector<LandmarkId>{ LandmarkId{ 0 }, LandmarkId{ 1 },
                                        LandmarkId{ 2 }, LandmarkId{ 3 },
@@ -86,7 +89,10 @@ TEST( KeyframeUpdateTest, NonKeyframeAllNewIdsRejected )
   // Slice ⑤c: non-keyframe with all-new IDs -> shared = 0 -> rejected
   // (overlap broken); seeding is only for keyframes.
   auto calib = makeCalibration();
-  StereoVoEstimator estimator( calib );
+  // M4.2: 该用例验证 M3.3 keyframe 拒绝门, 属 IMU-off 回归。
+  EstimatorOptions options;
+  options.enable_imu = false;
+  StereoVoEstimator estimator( calib, options );
   auto ids0 = std::vector<LandmarkId>{ LandmarkId{ 0 }, LandmarkId{ 1 },
                                        LandmarkId{ 2 }, LandmarkId{ 3 },
                                        LandmarkId{ 4 }, LandmarkId{ 5 },
@@ -113,7 +119,10 @@ TEST( KeyframeUpdateTest, NonKeyframeAllNewIdsRejected )
 TEST( KeyframeUpdateTest, NonKeyframeRejectedOnLowShared )
 {
   auto calib = makeCalibration();
-  StereoVoEstimator estimator( calib );
+  // M4.2: 该用例验证 M3.3 keyframe 拒绝门, 属 IMU-off 回归。
+  EstimatorOptions options;
+  options.enable_imu = false;
+  StereoVoEstimator estimator( calib, options );
 
   // Initialise with 20 IDs (above min_pnp_inliers = 10).
   std::vector<LandmarkId> ids;
@@ -144,7 +153,10 @@ TEST( KeyframeUpdateTest, NonKeyframeRejectedOnLowShared )
 TEST( KeyframeUpdateTest, NonKeyframeRejectedOnNoShared )
 {
   auto calib = makeCalibration();
-  StereoVoEstimator estimator( calib );
+  // M4.2: 该用例验证 M3.3 keyframe 拒绝门, 属 IMU-off 回归。
+  EstimatorOptions options;
+  options.enable_imu = false;
+  StereoVoEstimator estimator( calib, options );
 
   auto ids0 = std::vector<LandmarkId>{
       LandmarkId{ 0 }, LandmarkId{ 1 }, LandmarkId{ 2 }, LandmarkId{ 3 },
@@ -171,7 +183,10 @@ TEST( KeyframeUpdateTest, NonKeyframeRejectedOnNoShared )
 TEST( KeyframeUpdateTest, NonKeyframePreservesPoseChain )
 {
   auto calib = makeCalibration();
-  StereoVoEstimator estimator( calib );
+  // M4.2: 该用例验证 M3.3 keyframe 拒绝门, 属 IMU-off 回归。
+  EstimatorOptions options;
+  options.enable_imu = false;
+  StereoVoEstimator estimator( calib, options );
 
   auto ids = std::vector<LandmarkId>{
       LandmarkId{ 0 }, LandmarkId{ 1 }, LandmarkId{ 2 }, LandmarkId{ 3 },
@@ -204,7 +219,10 @@ TEST( KeyframeUpdateTest, NonKeyframePreservesPoseChain )
 TEST( KeyframeUpdateTest, NonKeyframeBeforeInitRejected )
 {
   auto calib = makeCalibration();
-  StereoVoEstimator estimator( calib );
+  // M4.2: 该用例验证 M3.3 keyframe 拒绝门, 属 IMU-off 回归。
+  EstimatorOptions options;
+  options.enable_imu = false;
+  StereoVoEstimator estimator( calib, options );
 
   auto ids = std::vector<LandmarkId>{
       LandmarkId{ 0 }, LandmarkId{ 1 }, LandmarkId{ 2 }, LandmarkId{ 3 },
@@ -220,7 +238,10 @@ TEST( KeyframeUpdateTest, WindowCapsAtTenWithTemporalEviction )
   // Slice ⑤c Basalt eviction: window holds up to window_size frames;
   // non-keyframes are evicted first when full.
   auto calib = makeCalibration();
-  StereoVoEstimator estimator( calib );
+  // M4.2: 该用例验证 M3.3 keyframe 拒绝门, 属 IMU-off 回归。
+  EstimatorOptions options;
+  options.enable_imu = false;
+  StereoVoEstimator estimator( calib, options );
 
   std::vector<LandmarkId> ids;
   for ( int i = 0; i < 20; ++i )

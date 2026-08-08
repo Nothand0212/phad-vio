@@ -28,6 +28,7 @@
 #include "phad/io/dataset/dataset_replay_source.hpp"
 #include "phad/io/dataset/euroc/euroc_dataset.hpp"
 #include "phad/sensor/stereo_frame.hpp"
+#include "phad/sensor/stereo_imu_packet.hpp"
 
 /**
  * @file offline_vo_session.cpp
@@ -375,7 +376,9 @@ namespace phad::apps
         break;
       }
 
-      auto loaded = stream.next();
+      // M4.2: session 走 nextPacket() —— IMU 随帧进入 sync 并切段, estimator
+      // 拿到本帧与上一帧之间的 IMU 段 [t_prev, timestamp]。
+      auto loaded = stream.nextPacket();
       if ( std::holds_alternative<io::EndOfStream>( loaded ) )
       {
         break;
@@ -390,7 +393,8 @@ namespace phad::apps
       }
 
       const auto  frame_begin = std::chrono::steady_clock::now();
-      const auto& raw         = std::get<sensor::StereoFrame>( loaded );
+      const auto& packet      = std::get<sensor::StereoImuPacket>( loaded );
+      const auto& raw         = packet.frame;
 
       const auto rectify_begin = std::chrono::steady_clock::now();
       auto       rectified     = rectifier.value().rectify( raw );
@@ -451,8 +455,13 @@ namespace phad::apps
       const bool is_kf = isKeyframe( tracks, tracks.timestamp );
       const auto estimator_begin =
           std::chrono::steady_clock::now();
-      const estimator::KeyframeMeasurement measurement =
+      estimator::KeyframeMeasurement measurement =
           toKeyframeMeasurement( tracks );
+      // M4.2: 携带帧间 IMU 段 (sync 切段插值语义, 见 StereoImuPacket)。
+      // 无 IMU 数据源时段恒空且 imu_gap=true → estimator 走 IMU-off 路径。
+      measurement.imu_samples = packet.samples;
+      measurement.t_prev      = packet.t_prev;
+      measurement.imu_gap     = packet.imu_gap;
       const estimator::VioUpdateResult update =
           estimator.update( measurement, is_kf );
       const auto estimator_end = std::chrono::steady_clock::now();

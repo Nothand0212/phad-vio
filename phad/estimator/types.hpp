@@ -10,6 +10,7 @@
 
 #include "phad/common/landmark_id.hpp"
 #include "phad/common/timestamp.hpp"
+#include "phad/sensor/imu_measurement.hpp"
 
 namespace phad::estimator
 {
@@ -30,6 +31,13 @@ namespace phad::estimator
   {
     common::Timestamp              timestamp;
     std::vector<StereoObservation> observations;
+    // M4.2: 本帧与上一帧之间的 IMU 段 [t_prev, timestamp]（sync 切段语义，
+    // 见 StereoImuPacket）。IMU-off 时恒空且 imu_gap=true；IMU-on 且
+    // enable_imu=false 时 estimator 直接忽略。段含两端插值样本，相邻段共享
+    // 右端样本——estimator 按需在 buildGraph 时即时重建预积分（C3）。
+    std::vector<sensor::ImuMeasurement> imu_samples;
+    common::Timestamp                  t_prev{ 0 };
+    bool                               imu_gap = false;
   };
 
   struct EstimatorOptions
@@ -89,6 +97,27 @@ namespace phad::estimator
     bool enable_accumulated_seed = false;
     // Session sets true when probe_b_path non-empty; NOT in flattenConfig.
     bool enable_probe_b = false;
+    // ---- M4.2 IMU 机制（默认开，进 config_hash）----
+    // enable_imu=false 完全走原 M3.3 链（不建 V/B 变量、无 IMU 因子）→
+    // IMU-off 字节回归保证。CLI: --no-imu。
+    bool enable_imu = true;
+    // 伪初始化重力（C4/C5）：EuRoC g = 9.81007，Z-up（MakeSharedU）。
+    double imu_gravity = 9.81007;
+    // 噪声密度（implicit smart 无重积分情况下的 white noise 模型；按设计稿
+    // §2.3：协方差 = 密度平方）。EuRoC 默认：acc_nd 2.0e-3 m/s²/√Hz、
+    // gyr_nd 1.6968e-4 rad/s/√Hz、acc_rw 3.0e-3 m/s²/√Hz、
+    // gyr_rw 1.9393e-5 rad/s²/√Hz。
+    double imu_acc_noise_nd = 2.0e-3;
+    double imu_gyr_noise_nd = 1.6968e-4;
+    double imu_acc_rw       = 3.0e-3;
+    double imu_gyr_rw       = 1.9393e-5;
+    // 最老帧 / gap 恢复帧 priors（C11/C15，中等 sigma 不扫参）：
+    // X prior 放松（IMU 因子约束重力/速度）；V prior 0 ± 1.0 m/s；
+    // B prior 0 ± gyro 1e-3 rad/s / acc 1e-2 m/s²。
+    double imu_prior_pose_sigma        = 1e-2;
+    double imu_prior_vel_sigma         = 1.0;
+    double imu_prior_bias_gyro_sigma   = 1e-3;
+    double imu_prior_bias_acc_sigma    = 1e-2;
   };
 
   enum class UpdateStatus : std::uint8_t

@@ -155,6 +155,8 @@ TEST( StereoVoReanchor, RecoversAfterLandmarkIdTurnover )
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
   options.window_size          = 5;
   options.min_shared_landmarks = 3;
+  // M4.2: 该用例测试 M3.3 重锚语义, 属 IMU-off 回归。
+  options.enable_imu = false;
   ASSERT_GE( kLandmarksB.size(),
              static_cast<std::size_t>( options.min_seed_observations ) );
 
@@ -200,6 +202,8 @@ TEST( StereoVoReanchor, SeedGateRejectsWithoutPoisoningState )
   options.window_size           = 5;
   options.min_shared_landmarks  = 3;
   options.min_seed_observations = 10;
+  // M4.2: 该用例测试 M3.3 首段播种门语义, 属 IMU-off 回归。
+  options.enable_imu = false;
 
   StereoVoEstimator estimator( calibration, options );
   const auto        poses = translatingPoses( 4, 0.05 );
@@ -239,6 +243,8 @@ TEST( StereoVoReanchor, ReanchorDisabledReproducesLegacyReject )
   options.window_size          = 5;
   options.min_shared_landmarks = 3;
   options.enable_reanchor      = false;
+  // M4.2: 该用例复现 M3.3 永久拒绝, 属 IMU-off 回归。
+  options.enable_imu = false;
 
   StereoVoEstimator estimator( calibration, options );
   const auto        poses = translatingPoses( 4, 0.05 );
@@ -363,6 +369,8 @@ TEST( StereoVoReanchor, AnchorFollowsConstantVelocityOption )
     options.window_size                = 5;
     options.min_shared_landmarks       = 3;
     options.use_constant_velocity_init = use_cv;
+    // M4.2: 该用例验证 CV 初值对锚位姿的 M3.3 语义, 属 IMU-off 回归。
+    options.enable_imu = false;
 
     StereoVoEstimator estimator( calibration, options );
     const auto        accepted = runNormalSegment( estimator, calibration, poses, ids_a );
