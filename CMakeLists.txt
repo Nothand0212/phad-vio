@@ -340,6 +340,7 @@ if(PHAD_BUILD_TESTS)
     tests/estimator/stereo_vo_cull_rebirth_test.cpp
     tests/estimator/keyframe_update_test.cpp
     tests/estimator/multiframe_triangulation_test.cpp
+    tests/estimator/stereo_vo_imu_test.cpp
   )
   target_link_libraries(phad_estimator_tests PRIVATE
     phad::estimator gtsam GTest::gtest_main
