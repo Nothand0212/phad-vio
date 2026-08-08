@@ -609,20 +609,33 @@ PnP stereo 一致性仲裁：[#25](https://github.com/Nothand0212/phad-vio/issue
 M3.3 出口已由 pre-M4 小片（两轮全否决，见上）锁定：纯 VO 内覆盖率的
 代价是 re-anchor 对齐税且无法在匹配/播种层消除 —— re-anchor 锚必须
 来自 IMU 预积分外推（消除 CV 锚错位），段间错位税结构性消失。这是
-本里程碑的第一动机，先于纯精度提升。
+本里程碑的第一动机，先于纯精度提升。定案设计见
+[M4 接入 IMU 设计](research/m4-imu-integration-design.md)（2026-08-07
+grill 定案；决策链 D1–D13 / C1–C17）。
 
-范围：
+切片（每片独立可观察收尾）：
 
-- IMU 输入校验与 bias 类型；
-- GTSAM preintegration 参数构造，噪声单位转换只在此处发生一次；
-- `PreintegratedCombinedMeasurements`；
-- 在 M3.2 的 `StereoPairSynchronizer` 上扩展 `pushImu`：图像边界 IMU 线性
-  插值与 `StereoImuPacket` 构造；队列长度限制与溢出报告沿用 M3.2，不新建
-  synchronizer；
-- 状态由 `X` 扩展为 `X/V/B`，新增 `ImuFactor` 与
-  `BetweenFactor<ConstantBias>`；
-- 起始静止初始化（收集静止段 → gyro bias → 重力方向 → roll/pitch →
-  零初速 → 建立 priors）。
+- **M4.1 数据路径**：`StereoPairSynchronizer` 扩展 `pushImu`（单调性
+  sticky 校验、有界队列与溢出计数沿用 M3.2）；图像边界 IMU 线性插值
+  与 `StereoImuPacket` 构造（段内 ΣΔt ≡ 图像间隔，原始样本 + 两端插值，
+  左端样本归新段）；大间断标 `imu_gap`；不新建 synchronizer；
+- **M4.2 估计器机制**：状态由 `X` 扩展为 `X/V/B`，新增
+  `CombinedImuFactor` 与 `BetweenFactor<ConstantBias>`；GTSAM preintegration
+  参数构造与噪声单位转换只发生在一处（acc_nd² / gyr_nd² / rw² 连续密度
+  平方）；位姿初值 = IMU 预积分外推，PnP/恒速降级为 IMU 不可用兜底；
+  **re-anchor 整体退役**：链跨段保持，事务回滚只回滚 landmark/观测；
+  伪初始化（bias=0 / v0=0 / g=9.81007）跑通，数字只记录不门控；
+- **M4.3 静止初始化 + 端到端门**：静止检测（gyro/accel 方差阈值）→
+  gyro bias → 重力方向 → roll/pitch → 零初速 → priors；检测失败返回
+  原因不冒充成功；初始化期间视觉等待（丢前 ~10–20 帧，
+  `init_dropped_frames` 进 summary）；bias 三轴进 `diag.csv`；
+- **M4.4 收尾小片**：Rule 4 旋转补偿来源 BA 位姿 → IMU 预积分，全序列
+  record-only + MH_01 不劣化；KF 冷却（Basalt `min_frames_after_kf=5`）
+  评估一并做。
+
+`estimator.enable_imu`（默认 true）进 `config_hash`；IMU-off 时
+`est.tum`/`diag.csv` 相对 M3.3 基线（`4cf55ca/default_773ea011`）
+**逐字节相同**，作为 A/B 归因与回退锚。
 
 测试：
 
@@ -632,16 +645,24 @@ M3.3 出口已由 pre-M4 小片（两轮全否决，见上）锁定：纯 VO 内
 - covariance 对称且特征值在容差内非负；
 - packet 的 IMU \(\sum\Delta t\) 等于图像时间间隔；
 - 图像时刻恰好落在 IMU 样本上、落在两样本之间、缺样、重复、逆序、
-  大间断；
+  大间断（`imu_gap` 跳因子不跳帧）；
 - 失败路径：逆序时间戳、非有限测量、非正 \(\Delta t\)、非法 noise 配置；
-- 静止检测成功与运动中误初始化拒绝。
+- 静止检测成功与运动中误初始化拒绝；
+- 合成退化注入（`--dropout-*`，CLI-only 不进 config_hash）：注入期位姿
+  由预积分外推连续、恢复后无永久损伤；IMU-off 对照为冻结语义。
 
-出口：
+出口（三重门）：
 
-- `MH_01` 的 ATE 优于 M3.3 的纯 VO 结果；
-- 视觉短时退化时轨迹连续，不出现跳变或发散；
-- IMU bias 能从扰动初值收敛；
-- 视觉与 IMU 时间错位用例产生可检测的误差增大。
+- **① MH_01 ATE ≤ 0.100 m**（绝对门；M3.3 锚 0.0988 已接近纯 VO 极限，
+  IMU 增量在良好视觉段期望不高，不设"严格优于"硬门）；
+- **② 视觉短时退化时轨迹连续**：MH_05 相对 M3.3 基线显著改善 + 注入
+  测试断言连续性与恢复性，不出现跳变或发散；
+- **③ 机制证据**：IMU-on 下 `segments`/`reanchors` 恒 1/0（re-anchor 税
+  结构性消失）；逐段 ATE 分解的段间错位显著下降；IMU bias 从扰动初值
+  收敛（gyro < 1e-3 rad/s 量级）。
+
+时间错位用例（视觉与 IMU 时间错位误差增大）纳入 M9 在线估计前的离线
+对拍测试，不在本里程碑单独验收。
 
 ## M5：正式初始化
 
