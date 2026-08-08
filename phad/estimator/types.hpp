@@ -120,8 +120,10 @@ namespace phad::estimator
     // 远大于短链上 IMU 因子的局部 bias 信息 (0.5s 悬停段实测 ≈324),
     // 首帧 LM 一步把正确的 init bias (EuRoC 实测 z 轴 0.080 rad/s) 压回 0,
     // 之后预积分以错误 bias 重建 → 航向按 (b_true−b_est)·t 累积漂移
-    // (MH_01 转误差 ±30°, ATE 0.458 vs 视觉门 0.100)。1e-1 后 bias 由
-    // init 初值 + 因子链观测性决定 (yaw 方向由视觉+地标世界位锚定)。
+    // (MH_01 转误差 ±30°, ATE 0.458 vs 视觉门 0.100)。1e-1 后 bias prior
+    // 信息量 100 已可被因子链吸收; 首图 yaw gauge (视觉因子只约束相对
+    // 几何, 共旋零成本) 由 buildGraph 的 seed pose prior 单独关闭
+    // (M4.3d), 之后 bias 由 init 初值 + 因子链观测性决定。
     double imu_prior_pose_sigma        = 1e-2;
     double imu_prior_vel_sigma         = 1.0;
     double imu_prior_bias_gyro_sigma   = 1e-1;

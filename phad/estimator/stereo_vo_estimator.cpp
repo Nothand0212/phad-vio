@@ -1312,6 +1312,21 @@ namespace phad::estimator
               gtsam::imuBias::ConstantBias(),
               gtsam::noiseModel::Diagonal::Sigmas( bias_sigmas ) );
         }
+
+        // M4.3d: 首图 (虚拟 t0 帧 + seed) 的 yaw gauge 退化修复。视觉因子
+        // 只约束 pose↔landmark 相对几何, 关于重力轴的共旋 (X(seed)+新地标)
+        // 不改变 IMU 因子 gravity 项 → LM 零成本吸收 init bias 误差
+        // (EuRoC 悬停 z 轴实测 0.080 rad/s 被压到 0, 之后预积分以错误 bias
+        // 重建 → 航向按 (b_true−b_est)·t 累积漂移)。给 seed 帧加 pose
+        // prior (σ=1e-2, 同 X0 锚): 共旋 0.04 rad = 4σ (cost 8) vs 保持
+        // bias 0.080 (cost 0.34) → LM 保持 bias。后续图有跨帧共享地标
+        // (landmarks_W 世界系固定) 自然锚定, 无需此 prior。
+        if ( !initialized && window.size() == 2 )
+        {
+          graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
+              X( window[ 1 ].frame_index ), toPose3( window[ 1 ].T_W_B ),
+              imu_pose_prior_noise );
+        }
       }
 
       const auto                     counts = countObservations();
