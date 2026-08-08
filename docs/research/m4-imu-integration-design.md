@@ -179,6 +179,24 @@ StereoImuPacket {
 - `apps/StereoPairStream` 扩展为产出 `StereoImuPacket`(或新增方法),session
   仍按 `StereoFrame` 消费(IMU 段暂存不消费)。
 
+### 3.5 实施状态(M4.1,已落地)
+
+- [x] `pushImu` + 独立 IMU 队列/sticky/溢出计数(`phad/sync`,issue #31);
+- [x] `StereoImuPacket` 类型(`phad/sensor/stereo_imu_packet.hpp`);
+- [x] 配对时切段与两端插值:`t_prev` 经 `m_last_emitted_left` 链式传递,右端
+      经 `m_last_boundary` 跨段共享;ΣΔt ≡ 图像间隔(测试断言);
+- [x] `imu_gap` 检测(段宽 > `imu_gap_ns` / 两端无法构造 / 段内无样本);
+- [x] 测试矩阵(§3.3 逐项 + 首帧零段 + sticky 独立性 + flush 计数,12 项新增);
+- [x] `apps/StereoPairStream::nextPacket()` 产出 packet,`next()` 取其 frame
+      (session 仍按 `StereoFrame` 消费);
+- [x] 字节级回归: MH_01 `est.tum`/`diag.csv` 与 `4cf55ca/default_773ea011`
+      逐字节相同(plan #31 出口)。
+- 说明: 切段时早于首帧的样本计入 `dropped_imu`(C2);首帧 packet 为零段
+  (`t_prev == t_cur`);`enable_imu` 开关与 `imu_gap_ns` 阈值在 M4.1 均**不进**
+  `config_hash`(估计器未消费 IMU,run 身份不变,字节回归基准可比);两者经
+  `StereoPairSynchronizerOptions` / CLI 可配置,待 M4.2 消费 IMU 时再按 §7
+  纳入 config_hash。
+
 ## 4. M4.2 估计器机制(`phad/estimator`)
 
 ### 4.1 状态与因子图
