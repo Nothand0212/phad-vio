@@ -547,10 +547,14 @@ namespace phad::estimator
             Eigen::Matrix3d::Identity() * 1e-8 );
         // - biasAccOmegaInit (预积分 biasHat 初始不确定度) 在安装的 4.3a0
         //   中默认 I_6x6·1.0, 逐样本注入 dt·1.0 到 ΔR/ΔV/Δp 协方差
-        //   (σ ≈ √dt, 因子权重为 0)。M4.3d 起与 bias prior 解耦: prior
-        //   sigma 已放宽到 1e-1 (图权重), 但 biasHat 的初始不确定度应反映
-        //   静止 init 的实际精度 (~1e-3 rad/s), 固定取 gyro 1e-3² /
-        //   acc 1e-1² (原 C15 数值, 不随 prior 扫参)。
+        //   (σ ≈ √dt, 因子权重为 0)。M4.3d 起与 graph bias prior
+        //   (acc 3e-2 / gyro 1e-1) 解耦, 固定取 acc 1e-3² /
+        //   gyro 1e-1², 不随 prior 扫参。
+        //   注意 fork 布局: block(0,0) 经 pos_H_biasAccInit 注入 Δp/Δv
+        //   (acc 槽), block(3,3) 经 theta_H_biasOmegaInit 注入 ΔR (gyro 槽)。
+        //   实测门① 调参 (2026-08-09): 值-槽互换 (acc 1e-1² / gyro 1e-3²)
+        //   → 0.1454 劣于现状 (acc 1e-3² / gyro 1e-1² → 0.1223), 保持现状
+        //   (紧 Δp/Δv + 松 ΔR 是良好视觉段的最优权重)。
         gtsam::Matrix6 bias_init_cov = gtsam::Matrix6::Zero();
         bias_init_cov.block<3, 3>( 0, 0 ) =
             Eigen::Matrix3d::Identity() * 1e-3 * 1e-3;
@@ -560,11 +564,18 @@ namespace phad::estimator
         imu_pose_prior_noise = makeImuPosePriorNoise( options );
         imu_vel_prior_noise  = gtsam::noiseModel::Isotropic::Sigma(
             3, options.imu_prior_vel_sigma );
+        // 本 fork 的 ConstantBias::vector() = [acc; gyro] (ImuBias.h:
+        // biasAcc_ 在前), 故 sigmas 布局必须 [acc×3, gyro×3] (曾按
+        // [gyro×3, acc×3] 排列与 residual 互换, 被同值 1e-1 掩盖, 已修正)。
+        // 全通道同 σ (acc 3e-2 / gyro 1e-1)。门① 调参 (2026-08-09):
+        // 各向异性 z (z 1e-1, x/y 3e-2) → 0.1305、全通道 1e-1 → 0.1443
+        // 均劣于 3e-2 → 0.1223 —— bias 自由度任何放松都以链内 walk 失真
+        // 偿还, 保持收紧。
         gtsam::Vector6 bias_sigmas;
-        bias_sigmas << options.imu_prior_bias_gyro_sigma,
-            options.imu_prior_bias_gyro_sigma,
-            options.imu_prior_bias_gyro_sigma, options.imu_prior_bias_acc_sigma,
-            options.imu_prior_bias_acc_sigma, options.imu_prior_bias_acc_sigma;
+        bias_sigmas << options.imu_prior_bias_acc_sigma,
+            options.imu_prior_bias_acc_sigma,
+            options.imu_prior_bias_acc_sigma, options.imu_prior_bias_gyro_sigma,
+            options.imu_prior_bias_gyro_sigma, options.imu_prior_bias_gyro_sigma;
         imu_bias_prior_noise =
             gtsam::noiseModel::Diagonal::Sigmas( bias_sigmas );
       }
@@ -818,7 +829,14 @@ namespace phad::estimator
       }
       init_T_W_I0  = Eigen::Isometry3d( Eigen::Quaterniond::FromTwoVectors(
           gravity_dir, Eigen::Vector3d::UnitZ() ) );
-      const Eigen::Vector3d acc_bias = a_mean - init_g * gravity_dir;
+      // acc bias init 不能用 init_g·gravity_dir (= a_mean, 恒等式) →
+      // acc_bias ≡ 0 (首图 gauge 无梯度, LM 停在 0, 积分不消除本征 acc
+      // bias → 位置按 ½·b·t² 漂移, MH_01 ATE 0.3518)。改用常数真重力
+      // (imu_gravity): acc_bias = a_mean − 9.81007·ẑ_body ≈ 真值
+      // (−0.0333, +0.0018, +0.0091)。静止假设下 a_mean 与真重力只差
+      // scale/tilt 混淆 (门① 归因, 见 benchmark m4.3 checkpoint)。
+      const Eigen::Vector3d acc_bias =
+          a_mean - options.imu_gravity * gravity_dir;
       init_bias0    = gtsam::imuBias::ConstantBias( acc_bias, g_mean );
       init_imu.erase(
           init_imu.begin(),
@@ -1269,16 +1287,13 @@ namespace phad::estimator
         // 按 (b_true−b_est)·t 累积漂移 (MH_01 ATE 0.458→0.281 vs 门①
         // 0.100)。目标改为 init bias 后 (b=biasHat, 种子位姿) 全图误差即 0
         // → LM 无动机移动, bias 精确保留 (独立复现验证: err0≈0, 0 迭代)。
-        // 后续图有跨帧共享地标 (count≥2) 自然锚定, 因子链观测性 (2e7) 主导,
-        // B prior 回归 Zero 目标。
-        gtsam::imuBias::ConstantBias b0_target;
-        if ( !initialized && window.size() == 2 )
-        {
-          b0_target = window.front().bias;
-        }
+        // M4.3d 定案: B prior 目标无条件 = window.front().bias (init bias)。
+        // Zero 目标在 G2 起把整链压向 0 (r≈0.08/0.03 有效 σ 交换, prior
+        // 残差 ~8.3 → LM 滑动 → bias 全碎); init 目标残差 0, LM 无动机
+        // 移动, bias 由 init 初值 + 因子链观测性决定。
         graph.emplace_shared<
             gtsam::PriorFactor<gtsam::imuBias::ConstantBias>>(
-            B( oldest ), b0_target, imu_bias_prior_noise );
+            B( oldest ), window.front().bias, imu_bias_prior_noise );
 
         for ( std::size_t j = 1; j < window.size(); ++j )
         {
@@ -1318,8 +1333,9 @@ namespace phad::estimator
           const double gyr_rw_sigma = options.imu_gyr_rw * std::sqrt( dt );
           const double acc_rw_sigma = options.imu_acc_rw * std::sqrt( dt );
           gtsam::Vector6 bias_sigmas;
-          bias_sigmas << gyr_rw_sigma, gyr_rw_sigma, gyr_rw_sigma,
-              acc_rw_sigma, acc_rw_sigma, acc_rw_sigma;
+          // vector() = [acc; gyro] (fork), 故 acc 分量取 acc_rw。
+          bias_sigmas << acc_rw_sigma, acc_rw_sigma, acc_rw_sigma,
+              gyr_rw_sigma, gyr_rw_sigma, gyr_rw_sigma;
           graph.emplace_shared<
               gtsam::BetweenFactor<gtsam::imuBias::ConstantBias>>(
               B( prev.frame_index ), B( cur.frame_index ),

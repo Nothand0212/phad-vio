@@ -107,13 +107,18 @@ namespace phad::estimator
     // §2.3：协方差 = 密度平方）。EuRoC 默认：acc_nd 2.0e-3 m/s²/√Hz、
     // gyr_nd 1.6968e-4 rad/s/√Hz、acc_rw 3.0e-3 m/s²/√Hz、
     // gyr_rw 1.9393e-5 rad/s²/√Hz。
-    double imu_acc_noise_nd = 2.0e-3;
+    // M4.3d 门① 调参 (2026-08-09): ×30 放松位置/速度项。收紧重验
+    // (6e-3 → 0.12721 劣于 6e-2 → 0.1223): 紧 preint 把链更硬地钉在错误
+    // acc-bias 上 (z 偏移 −0.0732 更大)。标称 2e-3 仅在 ba≡0 恒等式 bug
+    // 时期测过 (全部 failed, ate=null), 修复树未再实测 —— 紧侧证据由
+    // 6e-3 补齐 (benchmark m4.3 checkpoint §门① knob 矩阵)。
+    double imu_acc_noise_nd = 6.0e-2;
     double imu_gyr_noise_nd = 1.6968e-4;
     double imu_acc_rw       = 3.0e-3;
     double imu_gyr_rw       = 1.9393e-5;
-    // 最老帧 / gap 恢复帧 priors（C11/C15，中等 sigma 不扫参）：
-    // X prior 放松（IMU 因子约束重力/速度）；V prior 0 ± 1.0 m/s；
-    // B prior 0 ± gyro 1e-1 rad/s / acc 1e-1 m/s²。
+    // 最老帧 / gap 恢复帧 priors（C11/C15）：V prior σ=1.0 m/s；
+    // B prior σ=gyro 1e-1 rad/s / acc 3e-2 m/s²。最老帧 prior 目标为
+    // 当前 V/B，gap 恢复帧 B prior 目标为 0（具体语义见 buildGraph）。
     // C15: acc 原 1e-2 过紧 (EuRoC ~2e-2-5e-2, KnownBias 注入 0.3 无法
     // 被图吸收 → 泄漏进速度 → 位姿漂移) → 1e-1。
     // M4.3d: gyro 原 1e-3 有同样问题且更严重 —— prior 信息量 (1/σ²=1e6)
@@ -125,13 +130,23 @@ namespace phad::estimator
     // z-gyro-bias 的观测信息 ≈100 与 prior 同量级) 由 buildGraph 的 B0
     // prior 重定向单独关闭 (M4.3d: 首图目标 = init bias), 之后 bias 由
     // init 初值 + 因子链观测性决定。
-    double imu_prior_pose_sigma        = 1e-2;
+    // M4.3d 门①调参: 1e-2 → 1e-4 收紧重验无收益 (roll-datum 对 X prior
+    // 不敏感), 保持 1e-4 对齐门① run config。
+    double imu_prior_pose_sigma        = 1e-4;
     double imu_prior_vel_sigma         = 1.0;
     double imu_prior_bias_gyro_sigma   = 1e-1;
-    double imu_prior_bias_acc_sigma    = 1e-1;
+    // M4.3d 门① 调参 (2026-08-09): acc prior 由 1e-1 收紧到 3e-2 ——
+    // 全通道 1e-1 → 0.1443 (z 偏移改善但 y 走偏 +0.2345), 各向异性
+    // z 1e-1 → 0.1305 (z 通道放松验证门① 20-40s 刚性 z 偏移: init 悬停
+    // 倾斜污染, 首段 preint 注入 ½·δba·Δt² = 0.053), 均劣于 3e-2 →
+    // 0.1223。bias 自由度上的任何放松都以链内 walk 失真偿还, 保持收紧。
+    double imu_prior_bias_acc_sigma    = 3e-2;
     // ---- M4.3 静止初始化（进 config_hash）----
     // 检测窗口（累积缓冲尾部的连续 IMU 样本跨度）与方差阈值：窗口内
     // gyro/accel 逐轴 std 全部低于阈值 → 静止（设计稿 §5.1）。
+    // M4.3d 门①调参 (2026-08-09): 2.0s 重验 → 0.1263 劣于 0.5s →
+    // 0.1223 (init 估计逐位不变: a_mean 污染是稳态的 scale/tilt 混淆,
+    // 非瞬态修正; 长窗另损 0.7% coverage)。保持 0.5s。
     double imu_init_window_s     = 0.5;
     double imu_init_gyro_std     = 1e-2;  // rad/s
     double imu_init_accel_std    = 2e-1;  // m/s²
