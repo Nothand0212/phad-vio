@@ -629,10 +629,17 @@ grill 定案；决策链 D1–D13 / C1–C17）。
   g=9.81007）跑通，数字只记录不门控（MH_01 IMU-on ATE trans 0.682 m /
   rot 24.2°，yaw 未对齐，待 M4.3 静止初始化；IMU-off 与 M3.3 基线
   `8906684/default_revert_402d1925` 逐字节相同）；
-- **M4.3 静止初始化 + 端到端门**：静止检测（gyro/accel 方差阈值）→
-  gyro bias → 重力方向 → roll/pitch → 零初速 → priors；检测失败返回
-  原因不冒充成功；初始化期间视觉等待（丢前 ~10–20 帧，
-  `init_dropped_frames` 进 summary）；bias 三轴进 `diag.csv`；
+- **M4.3 静止初始化 + 端到端门（已收口，`603cd9e`，issue #33）**：
+  静止检测（gyro/accel 方差阈值）→ gyro bias → 重力方向 → roll/pitch →
+  零初速 → priors；检测失败返回原因不冒充成功；初始化期间视觉等待，
+  `init_dropped_frames` 进 summary；bias 三轴进 `diag.csv`。端到端结果：
+  门① MH_01 **FAIL**（ATE 0.122337 > 0.100；scale/tilt 污染 acc bias +
+  链内 bias walk，已完成 knob 穷尽），门② **量化 FAIL / dropout PASS**
+  （MH_05 0.345609 vs M3.3 0.324107；60 帧全清仍连续），门③ **PASS**
+  （8/8 `segments/reanchors=1/0`，gyro bias 为 `1e-3 rad/s` 量级）；
+  IMU-off 回归 PASS。详见
+  [M4.3 checkpoint](benchmark/m4.3/README.md)。本片完成表示实现、跑数与
+  归因收口，不表示失败的数值门已通过；结构性初始化修复移交 M5；
 - **M4.4 收尾小片**：Rule 4 旋转补偿来源 BA 位姿 → IMU 预积分，全序列
   record-only + MH_01 不劣化；KF 冷却（Basalt `min_frames_after_kf=5`）
   评估一并做。

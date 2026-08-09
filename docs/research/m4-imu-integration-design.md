@@ -62,7 +62,7 @@
 
 | # | 决策点 | 定案 |
 |---|---|---|
-| D10 | 静止初始化期间视觉 | **等待**: 静止检测完成时刻 t0 为第一个状态帧,其前图像帧丢弃(约 10–20 帧);检测所用 IMU 段仍进入第一条预积分段 |
+| D10 | 静止初始化期间视觉 | **等待**: 通过检测的静止窗口起点 t0 为第一个状态帧,此前图像帧丢弃;检测所用 IMU 段仍进入第一条预积分段 |
 | D11 | 退化测试 | **双轨**: 出口门挂天然序列(MH_05 IMU-on 相对 M3.3 基线显著改善);合成注入做 CI 级机制测试(`--dropout-start/--dropout-frames`,session 级、不进 `config_hash`,参照 `enable_probe_b` 模式) |
 | D12 | 机制证据 | 三合一: ① `segments`/`reanchors` 恒 1/0(IMU-on,D9 推论)② 逐段 ATE 分解的段间错位显著下降 ③ `diag.csv` bias 三轴 per-frame 输出 + 收敛用例 |
 | C8 | 初始化丢帧计数 | `init_dropped_frames` 进 `summary.json`,不进 `config_hash` |
@@ -318,20 +318,24 @@ IMU-off 零回归: 现有 67 测试全部通过;10 个 M3.3 语义用例显式
 ### 5.1 静止初始化流程
 
 ```text
-收集前 0.5 s IMU(100 样本)
-  → gyro/accel 方差 < 阈值(gyro std < 1e-2 rad/s、accel std < 2e-2 m/s²,
-    进 config,M4.3 扫参)→ 静止
+收集连续 0.5 s IMU(约 100 样本)
+  → gyro/accel 方差 < 阈值(gyro std < 1e-2 rad/s、accel std < 2e-1 m/s²,
+    进 config;后者按 EuRoC 旋翼静止底噪放宽)→ 静止
   → gyro_bias = mean(gyro)
   → gravity_dir = 归一化 mean(accel)(IMU 系)
-  → R_W_I0: 世界 Z 与 -gravity 对齐(roll/pitch);yaw = 0(C5)
-  → v0 = 0;bias0 = (mean(accel) − g·gravity_dir 的残差, acc_bias, gyro_bias)
-  → 建立 priors;t0 = 检测完成时刻
+  → R_W_I0: 把 gravity_dir(静止比力“上”方向)对齐世界 +Z(roll/pitch);
+    yaw = 0(C5)
+  → v0 = 0;acc_bias = mean(accel) − imu_gravity·gravity_dir;
+    gyro_bias = mean(gyro)
+  → 建立 priors;t0 = 通过检测的静止窗口起点
 检测失败 → 返回错误+原因(C9),不静默降级
 ```
 
 - 视觉等待(D10): t0 前图像帧丢弃,`init_dropped_frames` 进 summary(C8);
   t0 到首帧图像之间的 IMU 段仍进入第一条预积分段;
-- 重力幅值: `|mean(accel)|` 优先,9.81007 兜底(C10);
+- 预积分重力幅值: `|mean(accel)|` 优先,9.81007 兜底(C10);acc bias
+  必须使用标称 `imu_gravity`,避免 `mean(accel) − |mean(accel)|·gravity_dir`
+  恒为 0;
 - 运动中误初始化拒绝(roadmap 测试项): 合成数据构造运动段,断言拒绝。
 
 ### 5.2 端到端三重门(D2)
@@ -353,7 +357,27 @@ IMU-off 零回归: 现有 67 测试全部通过;10 个 M3.3 语义用例显式
   ATE 回到基线水平(无永久损伤);
 - bias 收敛用例: 伪初始化给零 bias,跑 30 s 后 bias 与静止段检测值差 <
   阈值(gyro < 1e-3 rad/s 量级);`diag.csv` 增 bias 三轴 per-frame 列(IMU-off
-  填 0/空,保证字节级回归成立,Q3/C12)。
+  填 0,保证新列确定且原列可字节级回归,Q3/C12)。
+
+### 5.4 实施状态(M4.3,已收口)
+
+- [x] estimator init 相位:连续段累积、0.5 s 尾窗检测、gap 重置、30 s
+      超时失败、虚拟 t0 帧、首段全量 pending 与测量重力重建;
+- [x] `diag.csv` 增 gyro/acc bias 六列,`init_dropped_frames` 进 summary;
+      IMU-off 新列恒 0;
+- [x] session dropout CLI 三参数齐备才激活且不进 `config_hash`;合成
+      IMU-on 连续/恢复与 IMU-off 冻结两臂通过;
+- [x] GTSAM fork 的 `ConstantBias::vector()=[acc;gyro]` 槽位修复、acc bias
+      恒等式修复、最老帧 B prior 目标固定为当前 init bias;
+- [x] 端到端跑数与 knob 归因完成,最终代码 `603cd9e`,config
+      `d70e45aa`;完整证据见
+      [M4.3 checkpoint](../benchmark/m4.3/README.md)。
+
+三重门实测结果不是全过:门① MH_01 `0.122337 > 0.100` **FAIL**;门②
+MH_05 `0.345609` vs M3.3 `0.324107`(+6.6%)量化 **FAIL**,但 60 帧
+全清 dropout 与两条合成断言 **PASS**;门③ 8/8 `segments/reanchors=1/0`,
+gyro bias 保持 `1e-3 rad/s` 量级,**PASS**。acc bias 暴露 scale/tilt
+混淆与链内 walk,结构性修复转入 M5;M4.3 收口不把失败门描述为通过。
 
 ## 6. M4.4 收尾小片
 
@@ -387,7 +411,7 @@ dropout 注入参数、`init_dropped_frames`(C8)。
 |---|---|---|
 | M4.1 | packet 矩阵(§3.3)+ 字节级回归 | `est.tum`/`diag.csv` 不变 |
 | M4.2 | 合成对拍(§4.7)+ MH_01 跑通 | 数字只记录不门控 |
-| M4.3 | 三重门(§5.2)+ 注入测试 + bias 收敛 + 误初始化拒绝 | 三重门全过 |
+| M4.3 | 三重门(§5.2)+ 注入测试 + bias 收敛 + 误初始化拒绝 | 目标为三重门全过;实测①/②量化 FAIL、dropout/③ PASS(§5.4) |
 | M4.4 | Rule 4 A/B | 全序列 record-only + MH_01 不劣化 |
 
 ## 9. 不做
@@ -403,7 +427,7 @@ dropout 注入参数、`init_dropped_frames`(C8)。
 
 1. **KF 冷却是否需要**(M4.4 用 IMU 数据决定,见 §6);
 2. **30px 视差阈值复评**(M4.4);
-3. **accel bias 可观测性**: 静止初始化只能粗糙给出 acc_bias(mean(accel) − g
-   残差),优化中与 roll/pitch 的耦合如何收敛 —— M4.3 实测关注;
+3. **accel bias 可观测性(M4.3 已观测)**: 静止初始化受 scale/tilt 混淆,
+   MH_01 链内继续 bias walk;运动基础初始化或 scale 联合估计转入 M5;
 4. **IMU 失效兜底的对拍**: `imu_gap` 期间 CV 锚行为与 M3.3 的一致性,列入
    M4.2 测试矩阵补项。
