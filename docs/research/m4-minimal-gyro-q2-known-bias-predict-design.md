@@ -2,14 +2,14 @@
 
 日期：2026-08-12
 
-状态：**Q2 plan preregistration；DUT 尚未实现、尚未取得 Q2 资格**
+状态：**Q2 implementation provisional；独立资格 pending，尚未取得 Q2 final 结论**
 
 固定点：`c0e214a04f8521dcf7f1c2769ebf10bf7ca06051`
 （分支 `Nothand0212/m4-q2-gyro-predict`）
 
 权限：GitHub issue
-[#37](https://github.com/Nothand0212/phad-vio/issues/37) 只授权 Q2 research、plan 与后续经评审的
-Q2 deterministic qualification；当前 research note 本身不授权 implementation。前置 Q1 final PASS 见
+[#37](https://github.com/Nothand0212/phad-vio/issues/37) 授权 Q2 research、plan 与经评审的
+Q2 deterministic implementation/qualification；当前实现结果仅为 provisional。前置 Q1 final PASS 见
 [Q1 Observe 资格结果](m4-minimal-gyro-q1-observe-result.md)。上位设计与方法分别见
 [M4 gyro measurement / factor 资格实验设计](m4-minimal-gyro-slice-design.md)和
 [证据门控的信息接入](../agents/evidence-gated-integration.md)。
@@ -349,6 +349,24 @@ framework。
 注入、临时改常量或新增 test seam 制造该错误；若 verifier 平台上这个已预注册 fixture 不能
 自然触发，Q2 整体判为 **INCONCLUSIVE 并停止**。
 
+final-output defensive branches 另冻结两个无 injection 的 public-input fixture；两者在进入
+GTSAM 前的 safe endpoint mean、corrected omega 与 rotation vector 均须逐元素 finite：
+
+- `kNonFinitePrediction`：timestamps `[0,1]` ns，两个 endpoints gyro 均为
+  `[DBL_MAX,0,0]` rad/s，bias 为 zero。当前冻结环境下 GTSAM output 为 3x3 全 NaN；public
+  result 必须为 `kNonFinitePrediction`，`sample_index`、`interval_index`、`timestamp_ns`
+  均为 `nullopt`。
+- `kInvalidRotation`：471 samples，timestamps 为 `0..470` ns，每点 gyro 均为
+  `[-2.4664720996731243e54,1.9669167514335542e54,-2.5705088372089910e54]` rad/s，bias
+  为 zero。当前冻结环境下 470 intervals 的 output matrix finite，
+  `||R^T R-I||_F=1.0012190690733831e-12`、`|det(R)-1|=7.5839334812144443e-13`；public
+  result 必须为 `kInvalidRotation`，三个 optional 字段均为 `nullopt`。
+
+这两组 actual 依赖 GTSAM `4.3a0`、Eigen `3.4.0`、GCC `13.3.0`、glibc `2.39`、x86_64、
+Release matrix-mode Rot3/Expmap 路径；不是 GTSAM 跨平台合同。换平台后任一 fixture 无法自然
+复现时，Q2 为 **INCONCLUSIVE 并停止**，不得更换常量或增加 injection seam。独立资格除运行
+这两个 runtime 门外，还须审计 production 的 output finite 与 SO(3) defensive checks。
+
 **未授权范围：**`imu_gap` 是 packet-level eligibility，不是 helper 输入。未来 caller 对 gap
 可按其资格层显式 skip factor，但不得把 malformed sample span 当 gap 静默处理。
 
@@ -490,22 +508,22 @@ midpoint semantics。它不调用、链接或修改 sync，也不授权 packet m
 
 | 对象 | PASS | FAIL | INCONCLUSIVE |
 |---|---|---|---|
-| 正常 DUT | 本文所有 upper bounds、exact duration、SO(3)、unused-accel invariance 与 hard-error expectations 全满足 | 任一 deterministic expectation 不满足，或错误被 skip/fallback/identity 掩盖 | 仅资格前提、工具版本、冻结 oracle identity，或预注册 `DBL_MAX` fixture 的自然 overflow 无法复现，尚未得到有效 DUT observation |
+| 正常 DUT | 本文所有 upper bounds、exact duration、SO(3)、unused-accel invariance、自然 runtime 门与 defensive code audit 全满足 | 任一 deterministic expectation 不满足，或错误被 skip/fallback/identity 掩盖 | 仅资格前提、工具版本、冻结 oracle identity，或任一冻结自然 fixture 无法复现，尚未得到有效 DUT observation |
 | 单个 mutant gate | 正常 DUT 先通过对应正例，且 mutant error `>= L`，证明 test 能拒绝它 | mutant error `< L`、mutant 被正常门接受，或 test 实际没有执行 mutant | 仅因 oracle/tool identity 无法复现而没有有效比较；不得因 mutant 结果难看而使用 |
 
 **项目决策：**“mutant PASS”表示 rejection test 有区分力，不表示 mutant 实现正确。
 
 ### 8.2 Q2 整体结论
 
-- **Q2 PASS**：正常 DUT 全部 PASS（包括 unused-accel invariance、可达的
-  `kNonFiniteComputation` 门与 final-output `kNonFinitePrediction` 门），六类 mutant gates
+- **Q2 PASS**：正常 DUT 全部 PASS（包括 unused-accel invariance、三个自然 defensive
+  runtime 门与 final-output defensive code audit），六类 mutant gates
   全部 PASS，RED 证据证明 tests 在 helper
   实现前失败，且 allowlist/deletion test 成立。
 - **Q2 FAIL**：任何 deterministic 正常门、hard-fail、duration、SO(3) 或 mutant rejection
   失败。必须修合同/实现或记录负结果；不得进入 Q3。
 - **Q2 INCONCLUSIVE**：仅当 fixed point/Q1 前提、CPython/mpmath 版本、80-dps oracle
-  identity、编译工具链、必需一手 dependency 无法复现，或 verifier 平台不能由预注册
-  `DBL_MAX` fixture 自然触发 corrected-omega overflow，导致没有有效 observation；后一情形
+  identity、编译工具链、必需一手 dependency 无法复现，或 verifier 平台不能由任一冻结
+  自然 fixture 触发对应 branch，导致没有有效 observation；后一情形
   必须立即停止，不得临时改常量、注入错误或增加 seam。
   `inconclusive` 不能掩盖已经观测到的 deterministic failure；某条正常 DUT 已超门时，整体
   就是 FAIL，而不是“环境可能有差异”。
@@ -571,10 +589,12 @@ posterior state、MH_01 run 或 visual comparison。若实现发现必须改 for
 4. GREEN：只构建/运行 estimator 定向 unit tests；fixed point 既有 sync tests 仅记录为
    上游前提，Q2 不新增、修改、链接或运行 sync test，也不运行 MH_01 或长测试；
 5. §5 正常数值、§6 mutant lower bounds、§4 hard-error matrix（含 unused-accel exact
-   invariance、自然可达的 `kNonFiniteComputation` 与 final-output
-   `kNonFinitePrediction`）、§7 三次调用 endpoint fixture 的逐项 actual；
+   invariance、三个自然 defensive fixtures 的实际 code/optional fields、precondition finite
+   checks、final output finite/orthogonality/determinant evidence 与 defensive code audit）、
+   §7 三次调用 endpoint fixture 的逐项 actual；
 6. `git diff --check`、受托 diff review、allowlist/forbidden-path audit 与 deletion test；
 7. PASS/FAIL/INCONCLUSIVE 按 §8 判定，不以“测试进程 exit 0”替代逐门 evidence。
 
-本 research note 只允许进入 Q2 plan/review；它没有实现 helper、测试或 CMake 变更，没有
-运行 Q2 qualification，不授权 Q2 implementation，也没有授予 Q3–Q5 权限。
+当前 helper/test/CMake implementation 与本次两个自然 fixture 的实施者定向结果仅为
+provisional；独立 clean qualification 与 Q2 final PASS/FAIL/INCONCLUSIVE 仍 pending。本 note
+不授予 Q3–Q5 权限。

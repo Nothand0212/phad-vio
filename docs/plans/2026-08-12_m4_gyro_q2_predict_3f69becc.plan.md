@@ -4,13 +4,13 @@ overview: 仅实施 Q2 known-bias deterministic predict：以 GTSAM base Preinte
 todos:
   - id: freeze-fixed-point-and-contract
     content: 以 c0e214a 为 Q2 base、7427057 为 Q1 executable evidence，冻结 public API、typed errors、数学合同、allowlist、forbidden scope 与独立 oracle identity
-    status: pending
+    status: completed
   - id: write-red-oracles-and-mutants
     content: 先写正常 fixture、hard-error、off-grid/shared-endpoint 与六类 mutant rejection tests，固定 80-dps oracle 全量常量并取得 DUT 未实现时的 RED 证据
-    status: pending
+    status: completed
   - id: implement-pure-predictor
     content: 在 phad::estimator 实现无 production caller 的纯 predictor，以 checked integer ns 切段、endpoint average、GTSAM bias-once/right-compose 返回 exact duration 与有效 SO(3)
-    status: pending
+    status: completed
   - id: run-independent-unit-qualification
     content: 由独立 clean verifier 重建并逐门核验正常 upper bounds、二阶 ratio、六类 mutant lower bounds、typed errors、duration、SO(3)、deletion test 与范围审计
     status: pending
@@ -22,7 +22,7 @@ isProject: false
 
 # M4 gyro Q2 Predict 实施计划
 
-状态：**计划已冻结；五个 todo 全部 pending；DUT 尚未实现，Q2 尚无机制证据**
+状态：**实施者 RED→GREEN 已完成；结果仅为 provisional；独立资格与结果记录仍 pending**
 
 计划 ID：`3f69becc`
 
@@ -38,8 +38,8 @@ isProject: false
 本计划的代码 base 是 `c0e214a04f8521dcf7f1c2769ebf10bf7ca06051`（短 hash
 `c0e214a`）；Q1 executable evidence 是
 `74270572cc1fcc2eac82559117efd0951c800ab9`（短 hash `7427057`）。Q1 final
-independent PASS 只给 Q2 发出 plan-only go；issue #37 与本计划均不把当前状态描述为
-implementation started 或 Q2 qualified。
+independent PASS 当时只给 Q2 发出 plan-only go；随后 issue #37 授权的 Q2 implementation
+已取得实施者 provisional GREEN，但本计划仍不把它描述为 Q2 qualified。
 
 ## 1. 本片问题、权限与完成定义
 
@@ -349,6 +349,24 @@ x-axis rate 自然溢出。精确期望为 `kNonFiniteComputation`、`interval_i
 常量自然触发该结果，则 Q2 结论必须为 `INCONCLUSIVE` 并停止；不得临时更换常量、构造方式或
 注入点取得 PASS。
 
+final-output defensive branches 另冻结两个不含 injection 的 public-input fixture；两者的 safe
+endpoint mean、corrected rate 与 rotation vector 均须逐元素 finite：
+
+1. `kNonFinitePrediction`：timestamps `[0,1]` ns，两个 gyro 均为
+   `[DBL_MAX,0,0]` rad/s，known bias 为 zero。当前冻结环境中 GTSAM 计算出的 3x3 matrix
+   全为 NaN，精确期望为 `kNonFinitePrediction`，且 `sample_index`、`interval_index`、
+   `timestamp_ns` 均为 `nullopt`。
+2. `kInvalidRotation`：471 samples，timestamps 为 `0..470` ns，每点 gyro 均为
+   `[-2.4664720996731243e54,1.9669167514335542e54,-2.5705088372089910e54]` rad/s，known
+   bias 为 zero。当前冻结环境中 470 intervals 后 matrix 仍 finite，
+   `||R^T R-I||_F=1.0012190690733831e-12`、`|det(R)-1|=7.5839334812144443e-13`，
+   精确期望为 `kInvalidRotation`，三个索引/时间字段均为 `nullopt`。
+
+这些 actual 依赖冻结的 GTSAM `4.3a0`、Eigen `3.4.0`、GCC `13.3.0`、glibc `2.39`、x86_64、
+Release matrix-mode Rot3/Expmap 数值路径。换平台若任一冻结 fixture 不再自然触发，资格结论为
+`INCONCLUSIVE` 并立即停止；不得换常量、增加 injection seam 或弱化原有八门。runtime 门之外
+还须审计 production 中 final-output finite 与 SO(3) defensive checks 确实存在。
+
 ### 6.6 Unused-accel invariance hard gate
 
 冻结一组相同 timestamps、gyro 与 known bias 的合法多 interval fixture，只改变每个
@@ -428,9 +446,11 @@ irregular errors、每个 duration、六个 mutant errors/L、每个保留的 ty
 code/sample_index/interval_index/timestamp、SO(3) actual、unused-accel 各变体的 success、exact
 duration 与 matrix element-exact equality、off-grid/shared endpoint 两段调用与整段调用的 exact
 duration add、`R_01 * R_12` 与 whole-span result 的 composition error，以及 segmented 与
-whole-span 各自相对 analytic result 的 error；并记录 frozen `DBL_MAX` fixture 是否在 GTSAM 前
-自然返回 `kNonFiniteComputation`。后者若在 verifier 平台不能自然触发，立即记 `INCONCLUSIVE`
-并停止，不得换常量或增加 injection seam。
+whole-span 各自相对 analytic result 的 error；并记录三个 frozen defensive fixtures 的实际
+code、三个 optional 字段，以及进入 final validation 前的 matrix finite、orthogonality 与
+determinant evidence。任一 fixture 若在 verifier 平台不能自然触发，立即记 `INCONCLUSIVE` 并
+停止，不得换常量或增加 injection seam；同时完成 defensive code audit，确认 output finite 与
+SO(3) 检查没有被绕过。
 
 独立 verifier 还必须完成：
 
@@ -460,9 +480,9 @@ deletion test、未执行项与剩余风险。
 
 | 结论 | 判定 | stop/go |
 |---|---|---|
-| `PASS` | 正常 DUT 全部 upper/duration/SO(3)/hard-error 门通过；六 mutant gates 全通过；RED、allowlist、deletion 与独立 clean verifier 成立 | 只允许另建 **Q3 plan**；Q3 implementation 仍 stop |
+| `PASS` | 正常 DUT 全部 upper/duration/SO(3)/hard-error 门通过；两个自然 final-output runtime 门与 defensive code audit 均成立；六 mutant gates 全通过；RED、allowlist、deletion 与独立 clean verifier 成立 | 只允许另建 **Q3 plan**；Q3 implementation 仍 stop |
 | `FAIL` | 任一 deterministic 正常门、typed error、duration、SO(3) 或 mutant rejection 失败；或已有有效 observation 超门 | 保留负结果，修 Q2 最早失败；不得进入 Q3 |
-| `INCONCLUSIVE` | 仅 fixed point/Q1 前提、冻结 CPython/mpmath/oracle、compiler、必需 dependency 无法复现，或 verifier 平台不能用冻结 `DBL_MAX` fixture 自然触发 `kNonFiniteComputation`，因而资格合同无法完整观测 | 记录缺口和复现方式，Q2 保持 pending；不得换常量、加 injection seam 或以 unit exit 0 放行 |
+| `INCONCLUSIVE` | 仅 fixed point/Q1 前提、冻结 CPython/mpmath/oracle、compiler、必需 dependency 无法复现，或 verifier 平台不能用任一冻结自然 fixture 触发对应 defensive code，因而资格合同无法完整观测 | 记录缺口和复现方式，Q2 保持 pending；不得换常量、加 injection seam 或以 unit exit 0 放行 |
 
 观测到 deterministic failure 后不能降格为 `INCONCLUSIVE`。fixed-seed noise、covariance、
 whitening 与 stochastic coverage 已从 Q2 删除，未来必须另行预注册。
@@ -472,8 +492,8 @@ fit bias、建 factor 或改变 visual posterior。
 
 ## 10. 收尾与执行状态
 
-计划落库阶段只验证 YAML、链接/code fence 与 diff scope；不会把任何 todo 标为 completed。
-实施结束时再执行：
+历史事实：计划最初落库时只验证了 YAML、链接/code fence 与 diff scope，todo 当时均为
+pending；随后实施阶段才更新前三项 todo 并执行：
 
 ```bash
 git diff --check
@@ -481,5 +501,13 @@ git status --short
 git diff -- CMakeLists.txt phad/estimator tests/estimator docs/plans
 ```
 
-当前事实：DUT、tests 与 CMake 均未按本计划实现，independent clean verifier 未运行，result doc
-尚未创建，Q2 结论尚未产生。
+实施者记录（2026-08-12）：已在 `a5e1a04` 上完成 fixed point/contract 冻结，先仅接入最终
+test 并取得缺失 `gyro_rotation_predictor.hpp` 的预期 compile RED，再实现纯 predictor、README
+与既有 target 接线并取得定向 GREEN。实现者结果仅为 provisional；
+`run-independent-unit-qualification` 与 `record-q2-stop-go` 保持 pending，result doc 尚未创建，
+Q2 final PASS/FAIL/INCONCLUSIVE 尚未产生。public seam 以本计划第 3 节为准：
+`integrateGyroRotation`、`GyroRotationResult`、`delta_R_i_j`。public seam 无错误注入机制，
+返修已在当前冻结环境以 §6.5 两个自然 public-input fixtures 取得
+`kNonFinitePrediction` / `kInvalidRotation` runtime actual，现有八门加两门共 10 tests 定向
+GREEN；独立 verifier 仍须重跑两门、记录 output/SO(3) evidence 并审计 defensive code，不得
+新增 seam 或据此越级放行。

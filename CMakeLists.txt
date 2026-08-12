@@ -140,13 +140,14 @@ target_compile_options(phad_viz PRIVATE
 )
 
 add_library(phad_estimator
+  phad/estimator/gyro_rotation_predictor.cpp
   phad/estimator/stereo_vo_estimator.cpp
 )
 add_library(phad::estimator ALIAS phad_estimator)
 target_compile_features(phad_estimator PUBLIC cxx_std_20)
 target_include_directories(phad_estimator PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(phad_estimator
-  PUBLIC phad::common phad::camera
+  PUBLIC phad::common phad::camera phad::sensor
   PRIVATE gtsam opencv_calib3d
 )
 # GTSAM headers trip -Wconversion / -Wpedantic; keep them out of our warning set.
@@ -343,6 +344,7 @@ if(PHAD_BUILD_TESTS)
   gtest_discover_tests(phad_frontend_tests PROPERTIES LABELS "unit")
 
   add_executable(phad_estimator_tests
+    tests/estimator/gyro_rotation_predictor_test.cpp
     tests/estimator/gtsam_smoke_test.cpp
     tests/estimator/types_test.cpp
     tests/estimator/stereo_point_mapping_test.cpp

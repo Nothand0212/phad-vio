@@ -7,15 +7,22 @@
 不依赖 `phad::frontend`。
 
 CMake target：`phad_estimator`（alias `phad::estimator`），公开依赖
-`phad::common`、`phad::camera`；GTSAM 为 PRIVATE（PIMPL 藏图与 Values，
+`phad::common`、`phad::camera`、`phad::sensor`；GTSAM 为 PRIVATE（PIMPL 藏图与 Values，
 include 标 SYSTEM）。
+
+M4 Q2 另提供纯 `integrateGyroRotation` helper：消费 timestamped gyro point
+samples 与同 frame、同为 rad/s 的已知常值 bias，返回 `delta_R_i_j` 和 exact
+`int64` 纳秒 duration。它按相邻 endpoint average 积分，不读取 accel；所有输入、
+时间算术、非有限计算和无效 rotation 均返回 typed error，不返回 partial/identity
+fallback。该 helper 当前没有 production caller，不进入 visual posterior、factor、
+optimizer、配置或 feedback。
 
 ## 职责边界
 
 | 做 | 不做 |
 |---|---|
 | 固定窗口 pose / landmark / 窗口内观测 | 关键帧决策（由 apps/session 决定）、feature track 生命周期 |
-| `GenericStereoFactor` + LM、最老帧 Prior gauge | 边缘化、smart factor、IMU |
+| `GenericStereoFactor` + LM、最老帧 Prior gauge | 边缘化、smart factor；full IMU state、covariance propagation、IMU factor、gravity 与 accel residual |
 | 重叠断裂时 re-anchor（`enable_reanchor`） | 分段 TUM / Atlas 式多轨迹 |
 | 共视 / cheirality / 重投影 / `segment_id` / PnP 诊断 | ATE（`phad::eval`） |
 | 正常路径 `solvePnPRansac` proposal + stereo 一致性仲裁 + 本帧 inlier 掩码 | frontend track 生命周期 |
@@ -28,6 +35,7 @@ include 标 SYSTEM）。
 |---|---|
 | `types.hpp` | `StereoObservation`、`KeyframeMeasurement`、`VioUpdateResult` 等合同 |
 | `stereo_vo_estimator.hpp` / `.cpp` | `StereoVoEstimator`（PIMPL 藏 GTSAM） |
+| `gyro_rotation_predictor.hpp` / `.cpp` | Q2 known-bias deterministic rotation prediction |
 
 ## 数据流
 
