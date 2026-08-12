@@ -607,14 +607,15 @@ PnP stereo 一致性仲裁：[#25](https://github.com/Nothand0212/phad-vio/issue
 ## M4：接入 IMU
 
 **当前状态（2026-08-12）：M4.1 数据路径已完成；Q1 Observe final independent PASS；
-Q2 known-bias synthetic 仅可开始独立计划，尚未实施。** M4.1 之后的
+Q2 known-bias synthetic 实施计划已建立且全部 todo pending，尚未实施。** M4.1 之后的
 measurement / factor 接入改按
 [证据门控的信息接入](agents/evidence-gated-integration.md)与
 [M4 gyro measurement / factor 资格实验设计](research/m4-minimal-gyro-slice-design.md)
 的 Q1→Q5 stop/go 顺序重新资格化。[Q1 Observe 实施计划](plans/2026-08-12_m4_gyro_q1_observe_7d3a91e6.plan.md)
 已完成：packet summary 与 raw gyro samples 已冻结，M3 off 路径字节不变；独立证据见
 [Q1 Observe 结果](research/m4-minimal-gyro-q1-observe-result.md)。Q1 PASS 只把 Q2 状态改为
-**go to plan only**，不构成 Q2 实现授权或开工记录。
+**go to plan only**；[Q2 Predict 实施计划](plans/2026-08-12_m4_gyro_q2_predict_3f69becc.plan.md)
+已冻结但尚未实施，不构成 Q2 实现授权或开工记录。
 
 当前权威路线只包含：
 
