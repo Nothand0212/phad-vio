@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <nlohmann/json.hpp>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -20,13 +21,13 @@ namespace
 
   [[nodiscard]] std::string readFile( const std::filesystem::path& path )
   {
-    std::ifstream in( path );
+    std::ifstream      in( path );
     std::ostringstream oss;
     oss << in.rdbuf();
     return oss.str();
   }
 
-  [[nodiscard]] int runBench( std::string_view args,
+  [[nodiscard]] int runBench( std::string_view             args,
                               const std::filesystem::path& stdout_path,
                               const std::filesystem::path& stderr_path )
   {
@@ -63,7 +64,7 @@ namespace
     return stdout_text.substr( start, end - start );
   }
 
-  TEST( VoBenchCliTest, UsageMentionsProbeB )
+  TEST( VoBenchCliTest, UsageMentionsProbeBAndGyroObserve )
   {
     ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
 
@@ -82,6 +83,52 @@ namespace
     EXPECT_NE( err.find( "--defer-drop-topk" ), std::string::npos );
     EXPECT_NE( err.find( "--evict-skip-culled" ), std::string::npos );
     EXPECT_NE( err.find( "--zombie-drop-age" ), std::string::npos );
+    EXPECT_NE( err.find( "--gyro-observe" ), std::string::npos );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, GyroObserveDoesNotChangeConfigHashOnSessionFailure )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_gyro_observe_hash";
+    std::filesystem::remove_all( root );
+    std::filesystem::create_directories( root );
+    const auto out_default    = root / "out_default";
+    const auto out_observe    = root / "out_observe";
+    const auto stdout_default = root / "stdout_default.txt";
+    const auto stderr_default = root / "stderr_default.txt";
+    const auto stdout_observe = root / "stdout_observe.txt";
+    const auto stderr_observe = root / "stderr_observe.txt";
+
+    const int default_exit = runBench(
+        "/nonexistent/sequence --out \"" + out_default.string() +
+            "\" --sequence-name gyro_observe_default --force",
+        stdout_default, stderr_default );
+    const int observe_exit = runBench(
+        "/nonexistent/sequence --out \"" + out_observe.string() +
+            "\" --sequence-name gyro_observe_on --force --gyro-observe",
+        stdout_observe, stderr_observe );
+
+    EXPECT_NE( default_exit, 0 );
+    EXPECT_NE( observe_exit, 0 );
+    const auto default_meta =
+        nlohmann::json::parse( readFile( out_default / "meta.json" ) );
+    const auto observe_meta =
+        nlohmann::json::parse( readFile( out_observe / "meta.json" ) );
+    EXPECT_EQ( default_meta.at( "config" ), observe_meta.at( "config" ) );
+    EXPECT_EQ( default_meta.at( "config_canonical_text" ),
+               observe_meta.at( "config_canonical_text" ) );
+    EXPECT_EQ( default_meta.at( "config_hash" ),
+               observe_meta.at( "config_hash" ) );
+    EXPECT_EQ( extractConfigHash( readFile( stdout_default ) ),
+               extractConfigHash( readFile( stdout_observe ) ) );
+    EXPECT_FALSE( std::filesystem::exists( out_observe /
+                                           "gyro_packets.csv" ) );
+    EXPECT_FALSE( std::filesystem::exists( out_observe /
+                                           "gyro_samples.csv" ) );
 
     std::filesystem::remove_all( root );
   }

@@ -10,6 +10,7 @@
 #include "phad/common/trajectory.hpp"
 #include "phad/estimator/types.hpp"
 #include "phad/frontend/stereo_tracker.hpp"
+#include "phad/sensor/stereo_imu_packet.hpp"
 #include "phad/sync/stereo_pair_synchronizer.hpp"
 
 /**
@@ -27,6 +28,43 @@ namespace phad::apps
     std::string detail;
   };
 
+  enum class GyroPacketStatus : std::uint8_t
+  {
+    kFirstZero,
+    kGap,
+    kEmptyNonfirst,
+    kValid
+  };
+
+  struct GyroPacketRow
+  {
+    std::uint64_t    packet_index  = 0;
+    std::int64_t     t_prev_ns     = 0;
+    std::int64_t     t_cur_ns      = 0;
+    std::uint32_t    vo_segment_id = 0;
+    bool             imu_gap       = false;
+    std::uint64_t    sample_count  = 0;
+    std::int64_t     sum_dt_ns     = 0;
+    std::int64_t     interval_ns   = 0;
+    GyroPacketStatus status        = GyroPacketStatus::kFirstZero;
+  };
+
+  struct GyroSampleRow
+  {
+    std::uint64_t packet_index = 0;
+    std::uint64_t sample_index = 0;
+    std::int64_t  timestamp_ns = 0;
+    double        gyr_x_radps  = 0.0;
+    double        gyr_y_radps  = 0.0;
+    double        gyr_z_radps  = 0.0;
+  };
+
+  struct GyroObserveArtifacts
+  {
+    std::vector<GyroPacketRow> packets;
+    std::vector<GyroSampleRow> samples;
+  };
+
   struct OfflineVoSessionOptions
   {
     std::filesystem::path          sequence_root;
@@ -34,6 +72,8 @@ namespace phad::apps
     estimator::EstimatorOptions    estimator;
     std::optional<std::uint64_t>   max_frames;
     bool                           collect_timing = true;
+    /// Q1 Observe side-channel only. Does not enter config/hash or estimator.
+    bool collect_gyro_observe = false;
     /// After estimator cull/cheirality erasures, drop matching frontend
     /// tracks. Default true (Slice ④c). False is A/B only — do not use as
     /// a production default without a MH_01 gate.
@@ -61,18 +101,18 @@ namespace phad::apps
   {
     std::int64_t  timestamp_ns = 0;
     std::string   status;
-    std::uint32_t num_observations        = 0;
-    std::uint32_t num_landmarks           = 0;
-    std::uint32_t num_shared              = 0;
-    std::uint32_t num_disparity           = 0;  // Slice: obs with disparity_px > 0
-    bool          low_connectivity        = false;
-    std::uint32_t window_size             = 0;
-    std::uint64_t prior_key               = 0;
-    double        reproj_rms_before_px    = 0.0;
-    double        reproj_rms_after_px     = 0.0;
-    std::uint32_t num_cheirality          = 0;
-    std::uint32_t lm_iterations           = 0;
-    double        max_window_pose_shift_m = 0.0;
+    std::uint32_t num_observations         = 0;
+    std::uint32_t num_landmarks            = 0;
+    std::uint32_t num_shared               = 0;
+    std::uint32_t num_disparity            = 0;  // Slice: obs with disparity_px > 0
+    bool          low_connectivity         = false;
+    std::uint32_t window_size              = 0;
+    std::uint64_t prior_key                = 0;
+    double        reproj_rms_before_px     = 0.0;
+    double        reproj_rms_after_px      = 0.0;
+    std::uint32_t num_cheirality           = 0;
+    std::uint32_t lm_iterations            = 0;
+    double        max_window_pose_shift_m  = 0.0;
     std::uint32_t segment_id               = 0;
     bool          pnp_success              = false;
     std::uint32_t pnp_inliers              = 0;
@@ -98,7 +138,7 @@ namespace phad::apps
     /// Cumulative successful reopt *rounds* (sum of outlier_reopt_rounds).
     std::uint64_t outlier_reopts = 0;
     /// Frames where dropTracks was skipped because outliers_culled >= N.
-    std::uint64_t drops_skipped = 0;
+    std::uint64_t drops_skipped     = 0;
     std::uint64_t deferred_drops    = 0;  // 冲刷次数
     std::uint64_t deferred_drop_ids = 0;  // 累计 drop 的 id 个数
     /// Frames where skip marked culled ids evictable (probe).
@@ -110,7 +150,7 @@ namespace phad::apps
     /// Cumulative ids dropped by zombie-age probe.
     std::uint64_t zombie_age_drop_ids = 0;
     /// Slice ⑤: keyframe counts.
-    std::uint64_t total_keyframes       = 0;
+    std::uint64_t total_keyframes         = 0;
     std::uint64_t total_track_only_frames = 0;
   };
 
@@ -137,9 +177,10 @@ namespace phad::apps
 
   struct OfflineVoSessionResult
   {
-    std::optional<common::Trajectory> trajectory;   // all accepted frames (est.tum)
+    std::optional<common::Trajectory> trajectory;     // all accepted frames (est.tum)
     std::optional<common::Trajectory> kf_trajectory;  // keyframes only (kf.tum)
     std::vector<VoDiagRow>            diag;
+    GyroObserveArtifacts              gyro_observe;
     FrameCounts                       counts;
     sync::StereoPairDiagnostics       sync;
     std::vector<std::string>          warnings;
@@ -153,6 +194,14 @@ namespace phad::apps
 
   [[nodiscard]] OfflineVoSessionResult runOfflineVoSession(
       const OfflineVoSessionOptions& options );
+
+  [[nodiscard]] std::optional<SessionError> collectGyroObservePacket(
+      const sensor::StereoImuPacket& packet,
+      std::uint32_t                  vo_segment_id,
+      GyroObserveArtifacts&          artifacts );
+
+  [[nodiscard]] std::optional<SessionError> validateGyroObserveArtifacts(
+      const GyroObserveArtifacts& artifacts );
 
   /// probe 与 bench 共用，保证 diag.csv 逐字节一致。
   [[nodiscard]] std::optional<SessionError> writeDiagCsv(

@@ -215,6 +215,20 @@ if( _phad_session_link_libs MATCHES "phad_eval|phad::eval" )
 endif()
 unset( _phad_session_link_libs )
 
+add_library(phad_gyro_observe_writer STATIC
+  apps/gyro_observe_writer.cpp
+)
+target_compile_features(phad_gyro_observe_writer PUBLIC cxx_std_20)
+target_include_directories(phad_gyro_observe_writer PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_link_libraries(phad_gyro_observe_writer
+  PUBLIC phad_offline_vo_session
+)
+target_compile_options(phad_gyro_observe_writer PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
 add_executable(phad_euroc_inspect apps/phad_euroc_inspect.cpp)
 target_link_libraries(phad_euroc_inspect PRIVATE phad::io_dataset)
 
@@ -236,7 +250,8 @@ target_link_libraries(phad_stereo_vo_probe
 
 add_executable(phad_vo_bench apps/phad_vo_bench.cpp)
 target_link_libraries(phad_vo_bench
-  PRIVATE phad_offline_vo_session phad::bench phad::eval phad::io_dataset
+  PRIVATE phad_offline_vo_session phad_gyro_observe_writer phad::bench
+          phad::eval phad::io_dataset
 )
 target_compile_definitions(phad_vo_bench PRIVATE
   PHAD_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -379,12 +394,14 @@ if(PHAD_BUILD_TESTS)
   gtest_discover_tests(phad_bench_tests PROPERTIES LABELS "unit")
 
   add_executable(phad_apps_tests
+    tests/apps/gyro_observe_artifact_test.cpp
     tests/apps/offline_vo_session_test.cpp
     tests/apps/phad_vo_bench_cli_test.cpp
     tests/apps/keyframe_selection_test.cpp
   )
   target_link_libraries(phad_apps_tests PRIVATE
-    phad_offline_vo_session GTest::gtest_main opencv_imgcodecs
+    phad_offline_vo_session phad_gyro_observe_writer GTest::gtest_main
+    nlohmann_json::nlohmann_json opencv_imgcodecs
   )
   target_compile_definitions(phad_apps_tests PRIVATE
     PHAD_VO_BENCH_PATH="$<TARGET_FILE:phad_vo_bench>"
@@ -412,6 +429,21 @@ if(PHAD_BUILD_TESTS)
   gtest_discover_tests(phad_io_dataset_tests PROPERTIES LABELS "unit")
 
   if(PHAD_ENABLE_MH01_TESTS)
+    add_executable(phad_apps_mh01_test
+      tests/apps/gyro_observe_mh01_test.cpp
+    )
+    target_link_libraries(phad_apps_mh01_test PRIVATE
+      phad_offline_vo_session GTest::gtest_main nlohmann_json::nlohmann_json
+    )
+    target_compile_definitions(phad_apps_mh01_test PRIVATE
+      PHAD_VO_BENCH_PATH="$<TARGET_FILE:phad_vo_bench>"
+    )
+    add_dependencies(phad_apps_mh01_test phad_vo_bench)
+    target_compile_options(phad_apps_mh01_test PRIVATE
+      $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+    )
+    gtest_discover_tests(phad_apps_mh01_test PROPERTIES LABELS "mh01")
+
     add_executable(phad_euroc_mh01_test
       tests/io/dataset/euroc/euroc_mh01_test.cpp
     )

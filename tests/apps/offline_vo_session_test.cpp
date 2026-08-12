@@ -11,6 +11,7 @@
 #include <opencv2/imgcodecs.hpp>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 namespace
 {
@@ -33,10 +34,11 @@ namespace
     static constexpr std::int64_t kSecondTimestampNs =
         kFirstTimestampNs + 50'000'000LL;
 
-    TinyEurocFixture()
+    explicit TinyEurocFixture( std::string_view suffix )
     {
       m_root = std::filesystem::temp_directory_path() /
-               "phad_offline_vo_session_tiny_seq";
+               ( "phad_offline_vo_session_tiny_seq_" +
+                 std::string{ suffix } );
       std::filesystem::remove_all( m_root );
       for ( const auto* sensor : { "cam0", "cam1", "imu0" } )
       {
@@ -170,6 +172,7 @@ namespace
   TEST( OfflineVoSessionTest, SkipDropMinCulledDefaultsFour )
   {
     OfflineVoSessionOptions options;
+    EXPECT_FALSE( options.collect_gyro_observe );
     EXPECT_EQ( options.skip_drop_min_culled, 4 );
     EXPECT_TRUE( options.drop_culled_tracks );
     EXPECT_EQ( options.defer_drop_topk, 0 );
@@ -182,7 +185,7 @@ namespace
   TEST( OfflineVoSessionTest,
         StreamErrorMidLoopFinalizesCountsWithoutSpuriousSummaryWarning )
   {
-    TinyEurocFixture fixture;
+    TinyEurocFixture fixture{ "stream_error" };
     fixture.corruptSecondRightImage();
 
     OfflineVoSessionOptions options;
@@ -211,6 +214,27 @@ namespace
                               0;
                      } );
     EXPECT_FALSE( has_cull_warning );
+    EXPECT_TRUE( result.gyro_observe.packets.empty() );
+    EXPECT_TRUE( result.gyro_observe.samples.empty() );
+  }
+
+  TEST( OfflineVoSessionTest, GyroObserveCollectsPacketBeforeLaterStreamError )
+  {
+    TinyEurocFixture fixture{ "gyro_observe_stream_error" };
+    fixture.corruptSecondRightImage();
+
+    OfflineVoSessionOptions options;
+    options.sequence_root        = fixture.root();
+    options.collect_gyro_observe = true;
+
+    const auto result = runOfflineVoSession( options );
+    ASSERT_TRUE( result.error.has_value() );
+    ASSERT_EQ( result.gyro_observe.packets.size(), 1U );
+    EXPECT_EQ( result.gyro_observe.packets.front().status,
+               phad::apps::GyroPacketStatus::kFirstZero );
+    EXPECT_EQ( result.gyro_observe.packets.front().vo_segment_id,
+               result.diag.empty() ? 0U : result.diag.front().segment_id );
+    EXPECT_TRUE( result.gyro_observe.samples.empty() );
   }
 
   TEST( OfflineVoSessionTest, WriteDiagCsvMatchesProbeContract )
@@ -220,19 +244,19 @@ namespace
     std::filesystem::remove( path );
 
     VoDiagRow row;
-    row.timestamp_ns            = 1403636579763555584LL;
-    row.status                  = "ok";
-    row.num_observations        = 136;
-    row.num_landmarks           = 0;
-    row.num_shared              = 0;
-    row.low_connectivity        = false;
-    row.window_size             = 1;
-    row.prior_key               = 0;
-    row.reproj_rms_before_px    = 0.0;
-    row.reproj_rms_after_px     = 0.0;
-    row.num_cheirality          = 0;
-    row.lm_iterations           = 0;
-    row.max_window_pose_shift_m = 0.0;
+    row.timestamp_ns             = 1403636579763555584LL;
+    row.status                   = "ok";
+    row.num_observations         = 136;
+    row.num_landmarks            = 0;
+    row.num_shared               = 0;
+    row.low_connectivity         = false;
+    row.window_size              = 1;
+    row.prior_key                = 0;
+    row.reproj_rms_before_px     = 0.0;
+    row.reproj_rms_after_px      = 0.0;
+    row.num_cheirality           = 0;
+    row.lm_iterations            = 0;
+    row.max_window_pose_shift_m  = 0.0;
     row.segment_id               = 0;
     row.pnp_success              = false;
     row.pnp_inliers              = 0;
@@ -248,7 +272,7 @@ namespace
     const std::string text = oss.str();
     EXPECT_NE( text.find( "timestamp_ns,status,num_obs," ), std::string::npos );
     EXPECT_NE( text.find( "pnp_success,pnp_inliers,outliers_culled,"
-                           "reproj_rms_after_cull_px" ),
+                          "reproj_rms_after_cull_px" ),
                std::string::npos );
     // Slice ④e / Probe B keep the 19-column contract; Probe B is a
     // separate jsonl side-channel. outlier_reopt_rounds stay off diag
@@ -347,7 +371,7 @@ namespace
   TEST( OfflineVoSessionTest, IllegalProbeBParentDirFailsSession )
   {
     // Writer open fails before the frame loop; TinyEuroc is enough.
-    TinyEurocFixture fixture;
+    TinyEurocFixture fixture{ "probe_b_open_error" };
     const auto       probe_path =
         std::filesystem::temp_directory_path() /
         "phad_offline_vo_session_probe_b_missing_parent" / "nested" /

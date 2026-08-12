@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "apps/gyro_observe_writer.hpp"
 #include "apps/offline_vo_session.hpp"
 #include "phad/bench/code_identity.hpp"
 #include "phad/bench/config_snapshot.hpp"
@@ -42,7 +43,7 @@ namespace
       "                     [--sequence-name <name>] [--config-label <name>]\n"
       "                     [--gt-euroc <sequence-root>] [--max-dt-ms <v>]\n"
       "                     [--min-match-rate <v>] [--rpe-delta-s <v>]\n"
-      "                     [--errors-csv] [--repo <dir>]\n"
+      "                     [--errors-csv] [--gyro-observe] [--repo <dir>]\n"
       "                     [--max-frames <n>] [--force]\n"
       "                     [--no-outlier-cull] [--no-outlier-reopt]\n"
       "                     [--allow-culled-rebirth]\n"
@@ -77,8 +78,9 @@ namespace
     double                       min_match_rate = 0.5;
     double                       rpe_delta_s    = 1.0;
     std::optional<std::uint64_t> max_frames;
-    bool                         write_errors_csv   = false;
-    bool                         force              = false;
+    bool                         write_errors_csv      = false;
+    bool                         force                 = false;
+    bool                         gyro_observe          = false;
     bool                         no_outlier_cull       = false;
     bool                         no_outlier_reopt      = false;
     bool                         allow_culled_rebirth  = false;
@@ -152,6 +154,11 @@ namespace
       if ( flag == "--errors-csv" )
       {
         arguments.write_errors_csv = true;
+        continue;
+      }
+      if ( flag == "--gyro-observe" )
+      {
+        arguments.gyro_observe = true;
         continue;
       }
       if ( flag == "--no-outlier-cull" )
@@ -676,6 +683,8 @@ namespace
     phad::apps::OfflineVoSessionOptions session_options;
     session_options.sequence_root = arguments.sequence_root;
     session_options.max_frames    = arguments.max_frames;
+    // Q1 Observe is a CLI-only side-channel and never enters flattenConfig.
+    session_options.collect_gyro_observe = arguments.gyro_observe;
     if ( arguments.no_outlier_cull )
     {
       session_options.estimator.enable_outlier_cull = false;
@@ -867,27 +876,27 @@ namespace
             ? 0.0
             : static_cast<double>( session.counts.ok ) /
                   static_cast<double>( session.counts.image_frames );
-    summary.trajectory.coverage_rate    = coverageRate( session );
-    summary.trajectory.segments               = session.counts.segments;
-    summary.trajectory.total_keyframes       = session.counts.total_keyframes;
+    summary.trajectory.coverage_rate   = coverageRate( session );
+    summary.trajectory.segments        = session.counts.segments;
+    summary.trajectory.total_keyframes = session.counts.total_keyframes;
     summary.trajectory.total_track_only_frames =
         session.counts.total_track_only_frames;
     summary.robustness.rejected         = session.counts.rejected;
     summary.robustness.failed           = session.counts.failed;
     summary.robustness.low_connectivity = session.counts.low_connectivity;
     summary.robustness.reanchors        = session.counts.reanchors;
-    summary.robustness.pnp_successes          = session.counts.pnp_successes;
-    summary.robustness.pnp_fallbacks          = session.counts.pnp_fallbacks;
-    summary.robustness.outliers_culled        = session.counts.outliers_culled;
+    summary.robustness.pnp_successes    = session.counts.pnp_successes;
+    summary.robustness.pnp_fallbacks    = session.counts.pnp_fallbacks;
+    summary.robustness.outliers_culled  = session.counts.outliers_culled;
     summary.robustness.outliers_culled_unique =
         session.counts.outliers_culled_unique;
-    summary.robustness.outlier_reopts = session.counts.outlier_reopts;
+    summary.robustness.outlier_reopts    = session.counts.outlier_reopts;
     summary.robustness.drops_skipped     = session.counts.drops_skipped;
     summary.robustness.deferred_drops    = session.counts.deferred_drops;
     summary.robustness.deferred_drop_ids = session.counts.deferred_drop_ids;
-    summary.robustness.evictable_marked   = session.counts.evictable_marked;
-    summary.robustness.tracks_evicted     = session.counts.tracks_evicted;
-    summary.robustness.zombie_age_drops   = session.counts.zombie_age_drops;
+    summary.robustness.evictable_marked  = session.counts.evictable_marked;
+    summary.robustness.tracks_evicted    = session.counts.tracks_evicted;
+    summary.robustness.zombie_age_drops  = session.counts.zombie_age_drops;
     summary.robustness.zombie_age_drop_ids =
         session.counts.zombie_age_drop_ids;
     for ( const auto& row : session.diag )
@@ -1024,6 +1033,19 @@ namespace
         summary.status = phad::bench::RunStatus::kFailed;
         summary.warnings.push_back( kf_error->describe() );
         std::cerr << "write kf tum failed: " << kf_error->describe() << '\n';
+        exit_code = 1;
+      }
+    }
+
+    if ( exit_code == 0 && arguments.gyro_observe )
+    {
+      if ( const auto error = phad::apps::writeGyroObserveCsvs(
+               output_dir / "gyro_packets.csv",
+               output_dir / "gyro_samples.csv", session.gyro_observe ) )
+      {
+        summary.status = phad::bench::RunStatus::kFailed;
+        summary.warnings.push_back( error->detail );
+        std::cerr << error->detail << '\n';
         exit_code = 1;
       }
     }

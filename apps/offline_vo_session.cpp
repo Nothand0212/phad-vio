@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -39,6 +40,165 @@ namespace phad::apps
   namespace
   {
 
+    [[nodiscard]] std::optional<SessionError> gyroObserveError(
+        std::string_view code )
+    {
+      return SessionError{ "gyro observe:" + std::string{ code } };
+    }
+
+    [[nodiscard]] bool checkedSubtract( std::int64_t  left,
+                                        std::int64_t  right,
+                                        std::int64_t& result )
+    {
+      constexpr std::int64_t kMin = std::numeric_limits<std::int64_t>::min();
+      constexpr std::int64_t kMax = std::numeric_limits<std::int64_t>::max();
+      if ( ( right > 0 && left < kMin + right ) ||
+           ( right < 0 && left > kMax + right ) )
+      {
+        return false;
+      }
+      result = left - right;
+      return true;
+    }
+
+    [[nodiscard]] bool checkedAdd( std::int64_t  left,
+                                   std::int64_t  right,
+                                   std::int64_t& result )
+    {
+      constexpr std::int64_t kMin = std::numeric_limits<std::int64_t>::min();
+      constexpr std::int64_t kMax = std::numeric_limits<std::int64_t>::max();
+      if ( ( right > 0 && left > kMax - right ) ||
+           ( right < 0 && left < kMin - right ) )
+      {
+        return false;
+      }
+      result = left + right;
+      return true;
+    }
+
+    [[nodiscard]] bool sizeToUint64( std::size_t    size,
+                                     std::uint64_t& value )
+    {
+      if constexpr ( sizeof( std::size_t ) > sizeof( std::uint64_t ) )
+      {
+        if ( size > std::numeric_limits<std::uint64_t>::max() )
+        {
+          return false;
+        }
+      }
+      value = static_cast<std::uint64_t>( size );
+      return true;
+    }
+
+    [[nodiscard]] std::optional<SessionError> validateGyroPacketRow(
+        const GyroPacketRow&           packet,
+        std::span<const GyroSampleRow> samples )
+    {
+      std::uint64_t sample_count = 0;
+      if ( !sizeToUint64( samples.size(), sample_count ) ||
+           sample_count != packet.sample_count )
+      {
+        return gyroObserveError( "sample_count_mismatch" );
+      }
+
+      std::int64_t interval_ns = 0;
+      if ( !checkedSubtract( packet.t_cur_ns, packet.t_prev_ns,
+                             interval_ns ) )
+      {
+        return gyroObserveError( "interval_overflow" );
+      }
+      if ( packet.interval_ns != interval_ns )
+      {
+        return gyroObserveError( "interval_mismatch" );
+      }
+
+      std::int64_t sum_dt_ns = 0;
+      for ( std::size_t index = 0; index < samples.size(); ++index )
+      {
+        const GyroSampleRow& sample = samples[ index ];
+        if ( sample.packet_index != packet.packet_index ||
+             sample.sample_index != static_cast<std::uint64_t>( index ) )
+        {
+          return gyroObserveError( "sample_index_mismatch" );
+        }
+        if ( !std::isfinite( sample.gyr_x_radps ) ||
+             !std::isfinite( sample.gyr_y_radps ) ||
+             !std::isfinite( sample.gyr_z_radps ) )
+        {
+          return gyroObserveError( "sample_nonfinite" );
+        }
+        if ( index == 0U )
+        {
+          continue;
+        }
+        const std::int64_t previous_ns = samples[ index - 1U ].timestamp_ns;
+        if ( sample.timestamp_ns == previous_ns )
+        {
+          return gyroObserveError( "sample_duplicate" );
+        }
+        if ( sample.timestamp_ns < previous_ns )
+        {
+          return gyroObserveError( "sample_out_of_order" );
+        }
+        std::int64_t dt_ns = 0;
+        if ( !checkedSubtract( sample.timestamp_ns, previous_ns, dt_ns ) )
+        {
+          return gyroObserveError( "sample_delta_overflow" );
+        }
+        if ( !checkedAdd( sum_dt_ns, dt_ns, sum_dt_ns ) )
+        {
+          return gyroObserveError( "sum_dt_overflow" );
+        }
+      }
+      if ( packet.sum_dt_ns != sum_dt_ns )
+      {
+        return gyroObserveError( "interval_unclosed" );
+      }
+
+      GyroPacketStatus expected = GyroPacketStatus::kFirstZero;
+      if ( packet.packet_index == 0U )
+      {
+        if ( packet.t_prev_ns != packet.t_cur_ns || packet.imu_gap ||
+             packet.sample_count != 0U )
+        {
+          return gyroObserveError( "first_not_zero" );
+        }
+      }
+      else
+      {
+        if ( interval_ns <= 0 )
+        {
+          return gyroObserveError( "interval_nonpositive" );
+        }
+        if ( packet.imu_gap )
+        {
+          expected = GyroPacketStatus::kGap;
+        }
+        else if ( samples.empty() )
+        {
+          expected = GyroPacketStatus::kEmptyNonfirst;
+        }
+        else
+        {
+          if ( samples.front().timestamp_ns != packet.t_prev_ns ||
+               samples.back().timestamp_ns != packet.t_cur_ns )
+          {
+            return gyroObserveError( "endpoint_mismatch" );
+          }
+          if ( sum_dt_ns != interval_ns )
+          {
+            return gyroObserveError( "interval_unclosed" );
+          }
+          expected = GyroPacketStatus::kValid;
+        }
+      }
+      if ( packet.status != expected )
+      {
+        return gyroObserveError( "status_mismatch" );
+      }
+      return std::nullopt;
+    }
+
     // Must match phad::estimator::StereoVoEstimator::update reject messages.
     constexpr std::string_view kSeedRejectedNewSegment =
         "insufficient observations to seed new segment";
@@ -60,7 +220,7 @@ namespace phad::apps
     struct KeyframeSelectorState
     {
       std::unordered_map<common::LandmarkId, Eigen::Vector2d>
-                         last_kf_pixels;
+                        last_kf_pixels;
       common::Timestamp last_kf_timestamp{ 0 };
       std::uint32_t     total_keyframes = 0;
       // Rotation compensation (Slice ⑤b): rotation of the last accepted
@@ -73,9 +233,9 @@ namespace phad::apps
     };
 
     [[nodiscard]] bool isKeyframeImpl(
-        const frontend::FrameTracks& tracks,
-        const common::Timestamp      current_ts,
-        KeyframeSelectorState&       state,
+        const frontend::FrameTracks&              tracks,
+        const common::Timestamp                   current_ts,
+        KeyframeSelectorState&                    state,
         const camera::RectifiedStereoCalibration& calibration )
     {
       // Rule 0: empty observations never become keyframes (Slice ⑤b; the
@@ -123,12 +283,12 @@ namespace phad::apps
       // Normalized-coordinate projection of the rotation-compensated ray:
       // pixel -> normalized ray, rotate, back to pixel. This avoids the
       // degenerate z~0 blow-up of rotating raw pixel coordinates.
-      const double fx = calibration.fxPixels();
-      const double fy = calibration.fyPixels();
-      const double cx = calibration.cxPixels();
-      const double cy = calibration.cyPixels();
-      double      parallax_sum   = 0.0;
-      std::size_t parallax_count = 0;
+      const double fx             = calibration.fxPixels();
+      const double fy             = calibration.fyPixels();
+      const double cx             = calibration.cxPixels();
+      const double cy             = calibration.cyPixels();
+      double       parallax_sum   = 0.0;
+      std::size_t  parallax_count = 0;
       for ( const auto& obs : tracks.observations )
       {
         auto it = state.last_kf_pixels.find( obs.id );
@@ -238,9 +398,9 @@ namespace phad::apps
     frontend::StereoTracker tracker( rectified_cal, options.tracker );
 
     // Probe B: CLI path only. Enable estimator side-channel when writing.
-    std::unique_ptr<ProbeBWriter>              probe_b_writer;
-    std::unordered_set<common::LandmarkId>     lifetime_culled;
-    estimator::EstimatorOptions                estimator_options = options.estimator;
+    std::unique_ptr<ProbeBWriter>          probe_b_writer;
+    std::unordered_set<common::LandmarkId> lifetime_culled;
+    estimator::EstimatorOptions            estimator_options = options.estimator;
     if ( !options.probe_b_path.empty() )
     {
       try
@@ -375,7 +535,7 @@ namespace phad::apps
         break;
       }
 
-      auto loaded = stream.next();
+      auto loaded = stream.nextPacket();
       if ( std::holds_alternative<io::EndOfStream>( loaded ) )
       {
         break;
@@ -390,7 +550,8 @@ namespace phad::apps
       }
 
       const auto  frame_begin = std::chrono::steady_clock::now();
-      const auto& raw         = std::get<sensor::StereoFrame>( loaded );
+      const auto& packet      = std::get<sensor::StereoImuPacket>( loaded );
+      const auto& raw         = packet.frame;
 
       const auto rectify_begin = std::chrono::steady_clock::now();
       auto       rectified     = rectifier.value().rectify( raw );
@@ -457,6 +618,20 @@ namespace phad::apps
           estimator.update( measurement, is_kf );
       const auto estimator_end = std::chrono::steady_clock::now();
 
+      if ( options.collect_gyro_observe )
+      {
+        if ( const auto error = collectGyroObservePacket(
+                 packet, update.diagnostics.segment_id,
+                 result.gyro_observe ) )
+        {
+          result.error = *error;
+          result.sync  = stream.diagnostics();
+          flushPendingDrop();
+          finalizeSegmentsAndWarnings();
+          return result;
+        }
+      }
+
       // Update keyframe snapshot ONLY when the estimator accepted the
       // keyframe (Slice ⑤b fix: rejected kf must not advance the parallax
       // / time baselines).
@@ -471,7 +646,7 @@ namespace phad::apps
         kf_state.last_accepted_rotation =
             update.estimate->T_W_B.linear();
       }
-      const auto frame_end     = estimator_end;
+      const auto frame_end = estimator_end;
 
       // Composition-root feedback: drop frontend tracks for ids the
       // estimator permanently removed this frame. Default on (④c); two-level
@@ -564,13 +739,13 @@ namespace phad::apps
         {
           probe_frame.culled_ids = std::vector<std::uint64_t>(
               d.culled_landmark_ids.begin(), d.culled_landmark_ids.end() );
-          probe_frame.zombie_track_n    = zombie_track_n;
-          probe_frame.rejected_block_n  = d.probe_rejected_block_n;
-          probe_frame.new_lm            = d.probe_new_lm_n;
-          probe_frame.shared            = d.num_shared;
-          probe_frame.num_obs           = d.num_observations;
-          probe_frame.lm_iterations     = d.lm_iterations;
-          probe_frame.shift_m           = d.max_window_pose_shift_m;
+          probe_frame.zombie_track_n   = zombie_track_n;
+          probe_frame.rejected_block_n = d.probe_rejected_block_n;
+          probe_frame.new_lm           = d.probe_new_lm_n;
+          probe_frame.shared           = d.num_shared;
+          probe_frame.num_obs          = d.num_observations;
+          probe_frame.lm_iterations    = d.lm_iterations;
+          probe_frame.shift_m          = d.max_window_pose_shift_m;
           std::vector<ProbeBShiftTop> shift_top;
           shift_top.reserve( d.probe_shift_top.size() );
           for ( const auto& entry : d.probe_shift_top )
@@ -781,6 +956,147 @@ namespace phad::apps
       result.kf_trajectory = std::move( kf_trajectory.value() );
     }
     return result;
+  }
+
+  std::optional<SessionError> collectGyroObservePacket(
+      const sensor::StereoImuPacket& packet,
+      std::uint32_t                  vo_segment_id,
+      GyroObserveArtifacts&          artifacts )
+  {
+    std::uint64_t packet_index = 0;
+    std::uint64_t sample_count = 0;
+    if ( !sizeToUint64( artifacts.packets.size(), packet_index ) )
+    {
+      return gyroObserveError( "packet_index_overflow" );
+    }
+    if ( !sizeToUint64( packet.samples.size(), sample_count ) )
+    {
+      return gyroObserveError( "sample_count_overflow" );
+    }
+
+    std::int64_t interval_ns = 0;
+    if ( !checkedSubtract( packet.frame.timestamp.nanoseconds(),
+                           packet.t_prev.nanoseconds(), interval_ns ) )
+    {
+      return gyroObserveError( "interval_overflow" );
+    }
+
+    std::vector<GyroSampleRow> rows;
+    rows.reserve( packet.samples.size() );
+    for ( std::size_t index = 0; index < packet.samples.size(); ++index )
+    {
+      std::uint64_t sample_index = 0;
+      if ( !sizeToUint64( index, sample_index ) )
+      {
+        return gyroObserveError( "sample_index_overflow" );
+      }
+      const sensor::ImuMeasurement& sample = packet.samples[ index ];
+      rows.push_back( GyroSampleRow{
+          .packet_index = packet_index,
+          .sample_index = sample_index,
+          .timestamp_ns = sample.timestamp.nanoseconds(),
+          .gyr_x_radps  = sample.gyro_radps[ 0 ],
+          .gyr_y_radps  = sample.gyro_radps[ 1 ],
+          .gyr_z_radps  = sample.gyro_radps[ 2 ],
+      } );
+    }
+
+    GyroPacketRow packet_row{
+        .packet_index  = packet_index,
+        .t_prev_ns     = packet.t_prev.nanoseconds(),
+        .t_cur_ns      = packet.frame.timestamp.nanoseconds(),
+        .vo_segment_id = vo_segment_id,
+        .imu_gap       = packet.imu_gap,
+        .sample_count  = sample_count,
+        .sum_dt_ns     = 0,
+        .interval_ns   = interval_ns,
+        .status        = GyroPacketStatus::kFirstZero,
+    };
+
+    std::int64_t sum_dt_ns = 0;
+    for ( std::size_t index = 1; index < rows.size(); ++index )
+    {
+      const std::int64_t current_ns  = rows[ index ].timestamp_ns;
+      const std::int64_t previous_ns = rows[ index - 1U ].timestamp_ns;
+      if ( current_ns == previous_ns )
+      {
+        return gyroObserveError( "sample_duplicate" );
+      }
+      if ( current_ns < previous_ns )
+      {
+        return gyroObserveError( "sample_out_of_order" );
+      }
+      std::int64_t dt_ns = 0;
+      if ( !checkedSubtract( current_ns, previous_ns, dt_ns ) )
+      {
+        return gyroObserveError( "sample_delta_overflow" );
+      }
+      if ( !checkedAdd( sum_dt_ns, dt_ns, sum_dt_ns ) )
+      {
+        return gyroObserveError( "sum_dt_overflow" );
+      }
+    }
+    packet_row.sum_dt_ns = sum_dt_ns;
+
+    if ( packet_index == 0U )
+    {
+      packet_row.status = GyroPacketStatus::kFirstZero;
+    }
+    else if ( packet.imu_gap )
+    {
+      packet_row.status = GyroPacketStatus::kGap;
+    }
+    else if ( rows.empty() )
+    {
+      packet_row.status = GyroPacketStatus::kEmptyNonfirst;
+    }
+    else
+    {
+      packet_row.status = GyroPacketStatus::kValid;
+    }
+
+    if ( const auto error = validateGyroPacketRow( packet_row, rows ) )
+    {
+      return error;
+    }
+    artifacts.packets.push_back( packet_row );
+    artifacts.samples.insert( artifacts.samples.end(), rows.begin(),
+                              rows.end() );
+    return std::nullopt;
+  }
+
+  std::optional<SessionError> validateGyroObserveArtifacts(
+      const GyroObserveArtifacts& artifacts )
+  {
+    std::size_t sample_begin = 0;
+    for ( std::size_t index = 0; index < artifacts.packets.size(); ++index )
+    {
+      const GyroPacketRow& packet = artifacts.packets[ index ];
+      if ( packet.packet_index != static_cast<std::uint64_t>( index ) )
+      {
+        return gyroObserveError( "packet_index_mismatch" );
+      }
+      if ( packet.sample_count >
+           static_cast<std::uint64_t>( artifacts.samples.size() -
+                                       sample_begin ) )
+      {
+        return gyroObserveError( "sample_count_mismatch" );
+      }
+      const std::size_t count =
+          static_cast<std::size_t>( packet.sample_count );
+      const std::span<const GyroSampleRow> all_samples{ artifacts.samples };
+      const auto                           packet_samples = all_samples.subspan( sample_begin, count );
+      if ( const auto error = validateGyroPacketRow( packet, packet_samples ) )
+      {
+        return error;
+      }
+      sample_begin += count;
+    }
+    if ( sample_begin != artifacts.samples.size() )
+    {
+      return gyroObserveError( "orphan_sample" );
+    }
+    return std::nullopt;
   }
 
   std::optional<SessionError> writeDiagCsv(

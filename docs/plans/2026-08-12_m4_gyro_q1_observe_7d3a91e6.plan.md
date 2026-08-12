@@ -4,16 +4,16 @@ overview: 仅实施 Q1 Observe：在不改变 M3 visual posterior、配置身份
 todos:
   - id: freeze-fixed-point
     content: 确认 GitHub issue 36 已同步新权威链接；以 a8e892f 为 design review / pre-Q1 code fixed point，按相对 7026ebf 的 runtime source diff 及 MH_01 control 指纹冻结实际实施起点
-    status: pending
+    status: completed
   - id: contract-red
     content: 先为 gyro_packets.csv / gyro_samples.csv 的 validator/writer、round-trip、local-invalid、hard-fail 与可控 open/post-flush 失败补 portable RED tests；成功 CLI 双 CSV 与 byte gate 只进 MH_01 qualification
-    status: pending
+    status: completed
   - id: implement-current-edge
     content: 仅在 apps composition root 采集 StereoImuPacket、校验 Q1 合同并写两个 CLI-only artifacts；estimator 仍只接收原 visual measurement
-    status: pending
+    status: completed
   - id: run-qualification-gate
     content: 跑定向 unit 与 MH_01 CLI qualification，核验 config_hash=402d1925、config 完整 object/canonical text 精确不变及 est.tum/kf.tum/diag.csv 的 cmp/SHA256 byte gate
-    status: pending
+    status: in_progress
   - id: record-stop-go
     content: 记录命令、输入/产物 SHA256、status 计数和 pass/fail/inconclusive；只有 Q1 pass 才给 Q2 known-bias synthetic integration 发出 go
     status: pending
@@ -22,16 +22,16 @@ isProject: false
 
 # M4 gyro Q1 Observe 实施计划
 
-状态：**待实施；当前本地唯一已定义的 M4 gyro 可执行范围，开工前还需同步 issue 权威链接**
+状态：**Q1 Observe 实现完成；implementer dirty-worktree qualification 为 provisional
+pass；最终独立 verifier pending；Q2 保持 stop**
 
 计划 ID：`7d3a91e6`
 
 跟踪 issue：[#36](https://github.com/Nothand0212/phad-vio/issues/36)
 
-远程前置：截至 2026-08-12 本计划修订时，#36 的 body 仍把历史
-`c4e62b35` 作为权威计划并授权 `off/shadow/fused` 旧路线。coordinator 尚在等待
-用户对远程写入的授权；在 #36 的 body/验收标准改为本计划与修订设计的链接、
-并且只读回验成功前，**不得开始 Q1 实施**。本地文档修正不表示 issue 已同步。
+远程前置已满足：经用户授权，coordinator 已通过 GitHub REST 更新 #36，并已只读回验；
+issue body 已链接本计划、修订设计、证据门控方法和控制组，并明确当前唯一授权为
+Q1 Observe。implementer 自己未执行 GitHub 远程写。
 
 上位合同：
 
@@ -117,14 +117,16 @@ hash 名。当前 control 的 `config` 与 canonical text 实测均为 45 个键
 
 | 路径 | 唯一允许的改动 |
 |---|---|
-| `apps/offline_vo_session.hpp` | 增加 Q1 packet/sample row 值类型、结果集合与纯 writer/validator 声明；不增加 estimator gyro API |
+| `apps/offline_vo_session.hpp` | 增加 Q1 packet/sample row 值类型、结果集合与纯 validator 声明；不增加 estimator gyro API，不声明落盘接口 |
 | `apps/offline_vo_session.cpp` | 将 session 的读取从 `next()` 换为同源 `nextPacket()`；frame 仍走原 rectify/tracker/glue/estimator 路径；从 packet 拷贝 Q1 artifact rows |
-| `apps/phad_vo_bench.cpp` | 增加 `--gyro-observe` CLI-only flag；成功 run 时在既有 output dir 写两个独立 CSV |
+| `apps/gyro_observe_writer.hpp` | 声明独立薄 app writer；只消费已采集 rows，不参与 pipeline |
+| `apps/gyro_observe_writer.cpp` | 负责 status 序列化、CSV bytes、temp/write/flush/close/rename 以及落盘错误传播 |
+| `apps/phad_vo_bench.cpp` | 增加 `--gyro-observe` CLI-only flag；作为 composition root，在成功 run 时调用薄 writer 发布两个独立 CSV |
 | `tests/apps/gyro_observe_artifact_test.cpp` | portable validator/writer schema、round-trip、边界、local-invalid、hard-fail 与可控 writer 失败 |
 | `tests/apps/offline_vo_session_test.cpp` | 仅在现有文件最小覆盖 packet 合同或失败传播；不用 tiny fixture 充当成功 bench artifact 资格证据 |
 | `tests/apps/phad_vo_bench_cli_test.cpp` | portable CLI presence 与失败路径；缺 dataset 时不伪造成功 artifact |
 | `tests/apps/gyro_observe_mh01_test.cpp` | 仅在 `PHAD_ENABLE_MH01_TESTS=ON` + `PHAD_EUROC_MH01_PATH` 下跑成功 CLI、双 CSV 与三主产物 byte gate；归入 `mh01` label |
-| `CMakeLists.txt` | 将 portable tests 接入既有 `phad_apps_tests`；按仓库既有 MH_01 模式在 `PHAD_ENABLE_MH01_TESTS` 下增加 `phad_apps_mh01_test` 并标记 `mh01`；不加生产依赖 |
+| `CMakeLists.txt` | 增加只依赖 session rows/validator 的薄 app writer target，将 portable tests 接入既有 `phad_apps_tests`；按仓库既有 MH_01 模式在 `PHAD_ENABLE_MH01_TESTS` 下增加 `phad_apps_mh01_test` 并标记 `mh01`；不加外部生产依赖 |
 
 若实现不需要其中某文件，就不改。若必须改 allowlist 外 source，视为合同冲突，停止并重新评审。
 
@@ -229,11 +231,12 @@ packet_index,sample_index,timestamp_ns,gyr_x_radps,gyr_y_radps,gyr_z_radps
 
 ### 4.4 Hash 合同
 
-Q1 run 完成后对两个 CSV 的**完整文件 bytes**分别计算 SHA256；hash 与文件大小、row count、
-首末 packet timestamp 一并写入 `docs/research/m4-minimal-gyro-q1-observe-result.md`。后续工具
-消费前必须重算并匹配；任何字节变化都需要新的 Q1 资格 run。artifact SHA 不写入
-`flattenConfig()`，也不修改 `meta.json.config` / `config_canonical_text`；配置身份与输入证据
-身份保持分离。
+最终独立 verifier 完成 Q1 run 后，对两个 CSV 的**完整文件 bytes**分别计算 SHA256；hash
+与文件大小、row count、首末 packet timestamp 一并写入强制交付
+`docs/research/m4-minimal-gyro-q1-observe-result.md`。该 result 文档当前尚未生成；在最终
+verifier 完成且证据可复现前不得伪造。后续工具消费前必须重算并匹配；任何字节变化都需要
+新的 Q1 资格 run。artifact SHA 不写入 `flattenConfig()`，也不修改 `meta.json.config` /
+`config_canonical_text`；配置身份与输入证据身份保持分离。
 
 ## 5. RED → GREEN 实施顺序
 
@@ -268,9 +271,10 @@ tiny EuRoC fixture 不足以证明生产 bench 成功路径能完整产生双 CS
 
 1. session 改取 `StereoImuPacket`，立即保留 packet 引用/值；只有 `packet.frame` 进入原
    rectify→tracker→glue→estimator 路径；
-2. 同一 update 返回后，使用公开 diagnostics 补 `vo_segment_id`，运行纯 Q1 validator，
-   收集 packet/sample rows；不把 samples 传入 estimator；
-3. bench 只在 `--gyro-observe` 且 session 成功时 publish 两个 CSV；每个文件按
+2. 同一 update 返回后，使用公开 diagnostics 补 `vo_segment_id`，在 session 内运行纯 Q1
+   validator 并收集 packet/sample rows；不把 samples 传入 estimator，Q1 不向 session
+   target 新增落盘职责；
+3. bench 只在 `--gyro-observe` 且 session 成功时调用独立薄 app writer publish 两个 CSV；每个文件按
    第 4.1 节同目录 temp+rename 独立原子 publish，任一 writer/publish error 传播为
    整次 run 失败；
 4. 保持 `writeDiagCsv()`、TUM writer、`flattenConfig()` 和现有浮点求值顺序不变。
@@ -393,3 +397,106 @@ git diff -- docs
 结果文档必须明确区分已执行与未执行命令、实际 exit code、artifact 绝对路径与 SHA256、
 未执行的 full EuRoC/Sanitizer，以及剩余风险。未实际完成 MH_01 gate 时不得把 todo 标为
 completed，也不得发出 Q2 go。
+
+## 10. 2026-08-12 实施与资格记录
+
+### 10.1 Fixed point 与 RED
+
+- 开工 HEAD：`8506378639a6ef8709b615cab9855cbdd0d54f88`；
+  `git merge-base --is-ancestor a8e892f HEAD` exit `0`；初始工作区 clean。
+- `git diff --exit-code 7026ebf -- CMakeLists.txt apps phad tests scripts` exit `0`。
+- control 三主产物 SHA256 与第 2.2 节一致；`meta.json` 的完整 config 与 canonical
+  text 已读取冻结。
+- RED 命令：`cmake --build build --target phad_apps_tests -j2`；exit `2`。失败点是新
+  `gyro_observe_artifact_test.cpp` 引用的 Q1 row/validator/writer API 尚不存在，符合
+  contract-first 预期；没有用旧 dirty worktree 的实现或 build 产物。
+
+### 10.2 实际验证
+
+- 配置：
+  `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DPHAD_BUILD_TESTS=ON -DPHAD_ENABLE_MH01_TESTS=ON`，exit `0`。
+- 定向构建：
+  `cmake --build build --target phad_sync_tests phad_apps_tests phad_apps_mh01_test phad_vo_bench -j2`，exit `0`。
+- 定向 tests：
+  `build/phad_apps_tests --gtest_filter='*GyroObserve*:*OfflineVoSession*:*VoBenchCli*'`，
+  exit `0`；33 tests：30 passed、3 skipped（3 个既有 session 测试因该命令未设置
+  `PHAD_EUROC_MH01_PATH` 而 skip）。
+- unit：`ctest --test-dir build -L unit --output-on-failure -j2`，exit `0`；
+  65 passed、3 skipped、0 failed。新增 session test 后的首次并行 unit
+  曾 exit `8`：两个独立 gtest process 复用了同一个 tiny fixture 临时目录；将三个 fixture
+  调用改为不同确定性目录后重跑通过，未改 production 路径。
+- MH_01 qualification：
+  `PHAD_EUROC_MH01_PATH=/home/lin/Projects/data/thidparty/euroc/native/MH_01_easy ctest --test-dir build -L mh01 --output-on-failure -j2`，
+  exit `0`；1/1 passed，约 146 s。该测试以 fresh temp run 调用真实
+  `phad_vo_bench --gyro-observe`，逐字节比较三主产物、完整比较 config object /
+  canonical text / hash，并只从复制后的两个 gyro CSV 与 `diag.csv` 重建、校验 packet /
+  sample / segment join；不以 tiny fixture 代替资格 run。
+- implementer standalone run 使用 fresh output dir，exit `0`；这不等于独立 verifier。
+  产物目录：
+  `/home/lin/Projects/data/phad-bench/MH_01_easy/8506378/q1_observe_task_b35431f8b8ba`。
+  三个 `cmp`、完整 config/canonical/hash `jq` gate、segment join gate 均 exit `0`；
+  `config_hash=402d1925`。`gyro_packets.csv` 为 3682 data rows + 1 header：
+  `first_zero=1`、`valid=3681`、`gap=0`、`empty_nonfirst=0`；
+  `gyro_samples.csv` 为 40491 data rows + 1 header；没有残留 `.tmp`。
+  `gyro_packets.csv` 为 278808 bytes，首/末 `t_cur_ns` 分别为
+  `1403636579763555584` / `1403636763813555456`；`gyro_samples.csv` 为
+  3618112 bytes。
+- 该 standalone run 的身份是 `base_head=8506378`、`implementation_commit=none`、
+  `git_dirty=true`。`summary.json.status=completed_with_warnings`，并包含
+  `git working tree is dirty; not suitable as a formal baseline` warning。
+- 上述 standalone run、`jq`/segment/replay gate 的 exact commands 以及 input SHA 当时未完整
+  保留；不得根据现有产物反推后补为已记录。hash/config/cmp 结论已核验，但 exact commands、
+  input SHA、post-implementation dirty diff/status 快照须由最终 verifier 重建并写入指定
+  result 文档。
+
+完整文件 SHA256：
+
+```text
+18fc4aa6f54977b7bb8386f0b13f4b50b3d67efa5cc61f99982d2ea9bf349321  est.tum
+4a4a1ba8f7fb2729e482d5aca644c9195ad605ccc0e94ffb9e1e670d1f898bb9  kf.tum
+1da9df9ae56dd9d552187128f1295d5153aa29c379cc366147ab1910116c51eb  diag.csv
+fbf574545e418fc19d100b7b05f79546a5336420bca60852770605b42702a3fe  gyro_packets.csv
+da35227b40a1ab47c94217b4210b5445d11927a864d6634f8b824812ccec0344  gyro_samples.csv
+```
+
+### 10.3 结论、未执行项与边界
+
+implementer dirty-worktree qualification 的结论为 provisional `pass`：Observe 默认关闭，
+开启时只在 apps composition root 收集与发布 artifact；gyro 没有取得进入 estimator、
+state、factor、初值或 feedback 的权限。最终独立 verifier 尚未从当前 dirty diff 重跑资格
+门，且强制 result 文档尚不存在，因此 `record-stop-go` 保持 pending，Q2 保持 stop。
+
+未执行 EuRoC 11/11、Sanitizer、性能专项或 Q2+。剩余代码风险：fixed-point 已有的
+`phad/sync/stereo_pair_synchronizer.cpp` 在 Observe collector 之前仍存在极端 int64 timestamp
+未检查减法；真实 MH_01 不触发，本轮不修改该固定点路径。implementer 未执行 commit、push、
+merge 或 rebase；本轮此前仅发生上述经用户授权的 #36 body 远程更新。
+
+### 10.4 Fresh review 边界修正
+
+fresh reviewer 的 Spec 结论为无 finding；Standards 唯一 finding 是 Q1 曾把 CSV
+序列化与 temp/write/flush/close/rename 放入约定只跑 pipeline 的
+`phad_offline_vo_session` target。该 finding 已按以下边界闭合：
+
+- session 只保留 packet/sample rows、采集与纯 validator；Q1 不再向 session target
+  新增落盘职责；
+- 新增具体薄 target `phad_gyro_observe_writer`，依赖方向为
+  writer → `phad_offline_vo_session`；status name、CSV bytes 与原子发布均由该 target
+  所有；
+- `phad_vo_bench` 作为 composition root 只在成功 `--gyro-observe` run 后调用 writer；
+  portable artifact tests 显式链接 writer。CSV schema/bytes、稳定错误 code、发布顺序及
+  Q1 权限均未改变。
+
+边界修正后实际执行：
+
+- 配置与构建三个目标：`phad_apps_tests`、`phad_vo_bench`、
+  `phad_apps_mh01_test`，exit `0`；
+- 定向 `*GyroObserve*:*OfflineVoSession*:*VoBenchCli*`：34 tests，31 passed、
+  3 conditional skipped，exit `0`；
+- `ctest --test-dir build -L unit --output-on-failure -j2`：69 tests，
+  66 passed、3 conditional skipped、0 failed，exit `0`；
+- 仅跑两项短 MH_01 writer-path integration：默认 CLI 不发布 Observe CSV，以及
+  successful session 后 writer failure 令 run/summary 失败；2/2 passed，exit `0`；
+- `git diff --check` 与所有 changed C++ 的 `clang-format --dry-run --Werror` 均 exit `0`。
+
+本次边界修正刻意未重复完整 MH_01 qualification；因此本节不升级 provisional 结论，
+最终独立 verifier 仍 pending，`record-stop-go` 仍 pending，Q2 仍 stop。
