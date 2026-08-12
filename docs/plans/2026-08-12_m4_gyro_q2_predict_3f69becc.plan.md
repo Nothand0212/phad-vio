@@ -22,7 +22,7 @@ isProject: false
 
 # M4 gyro Q2 Predict 实施计划
 
-状态：**实施者 RED→GREEN 已完成；结果仅为 provisional；独立资格与结果记录仍 pending**
+状态：**实施者 RED→GREEN 已完成；首次 independent 技术门已实跑但正式判定为 INCONCLUSIVE；allowlist 账本修正中，重验与结果记录仍 pending**
 
 计划 ID：`3f69becc`
 
@@ -65,7 +65,8 @@ bias estimate、covariance、factor、optimizer、posterior、初始化或 feedb
 
 ## 2. 实施 allowlist 与禁止范围
 
-Q2 implementation allowlist **恰为**：
+Q2 production implementation allowlist（包含随实施同步的 README 与本 plan）
+**恰为以下六路径**：
 
 ```text
 CMakeLists.txt
@@ -75,6 +76,13 @@ tests/estimator/gyro_rotation_predictor_test.cpp
 phad/estimator/README.md
 docs/plans/2026-08-12_m4_gyro_q2_predict_3f69becc.plan.md
 ```
+
+同一 Q2 implementation commit 另行授权
+`docs/research/m4-minimal-gyro-q2-known-bias-predict-design.md`，仅用于 reviewer-requested
+自然可达性 evidence correction 与 implementation provisional/status 同步；该文档是
+evidence 文档路径，**不是 production implementation path**，也不授权其他
+research 或设计变更。因此该 commit 的总差异 allowlist 恰为七路径：上述六条
+production implementation allowlist 路径，加这一条单独授权的 evidence 文档路径。
 
 除上述路径外不得修改 implementation 文件；不需要某个文件时不改。资格结果文档只预定为
 `docs/research/m4-minimal-gyro-q2-known-bias-predict-result.md`，用于完成后记录证据，**不进入
@@ -498,16 +506,34 @@ pending；随后实施阶段才更新前三项 todo 并执行：
 ```bash
 git diff --check
 git status --short
-git diff -- CMakeLists.txt phad/estimator tests/estimator docs/plans
+git diff --name-only a5e1a04..HEAD
+git diff -- CMakeLists.txt phad/estimator tests/estimator docs/plans \
+  docs/research/m4-minimal-gyro-q2-known-bias-predict-design.md
 ```
 
 实施者记录（2026-08-12）：已在 `a5e1a04` 上完成 fixed point/contract 冻结，先仅接入最终
 test 并取得缺失 `gyro_rotation_predictor.hpp` 的预期 compile RED，再实现纯 predictor、README
-与既有 target 接线并取得定向 GREEN。实现者结果仅为 provisional；
-`run-independent-unit-qualification` 与 `record-q2-stop-go` 保持 pending，result doc 尚未创建，
-Q2 final PASS/FAIL/INCONCLUSIVE 尚未产生。public seam 以本计划第 3 节为准：
+与既有 target 接线并取得定向 GREEN。public seam 以本计划第 3 节为准：
 `integrateGyroRotation`、`GyroRotationResult`、`delta_R_i_j`。public seam 无错误注入机制，
 返修已在当前冻结环境以 §6.5 两个自然 public-input fixtures 取得
 `kNonFinitePrediction` / `kInvalidRotation` runtime actual，现有八门加两门共 10 tests 定向
-GREEN；独立 verifier 仍须重跑两门、记录 output/SO(3) evidence 并审计 defensive code，不得
-新增 seam 或据此越级放行。
+GREEN。
+
+首次独立 verifier 记录（2026-08-12）：在 clean copy 上审计 commit `0f51eaa`，
+定向 `GyroRotationPredictor` 10/10 与 unit 77/77 通过，deletion characterization、
+forbidden-scope 审计与 `git diff --check` 也均通过。然而该轮正式结论已判为
+**INCONCLUSIVE（非 FAIL）**；唯一形式判定原因是 verifier 错误地未解析 checkout
+外的权威绝对路径
+`/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/m4-minimal-gyro/.codex/agents/vio_verifier.toml`，
+因而不能证明完整遵守 verifier 配置。该 INCONCLUSIVE 不否定上述已实测通过的
+技术门，但也不能将 `run-independent-unit-qualification` 标为 completed。
+
+独立 scope auditor 另发现原 plan 的六/七路径账本不一致：从 `a5e1a04` 到
+`0f51eaa` 实际总差异恰为七路径，其中六条属于 §2 冻结的 production
+implementation allowlist；第七条
+`docs/research/m4-minimal-gyro-q2-known-bias-predict-design.md` 是 §2 单独授权的
+reviewer-requested 自然可达性 evidence correction/status 同步，不是 production
+implementation path。本 patch 只修正这一 allowlist 账本与执行状态；修正后必须由新
+verifier 显式读取上述绝对 config 路径，并从包含本账本修正的新 clean commit
+重跑完整独立资格。在新资格结论与 result doc 落盘前，Q2 final、
+`run-independent-unit-qualification` 与 `record-q2-stop-go` 均保持 pending，不授权进入 Q3。
