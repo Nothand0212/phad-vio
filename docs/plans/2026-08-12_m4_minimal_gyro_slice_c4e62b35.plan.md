@@ -4,7 +4,7 @@ overview: 在 main 的 M3 StereoVoEstimator 上分四个可停止的 vertical sl
 todos:
   - id: issue-and-control
     content: 获得实施授权后创建本片 GitHub issue，并在 main@7026ebf 上重跑 MH_01 控制组，固化参数快照、指标和 est.tum/kf.tum/diag.csv 参考产物
-    status: pending
+    status: completed
   - id: mode-and-input-red
     content: 先补 GyroMode、IMU segment 输入、IMU 标定和非法配置的失败测试；测试必须在生产修改前失败
     status: pending
