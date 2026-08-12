@@ -2,8 +2,10 @@
 
 日期：2026-08-12
 
-状态：设计修订完成；已纳入闭合审查勘误；Q1 Observe 实施计划已按本设计重写，
-Q2–Q5 仍须在上一层通过后逐层新建独立计划，当前均未授权实施。
+状态：设计修订完成；Q1 Observe final independent PASS；Q2 deterministic known-bias
+rotation-only 已在 `d1c4385` 取得 technical PASS under one-time post-hoc
+evidence-retention waiver，original frozen-plan RED exact-record conformance NOT MET。下一步仅授权
+Q3 plan/design，Q3 implementation 与 Q4–Q5 仍未授权。
 
 控制基线：`main@7026ebf` 的 M3 production VO + M4.1 IMU sync 数据通路。MH_01
 权威控制组见 [M4 最小 gyro-aided VO：MH_01 控制组](m4-minimal-gyro-mh01-control.md)。
@@ -18,6 +20,11 @@ Q2–Q5 仍须在上一层通过后逐层新建独立计划，当前均未授权
 （保留为历史，不得直接执行）
 
 当前 Q1 计划：[M4 gyro Q1 Observe](../plans/2026-08-12_m4_gyro_q1_observe_7d3a91e6.plan.md)
+
+Q1 结果：[M4 gyro Q1 Observe 资格结果](m4-minimal-gyro-q1-observe-result.md)
+
+Q2 计划与结果：[M4 gyro Q2 Predict](../plans/2026-08-12_m4_gyro_q2_predict_3f69becc.plan.md)；
+[M4 gyro Q2 Predict 资格结果](m4-minimal-gyro-q2-known-bias-predict-result.md)
 
 本文档描述当前约定，不是绝对约束，会随项目开发修订。
 
@@ -427,9 +434,18 @@ lifecycle 可接受，再让 IMU 取得进入该 posterior 的资格。
 
 ## 14. 下一步
 
-1. 先停止执行旧计划中与本设计冲突的步骤。
-2. Q1 Observe 计划已重写；Q1 未通过前不新建 Q2 实施片，后续 Q2–Q5 也必须
-   在各自上一层通过后逐层新建独立计划；Q3 计划需预注册第 4.2 节
-   尚需冻结的统计门。
-3. 从 Q1 packet summary + raw gyro sample artifacts 开始；上一层没有证据，不实现下一层。
-4. 本片结束后，根据最早失败层选择下一片，不直接跳到 full VIO。
+1. 继续停止执行旧计划中与本设计冲突的步骤。
+2. Q1 Observe 已 final independent PASS；Q2 Predict 为 **technical PASS under one-time
+   post-hoc evidence-retention waiver**，original frozen-plan RED exact-record conformance **NOT
+   MET**。原 RED 资格权重为零，later deletion 不作替代；该一次性处置不降低 Q3+
+   evidence-retention 标准。Q2 结果严格限于 deterministic known-bias rotation-only
+   helper，当前没有 production caller，也没有产品指标主张。最终 command evidence 以
+   `/tmp/q2-missing-evidence-replay-v2.md`（SHA-256
+   `06951458173c910dc09e36624a782b233d85ef777703ccf8d155a9ba39ea8809`）为权威：父进程以
+   `/usr/bin/env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/home/lin LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=Asia/Shanghai /bin/bash --noprofile --norc /tmp/q2-missing-evidence-replay-v2/run.sh`
+   调用固定 `d1c4385` / tree archive，fresh 定向 10/10，并重现相同 shared-endpoint
+   actual、closure 与 duration。v1 header 与实际 `env -i` 矛盾，已被 supersede，不得作最终
+   命令证据，无需删除。
+3. 下一步只编写 Q3 plan/design，并预注册第 4.2 节尚需冻结的统计门；Q3 implementation 在
+   该计划单独评审和授权前保持 stop。
+4. 后续 Q4–Q5 仍须在各自上一层通过后逐层新建独立计划，不直接跳到 full VIO。

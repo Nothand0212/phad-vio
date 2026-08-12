@@ -2,15 +2,18 @@
 
 日期：2026-08-12
 
-状态：**Q2 implementation provisional；独立资格 pending，尚未取得 Q2 final 结论**
+状态：**Q2 已在 `d1c4385` 取得 technical PASS under one-time post-hoc
+evidence-retention waiver；original frozen-plan RED exact-record conformance NOT MET；只授权
+Q3 plan/design**
 
 固定点：`c0e214a04f8521dcf7f1c2769ebf10bf7ca06051`
 （分支 `Nothand0212/m4-q2-gyro-predict`）
 
 权限：GitHub issue
 [#37](https://github.com/Nothand0212/phad-vio/issues/37) 授权 Q2 research、plan 与经评审的
-Q2 deterministic implementation/qualification；当前实现结果仅为 provisional。前置 Q1 final PASS 见
-[Q1 Observe 资格结果](m4-minimal-gyro-q1-observe-result.md)。上位设计与方法分别见
+Q2 deterministic implementation/qualification。前置 Q1 final PASS 见
+[Q1 Observe 资格结果](m4-minimal-gyro-q1-observe-result.md)，Q2 final 证据见
+[Q2 Predict 资格结果](m4-minimal-gyro-q2-known-bias-predict-result.md)。上位设计与方法分别见
 [M4 gyro measurement / factor 资格实验设计](m4-minimal-gyro-slice-design.md)和
 [证据门控的信息接入](../agents/evidence-gated-integration.md)。
 
@@ -595,6 +598,29 @@ posterior state、MH_01 run 或 visual comparison。若实现发现必须改 for
 6. `git diff --check`、受托 diff review、allowlist/forbidden-path audit 与 deletion test；
 7. PASS/FAIL/INCONCLUSIVE 按 §8 判定，不以“测试进程 exit 0”替代逐门 evidence。
 
-当前 helper/test/CMake implementation 与本次两个自然 fixture 的实施者定向结果仅为
-provisional；独立 clean qualification 与 Q2 final PASS/FAIL/INCONCLUSIVE 仍 pending。本 note
-不授予 Q3–Q5 权限。
+## 12. 收尾结果与下一步
+
+本设计冻结的公式、fixtures 与阈值未作事后修改。clean fixed point
+`d1c4385809a6bf461f1c6b8acd81870f98634aa0` 已完成 fresh Release independent qualification：
+定向 10/10、unit 77/77、exact-decimal oracle bits 9/9，并通过数值、SO(3)、duration、六类
+mutant、typed/natural defensive、unused-accel、shared endpoint、deletion、scope 与格式门。
+完整 actual、证据 SHA、allowlist waiver chronology、首次无效 verifier attempt 与原始 RED 证据
+限制见 [Q2 Predict 资格结果](m4-minimal-gyro-q2-known-bias-predict-result.md)。
+
+Q2 final verdict 为 deterministic known-bias rotation-only **technical PASS under one-time post-hoc
+evidence-retention waiver**；original frozen-plan RED exact-record conformance **NOT MET**。原 RED
+lifecycle summary 仅作 historical non-qualifying observation，qualifying weight = `0`；later
+deletion negative arm 不是原 RED，也不替代它。可重跑账本项已由 post-final replay
+v2 补齐，证据 disposition、命令与 SHA 见资格结果。v2 权威报告
+`/tmp/q2-missing-evidence-replay-v2.md` 的 SHA-256 为
+`06951458173c910dc09e36624a782b233d85ef777703ccf8d155a9ba39ea8809`；它由父进程以精确
+`/usr/bin/env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/home/lin LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=Asia/Shanghai /bin/bash --noprofile --norc /tmp/q2-missing-evidence-replay-v2/run.sh`
+调用，从 `git archive d1c4385809a6bf461f1c6b8acd81870f98634aa0` / tree
+`9c9c991b21c4d40e8c5f2ce974334b76e1a42b64` fresh 构建并取得定向 10/10 与相同的
+shared-endpoint actual/closure/duration。v1 command ledger 的 inherited-environment header 与
+实际 `env -i` 矛盾，已被 supersede，不得作最终命令证据，无需删除。该 waiver 仅限 Q2 此次历史留存事故，
+不改变本设计的任何 fixture、阈值、作用范围或后续证据标准。当前 helper 无
+production caller。
+未运行 MH_01、EuRoC 11/11、ATE/RPE、Sanitizer、performance、noise/covariance/whitening 或
+stochastic qualification。本结果只允许下一步编写 Q3 plan/design；Q3 implementation 与 Q4–Q5
+仍未授权。

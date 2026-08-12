@@ -13,16 +13,20 @@ todos:
     status: completed
   - id: run-independent-unit-qualification
     content: 由独立 clean verifier 重建并逐门核验正常 upper bounds、二阶 ratio、六类 mutant lower bounds、typed errors、duration、SO(3)、deletion test 与范围审计
-    status: pending
+    status: completed
   - id: record-q2-stop-go
     content: 将命令、身份、oracle hash、全部 actual 与 PASS/FAIL/INCONCLUSIVE 记录到预定 result doc；只有 Q2 全门 PASS 才允许 Q3 plan-only
-    status: pending
+    status: completed
+  - id: adjudicate-red-retention-gap
+    content: 记录一次性 post-hoc RED exact-record retention waiver、原始 RED 零资格权重与 post-final replay 可重跑证据，不改写原冻结合同
+    status: completed
 isProject: false
 ---
 
 # M4 gyro Q2 Predict 实施计划
 
-状态：**实施者 RED→GREEN 已完成；首次 independent 技术门已实跑但正式判定为 INCONCLUSIVE；allowlist 账本修正中，重验与结果记录仍 pending**
+状态：**Q2 technical PASS under one-time post-hoc evidence-retention waiver；
+original frozen-plan RED exact-record conformance NOT MET；只授权 Q3 plan/design**
 
 计划 ID：`3f69becc`
 
@@ -31,6 +35,7 @@ isProject: false
 权威输入：
 
 - [Q2 known-bias deterministic predict 设计](../research/m4-minimal-gyro-q2-known-bias-predict-design.md)
+- [Q2 known-bias deterministic predict 资格结果](../research/m4-minimal-gyro-q2-known-bias-predict-result.md)
 - [Q1 Observe 实施计划](2026-08-12_m4_gyro_q1_observe_7d3a91e6.plan.md)
 - [证据门控的信息接入](../agents/evidence-gated-integration.md)
 - [M4 路线](../roadmap.md)
@@ -39,7 +44,9 @@ isProject: false
 `c0e214a`）；Q1 executable evidence 是
 `74270572cc1fcc2eac82559117efd0951c800ab9`（短 hash `7427057`）。Q1 final
 independent PASS 当时只给 Q2 发出 plan-only go；随后 issue #37 授权的 Q2 implementation
-已取得实施者 provisional GREEN，但本计划仍不把它描述为 Q2 qualified。
+已在 `d1c4385` 取得 **technical PASS under one-time post-hoc evidence-retention
+waiver**。原 frozen-plan RED exact-record conformance **NOT MET**；本 technical PASS 只给 Q3
+发出 plan/design-only go。
 
 ## 1. 本片问题、权限与完成定义
 
@@ -77,12 +84,13 @@ phad/estimator/README.md
 docs/plans/2026-08-12_m4_gyro_q2_predict_3f69becc.plan.md
 ```
 
-同一 Q2 implementation commit 另行授权
-`docs/research/m4-minimal-gyro-q2-known-bias-predict-design.md`，仅用于 reviewer-requested
-自然可达性 evidence correction 与 implementation provisional/status 同步；该文档是
-evidence 文档路径，**不是 production implementation path**，也不授权其他
-research 或设计变更。因此该 commit 的总差异 allowlist 恰为七路径：上述六条
-production implementation allowlist 路径，加这一条单独授权的 evidence 文档路径。
+上述六路径是 `a5e1a04` 原始 prereg 的 production implementation allowlist；原 §2 不含
+`docs/research/m4-minimal-gyro-q2-known-bias-predict-design.md`。reachability review 后，
+coordinator 于 `2026-08-12T15:18:26Z` 创建、于 `15:18:40Z` dispatch Orca task
+`task_76375610b1d9`，在实际返修与 `0f51eaa` commit 前对该 research 单一路径授予 narrow waiver，
+仅允许 reviewer-requested natural-defensive evidence correction 与 provisional/status 同步。
+因此 `0f51eaa` 的七路径 packaging 是原 six-path production scope 加一个 pre-edit evidence
+waiver；这不是原 §2 已有的第七路径，也不是 `222c5a3` 的事后追授。
 
 除上述路径外不得修改 implementation 文件；不需要某个文件时不改。资格结果文档只预定为
 `docs/research/m4-minimal-gyro-q2-known-bias-predict-result.md`，用于完成后记录证据，**不进入
@@ -498,6 +506,27 @@ whitening 与 stochastic coverage 已从 Q2 删除，未来必须另行预注册
 Q2 PASS 的最大权限是 **Q3 plan-only go**；不得在本片写 Q3 统计实现、读 MH_01/Q1 CSV、
 fit bias、建 factor 或改变 visual posterior。
 
+### 9.1 Post-hoc evidence-retention adjudication（2026-08-12）
+
+coordinator task `task_4d57d3d8c484` / decision gate `gate_f800287d8728` 于
+`2026-08-12T17:26:28Z` resolved，授予一次性 **post-hoc RED exact-record retention
+waiver**。因此最终结论精确为 **Q2 technical PASS under one-time post-hoc
+evidence-retention waiver**，而不是无条件 PASS；原 frozen-plan 对 TDD RED exact
+command、build directory、stdout/stderr artifact 及 log SHA 的 conformance 永久为
+**NOT MET**。
+
+该 waiver 只豁免不可恢复的历史证据留存义务：原 RED lifecycle summary 仅作
+historical non-qualifying observation，qualifying weight = `0`。later deletion negative arm
+只表征当前 test→header 依赖与 deletion sensitivity，不是原 RED，也不替代其缺失记录。
+所有其他数值、fixture、阈值、typed error、SO(3)、duration、mutant、scope、clean
+verifier 与权限门保持原样，并由下述 post-final replay 补齐仍可重跑的账本项。
+这是 Q2 历史留存事故的一次性处置，不修改
+`evidence-gated-integration` 的一般规则，不降低 Q3+ 证据留存标准。
+原有五个 todo 的 id/content 保持历史语义；`run-independent-unit-qualification`
+completed 表示未豁免 technical gates 已资格化，`record-q2-stop-go` completed 表示
+waiver 后有效账本已闭合，不表示原 frozen plan 的 RED exact-record 义务已履约。
+新增 `adjudicate-red-retention-gap` 单独记录这一事后裁定，避免倒写原 todo。
+
 ## 10. 收尾与执行状态
 
 历史事实：计划最初落库时只验证了 YAML、链接/code fence 与 diff scope，todo 当时均为
@@ -519,21 +548,61 @@ test 并取得缺失 `gyro_rotation_predictor.hpp` 的预期 compile RED，再�
 `kNonFinitePrediction` / `kInvalidRotation` runtime actual，现有八门加两门共 10 tests 定向
 GREEN。
 
-首次独立 verifier 记录（2026-08-12）：在 clean copy 上审计 commit `0f51eaa`，
-定向 `GyroRotationPredictor` 10/10 与 unit 77/77 通过，deletion characterization、
-forbidden-scope 审计与 `git diff --check` 也均通过。然而该轮正式结论已判为
-**INCONCLUSIVE（非 FAIL）**；唯一形式判定原因是 verifier 错误地未解析 checkout
-外的权威绝对路径
-`/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/m4-minimal-gyro/.codex/agents/vio_verifier.toml`，
-因而不能证明完整遵守 verifier 配置。该 INCONCLUSIVE 不否定上述已实测通过的
-技术门，但也不能将 `run-independent-unit-qualification` 标为 completed。
+原始 TDD RED 的 Orca lifecycle summary（task/dispatch `task_a3ea5796bd7b` /
+`ctx_5f26c67ef846`）只证明 `phad_estimator_tests` build exit `2`，首个 fatal 为缺失
+`phad/estimator/gyro_rotation_predictor.hpp`。bounded archived transcript 没有保存 exact command、
+build directory、stdout/stderr artifact 或 log SHA；后续 negative deletion 独立复现同一依赖失败，
+但不冒充原始 RED。原 final requalification evidence 也不能恢复当时的 exact standalone
+probe compile command；后述 replay 另行记录新的可复制 compile/run command，不倒灌为原命令。
 
-独立 scope auditor 另发现原 plan 的六/七路径账本不一致：从 `a5e1a04` 到
-`0f51eaa` 实际总差异恰为七路径，其中六条属于 §2 冻结的 production
-implementation allowlist；第七条
-`docs/research/m4-minimal-gyro-q2-known-bias-predict-design.md` 是 §2 单独授权的
-reviewer-requested 自然可达性 evidence correction/status 同步，不是 production
-implementation path。本 patch 只修正这一 allowlist 账本与执行状态；修正后必须由新
-verifier 显式读取上述绝对 config 路径，并从包含本账本修正的新 clean commit
-重跑完整独立资格。在新资格结论与 result doc 落盘前，Q2 final、
-`run-independent-unit-qualification` 与 `record-q2-stop-go` 均保持 pending，不授权进入 Q3。
+首次 verifier attempt（2026-08-12，source `0f51eaa`）未读取 dispatch 指定、checkout 外且存在的
+mandatory `vio_verifier.toml`，故追记为 **process-invalid / unqualified attempt；无 Q2
+PASS/FAIL/INCONCLUSIVE verdict**。该 attempt 报告的 10/10、77/77、probe、deletion、scope 与
+格式结果仅是 non-qualifying historical observations，不完成资格 todo，也不产生 stop/go。
+
+`222c5a3` 上的独立 PASS 随后因 exact-constant oracle identity 三处 1-ULP finding 被 supersede。
+`d1c4385809a6bf461f1c6b8acd81870f98634aa0` / tree
+`9c9c991b21c4d40e8c5f2ce974334b76e1a42b64` 修正 oracle bits 后，final verifier 完整读取
+绝对 config（SHA-256
+`8be3b22014708ed38f1032d81d8e1d591f3ff5da749417ab8021b1a94edfea46`）并从头重跑：Release
+定向 10/10、unit 77/77、exact-decimal bits 9/9，以及数值、SO(3)、duration、mutant、typed/
+natural defensive、unused-accel、shared endpoint、deletion、scope 与格式门全部 PASS。
+
+最终账本见
+[Q2 known-bias deterministic predict 资格结果](../research/m4-minimal-gyro-q2-known-bias-predict-result.md)；
+verifier report SHA-256 为
+`574a946fd08a6006de9b5477766443fed9fe5fd92b6079b93c772630a30b9ed1`，oracle script/output
+SHA-256 分别为 `e513d13f97f9abd6a5f79a154bf484b5dc9f6f6e658ef87e5831c11029a4d5b8` /
+`bae58704d85e828b709ecb1d9be0120dcb91ce27a7dcd1b8699771fa652dad7d`。原始 six-path
+production scope PASS；research correction 按 §2 的 edit 前 narrow waiver PASS；`0f51eaa`
+packaging 为 6+1 七路径。
+
+旧 v1 `/tmp/q2-missing-evidence-replay/commands.txt` 的 header 声称 inherited environment，
+却与实际 `env -i` 记录矛盾；v1 已被 supersede，不得用作最终命令证据，无需删除。P3
+修正后的权威 supplementary replay v2 记录为
+`/tmp/q2-missing-evidence-replay-v2.md`（SHA-256
+`06951458173c910dc09e36624a782b233d85ef777703ccf8d155a9ba39ea8809`），其输入与账本为：
+
+- `commands-v2.txt`：`272f434aa0154e914454a3e41f5141f678784e3510d7fdfadf5e083e6745a63e`；
+- `run.sh`：`d6e22e390b780a802d5998d03950351222cdac306bd97dbf1a0f0317771060b9`；
+- `invoke.sh`：`ed95091ae60a2f1b5c6aafbc21aaf2a4eb0d2be7ddf0a001244498a2435e9bce`；
+- `dut_probe.cpp`：`c313e9a8bdd89afcef31c0c71271d8986a829a0dde848078a53966b7ede2f0aa`；
+- `evidence/log-sha256.txt`：`9670629a24205c6da28340092ef29a21d0f2ec322ede15d102f936b39c4f11bd`。
+
+父进程实际 child invocation 为：
+
+```text
+/usr/bin/env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/home/lin LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=Asia/Shanghai /bin/bash --noprofile --norc /tmp/q2-missing-evidence-replay-v2/run.sh
+```
+
+v2 从 `git archive d1c4385809a6bf461f1c6b8acd81870f98634aa0` / tree
+`9c9c991b21c4d40e8c5f2ce974334b76e1a42b64` 解出的 source fresh configure/build，定向
+`GyroRotationPredictor.*` **10/10 PASS**。它实测 shared-endpoint first/second/whole geodesic actual 分别为
+`5.1165412024903705e-18` / `2.6942274008182644e-18` /
+`3.962996241602435e-18` rad，duration 分别为 `60000000` / `53000000` /
+`113000000` ns，composition closure actual 为 `0`，且 `60000000 + 53000000 =
+113000000` ns。v2 replay 不是原 RED，不产生任何原 RED 资格权重。
+
+Q2 final verdict 为 **technical PASS under one-time post-hoc evidence-retention waiver**；
+original frozen-plan RED exact-record conformance **NOT MET**。只授权 Q3 plan/design；
+Q3 implementation 仍未授权。

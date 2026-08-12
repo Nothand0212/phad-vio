@@ -606,8 +606,10 @@ PnP stereo 一致性仲裁：[#25](https://github.com/Nothand0212/phad-vio/issue
 
 ## M4：接入 IMU
 
-**当前状态（2026-08-12）：M4.1 数据路径已完成；Q1 Observe final independent PASS；
-Q2 known-bias synthetic 实施计划已建立且全部 todo pending，尚未实施。** M4.1 之后的
+**当前状态（2026-08-13）：M4.1 数据路径已完成；Q1 Observe final independent PASS；
+Q2 deterministic known-bias rotation-only 已在 `d1c4385` 取得 technical PASS under
+one-time post-hoc evidence-retention waiver，original frozen-plan RED exact-record conformance
+NOT MET。** M4.1 之后的
 measurement / factor 接入改按
 [证据门控的信息接入](agents/evidence-gated-integration.md)与
 [M4 gyro measurement / factor 资格实验设计](research/m4-minimal-gyro-slice-design.md)
@@ -615,15 +617,26 @@ measurement / factor 接入改按
 已完成：packet summary 与 raw gyro samples 已冻结，M3 off 路径字节不变；独立证据见
 [Q1 Observe 结果](research/m4-minimal-gyro-q1-observe-result.md)。Q1 PASS 只把 Q2 状态改为
 **go to plan only**；[Q2 Predict 实施计划](plans/2026-08-12_m4_gyro_q2_predict_3f69becc.plan.md)
-已冻结但尚未实施，不构成 Q2 实现授权或开工记录。
+现已完成，独立证据见
+[Q2 Predict 结果](research/m4-minimal-gyro-q2-known-bias-predict-result.md)。该 technical PASS
+under waiver 只覆盖无 production caller 的 deterministic known-bias rotation helper；原 RED
+lifecycle 仅作 historical non-qualifying，qualifying weight = `0`，later deletion 不作原 RED
+替代。最终 command evidence 以 `/tmp/q2-missing-evidence-replay-v2.md`（SHA-256
+`06951458173c910dc09e36624a782b233d85ef777703ccf8d155a9ba39ea8809`）为权威：父进程以
+`/usr/bin/env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/home/lin LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=Asia/Shanghai /bin/bash --noprofile --norc /tmp/q2-missing-evidence-replay-v2/run.sh`
+调用固定 `d1c4385` / tree archive，fresh 定向 10/10，并重现相同 shared-endpoint actual、closure
+与 duration。v1 inherited-environment header 与实际 `env -i` 矛盾，已被 supersede，不得作最终
+命令证据，无需删除。这是一次性且不泛化的 evidence-retention 例外，不声明 MH_01、EuRoC、
+ATE/RPE、noise/covariance/whitening 或 stochastic 产品资格；只授权 Q3
+plan/design，Q3 implementation 仍未授权。
 
 当前权威路线只包含：
 
 - **M4.1 数据路径（已完成）**：`StereoPairSynchronizer::pushImu()` 与
   `StereoImuPacket` 的时间区间、插值和 `imu_gap` 合同；
 - **Q1→Q5（逐层 stop/go）**：只有上一层的证据门通过，下一层才能另建
-  独立计划；Q1 已 PASS，Q2 known-bias synthetic 仅可另建独立计划，Q2–Q5 均未实施，
-  也未被本 roadmap 授权实施；
+  独立计划；Q1 已 PASS，Q2 为 PASS under 上述 one-time waiver，下一步仅可另建 Q3
+  plan/design；Q3 implementation 与 Q4–Q5 均未被本 roadmap 授权实施；
 - **Q6 Default（未授权）**：Q1–Q5 即使全部通过，也只能授权另建 online-init /
   跨序列资格设计；不得据此新增或默认开启 production IMU 路径。
 
