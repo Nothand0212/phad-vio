@@ -606,22 +606,23 @@ PnP stereo 一致性仲裁：[#25](https://github.com/Nothand0212/phad-vio/issue
 
 ## M4：接入 IMU
 
-**当前状态（2026-08-12）：M4.1 数据路径已完成；Q1 Observe 待实施。** M4.1 之后的
+**当前状态（2026-08-12）：M4.1 数据路径已完成；Q1 Observe final independent PASS；
+Q2 known-bias synthetic 仅可开始独立计划，尚未实施。** M4.1 之后的
 measurement / factor 接入改按
 [证据门控的信息接入](agents/evidence-gated-integration.md)与
 [M4 gyro measurement / factor 资格实验设计](research/m4-minimal-gyro-slice-design.md)
-的 Q1→Q5 stop/go 顺序重新资格化。当前唯一可执行范围是
-[Q1 Observe 实施计划](plans/2026-08-12_m4_gyro_q1_observe_7d3a91e6.plan.md)：同时冻结
-packet summary 与 raw gyro samples，并证明 M3 off 路径字节不变。Q1 开工前还必须
-把 issue [#36](https://github.com/Nothand0212/phad-vio/issues/36) 的 body/验收与权威链接
-同步到修订设计和 Q1 plan；当前本地文档不表示该远程前置已完成。
+的 Q1→Q5 stop/go 顺序重新资格化。[Q1 Observe 实施计划](plans/2026-08-12_m4_gyro_q1_observe_7d3a91e6.plan.md)
+已完成：packet summary 与 raw gyro samples 已冻结，M3 off 路径字节不变；独立证据见
+[Q1 Observe 结果](research/m4-minimal-gyro-q1-observe-result.md)。Q1 PASS 只把 Q2 状态改为
+**go to plan only**，不构成 Q2 实现授权或开工记录。
 
 当前权威路线只包含：
 
 - **M4.1 数据路径（已完成）**：`StereoPairSynchronizer::pushImu()` 与
   `StereoImuPacket` 的时间区间、插值和 `imu_gap` 合同；
 - **Q1→Q5（逐层 stop/go）**：只有上一层的证据门通过，下一层才能另建
-  独立计划；当前仅 Q1 有实施计划，Q2–Q5 未被本 roadmap 授权实施；
+  独立计划；Q1 已 PASS，Q2 known-bias synthetic 仅可另建独立计划，Q2–Q5 均未实施，
+  也未被本 roadmap 授权实施；
 - **Q6 Default（未授权）**：Q1–Q5 即使全部通过，也只能授权另建 online-init /
   跨序列资格设计；不得据此新增或默认开启 production IMU 路径。
 

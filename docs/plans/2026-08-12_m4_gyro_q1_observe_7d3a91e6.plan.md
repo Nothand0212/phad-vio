@@ -13,17 +13,17 @@ todos:
     status: completed
   - id: run-qualification-gate
     content: 跑定向 unit 与 MH_01 CLI qualification，核验 config_hash=402d1925、config 完整 object/canonical text 精确不变及 est.tum/kf.tum/diag.csv 的 cmp/SHA256 byte gate
-    status: in_progress
+    status: completed
   - id: record-stop-go
     content: 记录命令、输入/产物 SHA256、status 计数和 pass/fail/inconclusive；只有 Q1 pass 才给 Q2 known-bias synthetic integration 发出 go
-    status: pending
+    status: completed
 isProject: false
 ---
 
 # M4 gyro Q1 Observe 实施计划
 
-状态：**Q1 Observe 实现完成；implementer dirty-worktree qualification 为 provisional
-pass；最终独立 verifier pending；Q2 保持 stop**
+状态：**Q1 Observe final independent PASS；Q2 为 go to plan only，尚未实施且未获本任务
+授权开工**
 
 计划 ID：`7d3a91e6`
 
@@ -38,6 +38,7 @@ Q1 Observe。implementer 自己未执行 GitHub 远程写。
 - [证据门控的信息接入](../agents/evidence-gated-integration.md)
 - [M4 gyro measurement / factor 资格实验设计（修订版）](../research/m4-minimal-gyro-slice-design.md)
 - [MH_01 控制组](../research/m4-minimal-gyro-mh01-control.md)
+- [Q1 Observe final independent PASS 结果](../research/m4-minimal-gyro-q1-observe-result.md)
 
 历史计划：
 [M4 最小 gyro-aided VO `c4e62b35`](2026-08-12_m4_minimal_gyro_slice_c4e62b35.plan.md)
@@ -231,12 +232,11 @@ packet_index,sample_index,timestamp_ns,gyr_x_radps,gyr_y_radps,gyr_z_radps
 
 ### 4.4 Hash 合同
 
-最终独立 verifier 完成 Q1 run 后，对两个 CSV 的**完整文件 bytes**分别计算 SHA256；hash
-与文件大小、row count、首末 packet timestamp 一并写入强制交付
-`docs/research/m4-minimal-gyro-q1-observe-result.md`。该 result 文档当前尚未生成；在最终
-verifier 完成且证据可复现前不得伪造。后续工具消费前必须重算并匹配；任何字节变化都需要
-新的 Q1 资格 run。artifact SHA 不写入 `flattenConfig()`，也不修改 `meta.json.config` /
-`config_canonical_text`；配置身份与输入证据身份保持分离。
+最终独立 verifier 已对两个 CSV 的**完整文件 bytes**分别计算 SHA256；hash 与文件大小、
+row count、首末 packet timestamp 已写入强制交付
+[Q1 Observe 结果](../research/m4-minimal-gyro-q1-observe-result.md)。后续工具消费前必须重算
+并匹配；任何字节变化都需要新的 Q1 资格 run。artifact SHA 不写入 `flattenConfig()`，
+也不修改 `meta.json.config` / `config_canonical_text`；配置身份与输入证据身份保持分离。
 
 ## 5. RED → GREEN 实施顺序
 
@@ -444,10 +444,10 @@ completed，也不得发出 Q2 go。
 - 该 standalone run 的身份是 `base_head=8506378`、`implementation_commit=none`、
   `git_dirty=true`。`summary.json.status=completed_with_warnings`，并包含
   `git working tree is dirty; not suitable as a formal baseline` warning。
-- 上述 standalone run、`jq`/segment/replay gate 的 exact commands 以及 input SHA 当时未完整
-  保留；不得根据现有产物反推后补为已记录。hash/config/cmp 结论已核验，但 exact commands、
-  input SHA、post-implementation dirty diff/status 快照须由最终 verifier 重建并写入指定
-  result 文档。
+- 上述 implementer standalone run、`jq`/segment/replay gate 的 exact commands 以及
+  input SHA 当时未完整保留；不得根据其现有产物反推后补为已记录。该缺口后来由 final
+  verifier 在 clean commit 上以 fresh build/output 独立重建，并记录于
+  [Q1 Observe 结果](../research/m4-minimal-gyro-q1-observe-result.md)；两套证据不能混称同一 run。
 
 完整文件 SHA256：
 
@@ -461,10 +461,11 @@ da35227b40a1ab47c94217b4210b5445d11927a864d6634f8b824812ccec0344  gyro_samples.c
 
 ### 10.3 结论、未执行项与边界
 
-implementer dirty-worktree qualification 的结论为 provisional `pass`：Observe 默认关闭，
+本节记录的是 implementer 当时的 dirty-worktree provisional `pass`：Observe 默认关闭，
 开启时只在 apps composition root 收集与发布 artifact；gyro 没有取得进入 estimator、
-state、factor、初值或 feedback 的权限。最终独立 verifier 尚未从当前 dirty diff 重跑资格
-门，且强制 result 文档尚不存在，因此 `record-stop-go` 保持 pending，Q2 保持 stop。
+state、factor、初值或 feedback 的权限。当时 final verifier 尚未重跑，因此当时的
+`record-stop-go` 保持 pending、Q2 保持 stop；该历史状态已由第 10.5 节的 clean final
+evidence 取代，但予以保留以避免把 provisional 与 final 证据混为一谈。
 
 未执行 EuRoC 11/11、Sanitizer、性能专项或 Q2+。剩余代码风险：fixed-point 已有的
 `phad/sync/stereo_pair_synchronizer.cpp` 在 Observe collector 之前仍存在极端 int64 timestamp
@@ -498,5 +499,29 @@ fresh reviewer 的 Spec 结论为无 finding；Standards 唯一 finding 是 Q1 �
   successful session 后 writer failure 令 run/summary 失败；2/2 passed，exit `0`；
 - `git diff --check` 与所有 changed C++ 的 `clang-format --dry-run --Werror` 均 exit `0`。
 
-本次边界修正刻意未重复完整 MH_01 qualification；因此本节不升级 provisional 结论，
-最终独立 verifier 仍 pending，`record-stop-go` 仍 pending，Q2 仍 stop。
+本次边界修正刻意未重复完整 MH_01 qualification；因此在该历史 checkpoint，本节未升级
+provisional 结论，final verifier、`record-stop-go` 与 Q2 当时仍 pending/stop。随后完成的
+独立证据见第 10.5 节。
+
+### 10.5 Final independent verifier 与 stop/go
+
+final verifier 在 clean commit
+`74270572cc1fcc2eac82559117efd0951c800ab9` 上使用 fresh
+`build-q1-final-verifier` 和 fresh standalone output 完成资格门。证据分层如下：
+
+- implementer 证据仍只作为第 10.2–10.4 节的 provisional/history；
+- final verifier 独立执行定向 tests、unit、MH_01 full gate、standalone run、三项 `cmp`、
+  完整 config/canonical/hash gate、输入 manifest v2、packet/sample replay 与 segment join；
+- 最终 source/input/output/control 身份、所有有效命令、duration、五个 artifact SHA、完整
+  config snapshot、metrics、判定矩阵和剩余风险，以
+  [Q1 Observe final result](../research/m4-minimal-gyro-q1-observe-result.md)为权威记录。
+
+首次未带 `PHAD_EUROC_MH01_PATH` 的 `ctest -L mh01` 虽 exit `0`，但 3 项全部 skip，
+明确不计通过。之后两次带 env 的 MH_01 均 3/3 PASS；以最终显式 `env` 的串行命令作为
+正式门。input manifest v1 因 CRLF 文件名未清理而只含 8 条非图像 hash，已废弃；v2
+包含 7,372 条并通过全量 `sha256sum -c`。
+
+因此 `run-qualification-gate` 与 `record-stop-go` 均完成，Q1 结论为 **final independent
+PASS**。Q2 仅获 **go to plan only**：允许另建 known-bias synthetic integration 的独立计划，
+不表示 Q2 已获实现授权、已经开始或已有机制证据。EuRoC 11/11、Sanitizer、性能专项和 Q2+
+仍未运行；fixed-point extreme-int64 timestamp subtraction 风险仍保留。
