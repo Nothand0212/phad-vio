@@ -4,8 +4,10 @@
 
 状态：设计修订完成；Q1 Observe final independent PASS；Q2 deterministic known-bias
 rotation-only 已在 `d1c4385` 取得 technical PASS under one-time post-hoc
-evidence-retention waiver，original frozen-plan RED exact-record conformance NOT MET。下一步仅授权
-Q3 plan/design，Q3 implementation 与 Q4–Q5 仍未授权。
+evidence-retention waiver，original frozen-plan RED exact-record conformance NOT MET。Q3 已完成
+一手研究、无依据 hints 废止、deep one-call seam 选择及 module/data/structural contract draft；
+完整 input/statistics/solver/schema/owner-budget protocol 尚未冻结，当前为 **protocol amendment
+STOP**。这不是 DUT fail。Q3 implementation 与 Q4–Q5 仍未授权。
 
 控制基线：`main@7026ebf` 的 M3 production VO + M4.1 IMU sync 数据通路。MH_01
 权威控制组见 [M4 最小 gyro-aided VO：MH_01 控制组](m4-minimal-gyro-mh01-control.md)。
@@ -25,6 +27,10 @@ Q1 结果：[M4 gyro Q1 Observe 资格结果](m4-minimal-gyro-q1-observe-result.
 
 Q2 计划与结果：[M4 gyro Q2 Predict](../plans/2026-08-12_m4_gyro_q2_predict_3f69becc.plan.md)；
 [M4 gyro Q2 Predict 资格结果](m4-minimal-gyro-q2-known-bias-predict-result.md)
+
+Q3 structural draft：[调研](m4-minimal-gyro-q3-offline-bias-alignment-research.md)；
+[设计草案](m4-minimal-gyro-q3-offline-bias-alignment-design.md)；
+[实施计划](../plans/2026-08-13_m4_gyro_q3_align_0e897ba8.plan.md)
 
 本文档描述当前约定，不是绝对约束，会随项目开发修订。
 
@@ -169,6 +175,15 @@ sensor / calibration 合同中增加显式的 \(\mathbf T_{BI}\)，不能在实�
 如果三主产物不一致，在 Q1 停止，不能继续解释任何 gyro 指标。
 
 ### 4.2 离线 alignment：fit 与 held-out 分开
+
+**Q3 structural draft 勘误（2026-08-13）：**本节早期描述中的未冻结统计占位，现以
+[Q3 调研](m4-minimal-gyro-q3-offline-bias-alignment-research.md)与
+[Q3 设计草案](m4-minimal-gyro-q3-offline-bias-alignment-design.md)为准。固定
+`condition <= 1e6`、至少 60 blocks 和未枚举的 22 项 Holm family 均已废止；历史 Q1 plan
+只作审计、不回写。当前只完成 block/fit-half/SO(3)/module 等结构草案；exact input predicates、
+solver/Jacobian/rank、primary/equivalence/support、outcome 外 owner budgets 与 versioned artifact
+schemas 均须在独立 amendment 冻结并评审。当前是 protocol amendment STOP，不能开始 Q3
+implementation。
 
 离线工具只使用第 1 趟已经发布的 \(\mathbf T_{WB}\) 和 packet dump，不重新实现 sync。
 
@@ -367,7 +382,7 @@ factor-enabled run 才记录 `enable_gyro_factor=true` 及全部冻结参数。G
 |---|---|
 | Q0 / Q1 | IMU-off 三主产物与 control byte-identical；canonical hash `402d1925` |
 | Q2 | known-bias synthetic integration 解析门通过；不使用 MH_01 bias fit 或 ATE |
-| Q3 | 第 4.2 节 alignment 前四项硬门通过并报告描述性拓扑覆盖；未通过不开 factor |
+| Q3 | structural draft 已完成、protocol amendment STOP；implementation 未授权；完整 PASS 前不开 factor |
 | Q4 active | 以 graph-state-compatible packets 为唯一 eligible 分母，`attached / eligible = 1.0` 且 attached 非零；另报 compatible / all-valid packet count 与 duration，仅作描述性覆盖，不设 0.95 硬门 |
 | Q4 mechanism | synthetic fixed graph 全过；frozen-input 首次变化符合 factor 作用方向 |
 | Q5 translation guardrail | exact-common ATE RMSE ≤ `0.100 m` |
@@ -446,6 +461,8 @@ lifecycle 可接受，再让 IMU 取得进入该 posterior 的资格。
    调用固定 `d1c4385` / tree archive，fresh 定向 10/10，并重现相同 shared-endpoint
    actual、closure 与 duration。v1 header 与实际 `env -i` 矛盾，已被 supersede，不得作最终
    命令证据，无需删除。
-3. 下一步只编写 Q3 plan/design，并预注册第 4.2 节尚需冻结的统计门；Q3 implementation 在
-   该计划单独评审和授权前保持 stop。
+3. Q3 已完成一手研究、旧 `condition <= 1e6`/固定 60 blocks/未枚举 22 项 family 的废止、
+   deep one-call seam 选择与 structural draft；完整 input/statistics/solver/schema/owner-budget
+   amendment 仍 pending。当前是 protocol amendment STOP，不是 DUT fail；Q3 implementation
+   保持未授权。
 4. 后续 Q4–Q5 仍须在各自上一层通过后逐层新建独立计划，不直接跳到 full VIO。
