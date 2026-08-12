@@ -1,8 +1,9 @@
-# M4 最小 gyro-aided VO 重启方案（已通过）
+# M4 最小 gyro-aided VO 重启方案（历史）
 
 日期：2026-08-12
-状态：大致方案与详细计划已于 2026-08-12 获用户同意；issue
-[#36](https://github.com/Nothand0212/phad-vio/issues/36) 实施中
+状态：历史上位提案；2026-08-12 已由 evidence-gated 修订设计取代，禁止按旧详细计划直接实施。
+issue [#36](https://github.com/Nothand0212/phad-vio/issues/36) 尚需在获得远程写入授权后同步为
+Q1 Observe 权威链接；本地文档不冒充该远程前置已完成。
 基线：`main@7026ebf`（M3 production VO + 已合入的 M4.1 IMU sync 数据通路）
 
 ## 目标判断
@@ -56,6 +57,10 @@ accelerometer bias、accelerometer factor，也不引入 `IncrementalFixedLagSmo
 - 不先扫 covariance、Huber 或 PnP 阈值寻找偶然甜区；
 - MH_01 未过门前不扩 EuRoC 11/11；已授权的详细计划只覆盖到 MH_01 gate。
 
-详细实施计划：
-[M4 最小 gyro-aided VO](../plans/2026-08-12_m4_minimal_gyro_slice_c4e62b35.plan.md)，
-覆盖模块边界与数据流、错误与 diagnostics、测试矩阵、逐片验收和可回滚实施步骤。
+当前合同与实施入口：
+
+- [M4 gyro measurement / factor 资格实验设计（修订版）](m4-minimal-gyro-slice-design.md)；
+- [Q1 Observe 实施计划](../plans/2026-08-12_m4_gyro_q1_observe_7d3a91e6.plan.md)。
+
+原 [M4 最小 gyro-aided VO 详细计划](../plans/2026-08-12_m4_minimal_gyro_slice_c4e62b35.plan.md)
+仅保留为历史，不得执行，其中的旧实现状态不构成新版 Q1–Q5 资格证据。

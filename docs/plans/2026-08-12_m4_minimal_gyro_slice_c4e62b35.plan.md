@@ -1,46 +1,52 @@
 ---
-name: M4 最小 gyro-aided VO
-overview: 在 main 的 M3 StereoVoEstimator 上分四个可停止的 vertical slice 接入 gyro：先冻结 IMU-off，再验证 segment 与 shared bias，再做带 fixed-bias pose-only AHRS factor、但不改输出的 shadow graph，最后才允许 fused 写回。默认保持 off；不复用 P2b candidate，不做 fixed-lag 或 full X/V/B VIO。
+name: M4 最小 gyro-aided VO（历史，禁止执行）
+overview: 历史计划，基于已失效的跨层合同；仅保留审计，不得继续执行，也不得把其中的实现状态当作新版资格证据。当前工作从独立 Q1 Observe 计划重新开始。
 todos:
   - id: issue-and-control
     content: 获得实施授权后创建本片 GitHub issue，并在 main@7026ebf 上重跑 MH_01 控制组，固化参数快照、指标和 est.tum/kf.tum/diag.csv 参考产物
     status: completed
   - id: mode-and-input-red
     content: 先补 GyroMode、IMU segment 输入、IMU 标定和非法配置的失败测试；测试必须在生产修改前失败
-    status: pending
+    status: cancelled
   - id: packet-off-green
     content: OfflineVoSession 改用 StereoImuPacket 并贯通 estimator 输入；gyro=off 完全不读取 IMU 内容，三主产物与冻结控制组 byte-identical
-    status: pending
+    status: cancelled
   - id: segment-ledger
     content: 在 estimator PIMPL 内实现 accepted-pose edge 的 segment 校验、rejected-frame 累积、gap/re-anchor 截断和 window 生命周期，覆盖无状态污染测试
-    status: pending
+    status: cancelled
   - id: visual-gyro-alignment
     content: 用 accepted visual posterior rotation 和连续 gyro edge 估计并冻结一个 shared absolute gyro bias，记录 rank、support、residual；不引入 bias prior/RW
-    status: pending
+    status: cancelled
   - id: fixed-bias-factor
     content: 实现 estimator-private FixedBiasAhrsFactor，使用 gyr_nd² 与 alignment residual covariance，验证方向、bias correction、Pose3 Jacobian 和零 translation residual
-    status: pending
+    status: cancelled
   - id: shadow-graph
     content: 从同一最终 visual graph/posterior 构造非写回 gyro shadow solve，并新增独立 gyro_state.csv；不得改变视觉状态、KF/lifecycle 或现有 diag.csv
-    status: pending
+    status: cancelled
   - id: shadow-mh01-gate
     content: MH_01 跑 off/shadow；三主产物逐字节相同，sidecar 合同、alignment 与 factor activation 全部成立后才允许进入 fused
-    status: pending
+    status: cancelled
   - id: fused-path
     content: 将同一 gyro correction solve 作为 fused 最终 posterior，保持当前帧 visual PnP/cull/reopt 决策顺序；失败不得提交部分视觉或 gyro 状态
-    status: pending
+    status: cancelled
   - id: fused-mh01-gate
     content: MH_01 自然闭环跑 off/fused，以 exact-common support 比较 ATE/RPE/coverage；两项精度均严格改善且无完成率回归才判定本片成功
-    status: pending
+    status: cancelled
   - id: docs-and-decision
     content: 更新 estimator/apps/scripts 合同和 M4 研究记录；无论正负结果都固化 config、日志与指标，默认仍保持 off，另行评审是否推广和扩 EuRoC
-    status: pending
+    status: cancelled
 isProject: false
 ---
 
 # M4 最小 gyro-aided VO 详细实施计划
 
-状态：**已审阅通过；实施中**
+状态：**历史计划；已失效；不得执行**
+
+> 本文件只保留旧决策与实施痕迹，不能作为当前 source allowlist、验收门或
+> 后续实现授权。当前合同以
+> [M4 gyro measurement / factor 资格实验设计（修订版）](../research/m4-minimal-gyro-slice-design.md)
+> 和独立的 [Q1 Observe 实施计划](2026-08-12_m4_gyro_q1_observe_7d3a91e6.plan.md)
+> 为准；旧实现的“已完成/已编码/已运行”陈述不自动转化为 Q1–Q5 资格证据。
 
 计划 ID：`c4e62b35`
 

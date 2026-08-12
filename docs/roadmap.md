@@ -606,63 +606,35 @@ PnP stereo 一致性仲裁：[#25](https://github.com/Nothand0212/phad-vio/issue
 
 ## M4：接入 IMU
 
-M3.3 出口已由 pre-M4 小片（两轮全否决，见上）锁定：纯 VO 内覆盖率的
-代价是 re-anchor 对齐税且无法在匹配/播种层消除 —— re-anchor 锚必须
-来自 IMU 预积分外推（消除 CV 锚错位），段间错位税结构性消失。这是
-本里程碑的第一动机，先于纯精度提升。定案设计见
-[M4 接入 IMU 设计](research/m4-imu-integration-design.md)（2026-08-07
-grill 定案；决策链 D1–D13 / C1–C17）。
+**当前状态（2026-08-12）：M4.1 数据路径已完成；Q1 Observe 待实施。** M4.1 之后的
+measurement / factor 接入改按
+[证据门控的信息接入](agents/evidence-gated-integration.md)与
+[M4 gyro measurement / factor 资格实验设计](research/m4-minimal-gyro-slice-design.md)
+的 Q1→Q5 stop/go 顺序重新资格化。当前唯一可执行范围是
+[Q1 Observe 实施计划](plans/2026-08-12_m4_gyro_q1_observe_7d3a91e6.plan.md)：同时冻结
+packet summary 与 raw gyro samples，并证明 M3 off 路径字节不变。Q1 开工前还必须
+把 issue [#36](https://github.com/Nothand0212/phad-vio/issues/36) 的 body/验收与权威链接
+同步到修订设计和 Q1 plan；当前本地文档不表示该远程前置已完成。
 
-切片（每片独立可观察收尾）：
+当前权威路线只包含：
 
-- **M4.1 数据路径**：`StereoPairSynchronizer` 扩展 `pushImu`（单调性
-  sticky 校验、有界队列与溢出计数沿用 M3.2）；图像边界 IMU 线性插值
-  与 `StereoImuPacket` 构造（段内 ΣΔt ≡ 图像间隔，原始样本 + 两端插值，
-  左端样本归新段）；大间断标 `imu_gap`；不新建 synchronizer；
-- **M4.2 估计器机制**：状态由 `X` 扩展为 `X/V/B`，新增
-  `CombinedImuFactor` 与 `BetweenFactor<ConstantBias>`；GTSAM preintegration
-  参数构造与噪声单位转换只发生在一处（acc_nd² / gyr_nd² / rw² 连续密度
-  平方）；位姿初值 = IMU 预积分外推，PnP/恒速降级为 IMU 不可用兜底；
-  **re-anchor 整体退役**：链跨段保持，事务回滚只回滚 landmark/观测；
-  伪初始化（bias=0 / v0=0 / g=9.81007）跑通，数字只记录不门控；
-- **M4.3 静止初始化 + 端到端门**：静止检测（gyro/accel 方差阈值）→
-  gyro bias → 重力方向 → roll/pitch → 零初速 → priors；检测失败返回
-  原因不冒充成功；初始化期间视觉等待（丢前 ~10–20 帧，
-  `init_dropped_frames` 进 summary）；bias 三轴进 `diag.csv`；
-- **M4.4 收尾小片**：Rule 4 旋转补偿来源 BA 位姿 → IMU 预积分，全序列
-  record-only + MH_01 不劣化；KF 冷却（Basalt `min_frames_after_kf=5`）
-  评估一并做。
+- **M4.1 数据路径（已完成）**：`StereoPairSynchronizer::pushImu()` 与
+  `StereoImuPacket` 的时间区间、插值和 `imu_gap` 合同；
+- **Q1→Q5（逐层 stop/go）**：只有上一层的证据门通过，下一层才能另建
+  独立计划；当前仅 Q1 有实施计划，Q2–Q5 未被本 roadmap 授权实施；
+- **Q6 Default（未授权）**：Q1–Q5 即使全部通过，也只能授权另建 online-init /
+  跨序列资格设计；不得据此新增或默认开启 production IMU 路径。
 
-`estimator.enable_imu`（默认 true）进 `config_hash`；IMU-off 时
-`est.tum`/`diag.csv` 相对 M3.3 基线（`4cf55ca/default_773ea011`）
-**逐字节相同**，作为 A/B 归因与回退锚。
+### 历史 M4.2+ 路线（non-normative；不可执行）
 
-测试：
-
-- 预积分解析验证作为单元测试：静止、匀速、恒定角速度、已知 bias 的
-  first-order correction 与重新积分一致；
-- rad/s 与 deg/s 错用能被测试发现；
-- covariance 对称且特征值在容差内非负；
-- packet 的 IMU \(\sum\Delta t\) 等于图像时间间隔；
-- 图像时刻恰好落在 IMU 样本上、落在两样本之间、缺样、重复、逆序、
-  大间断（`imu_gap` 跳因子不跳帧）；
-- 失败路径：逆序时间戳、非有限测量、非正 \(\Delta t\)、非法 noise 配置；
-- 静止检测成功与运动中误初始化拒绝；
-- 合成退化注入（`--dropout-*`，CLI-only 不进 config_hash）：注入期位姿
-  由预积分外推连续、恢复后无永久损伤；IMU-off 对照为冻结语义。
-
-出口（三重门）：
-
-- **① MH_01 ATE ≤ 0.100 m**（绝对门；M3.3 锚 0.0988 已接近纯 VO 极限，
-  IMU 增量在良好视觉段期望不高，不设"严格优于"硬门）；
-- **② 视觉短时退化时轨迹连续**：MH_05 相对 M3.3 基线显著改善 + 注入
-  测试断言连续性与恢复性，不出现跳变或发散；
-- **③ 机制证据**：IMU-on 下 `segments`/`reanchors` 恒 1/0（re-anchor 税
-  结构性消失）；逐段 ATE 分解的段间错位显著下降；IMU bias 从扰动初值
-  收敛（gyro < 1e-3 rad/s 量级）。
-
-时间错位用例（视觉与 IMU 时间错位误差增大）纳入 M9 在线估计前的离线
-对拍测试，不在本里程碑单独验收。
+2026-08-07 的 [M4 接入 IMU 设计](research/m4-imu-integration-design.md) 曾提议直接将
+state 从 `X` 扩展为 `X/V/B`，引入 `CombinedImuFactor`、
+`BetweenFactor<ConstantBias>`、静止初始化、IMU 预积分初值与 re-anchor 退役，
+并设想让 `estimator.enable_imu` 默认为 true 且进入 `config_hash`。该 M4.2–M4.4
+路线及其测试/出口只是历史提案，**不是当前的 production 行为、默认值、API
+合同或实施授权**。未来若要引入 `X/V/B`、gravity、accelerometer、online bias
+initialization 或默认 IMU，必须在 Q1–Q5 证据之后重新设计并单独授权；不得从本历史段
+推导现行配置或代码要求。
 
 ## M5：正式初始化
 

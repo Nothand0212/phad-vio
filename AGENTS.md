@@ -16,6 +16,11 @@
 针对当前 milestone，先实现最小可运行的 vertical slice，再根据观测到的需求与失败逐步演进。详见
 `docs/agents/incremental-development.md`。
 
+### Evidence-gated integration
+
+接入会改变既有输出的新传感器、先验、模型、factor 或 optimizer 时，按资格阶梯逐层取得权限。
+详见 `docs/agents/evidence-gated-integration.md`。
+
 ### Issue tracker
 
 Issues 与 PRDs 在 GitHub Issues 中跟踪。详见 `docs/agents/issue-tracker.md`。
