@@ -3,7 +3,8 @@
 日期：2026-08-13
 
 状态：一手资料对照、无依据旧 hints 的废止、deep one-call seam 选择以及 module/data/structural
-contract draft 已完成；**O0=A 已冻结，其余 amendment pending，protocol amendment STOP**。
+contract draft 已完成；**O0=A 与 O1 primary delta-loss 零容忍已冻结，
+effects/power 与其余 amendment 仍 pending，protocol amendment STOP**。
 这不是 DUT fail：Q3 implementation 尚未授权，也没有生成 Q3 科学结果。
 
 关联：issue [#38](https://github.com/Nothand0212/phad-vio/issues/38)、

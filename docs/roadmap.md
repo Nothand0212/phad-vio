@@ -610,8 +610,9 @@ PnP stereo 一致性仲裁：[#25](https://github.com/Nothand0212/phad-vio/issue
 Q2 deterministic known-bias rotation-only 已在 `d1c4385` 取得 technical PASS under
 one-time post-hoc evidence-retention waiver，original frozen-plan RED exact-record conformance
 NOT MET；Q3 已完成一手研究、无依据 hints 废止、deep one-call seam 选择及
-module/data/structural contract draft；O0=A 已 resolved，其余 amendment（包括 S1 alpha
-与 V2）全部 pending，当前 protocol amendment STOP（非 DUT fail）。O0 的规范语义只见
+module/data/structural contract draft；O0=A 与 O1 `primary.delta_loss_rad2=0` 已 resolved。剩余
+effects/power、S1、V2、schema、solver/Jacobian 与 support 仍 pending，当前 protocol amendment
+STOP（非 DUT fail）。O0/O1 的规范语义只见
 [Q3 normative design](research/m4-minimal-gyro-q3-offline-bias-alignment-design.md#6-o0-normative-statistical-protocol)。**
 M4.1 之后的
 measurement / factor 接入改按
@@ -648,9 +649,9 @@ alpha 数值/分配也已全部退役，不得当作候选资格证据；唯一�
 - **M4.1 数据路径（已完成）**：`StereoPairSynchronizer::pushImu()` 与
   `StereoImuPacket` 的时间区间、插值和 `imu_gap` 合同；
 - **Q1→Q5（逐层 stop/go）**：只有上一层的证据门通过，下一层才能另建
-  独立计划；Q1 已 PASS，Q2 为 PASS under 上述 one-time waiver，下一步仅可另建 Q3
-  plan/design；Q3 structural draft 已完成且 O0=A 已 resolved，但其余 amendment 与
-  independent review 仍 pending，protocol amendment STOP；
+  独立计划；Q1 已 PASS，Q2 为 PASS under 上述 one-time waiver；Q3 structural draft
+  已完成，O0=A 与 O1 primary delta-loss 零容忍已 resolved，但剩余 effects/power、S1、
+  V2、schema、solver/Jacobian、support 与 independent review 仍 pending，protocol amendment STOP；
   Q3 implementation、qualification 与 Q4–Q5 均未被本 roadmap 授权；
 - **Q6 Default（未授权）**：Q1–Q5 即使全部通过，也只能授权另建 online-init /
   跨序列资格设计；不得据此新增或默认开启 production IMU 路径。

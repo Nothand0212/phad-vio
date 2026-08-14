@@ -2,7 +2,8 @@
 
 日期：2026-08-13
 
-状态：**O0=A 已冻结 / 其余 owner 与 protocol decisions pending / Q3 implementation STOP**。
+状态：**O0=A 与 O1 `primary.delta_loss_rad2=0` 已冻结 / 其余 owner 与 protocol
+decisions pending / Q3 implementation STOP**。
 本文没有打开或统计 Q1 runtime CSV/TUM/diag 内容，没有读取 Q3 held-out suffix、GT/ATE/RPE、
 Q5 结果或 future DUT，也没有生成、执行或判定任何 Q3 outcome。
 
@@ -12,7 +13,7 @@ Q5 结果或 future DUT，也没有生成、执行或判定任何 Q3 outcome。
 [Q3 计划](../plans/2026-08-13_m4_gyro_q3_align_0e897ba8.plan.md)。
 
 文档角色：本文是 **evidence + owner decision record**，保留来源、数学推导、候选评估与
-A/B/C 决策历史；不是 executable protocol authority。O0 与统计合同的 adopted normative
+A/B/C 决策历史；不是 executable protocol authority。O0/O1 与统计合同的 adopted normative
 定义只在上述 Q3 design 规范节中维护。
 
 ## 1. Fixed point、权限与 leakage prohibition
@@ -22,8 +23,10 @@ issue #39 固定 structural Q3 plan 于 commit
 research/design/plan；Q3 source/tests/CMake、执行、Q4+、factor-enabled experiment 与 posterior
 变化均未授权。amendment 即使完成，也仍须另获明确 implementation go。
 
-本次只记录 O0=A resolved；所有后续 owner/protocol decisions 仍 pending。尤其
-`delta_loss`、alpha、mixed verdict precedence、schema、solver 和 support 均未冻结。
+本次记录 O0=A 以及 O1 零损失容忍 A selected；两者的 adopted normative contract 均只见
+[Q3 design §6](m4-minimal-gyro-q3-offline-bias-alignment-design.md#6-o0-normative-statistical-protocol)。
+primary positive minimum meaningful effect、adjacent effect、target power、alpha、mixed verdict
+precedence、schema、solver、Jacobian 和 support 均未冻结。
 
 本研究采用以下防泄漏边界：
 
@@ -186,7 +189,7 @@ prospective calculation 判定预注册的 target power 在预算内不可达，
 
 | source | source units | protocol units | explicit assumption | owner approval required | candidate protocol field / current state |
 |---|---|---|---|---|---|
-| 产品风险：corrected arm 不得更差 | product policy | `rad^2` | `d_k=loss_zero-loss_corrected`，candidate one-sided gate 为 `LCB(d)>delta_loss` | owner 尚未选择损失容忍 | `primary.delta_loss_rad2=0` / **推荐 A 候选，pending** |
+| 产品风险：corrected arm 不得更差 | product policy | `rad^2` | 零损失容忍；exact sign/gate/equality 语义只见 [Q3 design §6.1](m4-minimal-gyro-q3-offline-bias-alignment-design.md#61-primary-diagnostic-componenthac) | owner 已选 A | `primary.delta_loss_rad2=0` / **selected；adopted into design** |
 | ADIS16448 ARW `0.66 deg/sqrt(h)` | angle random walk | `rad/sqrt(s)`，再到 1 s `rad` | 若用于 stochastic model，须先冻结 white/stationary、dataset 配置适用性、轴相关与传播模型；目前 pending | 是否只作 sanity floor，或进入 stochastic model | `sensor.arw_rad_sqrt_s=1.91986e-4` / source fact；用途 pending |
 | ADIS16448 IRBS `14.5 deg/h` | bias stability | `rad/s` | 若用于 budget，须先冻结 Allan-minimum typical 1 sigma 对目标 run 的适用性、轴相关与倍数；目前 pending | 接受 typical/model risk | `bias.full_uncertainty_budget_radps[3]`、`half.margin_radps[3]` / pending |
 | ADIS16448 bias repeatability `0.5 deg/s` | long-term offset | `rad/s` | 若用于 sensitivity，须先论证跨环境 population scale 与本次 100 s estimand 的关系；目前 pending | 通常应拒绝作 Q3 tight hard gate | sensitivity-only / pending |
@@ -197,8 +200,9 @@ prospective calculation 判定预注册的 target power 在预算内不可达，
 | Schuirmann/ICH/FDA | dimensionless alpha/CI | matching estimator units | equivalence margin 须事先给定，且 inference coverage 依赖所选 SE/df/HAC model | owner 仍须批准 margins 与 S1 risk choices | O0 已决；adopted executable 语义见 [Q3 design §6](m4-minimal-gyro-q3-offline-bias-alignment-design.md#6-o0-normative-statistical-protocol)；其余 pending |
 | Newey-West/Bartlett | indexed covariance | estimator-specific squared units | 若采用 HAC，须先冻结 calendar lag、kernel、bandwidth、normalization、correction 与 critical law；目前 pending | 接受 asymptotic risk与 sensitivity rule | `hac.*` / pending |
 
-表中的 candidate formula、model 与 estimand 均只是待 owner 选择且补齐前提的候选；在对应链条
-完整冻结前，它们都不是 protocol fact，不得写入 executable verdict 合同。
+除明确标为 selected/adopted 的 O0/O1 decision history 外，表中的 candidate formula、model 与
+estimand 均只是待 owner 选择且补齐前提的候选；在对应链条完整冻结前，它们都不是
+protocol fact，不得写入 executable verdict 合同。O0/O1 的可执行语义仍只见 Q3 design。
 
 禁止来源：`condition<=1e6`、固定 60 blocks、未枚举 22-Holm、Mahalanobis non-rejection、旧
 adjacent/RMSE hints、无 command/log/hash 的 census、suffix/GT/ATE/Q5、成熟项目 online constants。
@@ -243,9 +247,10 @@ procedure、候选 alpha 或资格证据。
 1. `U0` 固定上游事实：Q1 writer/validator、timestamp parser、Q2 helper、EuRoC/ADI source facts。
 2. `U0 -> U1/U2/U3`：分别冻结 exact input/eligibility；block+adjacent estimands/calendar index；
    objective/FD Jacobian/rank/HAC sandwich estimator。
-3. `O0=A` 是 resolved input；下一项为 `O1` delta loss/effects/power，随后依次冻结 `O2` 三轴
-   uncertainty/stability budgets、`O3` 与 O0=A 一致的 12 margins 与 design alternatives、`O4`
-   provenance architecture。
+3. `O0=A` 与 O1 `primary.delta_loss_rad2=0` 是 resolved inputs。下一 owner 事项只是
+   primary positive minimum meaningful effect；adjacent effect 与 target power 仍为其后的
+   pending 事项。再随后依次冻结 `O2` 三轴 uncertainty/stability budgets、`O3` 与 O0=A
+   一致的 12 margins 与 design alternatives、`O4` provenance architecture。
 4. `(U1,U2,U3,O1,O2,O3) -> S1`：冻结 alpha/critical law/TOST/HAC/gap rules。
 5. 只有 owner 明确授权 prefix-only nuisance 后，`S1 -> S2` prospective
    support/power/infeasible rule。
@@ -256,7 +261,7 @@ procedure、候选 alpha 或资格证据。
 8. `R1` 通过后 amendment 才可称 `COMPLETE`；amendment `COMPLETE` 仍是 implementation
    `STOP`，必须另获 separate implementation go。
 
-## 7. Owner decisions：O0 已决，下一项为 O1 `delta_loss`
+## 7. Owner decisions：O0 与 O1 `delta_loss` 已决
 
 ### 7.1 O0：product claim 与 risk semantics
 
@@ -276,56 +281,57 @@ O0 的 A/B/C 处置如下：
 
 ### 7.2 O1：`delta_loss`
 
-先固定符号与 candidate gate：
+决策来源：用户于 2026-08-14 选择 Q3 amendment O1=A。该回复只冻结零损失容忍，
+不冻结 positive primary minimum meaningful effect、adjacent effect、target power、alpha、
+solver、schema、support 或 outcome。exact field/sign/unit/strict-boundary 与 component/overall 语义只见
+[Q3 design §6.1](m4-minimal-gyro-q3-offline-bias-alignment-design.md#61-primary-diagnostic-componenthac)；
+本 research 不持有平行的 normative gate 或可执行 test oracle。
 
-\[
-d_k=loss_{zero,k}-loss_{corrected,k},\qquad LCB(d)>delta_{loss}.
-\]
+O1 的 A/B/C 处置如下：
 
-若产品允许 corrected arm 比 zero arm 最多坏 `delta_allow>=0`，则阈值必须取
-`delta_loss=-delta_allow`，不能把正的允许损失直接填入 `delta_loss`。
-
-owner 尚未回答本题，推荐 A 也尚未获 owner 批准；当前选项为：
-
-- **A（推荐）**：`primary.delta_loss_rad2=0`。qualification 不允许 corrected arm 的 held-out 平均
-  squared loss 变差；最小有意义正向 design effect 另由 owner 产品目标给出；ADI 规格只作
-  uncertainty/sanity floor。优点是语义直接、无需把 typical sensor stats 冒充 guarantee。
-- **B（候选但当前不可执行）**：若产品允许 corrected 最多坏
-  `delta_allow=1.25e-7 rad^2`，则对应的是 `delta_loss=-1.25e-7 rad^2`。这个数目前仍不可用于
+- **A（selected / adopted into design）**：`primary.delta_loss_rad2=0`。owner 选择的产品含义是
+  corrected arm 的 held-out mean squared loss 不得变差。ADI 规格只作 uncertainty/sanity
+  floor，不冒充 guarantee。
+- **B（not selected / non-normative / no qualification authority）**：曾候选允许 corrected 最多坏
+  `delta_allow=1.25e-7 rad^2`，其历史对应候选字段为 `delta_loss=-1.25e-7 rad^2`。这个数目前仍不可用于
   executable field：其原候选算法把 IRBS `7.02980e-5 rad/s` 静默当作 1 s angle stochastic term，
   但缺少随机过程与传播合同；还额外假设 ARW 与 IRBS 可独立合成、三轴同分布且 dataset 配置
   适用。在完整 noise process、integration/filter、axis covariance 与 visual error 模型冻结前，
   不得将该候选写入 protocol。
-- **C**：owner 提供非零 application loss budget `[rad^2]` 及 hazard/risk 来源；不得引用 Q5、
-  suffix、GT/ATE 或 desired PASS。
+- **C（not selected / non-normative / no qualification authority）**：owner 另行提供非零
+  application loss budget `[rad^2]` 及 hazard/risk 来源；不得引用 Q5、suffix、GT/ATE 或
+  desired PASS。
 
-`primary.delta_loss_rad2` 仍为 pending；effect、power 和其余数值门也待后续 owner input，不在本文
-填具体数值。owner 回答本题只会冻结这一项，不代表 protocol complete。
+`primary.delta_loss_rad2` 已选定不代表 protocol complete。下一 owner 事项只是 primary positive
+minimum meaningful effect；adjacent effect 与 target power 继续作为随后 pending 事项，本文
+不代选任何数值。
 
 ## 8. Owner choices 顺序与最小下一步
 
-`O0=A` 已 resolved 并退出待决队列。以下只记录依赖顺序、候选职责与待 owner 选择的
+`O0=A` 与 O1 `primary.delta_loss_rad2=0` 已 resolved 并退出待决队列。以下只记录依赖顺序、
+候选职责与待 owner 选择的
 alternatives，不构成 adopted protocol；按顺序一次只问一项：
 
-1. `O1` 的 `delta_loss`：先选择 Section 7.2 的损失容忍；
-2. `O1` 其余项：随后选择 primary/adjacent minimum meaningful effects 与 target power（具体数值由
+1. `O1` 剩余项的下一个问题：primary positive minimum meaningful effect（具体数值由
    owner product/risk input）；
-3. `O2`：ADI typical specs 只作 sanity floor，还是在何种明确模型下进入三轴
+2. `O1` 随后 pending：adjacent effect；
+3. `O1` 再随后 pending：target power；
+4. `O2`：ADI typical specs 只作 sanity floor，还是在何种明确模型下进入三轴
    full-fit uncertainty 与 half-stability budgets；
-4. `O3`：在已冻结 O0=A 下选择 12 项 equivalence margins 与 design alternatives，并保持 sole
+5. `O3`：在已冻结 O0=A 下选择 12 项 equivalence margins 与 design alternatives，并保持 sole
    overall IUT、component diagnostic-only 与 no-component-claim 语义；
-5. `O4`：trusted outer launcher/verifier、build attestation、embedded protocol bytes、Q1/Q2 ledger
+6. `O4`：trusted outer launcher/verifier、build attestation、embedded protocol bytes、Q1/Q2 ledger
    与 out-of-band expected manifest digest 的 provenance architecture；
-6. `U1`：独立冻结 exact input/eligibility/near-pi/error table 与 calendar identity；
-7. `U2`：独立冻结 block/adjacent estimands、duration normalization 与 calendar index；
-8. `U3`：独立冻结 zero-init objective、Q2-helper central-FD Jacobian、rank rule 与 HAC
+7. `U1`：独立冻结 exact input/eligibility/near-pi/error table 与 calendar identity；
+8. `U2`：独立冻结 block/adjacent estimands、duration normalization 与 calendar index；
+9. `U3`：独立冻结 zero-init objective、Q2-helper central-FD Jacobian、rank rule 与 HAC
    sandwich estimator；
-9. `S1`：在 `U1/U2/U3/O1/O2/O3` 都冻结后，冻结与 O0=A 一致的 alpha/critical law、TOST、
+10. `S1`：在 `U1/U2/U3/O1/O2/O3` 都冻结后，冻结与 O0=A 一致的 alpha/critical law、TOST、
    calendar-gap、Bartlett bandwidth/normalization/correction；IUT 代数不会替 owner 冻结 alpha；
-10. `S2`：只有 owner 另行授权 prefix-only nuisance 后，才冻结 prospective sizing、support 与
+11. `S2`：只有 owner 另行授权 prefix-only nuisance 后，才冻结 prospective sizing、support 与
     precision-infeasible semantics；
-11. `V1`：先冻结逐 gate boundary truth table；
-12. `V2`：在 V1 之后，由 owner 在以下互斥 alternatives 中选择 overall mixed-verdict
+12. `V1`：先冻结逐 gate boundary truth table；
+13. `V2`：在 V1 之后，由 owner 在以下互斥 alternatives 中选择 overall mixed-verdict
     precedence：
     - **A（pending）**：保持 provisional candidate
       `HARD_ERROR -> INCONCLUSIVE -> HYPOTHESIS_FAIL -> PASS`；
@@ -335,14 +341,16 @@ alternatives，不构成 adopted protocol；按顺序一次只问一项：
 
     三者均 pending；“现行”或“推荐”只描述候选来源，不等于 owner selected，`O0=A` 也不冻结
     V2。
-13. `A1`：最后冻结 canonical JSON/CSV/manifest schemas 与 external trust anchor。
+14. `A1`：最后冻结 canonical JSON/CSV/manifest schemas 与 external trust anchor。
 
 最小实验也必须在上述数值与 protocol hash 冻结后进行：先只用 synthetic fixtures 和 boundary
 mutants 验证单位、timestamp、eligibility、duration split invariance、calendar gap、FD step-halving、
-HAC/TOST truth table、manifest attacks；primary future tests 还必须覆盖 `delta_allow=+delta` 与
-`delta_loss=-delta` 的符号映射、`LCB(d)=delta_loss±δ` 两侧 fixture，以及 equality boundary
-`LCB(d)=delta_loss` 不得通过严格 `>`。再由独立 reviewer 检查 protocol bytes。不得为这一步读取
-Q3 suffix 或运行 DUT。
+HAC/TOST truth table 与 manifest attacks。primary strict-boundary 的 executable oracle 仅见
+[Q3 design §10.2](m4-minimal-gyro-q3-offline-bias-alignment-design.md#102-green--independent-requalification)；
+本 budget 不复制或扩展该 oracle。再由独立 reviewer 检查 protocol bytes。不得为这一步读取 Q3
+suffix 或运行 DUT。
 
-当前结论保持：**O0=A 已决；其余 owner/protocol decisions pending；Q3 implementation
-STOP；没有任何 Q3 PASS/FAIL/INCONCLUSIVE outcome。**
+当前结论保持：**O0=A 与 O1 `primary.delta_loss_rad2=0` 已决；primary positive
+minimum meaningful effect 是下一 owner 事项，adjacent effect 与 target power 随后
+pending；其余 owner/protocol decisions pending；Q3 implementation STOP；没有任何 Q3
+PASS/FAIL/INCONCLUSIVE outcome。**

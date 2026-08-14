@@ -6,8 +6,9 @@
 rotation-only 已在 `d1c4385` 取得 technical PASS under one-time post-hoc
 evidence-retention waiver，original frozen-plan RED exact-record conformance NOT MET。Q3 已完成
 一手研究、无依据 hints 废止、deep one-call seam 选择及 module/data/structural contract draft；
-完整 input/statistics/solver/schema/owner-budget protocol 尚未冻结，当前为 **protocol amendment
-STOP**。这不是 DUT fail。Q3 implementation 与 Q4–Q5 仍未授权。
+O0=A 与 O1 primary delta-loss 零容忍已冻结，但完整 input/statistics/solver/schema/
+owner-budget protocol 尚未冻结，当前为 **protocol amendment STOP**。这不是 DUT fail。
+Q3 implementation 与 Q4–Q5 仍未授权。
 
 控制基线：`main@7026ebf` 的 M3 production VO + M4.1 IMU sync 数据通路。MH_01
 权威控制组见 [M4 最小 gyro-aided VO：MH_01 控制组](m4-minimal-gyro-mh01-control.md)。
@@ -176,14 +177,15 @@ sensor / calibration 合同中增加显式的 \(\mathbf T_{BI}\)，不能在实�
 
 ### 4.2 离线 alignment：fit 与 held-out 分开
 
-**Q3 structural draft 勘误（2026-08-13）：**本节早期描述中的未冻结统计占位，现以
+**Q3 structural draft 勘误（2026-08-13，2026-08-14 更新）：**本节早期描述中的未冻结统计占位，现以
 [Q3 调研](m4-minimal-gyro-q3-offline-bias-alignment-research.md)与
-[Q3 设计草案](m4-minimal-gyro-q3-offline-bias-alignment-design.md)为准。固定
+[Q3 唯一 normative 设计](m4-minimal-gyro-q3-offline-bias-alignment-design.md)为准。固定
 `condition <= 1e6`、至少 60 blocks 和未枚举的 22 项 Holm family 均已废止；历史 Q1 plan
 只作审计、不回写。当前只完成 block/fit-half/SO(3)/module 等结构草案；exact input predicates、
 solver/Jacobian/rank、primary/equivalence/support、outcome 外 owner budgets 与 versioned artifact
 schemas 均须在独立 amendment 冻结并评审。当前是 protocol amendment STOP，不能开始 Q3
-implementation。
+implementation。O0=A 与 O1 primary delta-loss 零容忍的当前状态已在上述 normative design
+同步；本 historical 文档不复制其符号、公式或 strict-boundary oracle。
 
 离线工具只使用第 1 趟已经发布的 \(\mathbf T_{WB}\) 和 packet dump，不重新实现 sync。
 
@@ -222,17 +224,19 @@ alignment 证据包括：
 - 每轴 mean、RMSE、分位数、时间序列、lag 与 angular-speed 分桶；
 - corrected 与 zero-bias residual 的 paired comparison。
 
-放行第二趟前必须记录 go/no-go；前四项是 Q3 硬门，第五项只作拓扑覆盖描述：
+以下五项只是 **2026-08-12 historical / non-normative** 的早期 go/no-go 草案；它们不是
+现行 Q3 硬门、不能授权第二趟，也无 qualification authority：
 
-1. rank、condition、finite 等数值门通过；
-2. 两个 fit half 的 bias 在估计不确定性内相容；
-3. validation 的 adjacent 和 1 s rotation residual 都优于 zero-bias；
-4. validation residual 没有未解释的显著均值、轴向、时间或速度结构；
-5. 报告能形成 exact contiguous visual interval 的 packet count/duration 占 all-valid packet
+1. 当时拟议 rank、condition、finite 等数值门；
+2. 当时拟议两个 fit half 的 bias 相容性门；
+3. 当时拟议 validation adjacent 与 1 s rotation residual 的改善门；
+4. 当时拟议 validation residual 均值、轴向、时间或速度结构门；
+5. 当时拟议报告 exact contiguous visual interval 的 packet count/duration 占 all-valid packet
    的比例；该比例不设 95% 硬门，也不得通过 merge packet 或新增全帧 state 提高。
 
-统计实现、condition 上限和“显著结构”的具体检验必须在 Q3 的独立
-实施计划中预注册，并在 factor-enabled 结果产生前冻结。不得看到 ATE 后回改。
+现行唯一统计合同、已冻结决策和全部 pending blockers 只见
+[Q3 normative design](m4-minimal-gyro-q3-offline-bias-alignment-design.md)。不得从上述历史列表推导当前
+condition、half、adjacent、1 s 或任何“显著结构”门，也不得看到 ATE 后回改现行合同。
 
 不再设置 \(\lVert\hat b_g\rVert<0.05\) rad/s 之类绝对大小门。bias 大小本身不证明
 alignment 错误；应由可观性、稳定性和 held-out residual 决定。
@@ -382,7 +386,7 @@ factor-enabled run 才记录 `enable_gyro_factor=true` 及全部冻结参数。G
 |---|---|
 | Q0 / Q1 | IMU-off 三主产物与 control byte-identical；canonical hash `402d1925` |
 | Q2 | known-bias synthetic integration 解析门通过；不使用 MH_01 bias fit 或 ATE |
-| Q3 | structural draft 已完成、protocol amendment STOP；implementation 未授权；完整 PASS 前不开 factor |
+| Q3 | structural draft 已完成；O0=A 与 O1 primary delta-loss 零容忍已冻结；其余 protocol amendment pending/STOP；implementation 未授权；完整 PASS 前不开 factor |
 | Q4 active | 以 graph-state-compatible packets 为唯一 eligible 分母，`attached / eligible = 1.0` 且 attached 非零；另报 compatible / all-valid packet count 与 duration，仅作描述性覆盖，不设 0.95 硬门 |
 | Q4 mechanism | synthetic fixed graph 全过；frozen-input 首次变化符合 factor 作用方向 |
 | Q5 translation guardrail | exact-common ATE RMSE ≤ `0.100 m` |
@@ -462,7 +466,7 @@ lifecycle 可接受，再让 IMU 取得进入该 posterior 的资格。
    actual、closure 与 duration。v1 header 与实际 `env -i` 矛盾，已被 supersede，不得作最终
    命令证据，无需删除。
 3. Q3 已完成一手研究、旧 `condition <= 1e6`/固定 60 blocks/未枚举 22 项 family 的废止、
-   deep one-call seam 选择与 structural draft；完整 input/statistics/solver/schema/owner-budget
-   amendment 仍 pending。当前是 protocol amendment STOP，不是 DUT fail；Q3 implementation
-   保持未授权。
+   deep one-call seam 选择与 structural draft；O0=A 与 O1 primary delta-loss 零容忍已冻结，
+   但完整 input/statistics/solver/schema/owner-budget amendment 仍 pending。当前是 protocol
+   amendment STOP，不是 DUT fail；Q3 implementation 保持未授权。
 4. 后续 Q4–Q5 仍须在各自上一层通过后逐层新建独立计划，不直接跳到 full VIO。
