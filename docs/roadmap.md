@@ -606,12 +606,14 @@ PnP stereo 一致性仲裁：[#25](https://github.com/Nothand0212/phad-vio/issue
 
 ## M4：接入 IMU
 
-**当前状态（2026-08-13）：M4.1 数据路径已完成；Q1 Observe final independent PASS；
+**当前状态（2026-08-14）：M4.1 数据路径已完成；Q1 Observe final independent PASS；
 Q2 deterministic known-bias rotation-only 已在 `d1c4385` 取得 technical PASS under
 one-time post-hoc evidence-retention waiver，original frozen-plan RED exact-record conformance
 NOT MET；Q3 已完成一手研究、无依据 hints 废止、deep one-call seam 选择及
-module/data/structural contract draft，但完整 protocol amendment 尚未冻结，当前 STOP（非 DUT
-fail）。** M4.1 之后的
+module/data/structural contract draft；O0=A 已 resolved，其余 amendment（包括 S1 alpha
+与 V2）全部 pending，当前 protocol amendment STOP（非 DUT fail）。O0 的规范语义只见
+[Q3 normative design](research/m4-minimal-gyro-q3-offline-bias-alignment-design.md#6-o0-normative-statistical-protocol)。**
+M4.1 之后的
 measurement / factor 接入改按
 [证据门控的信息接入](agents/evidence-gated-integration.md)与
 [M4 gyro measurement / factor 资格实验设计](research/m4-minimal-gyro-slice-design.md)
@@ -630,12 +632,16 @@ lifecycle 仅作 historical non-qualifying，qualifying weight = `0`，later del
 与 duration。v1 inherited-environment header 与实际 `env -i` 矛盾，已被 supersede，不得作最终
 命令证据，无需删除。这是一次性且不泛化的 evidence-retention 例外，不声明 MH_01、EuRoC、
 ATE/RPE、noise/covariance/whitening 或 stochastic 产品资格；只授权 Q3
-plan/design，Q3 implementation 仍未授权。Q3 权威文档为
-[调研](research/m4-minimal-gyro-q3-offline-bias-alignment-research.md)、
-[设计草案](research/m4-minimal-gyro-q3-offline-bias-alignment-design.md)与
-[计划](plans/2026-08-13_m4_gyro_q3_align_0e897ba8.plan.md)；它们废止旧 future hints 中无独立
-依据的 `condition <= 1e6`、固定 60 blocks 与未枚举 22 项 Holm family，但不把未冻结的统计、
-solver、schema 或 owner budgets 标成已预注册。
+plan/design，Q3 implementation 仍未授权。Q3 文档按角色分工：
+
+- research inputs：[outcome-independent budget / owner decision record](research/m4-minimal-gyro-q3-outcome-independent-budget-research.md)
+  与 [structural/historical research](research/m4-minimal-gyro-q3-offline-bias-alignment-research.md)；
+- 唯一 normative protocol authority：[Q3 design](research/m4-minimal-gyro-q3-offline-bias-alignment-design.md)；
+- implementation sequence：[Q3 plan](plans/2026-08-13_m4_gyro_q3_align_0e897ba8.plan.md)。
+
+旧 `condition <= 1e6`、固定 60 blocks 与 22-Holm 只是已废止历史 hints。fixed-point 旧
+alpha 数值/分配也已全部退役，不得当作候选资格证据；唯一逐项账本见
+[budget research §4.1](research/m4-minimal-gyro-q3-outcome-independent-budget-research.md#41-fixed-point-旧-alpha-tuple-退役账本)。
 
 当前权威路线只包含：
 
@@ -643,9 +649,9 @@ solver、schema 或 owner budgets 标成已预注册。
   `StereoImuPacket` 的时间区间、插值和 `imu_gap` 合同；
 - **Q1→Q5（逐层 stop/go）**：只有上一层的证据门通过，下一层才能另建
   独立计划；Q1 已 PASS，Q2 为 PASS under 上述 one-time waiver，下一步仅可另建 Q3
-  plan/design；Q3 structural draft 已完成但处于 protocol amendment STOP，须先冻结 exact
-  input/schema/error、solver/Jacobian/rank、primary/equivalence/support、outcome 外 owner budgets
-  与 manifest schema，并独立评审；Q3 implementation 与 Q4–Q5 均未被本 roadmap 授权实施；
+  plan/design；Q3 structural draft 已完成且 O0=A 已 resolved，但其余 amendment 与
+  independent review 仍 pending，protocol amendment STOP；
+  Q3 implementation、qualification 与 Q4–Q5 均未被本 roadmap 授权；
 - **Q6 Default（未授权）**：Q1–Q5 即使全部通过，也只能授权另建 online-init /
   跨序列资格设计；不得据此新增或默认开启 production IMU 路径。
 

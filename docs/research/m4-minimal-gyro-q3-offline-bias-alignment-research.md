@@ -3,14 +3,20 @@
 日期：2026-08-13
 
 状态：一手资料对照、无依据旧 hints 的废止、deep one-call seam 选择以及 module/data/structural
-contract draft 已完成；**protocol amendment STOP**。这不是 DUT fail：Q3 implementation 尚未
-授权，也没有生成 Q3 科学结果。
+contract draft 已完成；**O0=A 已冻结，其余 amendment pending，protocol amendment STOP**。
+这不是 DUT fail：Q3 implementation 尚未授权，也没有生成 Q3 科学结果。
 
-关联：issue [#38](https://github.com/Nothand0212/phad-vio/issues/38)
+关联：issue [#38](https://github.com/Nothand0212/phad-vio/issues/38)、
+[outcome-independent budget 调研](m4-minimal-gyro-q3-outcome-independent-budget-research.md)、
+[Q3 normative 设计](m4-minimal-gyro-q3-offline-bias-alignment-design.md)
 
 上位路线：[M4 gyro measurement / factor 资格实验设计](m4-minimal-gyro-slice-design.md)
 
-本文只核对固定版本的一手资料与 Q1/Q2 资格账本。标签含义如下：
+本文只核对固定版本的一手资料与 Q1/Q2 资格账本。
+文档角色是 **structural/historical research**：保留证据、来源对照、历史问题与结构性
+选择，不定义可执行统计 protocol。O0 与统计合同只以 Q3 design 为 normative
+authority。
+以下标签含义为：
 
 - **来源事实**：由固定版本的一手源码、论文或 Q1/Q2 账本直接支持；
 - **受来源支持的推断**：由来源事实导出的工程判断，不能冒充外部项目合同；
@@ -177,28 +183,20 @@ improvement \(d^{adj}_p=\lVert r_{0,p}\rVert^2-\lVert r_{b,p}\rVert^2\ [rad^2]\)
 adjacent observation 重采样、merge、跨 gap 拼接或改换 visual endpoints。
 
 这些 adjacent observations 与 1 s blocks 共用底层 packets，不能和 block sample 混合、相加或
-当作独立重复样本。它们构成 issue #38 要求的 mandatory supporting scientific gate，但其
-estimand/aggregation、相关性与 calendar-gap 处理、alpha/multiplicity、practical margin/effect、
-prospective support/power 和严格判定边界尚未冻结；在 amendment 冻结并实际执行前不能贡献
-`PASS`。
+当作独立重复样本。这是本 research 保留的 structural dependency；其统计角色、inference、
+support 和 verdict 语义不在此定义，只见
+[Q3 design §6](m4-minimal-gyro-q3-offline-bias-alignment-design.md#6-o0-normative-statistical-protocol)。
 
 ### 4.2 统计结构
 
-唯一 primary 候选仍是完整 1 s block 的 (d_k)；12 项 equivalence 候选仍为三轴 half-bias
-difference、held-out residual mean、normalized-time slope 与 centered-speed slope，其资格 sample
-unit 是完整 1 s block。adjacent interval 不成为第二 primary，也不进入这 12 项 family；它是
-另一个 mandatory supporting scientific gate，且因与 1 s block 共用 packets，不得被宣称为与
-primary/equivalence 独立的样本来源。
+O0=A 的 owner 决策已被 design 采用；本文只保留这一 historical trace，不重述 claim、
+level、PASS 或 component 的可执行定义。完整规范只见
+[Q3 design §6](m4-minimal-gyro-q3-offline-bias-alignment-design.md#6-o0-normative-statistical-protocol)。
 
-结构性 alpha allocation 候选为 overall `0.05`，primary `0.025`，equivalence family
-`alpha_E=0.025`。每项 `alpha_j=alpha_E/12`，TOST 两个 one-sided tests 各使用 `alpha_j`，等价
-CI coverage 为 `1 - 2 * alpha_j`，且必须严格位于 outcome 外 margins 内。分布、df、covariance
-与 exact regression 尚未冻结。加入 adjacent supporting gate 后，amendment 还必须明确其 alpha
-如何与唯一 primary 及 12 项 equivalence family 共同控制 multiplicity；不得默认沿用、挪用或
-扩张上述 allocation。
-
-没有带 exact command/log/hash 的 support census 被本文用于资格或规划；任何探索性计数的
-qualifying weight 均为 `0`，不得据此选择 minimum support、effect、margin 或 power。
+fixed point 的全部旧 alpha 数值/分配已退役，不得当作候选资格证据；唯一逐项账本见
+[budget research §4.1](m4-minimal-gyro-q3-outcome-independent-budget-research.md#41-fixed-point-旧-alpha-tuple-退役账本)。
+本 research 也没有采用任何无 exact command/log/hash 的 support census；此类计数的
+qualifying weight 为 `0`。
 
 ## 5. 被否决的旧 future hints
 
@@ -206,29 +204,18 @@ qualifying weight 均为 `0`，不得据此选择 minimum support、effect、mar
 |---|---|---|
 | `condition <= 1e6` | 无独立数值/工程依据；condition 不代表 practical observability | machine-epsilon rank 候选 + 外部 full-fit uncertainty budgets |
 | 固定至少 60 blocks | 未绑定 alpha/effect/power | prefix-only prospective support/power contract |
-| 未枚举 22 项 Holm family | hypothesis、sample unit 与 margin 不可审计 | 唯一 primary + 明确 12 项 equivalence 候选 |
+| 未枚举 22 项 Holm family | 历史 procedure 不可执行；关联旧 alpha tuple 的退役状态见 [budget ledger](m4-minimal-gyro-q3-outcome-independent-budget-research.md#41-fixed-point-旧-alpha-tuple-退役账本) | adopted 合同只见 [Q3 design §6](m4-minimal-gyro-q3-offline-bias-alignment-design.md#6-o0-normative-statistical-protocol) |
 | fit-half Mahalanobis “相容” | non-rejection 不证明 practical equivalence | 两 half 独立 refit + 每轴 TOST/equivalence margin |
-| 旧 adjacent/RMSE hints | 只有描述性 residual/RMSE，没有 estimand、相关性、multiplicity、margin 或 power 合同 | mandatory adjacent paired supporting gate；完整 inference 在 amendment 冻结 |
+| 旧 adjacent/RMSE hints | 只有描述性 residual/RMSE，没有 estimand、相关性、multiplicity、margin 或 power 合同；已 superseded、non-normative、qualifying weight `0` | mandatory adjacent diagnostic component；完整 inference 在 amendment 冻结 |
 
 历史 Q1 plan 不回写；其中 future hints 仅保留审计价值，从 Q3 起不具规范性。
 
 ## 6. Protocol amendment blocker
 
-amendment 必须在查看 Q3 suffix outcome 前精确定义并独立评审：
-
-1. 四个 Q1 artifact 的 exact schema/parse/join/eligibility predicates 与唯一 error/exclusion enums；
-2. 完整 solver、residual stack/weights/rank/covariance、analytic/central-finite-difference Jacobian、
-   determinism 与 nonconvergence 合同；
-3. primary HAC、12 项 regression/equivalence、small-sample/gap-run 与 prospective support/power；
-4. adjacent paired supporting gate 的 exact estimand/aggregation、autocorrelation/calendar-gap、
-   与唯一 primary/12 项 family 共存的 alpha/multiplicity、outcome 外 practical margin/effect、
-   prospective support/power、严格边界及 `HYPOTHESIS_FAIL`/`INCONCLUSIVE` 映射；
-5. `gyro_alignment.json`、CSV 与 completion manifest 的 exact versioned schema；
-6. outcome 外 `delta_loss`、primary design effect、target power、3 个 full-fit uncertainty budgets、
-   3 个 half-bias margins、3 个 residual-mean margins、3 个 time-slope margins、3 个 speed-slope
-   margins、各 equivalence design alternatives，以及 adjacent practical margin/effect 与 design
-   alternative；
-7. near-\(\pi\) 状态、错误优先级和全部 boundary actual。
+amendment 必须在查看 Q3 suffix outcome 前闭合 input/schema/error、solver/Jacobian/rank/
+uncertainty、statistics/support/budgets/verdict 以及 artifact/publication 五类 blocker，并通过
+独立评审。本 research 不再维护一份平行 checklist；完整待决合同、O0 已冻结条款与
+测试要求只见 [Q3 normative design](m4-minimal-gyro-q3-offline-bias-alignment-design.md)。
 
 Q5 的 `0.001 rad` 1 s product RPE guardrail 不能在缺少物理/统计推导时跨维度变成 rad/s bias
 budget、slope margin 或 rad² effect。

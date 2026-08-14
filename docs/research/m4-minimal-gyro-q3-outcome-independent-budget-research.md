@@ -2,14 +2,18 @@
 
 日期：2026-08-13
 
-状态：**protocol amendment research / owner decisions pending / Q3 implementation STOP**。
+状态：**O0=A 已冻结 / 其余 owner 与 protocol decisions pending / Q3 implementation STOP**。
 本文没有打开或统计 Q1 runtime CSV/TUM/diag 内容，没有读取 Q3 held-out suffix、GT/ATE/RPE、
 Q5 结果或 future DUT，也没有生成、执行或判定任何 Q3 outcome。
 
 关联：issue [#39](https://github.com/Nothand0212/phad-vio/issues/39)、
 [Q3 结构调研](m4-minimal-gyro-q3-offline-bias-alignment-research.md)、
-[Q3 设计草案](m4-minimal-gyro-q3-offline-bias-alignment-design.md)、
+[Q3 normative 设计](m4-minimal-gyro-q3-offline-bias-alignment-design.md#6-o0-normative-statistical-protocol)、
 [Q3 计划](../plans/2026-08-13_m4_gyro_q3_align_0e897ba8.plan.md)。
+
+文档角色：本文是 **evidence + owner decision record**，保留来源、数学推导、候选评估与
+A/B/C 决策历史；不是 executable protocol authority。O0 与统计合同的 adopted normative
+定义只在上述 Q3 design 规范节中维护。
 
 ## 1. Fixed point、权限与 leakage prohibition
 
@@ -17,6 +21,9 @@ issue #39 固定 structural Q3 plan 于 commit
 `dbec0be89512f54c386319762838fe16296e7b1f`。本片只允许 protocol-amendment 的
 research/design/plan；Q3 source/tests/CMake、执行、Q4+、factor-enabled experiment 与 posterior
 变化均未授权。amendment 即使完成，也仍须另获明确 implementation go。
+
+本次只记录 O0=A resolved；所有后续 owner/protocol decisions 仍 pending。尤其
+`delta_loss`、alpha、mixed verdict precedence、schema、solver 和 support 均未冻结。
 
 本研究采用以下防泄漏边界：
 
@@ -106,7 +113,7 @@ H_0:\theta\le L\ \text{or}\ \theta\ge U,\qquad H_1:L<\theta<U.
 \]
 
 两个单侧检验都在 `alpha` 拒绝才通过。若 CI 与检验严格匹配且为 equal-tail interval，则等价于
-`CI_(1-2alpha)` 严格包含于 `(L,U)`；`alpha=0.05` 对应 90% CI。经典 paired t-TOST 的
+`CI_(1-2alpha)` 严格包含于 `(L,U)`。经典 paired t-TOST 的
 finite-sample 结果依赖 normal model、独立实验单位、正确 SE/df。把 HAC CI 装进 TOST 只是
 决策壳，其有效性来自 HAC CI 的 coverage，而不是 Schuirmann 的小样本 t 推导。
 
@@ -128,10 +135,10 @@ P_\theta(\text{false overall reject})
 \le P_\theta(\varphi_{j^*}=1)\le\alpha.
 \]
 
-因此这一 sole overall claim 的 component 之间不需要额外 Bonferroni，上述不等式也不要求
-component independence。但任何逐项 confirmatory claim——包括 overall fail 后仍认领某个
-component——都改变了 error event，必须预注册 claim family 与 FWER procedure。以上统计代数
-是来源支持的事实；本项目的 owner claim scope 与 alpha 仍为 pending，本文不据此冻结。
+因此在上述 IUT 前提下，overall reject 的 level 上界可由某个成立的 component null 直接
+给出，不需要 component independence。这是 O0=A owner 选择的数学依据，不在本 research
+中定义项目的可执行 claim 或 alpha 操作；采用后的完整规范语义只见
+[Q3 design §6](m4-minimal-gyro-q3-offline-bias-alignment-design.md#6-o0-normative-statistical-protocol)。
 
 ### 3.2 Newey-West / Bartlett
 
@@ -187,7 +194,7 @@ prospective calculation 判定预注册的 target power 在预算内不可达，
 | 产品容许 constant-bias mismatch | hazard/product units | `rad/s` | 若用于 budget，须先冻结 full/early/late estimator 的共同 frame 与 axis 定义；目前 pending | 逐轴预算及风险等级 | full-fit uncertainty、half-difference margins / pending |
 | 产品容许 held-out orientation structure | hazard/product units | mean `rad`、time slope `rad/s`、speed slope `s` | 若采用 joint regression，须先冻结 time/speed predictor、centering、scaling 及共同 frame/axis；目前 pending | 12 margins 与 design alternatives | equivalence margins / pending |
 | 产品最小有意义改善 | product value | primary `rad^2`；adjacent rate-loss `rad^2/s^2` | 若用于 prospective sizing，须先冻结 block/adjacent estimand、duration normalization 与实验单位；目前 pending | effect 与 target power | prospective support/power / pending |
-| Schuirmann/ICH/FDA | dimensionless alpha/CI | matching estimator units | 若采用 TOST，须先冻结 equal-tail CI、SE/df、margin 与 strict boundary；目前 pending | claim scope、alpha、strict boundary | `tost.*` / pending |
+| Schuirmann/ICH/FDA | dimensionless alpha/CI | matching estimator units | equivalence margin 须事先给定，且 inference coverage 依赖所选 SE/df/HAC model | owner 仍须批准 margins 与 S1 risk choices | O0 已决；adopted executable 语义见 [Q3 design §6](m4-minimal-gyro-q3-offline-bias-alignment-design.md#6-o0-normative-statistical-protocol)；其余 pending |
 | Newey-West/Bartlett | indexed covariance | estimator-specific squared units | 若采用 HAC，须先冻结 calendar lag、kernel、bandwidth、normalization、correction 与 critical law；目前 pending | 接受 asymptotic risk与 sensitivity rule | `hac.*` / pending |
 
 表中的 candidate formula、model 与 estimand 均只是待 owner 选择且补齐前提的候选；在对应链条
@@ -197,13 +204,28 @@ prospective calculation 判定预注册的 target power 在预算内不可达，
 adjacent/RMSE hints、无 command/log/hash 的 census、suffix/GT/ATE/Q5、成熟项目 online constants。
 尤其 Q5 `0.001 rad` guardrail 不能跨量纲变成 `rad/s`、slope 或 `rad^2`。
 
+### 4.1 Fixed-point 旧 alpha tuple 退役账本
+
+本表是唯一退役 ledger，只用于证明 fixed point 中的旧值已不生效；不得将任一行恢复为
+procedure、候选 alpha 或资格证据。
+
+| fixed-point 旧项 | 退役状态 | qualification 语义 |
+|---|---|---|
+| overall `0.05` | superseded / non-normative | qualifying weight `0` |
+| primary `0.025` | superseded / non-normative | qualifying weight `0` |
+| `alpha_E=0.025` | superseded / non-normative | qualifying weight `0` |
+| `alpha_j=alpha_E/12` | superseded / non-normative | qualifying weight `0` |
+| adjacent separate allocation | superseded / non-normative | qualifying weight `0` |
+
+新的 overall alpha 数值仍由 S1 pending decision 冻结；本 ledger 不提供任何数值建议。
+
 ## 5. 对抗审查 F1-F9 结论
 
 | ID | severity | 分类 | review conclusion / recommendation | current status |
 |---|---|---|---|---|
 | F1 | BLOCKER | 事实 + owner 待决 | 所有 budget 必须走上述 traceability chain；官方 typical 规格不能替 owner 定产品风险。 | traceability 与禁止替 owner 决策的原则已记录；具体 budget 仍 pending。 |
-| F2 | BLOCKER | 事实 + owner/协议待决 | Berger 1982 与 Berger & Hsu 1996 Theorem 1 支持的 IUT 代数仅适用于 sole overall confirmatory claim：`H0=union_j H0j`、`H1=intersection_j H1j`、overall reject iff 每个预注册 component 都 reject，且各 component test 对完整 `H0j` 都是 level `<=alpha`。此时 false overall reject `<=alpha`，无需跨 component Bonferroni，也不要求 independence。任何逐项 claim（包括 overall fail 后仍认领 component）都须预注册 family 与 FWER procedure。 | 代数与来源已闭合；owner claim scope/alpha 仍 pending，不得一边声称 `0.025+0.025` 已分完，一边凭空给 adjacent alpha。 |
-| F3 | BLOCKER | 事实 + 审查建议 + owner/协议待决 | 逐 gate 先判 prerequisite。现行 structural design/plan 的 overall precedence 是 `HARD_ERROR -> INCONCLUSIVE -> HYPOTHESIS_FAIL -> PASS`；reviewer 提出“valid HYPOTHESIS_FAIL before INCONCLUSIVE”候选，它会改变 mixed verdict。 | V2 owner A/B/C 决策 pending；未决前保留现行 precedence，不修改 design/plan。 |
+| F2 | BLOCKER | 事实 + 已决 owner scope + 协议待决 | Berger 1982 与 Berger & Hsu 1996 Theorem 1 支持了 O0=A 的 IUT 选择，但不替代项目冻结 alpha 数值与 estimator validity。 | O0 owner decision 已记录；可执行 claim/level/PASS 语义只见 [Q3 design §6](m4-minimal-gyro-q3-offline-bias-alignment-design.md#6-o0-normative-statistical-protocol)，S1 仍 pending。 |
+| F3 | BLOCKER | 事实 + 审查建议 + owner/协议待决 | 逐 component 先判 prerequisite/support：不足是 `INCONCLUSIVE`，充分但科学边界未达是 `HYPOTHESIS_FAIL`；mixed aggregate precedence 存在待决 alternatives，不能从 component 状态语义推断。 | V2 pending，具体 A/B/C 只见本文 §8；normative design 只维护 component-level 状态语义与 V2 pending/link，O0 不冻结 aggregate precedence。 |
 | F4 | BLOCKER | 审查建议 + owner/协议待决 | Recommendation：四数据输入与可信 provenance 分两层；trusted outer launcher/verifier 固定 analyzer/build attestation、embedded protocol bytes 与 Q1/Q2 ledger；manifest 由 out-of-band expected digest 验证，不能只自报 hash。 | O4/A1 pending；provenance architecture 与 artifact trust anchor 尚未冻结。 |
 | F5 | HIGH | 审查建议 + 协议待决 | Recommendation：schema/integrity 先 hard validate；eligible packet 必须 exact valid、无 gap、样本/端点/segment/diag joins 全成立；拒帧无 pose 是 local exclusion，缺重 diag、unknown enum、pose-with-non-ok 是 hard error；`t0` 为 canonical order 首个 eligible interval。 | U1 pending；schema、eligibility、error table 与 calendar identity 尚未冻结。 |
 | F6 | HIGH | 事实 + 审查建议 + 协议待决 | adjacent raw `d_p` 受 duration square 影响；recommendation 为块内 `q_p=d_p/dt_p^2`，再以 `A_k=sum(dt_p*q_p)/sum(dt_p)` 得完整 1 s block 的 time-average rate-loss；与 primary 共用 `k`，不加 support、不声称独立；missing `k` 不压紧。 | U2 pending；adjacent estimand、duration normalization 与 calendar index 尚未冻结。 |
@@ -213,38 +235,44 @@ adjacent/RMSE hints、无 command/log/hash 的 census、suffix/GT/ATE/Q5、成�
 
 ## 6. 无循环 decision DAG
 
+本 DAG 只定义待决问题的依赖与提问顺序，是 evidence + owner decision record 的工作流，
+**不是 executable protocol authority**。任何 adopted normative contract 仍只写入
+[Q3 design](m4-minimal-gyro-q3-offline-bias-alignment-design.md)；下列 candidate 职责在 owner
+选择并单向写入 design 前均不具规范性。
+
 1. `U0` 固定上游事实：Q1 writer/validator、timestamp parser、Q2 helper、EuRoC/ADI source facts。
 2. `U0 -> U1/U2/U3`：分别冻结 exact input/eligibility；block+adjacent estimands/calendar index；
    objective/FD Jacobian/rank/HAC sandwich estimator。
-3. `O0` owner 先选 product claim 与 risk semantics；随后依次冻结：
-   `O1` delta loss/effects/power，`O2` 三轴 uncertainty/stability budgets，`O3` 与已冻结 O0
-   一致的 12 margins 与 design alternatives，`O4` provenance architecture。
-4. `(U1,U2,U3,O1,O2,O3) -> S1`：冻结 alpha/critical law/TOST/HAC/gap rules；只有 owner 授权
-   prefix-only nuisance 后，`S1 -> S2` prospective support/power/infeasible rule。
-5. `S2 -> V1 -> V2`：先冻结逐 gate boundary truth table；再由独立 owner A/B/C 决策冻结 overall
-   mixed-verdict precedence。V2 未决前保留现行 design/plan。
-6. `(U1,V2,O4) -> A1`：canonical JSON/CSV/manifest 与 external trust anchor；`A1 -> R1` 独立
-   Standards/Spec review 无 blocker，amendment 才可称 COMPLETE。
-7. amendment COMPLETE 仍是 implementation STOP，必须另问 explicit go。
+3. `O0=A` 是 resolved input；下一项为 `O1` delta loss/effects/power，随后依次冻结 `O2` 三轴
+   uncertainty/stability budgets、`O3` 与 O0=A 一致的 12 margins 与 design alternatives、`O4`
+   provenance architecture。
+4. `(U1,U2,U3,O1,O2,O3) -> S1`：冻结 alpha/critical law/TOST/HAC/gap rules。
+5. 只有 owner 明确授权 prefix-only nuisance 后，`S1 -> S2` prospective
+   support/power/infeasible rule。
+6. `S2 -> V1 -> V2`：先冻结逐 gate boundary truth table，再由独立 owner 决策冻结 overall
+   mixed-verdict precedence。
+7. `(U1,V2,O4) -> A1`：canonical JSON/CSV/manifest 与 external trust anchor；随后
+   `A1 -> R1` 独立 Standards/Spec review。
+8. `R1` 通过后 amendment 才可称 `COMPLETE`；amendment `COMPLETE` 仍是 implementation
+   `STOP`，必须另获 separate implementation go。
 
-## 7. Owner decisions：先 O0，再 O1 `delta_loss`
+## 7. Owner decisions：O0 已决，下一项为 O1 `delta_loss`
 
 ### 7.1 O0：product claim 与 risk semantics
 
-这是首道 owner decision，owner 尚未回答。此前用户选择的“A = 单独 protocol-amendment 路径”
-只授权了本次工作流路径，不是本题答案，也不冻结任何 product claim、risk semantics 或 alpha。
-以下 A/B/C 互斥；推荐项仍只是 recommendation，不替 owner 选择：
+决策来源：用户于 2026-08-14 在 O0 对齐后回复“继续”；按项目 Learned User Preferences 的
+“默认先落地推荐项”规则，冻结推荐 A。该回复只冻结 O0 claim scope，不冻结 alpha、margin、
+solver、schema、support、verdict precedence 或任何后续 owner/protocol decision。
 
-- **A（推荐）**：sole overall conjunctive confirmatory qualification claim。PASS 当且仅当全部 mandatory
-  preregistered component hypotheses 都 reject；component 只作诊断，不单独形成 confirmatory claim。
-  在 IUT 条件下，overall Type-I risk 由待 owner 冻结的单一 `alpha` 控制。
-- **B**：overall confirmatory claim 加可单独发布的 component confirmatory claims。必须在同一道
-  owner decision 中预注册 claim family、FWER procedure 与 alpha allocation；复杂度和证据负担
-  高于 A。
-- **C**：sensitivity/protocol-development only，不形成 confirmatory product qualification claim；
-  不得生成 Q3 PASS，implementation/qualification 保持 STOP。
+O0 的 A/B/C 处置如下：
 
-O0 当前保持 pending；不得从推荐 A、IUT 代数或此前的 workflow 选择推断 owner 已作决定。
+- **A（selected / 已冻结）**：接受 sole overall conjunctive claim scope。这是 owner decision
+  record；完整 PASS、component 和 level 语义只见
+  [Q3 design §6](m4-minimal-gyro-q3-offline-bias-alignment-design.md#6-o0-normative-statistical-protocol)。
+- **B（not selected / non-normative / qualifying weight 0）**：带可单独发布的 component
+  confirmatory claims。
+- **C（not selected / non-normative / qualifying weight 0）**：sensitivity/protocol-development
+  only。
 
 ### 7.2 O1：`delta_loss`
 
@@ -276,39 +304,45 @@ owner 尚未回答本题，推荐 A 也尚未获 owner 批准；当前选项为�
 
 ## 8. Owner choices 顺序与最小下一步
 
-按依赖顺序一次只问一项：
+`O0=A` 已 resolved 并退出待决队列。以下只记录依赖顺序、候选职责与待 owner 选择的
+alternatives，不构成 adopted protocol；按顺序一次只问一项：
 
-1. `O0`：先选择 Section 7.1 的 product claim 与 risk semantics；此前“A = 单独
-   protocol-amendment 路径”不回答本题；
-2. `O1` 的 `delta_loss`：再选择 Section 7.2 的损失容忍；
-3. `O1` 其余项：随后选择 primary/adjacent minimum meaningful effects 与 target power（具体数值由
+1. `O1` 的 `delta_loss`：先选择 Section 7.2 的损失容忍；
+2. `O1` 其余项：随后选择 primary/adjacent minimum meaningful effects 与 target power（具体数值由
    owner product/risk input）；
-4. `O2`：ADI typical specs 只作 sanity floor，还是在何种明确模型下进入三轴
+3. `O2`：ADI typical specs 只作 sanity floor，还是在何种明确模型下进入三轴
    full-fit uncertainty 与 half-stability budgets；
-5. `O3`：在已冻结 O0 下选择 12 项 equivalence margins 与 design alternatives；若 O0 选择可单独
-   发布的 component confirmatory claims，则其 family、FWER procedure 与 alpha allocation 必须已在
-   O0 同题预注册，不能拖到 O3 补选；
-6. `O4`：trusted outer launcher/verifier、build attestation、embedded protocol bytes、Q1/Q2 ledger
+4. `O3`：在已冻结 O0=A 下选择 12 项 equivalence margins 与 design alternatives，并保持 sole
+   overall IUT、component diagnostic-only 与 no-component-claim 语义；
+5. `O4`：trusted outer launcher/verifier、build attestation、embedded protocol bytes、Q1/Q2 ledger
    与 out-of-band expected manifest digest 的 provenance architecture；
-7. `U1`：独立冻结 exact input/eligibility/near-pi/error table 与 calendar identity；
-8. `U2`：独立冻结 block/adjacent estimands、duration normalization 与 calendar index；
-9. `U3`：独立冻结 zero-init objective、Q2-helper central-FD Jacobian、rank rule 与 HAC
+6. `U1`：独立冻结 exact input/eligibility/near-pi/error table 与 calendar identity；
+7. `U2`：独立冻结 block/adjacent estimands、duration normalization 与 calendar index；
+8. `U3`：独立冻结 zero-init objective、Q2-helper central-FD Jacobian、rank rule 与 HAC
    sandwich estimator；
-10. `S1`：在 `U1/U2/U3/O1/O2/O3` 都冻结后，冻结与 O0 一致的 alpha/critical law、TOST、
-    calendar-gap、Bartlett bandwidth/normalization/correction；IUT 代数不会替 owner 冻结 alpha；
-11. `S2`：只有 owner 另行授权 prefix-only nuisance 后，才冻结 prospective sizing、support 与
-   precision-infeasible semantics；
-12. `V1`：先冻结逐 gate boundary truth table；
-13. `V2`：再在 `O1/O3/S1` 之后选 overall mixed-verdict precedence：**A** 保持现行
-    `HARD_ERROR -> INCONCLUSIVE -> HYPOTHESIS_FAIL -> PASS`，**B** 采用 reviewer 候选
-    `HARD_ERROR -> HYPOTHESIS_FAIL -> INCONCLUSIVE -> PASS`，**C** 不折叠 mixed state，另定义并
-    论证显式 mixed verdict；precedence 未决前不得改 design/plan；
-14. `A1`：最后冻结 canonical JSON/CSV/manifest schemas 与 external trust anchor。
+9. `S1`：在 `U1/U2/U3/O1/O2/O3` 都冻结后，冻结与 O0=A 一致的 alpha/critical law、TOST、
+   calendar-gap、Bartlett bandwidth/normalization/correction；IUT 代数不会替 owner 冻结 alpha；
+10. `S2`：只有 owner 另行授权 prefix-only nuisance 后，才冻结 prospective sizing、support 与
+    precision-infeasible semantics；
+11. `V1`：先冻结逐 gate boundary truth table；
+12. `V2`：在 V1 之后，由 owner 在以下互斥 alternatives 中选择 overall mixed-verdict
+    precedence：
+    - **A（pending）**：保持 provisional candidate
+      `HARD_ERROR -> INCONCLUSIVE -> HYPOTHESIS_FAIL -> PASS`；
+    - **B（pending）**：采用 reviewer candidate
+      `HARD_ERROR -> HYPOTHESIS_FAIL -> INCONCLUSIVE -> PASS`；
+    - **C（pending）**：不折叠 mixed state，另定义并论证 explicit mixed verdict。
+
+    三者均 pending；“现行”或“推荐”只描述候选来源，不等于 owner selected，`O0=A` 也不冻结
+    V2。
+13. `A1`：最后冻结 canonical JSON/CSV/manifest schemas 与 external trust anchor。
 
 最小实验也必须在上述数值与 protocol hash 冻结后进行：先只用 synthetic fixtures 和 boundary
 mutants 验证单位、timestamp、eligibility、duration split invariance、calendar gap、FD step-halving、
 HAC/TOST truth table、manifest attacks；primary future tests 还必须覆盖 `delta_allow=+delta` 与
 `delta_loss=-delta` 的符号映射、`LCB(d)=delta_loss±δ` 两侧 fixture，以及 equality boundary
 `LCB(d)=delta_loss` 不得通过严格 `>`。再由独立 reviewer 检查 protocol bytes。不得为这一步读取
-Q3 suffix 或运行 DUT。当前结论保持：**owner decisions pending；Q3 implementation STOP；没有任何
-Q3 PASS/FAIL/INCONCLUSIVE outcome。**
+Q3 suffix 或运行 DUT。
+
+当前结论保持：**O0=A 已决；其余 owner/protocol decisions pending；Q3 implementation
+STOP；没有任何 Q3 PASS/FAIL/INCONCLUSIVE outcome。**

@@ -2,17 +2,24 @@
 
 日期：2026-08-13
 
-状态：module/data/structural contract draft 已完成；**protocol amendment STOP**。这不是 DUT
-fail：完整统计、solver、schema 与 owner budgets 尚未冻结，Q3 implementation 与 Q4+ 未授权。
+状态：module/data/structural contract draft 已完成；**O0=A 已冻结，其余 amendment pending，
+protocol amendment STOP**。这不是 DUT fail：完整统计、solver、schema 与 owner budgets 尚未
+冻结，Q3 implementation 与 Q4+ 未授权。
 
 关联：issue [#38](https://github.com/Nothand0212/phad-vio/issues/38)
 
 前置：
 
 - [Q3 一手资料调研](m4-minimal-gyro-q3-offline-bias-alignment-research.md)
+- [Q3 outcome-independent budget 调研](m4-minimal-gyro-q3-outcome-independent-budget-research.md)
 - [Q2 资格结果](m4-minimal-gyro-q2-known-bias-predict-result.md)
 - [证据门控的信息接入](../agents/evidence-gated-integration.md)
 - [Q3 实施计划](../plans/2026-08-13_m4_gyro_q3_align_0e897ba8.plan.md)
+
+本文是 Q3 O0/统计合同的**唯一 normative protocol authority**。其中明确标为已冻结的
+O0 条款可规范性引用；标为 pending 的条目仍不可执行。budget 文档只记录 evidence
+与 owner decision history，structural research 只记录来源/历史，implementation plan 只安排步骤，
+roadmap 只给出状态和 wayfinding；它们均不构成平行的 executable protocol authority。
 
 ## 1. 本片问题、权限与 fixed point
 
@@ -28,6 +35,13 @@ initializer。
 
 当前文档只冻结不依赖 owner threshold 的结构，并完整列出 amendment blockers。不得把
 candidate formula、future allowlist 或接口草图描述为已完成 protocol。
+
+本次 amendment 更新仅写入 O0=A；`O1/O2/O3/O4`、`U1/U2/U3`、`S1/S2`、`V1/V2`、`A1/R1`
+继续 pending。尤其不选择 `delta_loss`、不设置 alpha、不冻结 mixed verdict precedence，也不改
+schema、solver、support 的实质合同。pending decisions 的依赖与提问顺序只引用
+[budget §6 decision DAG](m4-minimal-gyro-q3-outcome-independent-budget-research.md#6-无循环-decision-dag)
+和 [budget §8 owner choices](m4-minimal-gyro-q3-outcome-independent-budget-research.md#8-owner-choices-顺序与最小下一步)；
+本文不复制该 DAG 或 V2 alternatives，owner 选择后只在本文单向写入 adopted normative contract。
 
 ## 2. Deep module 与依赖方向
 
@@ -153,9 +167,10 @@ d^{adj}_p=\lVert r_{0,p}\rVert^2-\lVert r_{b,p}\rVert^2
 endpoints。adjacent observations 与下节 1 s blocks 共用底层 packets，因此不得把两者混作同一
 analysis table 的独立 samples、相加扩大样本量，或以 pseudo-replication 计算 support/power。
 
-该路径是 issue #38 要求的 mandatory supporting scientific gate，但当前只冻结 observation
+该路径是 overall IUT 下的 mandatory diagnostic component，但当前只冻结 observation
 construction；estimand、aggregation/inference 与 go/no-go 边界仍属 §6 protocol amendment。
-它不成为第二 primary，唯一 primary 仍是完整 1 s block。
+它不成为第二 primary；完整 1 s block 仍保留 primary 的结构性名称，但两者都不构成独立
+confirmatory claim。
 
 ### 4.3 Exact non-overlap 1 s block
 
@@ -241,29 +256,57 @@ condition 只作 descriptive，不设 `1e6` 门。rank evaluation
 point/matrix 尚未冻结，所以不能声称 rank protocol 已完整。即使 rank=3，full-fit bias 三轴
 uncertainty 仍必须分别落入 outcome 外 owner budgets；三个 budgets 当前缺失。
 
-## 6. Statistical amendment
+## 6. O0 normative statistical protocol
 
-### 6.1 Primary HAC
+O0=A 已冻结唯一 sole overall conjunctive confirmatory qualification claim：overall null 是所有
+mandatory preregistered component null 的 union，overall alternative 是这些 component
+alternatives 的 intersection；overall PASS 当且仅当每个 mandatory component 都 reject。primary、
+12 个 equivalence TOST 与 adjacent 等名称只标识 mandatory diagnostic components，不形成独立
+confirmatory claim；component actual 可进入 artifact/result 供诊断，但不得形成独立可发布 claim。
 
-唯一 primary 的 sample unit 是完整 1 s block 的 (d_k\,[rad^2])。候选 bandwidth 为
+O0 的规范性 claim 与决策函数为
+
+\[
+H_0=\bigcup_j H_{0j},\qquad H_1=\bigcap_j H_{1j},
+\]
+
+\[
+\operatorname{PASS}\iff
+\bigcap_j\{\text{mandatory component }j\text{ rejects its complete }H_{0j}\}.
+\]
+
+任一 mandatory component 未 reject（包括未冻结、未实现、未执行或其前置不足）均不得
+产生 `PASS`；具体非 PASS 状态的聚合优先级由 V2 冻结，当前仍 pending。
+
+每个 component test 对其完整自身 null 都须 level 不大于同一个 overall alpha，即可控制 sole
+overall Type-I 不大于 alpha。不得跨 component 做 Bonferroni、Holm、FWER allocation 或 alpha
+分账。overall alpha 数值、critical law、df/SE/HAC validity 仍由 S1 冻结，本节不填数值。
+所有 fixed-point 旧 alpha 数值与分配已在
+[budget 调研的单一退役账本](m4-minimal-gyro-q3-outcome-independent-budget-research.md#41-fixed-point-旧-alpha-tuple-退役账本)
+中标为 superseded / non-normative / qualifying weight `0`，不得当作 S1 候选证据。
+
+### 6.1 Primary diagnostic component：HAC
+
+保留 primary 的结构性名称；其 sample unit 是完整 1 s block 的 (d_k\,[rad^2])，但它不是独立
+confirmatory claim。候选 bandwidth 为
 
 \[
 L=\lfloor4(n/100)^{2/9}\rfloor,
 \]
 
-primary candidate gate 是 one-sided HAC lower confidence bound 严格大于外部
+该 diagnostic component 的 candidate gate 是 one-sided HAC lower confidence bound 严格大于外部
 `delta_loss`。但 amendment 仍须精确定义：
 
 - HAC autocovariance formula、centering、分母与 normalization；
 - Bartlett weights 与是否 small-sample corrected；
-- critical distribution（Normal/t）、df 与 one-sided primary alpha；
+- S1 冻结的同一个 overall alpha、critical distribution（Normal/t）、df/SE 与 HAC validity；
 - negative/zero estimated variance、nonfinite、`n <= L`/small-n 的处理；
 - missing calendar block 的 lag、contiguous-run aggregation/combination 或 rejection rule；
 - sensitivity `L=0/2L` 是否只 descriptive 及其不影响 verdict 的机器可检验合同。
 
 在这些量冻结前，“使用 Bartlett/Newey-West”不是完整可执行统计门。
 
-### 6.2 十二项 equivalence family
+### 6.2 十二项 equivalence diagnostic components
 
 sample unit 仍是完整 1 s block。结构候选恰为：
 
@@ -284,24 +327,27 @@ r_{axis,k}=\beta_{0,axis}+\beta_{t,axis}x_{t,k}
 covariance/HAC、Normal/t 与 df 均 pending owner decision；不得把“mean/time/speed”标签冒充 exact
 hypothesis。
 
-equivalence alpha 结构固定为：`alpha_E=0.025`，每项
-`alpha_j=alpha_E/12`；每项 TOST 的两个 one-sided tests **各**使用 `alpha_j`，等价 CI coverage
-为 `1 - 2 * alpha_j`，CI 必须严格位于对应 outcome 外 margin 内。critical distribution、df 与
-covariance 未冻结，故 12 项门仍未完成。
+每项 equivalence component 内部的 TOST 必须让两个 one-sided tests 都在 S1 冻结的同一个
+overall alpha 下 reject；若 matching CI 为 equal-tail interval，则 coverage 为 (1-2alpha)，且 CI
+必须严格位于对应 outcome 外 margin 内。每个 component test 必须对其完整自身 null 均为 level
+不大于该 overall alpha；不在 12 项之间分账。alpha 数值、critical distribution、df/SE、HAC
+validity 与 covariance 未冻结，故 12 项门仍未完成。
 
-### 6.3 Mandatory adjacent supporting scientific gate
+### 6.3 Mandatory adjacent diagnostic component
 
-§4.2 的 held-out adjacent paired observations 必须形成独立列名/身份明确的 supporting gate；它
-不改变 §6.1 的 sole primary，也不加入 §6.2 的 12 项 equivalence family。由于 adjacent 与 1 s
-block 重用 packet evidence，amendment 必须显式建模这种依赖，不能假定两路 samples 独立。
+§4.2 的 held-out adjacent paired observations 必须形成身份明确的 diagnostic component；它不改变
+§6.1 的 primary 结构性名称，也不是 §6.2 的 equivalence component。由于 adjacent 与 1 s block
+重用 packet evidence，amendment 必须显式建模这种依赖，不能假定两路 samples 独立。它与其他
+component 一样只能共同支持 sole overall claim，不得单独发布 confirmatory claim。
 
 Slice 2 implementation go 前必须冻结并独立评审：
 
 1. paired improvement 序列的 exact estimand、方向和 aggregation/statistic；
 2. packet-level autocorrelation estimator/lag/normalization/small-sample rule，以及 segment、local
    exclusion 与 calendar gap 是保留 calendar lag、分 contiguous runs、组合还是拒绝；
-3. adjacent gate 的 alpha 与 multiplicity procedure，明确如何与 sole primary 及 12 项
-   equivalence family 共存；§6.2 已写的 family 内 allocation 不自动给 adjacent 分配 alpha；
+3. 对完整 adjacent component null 的 level 控制、critical law 与 df/SE/HAC validity，使用 S1
+   冻结的同一个 overall alpha；不得另配 alpha，也不得与 primary/12 项 components 做跨 component
+   multiplicity allocation；
 4. outcome 外 practical margin/effect 与 design alternative，含单位和独立来源；旧 adjacent
    residual/RMSE hints 与探索性摘要不能自动成为 threshold；
 5. 仅凭 prefix、不得查看 held-out outcome 的 prospective variance/support/power 方法、required
@@ -310,7 +356,7 @@ Slice 2 implementation go 前必须冻结并独立评审：
    语义，以及 support 充分但科学边界未达时 `HYPOTHESIS_FAIL`、support/power/科学前置不足时
    `INCONCLUSIVE` 的唯一映射。
 
-未冻结、未实现或未实际执行该 supporting gate 时，Q3 在任何情况下都不得 `PASS`。protocol
+未冻结、未实现或未实际执行该 diagnostic component 时，Q3 在任何情况下都不得 `PASS`。protocol
 未闭合时仍是当前的 amendment `STOP`，不产生科学 verdict，也不冒充 adjacent hypothesis 已
 失败。只有冻结 protocol 实际执行后，prospective prerequisite/support 不足才是
 `INCONCLUSIVE`；前置与 support 充分但未达已冻结科学边界才是 `HYPOTHESIS_FAIL`。
@@ -322,10 +368,11 @@ suffix outcome 前冻结：
 
 1. 只由 prefix 构造的 primary `d`-like series 的 exact block/pseudo-block definition；
 2. prefix long-run variance estimator，与 primary 分析是否同 normalization/gap rule；
-3. outcome 外 primary design alternative（rad²）、`delta_loss`、target power 与 alpha；
+3. outcome 外 primary design alternative（rad²）、`delta_loss`、target power，以及 S1 冻结的
+   overall alpha；
 4. sample-size/power equation、critical distribution、ceil、integer overflow 与 infeasible 结果；
 5. 12 项 equivalence 的 precision/power rule、每项 design alternative 与 family requirement；
-6. adjacent gate 的 prefix-only prospective variance、support/power、design alternative 与
+6. adjacent component 的 prefix-only prospective variance、support/power、design alternative 与
    requirement，且不得把同一 packets 在 adjacent/1 s 两路重复计为独立 support；
 7. observed/known support 不得参与 effect/margin 选择，也不得 cap calculated requirement。
 
@@ -345,23 +392,32 @@ owner 必须独立提供且说明量纲/来源：
 - 3 个 normalized-time-slope margins；
 - 3 个 centered-speed-slope margins；
 - 12 项 equivalence design alternatives；
-- adjacent paired supporting gate 的 practical margin/effect 与 design alternative。
+- adjacent diagnostic component 的 practical margin/effect 与 design alternative。
 
 Q5 `0.001 rad` 1 s product RPE guardrail 不得跨维度推导 rad/s、slope 或 rad² budgets。
 
 ## 7. Verdict 与错误优先级
 
-exit mapping：
+逐 component 先形成 machine-checkable diagnostic result：prerequisite、required support 或 prospective
+power 不足映射为 `INCONCLUSIVE`；这些前置充分而科学边界未达映射为 `HYPOTHESIS_FAIL`；完整
+component null 被拒绝才记为 component reject。component reject/actual 只作诊断，不构成独立
+confirmatory claim。
+
+以下是 unordered status/exit-code candidate mapping；为便于核查仅按 exit 数值排序。row order
+不具语义，也不定义 mixed aggregate precedence：
 
 | 状态 | exit | 无重叠判定 |
 |---|---:|---|
+| `PASS` | 0 | 所有 mandatory preregistered components 都按冻结 protocol reject，因而 sole overall union-null 被合取拒绝；不发布 component claim |
 | `HARD_ERROR` | 1 | input identity/schema/integrity、计算 finite/合同、I/O/publish 失败；不产生科学 completion |
-| `INCONCLUSIVE` | 3 | integrity/computation 均有效，但 rank、uncertainty、primary/equivalence/adjacent prospective support/power 或其他科学前置不足 |
-| `HYPOTHESIS_FAIL` | 2 | 全部科学前置与 support 充分，至少一个 primary/equivalence/adjacent scientific gate 未达 |
-| `PASS` | 0 | 全部前置充分且 sole primary、12 equivalence 与 mandatory adjacent supporting gate 全部按预注册 protocol 执行并通过 |
+| `HYPOTHESIS_FAIL` | 2 | 至少一个前置充分的 mandatory component 未达科学边界；mixed aggregate 如何折叠由 V2 冻结 |
+| `INCONCLUSIVE` | 3 | integrity/computation 均有效，但至少一个 mandatory component 的 prerequisite/support/power 不足；mixed aggregate 如何折叠由 V2 冻结 |
 
-判定优先级严格为：`HARD_ERROR` → `INCONCLUSIVE` → `HYPOTHESIS_FAIL` → `PASS`。protocol
-amendment 必须把每个 error/exclusion/nonconvergence/near-\(\pi\) 情形映射到唯一状态，消除重叠。
+V2 仍 pending；O0 不冻结 mixed aggregate precedence。待决 alternatives 只见
+[budget §8 的 A/B/C decision record](m4-minimal-gyro-q3-outcome-independent-budget-research.md#8-owner-choices-顺序与最小下一步)。
+
+protocol amendment 还必须把每个 error/exclusion/nonconvergence/near-\(\pi\) 情形映射到唯一状态，
+消除 component-level 状态重叠；这项唯一映射要求不定义 aggregate precedence。
 
 ## 8. Artifact schema 与 manifest-last publication
 
@@ -379,6 +435,12 @@ amendment 必须冻结：
 - report 中 commit/tree、Q1/Q2/protocol/analyzer identity、exact command/environment、四输入
   hash/size/schema/rows、join/exclusion/support、fit/validation ranges、solver/stat actual 与 output
   hashes 的 exact names。
+
+O4/A1 尚未冻结最终 schema 字段名，但 future schema 必须以机器可核查方式表达以下语义（这些是
+semantic requirements，不是字段命名决定）：`claim_scope` 为 sole overall conjunctive claim；每个
+component 及其 actual 都是 `diagnostic-only`；artifact/result 满足 `no-component-claim`，不能编码或
+导出独立 component confirmatory claim。consumer/verifier 必须拒绝缺失、矛盾或把 component
+reject 提升为可发布 claim 的 artifact。
 
 元数据必须含：
 
@@ -430,17 +492,19 @@ tests 约束新 module。Q2 的 retention waiver 不得泛化。
 
 tests 必须覆盖 identity-before-parse、schema/join、split/halves/block、adjacent 同端点 zero/bias
 pair、shared endpoint、禁止 resample/merge/pseudo-replication、SO(3)、solver/Jacobian/rank、
-primary HAC/equivalence/adjacent multiplicity 与 support/power、严格 boundary/verdict priority、
-manifest-last 与 GT isolation。mutants 至少覆盖 transpose、compose order、rad/deg、ns/s、bias
-sign、double subtraction、eligibility、adjacent 端点错配、adjacent/1 s 独立性误设、hash/schema
-bypass、gap compression 与 early manifest。
+primary/equivalence/adjacent components 的完整自身 null、共同 overall alpha 与 support/power、
+strict component boundary、V2 aggregate precedence、manifest-last、GT isolation，以及 §8.1
+`claim_scope` / `diagnostic-only` / `no-component-claim` 语义。mutants 至少覆盖 transpose、compose
+order、rad/deg、ns/s、bias sign、double subtraction、eligibility、adjacent 端点错配、adjacent/1 s
+独立性误设、把 alpha 按 `alpha/12` 或其他方式跨 component 分账、component claim 泄漏、
+hash/schema bypass、gap compression 与 early manifest；每类 mutant 都必须被预注册 oracle 检出。
 
 独立 verifier 从固定 commit/tree fresh build，逐门记录 actual、command/log 与 hashes；test
 process exit 0 不能替代逐门证据。
 
 ### 10.3 Future allowlist
 
-只有完整 protocol amendment 独立评审通过并另获 implementation go 后才生效：
+**当前不生效。**只有完整 protocol amendment 独立评审通过并另获 implementation go 后才生效：
 
 ```text
 CMakeLists.txt
@@ -463,10 +527,13 @@ knobs、fallback、第二套积分器及无实际必要的 README 修改。
 
 1. §3.2 exact schema/eligibility/error predicates；
 2. §5 complete solver/Jacobian/rank/uncertainty/determinism contract；
-3. §6 sole primary、12 项 equivalence、mandatory adjacent supporting gate、三者共同的
-   alpha/multiplicity、各自 support/power、严格 boundary/verdict mapping 与全部 owner budgets；
-4. §8.1 exact versioned artifact/manifest schemas；
-5. near-\(\pi\)、gap-run、nonconvergence 与 verdict priority 的唯一映射；
+3. §6 primary、12 项 equivalence、mandatory adjacent diagnostic components 的完整自身 null、
+   S1 单一 overall alpha/critical law/df/SE/HAC validity、各自 support/power、严格 component
+   boundary 与全部 owner budgets；
+4. §8.1 exact versioned artifact/manifest schemas，以及 machine-checkable `claim_scope`、
+   `diagnostic-only`、`no-component-claim` 语义；
+5. near-\(\pi\)、gap-run、nonconvergence、V1 component truth table 与 V2 aggregate precedence 的
+   唯一映射；
 6. canonical protocol serialization/hash；
 7. 独立 Standards/Spec review 无 blocker；
 8. issue/comment 明确授予 §10.3 allowlist。
