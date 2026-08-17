@@ -2,9 +2,10 @@
 
 日期：2026-08-13
 
-状态：**O0=A 与 O1 `primary.delta_loss_rad2=0` 已冻结 / O1-effect evidence-path A
-已选择，但 primary positive minimum meaningful effect `δ_MME` 仍为 `UNFROZEN` / 其余 owner
-与 protocol decisions pending / Q3 implementation STOP**。
+状态：**O0=A、O1-DELTA=A（`primary.delta_loss_rad2=0`）、O1E-PATH=A
+与 O1E-ANCHOR=A 已选择，但 primary positive minimum meaningful effect `δ_MME`
+仍为 `UNFROZEN`；下一项仅剩 exact endpoint semantics / 其余 owner 与 protocol
+decisions pending / Q3 implementation STOP**。
 本文没有打开或统计 Q1 runtime CSV/TUM/diag 内容，没有读取 Q3 held-out suffix、GT/ATE/RPE、
 Q5 结果或 future DUT，也没有生成、执行或判定任何 Q3 outcome。
 
@@ -14,7 +15,7 @@ Q5 结果或 future DUT，也没有生成、执行或判定任何 Q3 outcome。
 [Q3 计划](../plans/2026-08-13_m4_gyro_q3_align_0e897ba8.plan.md)。
 
 文档角色：本文是 **evidence + owner decision record**，保留来源、数学推导、候选评估与
-A/B/C 决策历史；不是 executable protocol authority。O0/O1 与统计合同的 adopted normative
+A/B/C 决策历史；不是 executable protocol authority。O0/O1-DELTA/O1E-ANCHOR 与统计合同的 adopted normative
 定义只在上述 Q3 design 规范节中维护。
 
 ## 1. Fixed point、权限与 leakage prohibition
@@ -24,15 +25,20 @@ issue #39 固定 structural Q3 plan 于 commit
 research/design/plan；Q3 source/tests/CMake、执行、Q4+、factor-enabled experiment 与 posterior
 变化均未授权。amendment 即使完成，也仍须另获明确 implementation go。
 
-本次记录 O0=A、O1 `delta_loss` 的 A 项（零损失容忍）selected，以及 O1-effect evidence-path A
-selected；前两者的
+本次记录 O0=A、O1-DELTA=A（零损失容忍）、O1E-PATH=A 与
+O1E-ANCHOR=A selected；这些是互不可代替的 decision labels，不是 protocol schema
+fields。O0、O1-DELTA 与 O1E-ANCHOR 的
 adopted normative contract 均只见
 [Q3 design §6](m4-minimal-gyro-q3-offline-bias-alignment-design.md#6-o0-normative-statistical-protocol)。
-evidence-path 选择只确定从 product/hazard/mission requirement 经完整可审计映射派生 positive
+后续三个稳定的 textual decision-record IDs 定义为：`O1E-MME`=primary positive `δ_MME`
+evidence package + owner adoption decision，`O1E-ADJ`=adjacent-equivalence effect/margin，
+`O1E-POWER`=target power。它们不是 JSON/schema/protocol fields，且全都保持 pending /
+`UNFROZEN`。
+O1E-PATH=A 只确定从 product/hazard/mission requirement 经完整可审计映射派生 positive
 `δ_MME [rad²]` candidate 的工作流，不采用任何数值 protocol field。目标 population 上 true mean
 paired squared-SO(3)-loss improvement `μ_d [rad²]` 是未知 estimand，只说明映射目标语义，不能由
-owner 采用为设计阈值或替代 `δ_MME`；adjacent-equivalence effect/margin、target power、alpha、mixed verdict
-precedence、schema、solver、Jacobian 和 support 也均未冻结。
+owner 采用为设计阈值或替代 `δ_MME`；`O1E-MME`、`O1E-ADJ`、`O1E-POWER`、alpha、
+mixed verdict precedence、schema、solver、Jacobian 和 support 也均未冻结。
 
 本研究采用以下防泄漏边界：
 
@@ -186,7 +192,8 @@ Power_{candidate}\approx\max\!\left\{0,
 outcome-independent 首轮 sizing，不能冒充已冻结协议。HAC、unknown variance、gaps、slope design
 或 small sample 必须用与最终 estimator/covariance/calendar rule 相同的 prospective
 calculation/simulation。不得用 suffix variance 或已知 suffix capacity 下调 `n_required`；若最终
-prospective calculation 判定预注册的 target power 在预算内不可达，或候选设计 power 低于该目标，
+prospective calculation 判定预注册的 `O1E-POWER` target power 在预算内不可达，或候选设计
+power 低于该目标，
 应按预注册规则映射为 `INCONCLUSIVE`，不能通过改 margin 取得通过。
 
 ## 4. Budget traceability chain
@@ -202,17 +209,18 @@ prospective calculation 判定预注册的 target power 在预算内不可达，
 | ADIS16448 rate ND `0.0135 deg/s/sqrt(Hz)` | rate spectral density | residual `rad` 或 loss `rad^2` | 若用于 residual/primary model，须先冻结 bandwidth、filter、sampling、integration、axes covariance 与 visual error；目前 pending | 批准完整 noise propagation model | residual/primary design input / pending |
 | 产品容许 constant-bias mismatch | hazard/product units | `rad/s` | 若用于 budget，须先冻结 full/early/late estimator 的共同 frame 与 axis 定义；目前 pending | 逐轴预算及风险等级 | full-fit uncertainty、half-difference margins / pending |
 | 产品容许 held-out orientation structure | hazard/product units | mean `rad`、time slope `rad/s`、speed slope `s` | 若采用 joint regression，须先冻结 time/speed predictor、centering、scaling 及共同 frame/axis；目前 pending | 12 margins 与 design alternatives | equivalence margins / pending |
-| product/hazard/mission orientation requirement | endpoint-native product/hazard/mission units | 派生 candidate `δ_MME [rad²]`；`μ_d [rad²]` 是目标 population 上 true mean paired squared-SO(3)-loss improvement 的未知 estimand | O1-effect evidence-path A 只选定可审计映射工作流；必须依次完成 endpoint authority + endpoint semantics → target population + operational domain → aggregation/window/axis semantics → severity/risk class → product/hazard/mission requirement threshold → mapping assumptions + formula → derived candidate positive `δ_MME [rad²]`（同时明确 `μ_d` estimand）→ rounding rule → strict boundary。该序列只形成 adoption-ready evidence package，不含 adoption | owner 已选择 evidence path A；所有映射输入、派生 candidate、rounding 与 strict boundary 仍待逐项批准；这些完成后 owner 才独立决定是否 adopt positive `δ_MME`；`μ_d` 不能作为设计阈值 | primary positive minimum meaningful effect `δ_MME` / **UNFROZEN；无候选 protocol 数值；未进入 adoption decision** |
-| 产品最小有意义改善 | product value | primary `rad^2`；adjacent rate-loss `rad^2/s^2` | 只有上述 evidence package 完成且 owner 随后明确 adopt positive `δ_MME`，effect chain 才 closed、effect 才 resolved；此后才可进入 adjacent-equivalence effect/margin，再完成 adjacent-equivalence 后才可进入 target power。若用于 prospective sizing，还须冻结 block/adjacent estimand、duration normalization 与实验单位 | primary effect、adjacent-equivalence effect/margin 与 target power 分阶段批准 | prospective support/power / pending |
+| downstream 1 s relative-orientation consistency / product orientation-quality requirement（exact identifier/version/owner/baseline provenance 待提供） | endpoint-native product units | 派生 candidate `δ_MME [rad²]`；`μ_d [rad²]` 是目标 population 上 true mean paired squared-SO(3)-loss improvement 的未知 estimand | O1E-PATH=A 选定可审计映射工作流；O1E-ANCHOR=A 只选定该 product endpoint 为 positive `δ_MME` evidence chain 的唯一上位 normative anchor。`1 s` 只是所选 product endpoint 的 identity/horizon；exact endpoint semantics 以及 target population + operational domain → aggregation/window/axis semantics → severity/risk class → product requirement threshold → mapping assumptions + formula → derived candidate positive `δ_MME [rad²]`（同时明确 `μ_d` estimand）→ rounding rule → strict boundary 仍须依次完成。该序列只形成 `O1E-MME` adoption-ready evidence package，不含 `O1E-MME` adoption | 用户于 2026-08-17 选择 O1E-PATH=A 与 O1E-ANCHOR=A；hazard endpoint B 与 mission-success endpoint C 仅为 not selected as co-equal anchor，不是对它们的否定或 protocol 判定。endpoint semantics、所有映射输入、派生 candidate、rounding 与 strict boundary 仍待逐项批准；这些完成后 owner 才独立作 `O1E-MME` adoption decision；`μ_d` 不能作为设计阈值 | primary positive minimum meaningful effect `δ_MME` / **endpoint authority selected；exact endpoint semantics next；`δ_MME` 仍 `UNFROZEN`；无候选 protocol 数值；`O1E-MME` 未进入 adoption decision** |
+| 产品最小有意义改善 | product value | primary `rad^2`；adjacent rate-loss `rad^2/s^2` | 只有 `O1E-MME` evidence package 完成且 owner 随后明确 adopt positive `δ_MME`，`O1E-MME` 才 closed/resolved；此后才可进入 `O1E-ADJ`，完成 `O1E-ADJ` 后才可进入 `O1E-POWER`。若用于 prospective sizing，还须冻结 block/adjacent estimand、duration normalization 与实验单位 | `O1E-MME`、`O1E-ADJ` 与 `O1E-POWER` 分阶段批准 | prospective support/power / pending |
 | Schuirmann/ICH/FDA | dimensionless alpha/CI | matching estimator units | equivalence margin 须事先给定，且 inference coverage 依赖所选 SE/df/HAC model | owner 仍须批准 margins 与 S1 risk choices | O0 已决；adopted executable 语义见 [Q3 design §6](m4-minimal-gyro-q3-offline-bias-alignment-design.md#6-o0-normative-statistical-protocol)；其余 pending |
 | Newey-West/Bartlett | indexed covariance | estimator-specific squared units | 若采用 HAC，须先冻结 calendar lag、kernel、bandwidth、normalization、correction 与 critical law；目前 pending | 接受 asymptotic risk与 sensitivity rule | `hac.*` / pending |
 
-除 O0 与 O1 `delta_loss` 的既有 selected/adopted decision history 外，新选的 O1-effect
-evidence-path A 也只具有 evidence-routing status；表中的 effect formula、model 与 estimand
+除 O0 与 O1-DELTA=A 的既有 selected/adopted decision history 外，O1E-PATH=A 只具有
+evidence-routing status；O1E-ANCHOR=A 只赋予所选 product endpoint meaningful-effect
+evidence authority，Q3 design 仍是唯一 executable protocol authority。表中的 effect formula、model 与 estimand
 均须等待 owner 逐项选择并补齐前提。strict boundary 前的 evidence package 即使完成，也不
-等于 adoption；只有 owner 随后明确 adopt positive `δ_MME`，O1-effect chain 才 closed、effect
-才 resolved。在此之前它们都不是 protocol fact，不得写入 executable verdict 合同。O0 与
-O1 `delta_loss` 的可执行语义仍只见 Q3 design。
+等于 `O1E-MME` adoption；只有 owner 随后明确 adopt positive `δ_MME`，`O1E-MME` 才
+closed/resolved。在此之前它们都不是 protocol fact，不得写入 executable verdict 合同。O0 与
+O1-DELTA=A 的可执行语义仍只见 Q3 design。
 
 禁止来源：`condition<=1e6`、固定 60 blocks、未枚举 22-Holm、Mahalanobis non-rejection、旧
 adjacent/RMSE hints、无 command/log/hash 的 census、suffix/GT/ATE/Q5、成熟项目 online constants。
@@ -257,24 +265,31 @@ procedure、候选 alpha 或资格证据。
 1. `U0` 固定上游事实：Q1 writer/validator、timestamp parser、Q2 helper、EuRoC/ADI source facts。
 2. `U0 -> U1/U2/U3`：分别冻结 exact input/eligibility；block+adjacent estimands/calendar index；
    objective/FD Jacobian/rank/HAC sandwich estimator。
-3. `O0=A` 与 O1 `primary.delta_loss_rad2=0` 是 resolved inputs；`O1-effect evidence-path A`
-   只是已选择的 evidence-source/workflow path，不是数值 protocol field。`δ_MME` 继续
-   `UNFROZEN`，并须依次完成：endpoint authority + endpoint semantics → target population +
+3. `O0=A` 与 O1-DELTA=A（`primary.delta_loss_rad2=0`）是 resolved inputs；
+   O1E-PATH=A 是已选择的 evidence-source/workflow path，O1E-ANCHOR=A 将 downstream
+   1 s relative-orientation consistency / product orientation-quality requirement 选为 positive
+   `δ_MME` evidence chain 的唯一上位 normative anchor。两者都是 decision label，不是
+   protocol schema field；`1 s` 只标识 product endpoint identity/horizon，不冻结 Q3 analytical
+   aggregation/window/block/axis/frame/reference semantics。`O1E-MME` 与 `δ_MME` 继续 pending /
+   `UNFROZEN`，下一项仅为
+   exact endpoint semantics，随后须依次完成：target population +
    operational domain → aggregation/window/axis semantics → severity/risk class →
-   product/hazard/mission requirement threshold → mapping assumptions + formula → derived
+   product requirement threshold → mapping assumptions + formula → derived
    candidate positive `δ_MME [rad²]`（同时明确 `μ_d` 是未知 estimand，只表达映射目标语义）→
-   rounding rule → strict boundary。到 strict boundary 为止只形成 adoption-ready evidence
+   rounding rule → strict boundary。到 strict boundary 为止只形成 `O1E-MME` adoption-ready evidence
    package；candidate 出现前的前置未完成时不得派生 candidate，strict boundary 未完成时不得
-   请求 adoption，且不得把 `μ_d` 当成 owner 可采用的设计阈值。随后 owner 才作独立 adoption
-   decision；只有 owner 明确 adopt 该 positive `δ_MME`，O1-effect chain 才 closed、effect 才
-   resolved，`δ_MME` 才从 `UNFROZEN` 变为 frozen。未明确 adopt 时，链保持 open，effect 与
-   `δ_MME` 均保持 unresolved / `UNFROZEN`。
-4. 只有 owner 明确 adopt positive `δ_MME`、使 effect resolved 后，才进入
-   adjacent-equivalence effect/margin；只有 adjacent-equivalence 完成后，才进入 target power。
+   请求 `O1E-MME` adoption，且不得把 `μ_d` 当成 owner 可采用的设计阈值。随后 owner 才作独立
+   `O1E-MME` adoption decision；只有 owner 明确 adopt 该 positive `δ_MME`，`O1E-MME` 才
+   closed/resolved，`δ_MME` 才从 `UNFROZEN` 变为 frozen。未明确 adopt 时，`O1E-MME` 保持
+   open / unresolved / pending / `UNFROZEN`。
+4. 只有 owner 明确 adopt positive `δ_MME`、使 `O1E-MME` resolved 后，才进入
+   `O1E-ADJ`；只有 `O1E-ADJ` 完成后，才进入 `O1E-POWER`。三者当前均保持 pending /
+   `UNFROZEN`。
    再随后依次冻结 `O2` 三轴
    uncertainty/stability budgets、`O3` 与 O0=A
    一致的 12 margins 与 design alternatives、`O4` provenance architecture。
-5. `(U1,U2,U3,O1,O2,O3) -> S1`：冻结 alpha/critical law/TOST/HAC/gap rules。
+5. `(U1,U2,U3,O1E-MME,O1E-ADJ,O1E-POWER,O2,O3) -> S1`：冻结
+   alpha/critical law/TOST/HAC/gap rules。
 6. 只有 owner 明确授权 prefix-only nuisance 后，`S1 -> S2` prospective
    support/power/infeasible rule。
 7. `S2 -> V1 -> V2`：先冻结逐 gate boundary truth table，再由独立 owner 决策冻结 overall
@@ -284,7 +299,7 @@ procedure、候选 alpha 或资格证据。
 9. `R1` 通过后 amendment 才可称 `COMPLETE`；amendment `COMPLETE` 仍是 implementation
    `STOP`，必须另获 separate implementation go。
 
-## 7. Owner decisions：O0 与 O1 `delta_loss` 已决
+## 7. Owner decisions：O0 与 O1-DELTA 已决
 
 ### 7.1 O0：product claim 与 risk semantics
 
@@ -302,16 +317,16 @@ O0 的 A/B/C 处置如下：
 - **C（not selected / non-normative / qualifying weight 0）**：sensitivity/protocol-development
   only。
 
-### 7.2 O1：`delta_loss`
+### 7.2 O1-DELTA：`delta_loss`
 
-决策来源：用户于 2026-08-14 选择 Q3 amendment 中 O1 `delta_loss` 的 A 项，即
+决策来源：用户于 2026-08-14 选择 Q3 amendment 中 O1-DELTA=A，即
 `primary.delta_loss_rad2=0`。该回复只冻结零损失容忍，
-不冻结 positive primary minimum meaningful effect、adjacent-equivalence effect/margin、target power、alpha、
+不冻结 `O1E-MME`、`O1E-ADJ`、`O1E-POWER`、alpha、
 solver、schema、support 或 outcome。exact field/sign/unit/strict-boundary 与 component/overall 语义只见
 [Q3 design §6.1](m4-minimal-gyro-q3-offline-bias-alignment-design.md#61-primary-diagnostic-componenthac)；
 本 research 不持有平行的 normative gate 或可执行 test oracle。
 
-O1 的 A/B/C 处置如下：
+O1-DELTA 的 A/B/C 处置如下：
 
 - **A（selected / adopted into design）**：`primary.delta_loss_rad2=0`。owner 选择的产品含义是
   corrected arm 的 held-out mean squared loss 不得变差。ADI 规格只作 uncertainty/sanity
@@ -326,18 +341,18 @@ O1 的 A/B/C 处置如下：
   application loss budget `[rad^2]` 及 hazard/risk 来源；不得引用 Q5、suffix、GT/ATE 或
   desired PASS。
 
-`primary.delta_loss_rad2` 已选定不代表 protocol complete。下一 owner 事项只是 primary positive
-minimum meaningful effect；adjacent-equivalence effect/margin 与 target power 继续作为随后 pending 事项，本文
-不代选任何数值。
+`primary.delta_loss_rad2` 已选定不代表 protocol complete。下一 owner 事项只是 `O1E-MME`；
+`O1E-ADJ` 与 `O1E-POWER` 继续作为随后 pending / `UNFROZEN` 事项，本文不代选任何数值。
 
-### 7.3 O1-effect：primary positive minimum meaningful effect evidence path
+### 7.3 O1E-PATH：primary positive minimum meaningful effect evidence path
 
-决策来源：用户于 2026-08-17 选择 **O1-effect evidence-path A**。该名称与既有、且唯一指向
-`primary.delta_loss_rad2=0` 的 O1 `delta_loss` A 分开；本次选择只确定 evidence source 与决策工作流，
-不冻结 `δ_MME`，不采用任何数值 protocol field，也不推进 adjacent-equivalence effect/margin、target power、alpha
-或 implementation 权限。`δ_MME` 继续为 `UNFROZEN`。
+决策来源：用户于 2026-08-17 选择 **O1E-PATH=A**。该 decision label 与既有、
+且唯一指向 `primary.delta_loss_rad2=0` 的 O1-DELTA=A 分开；本次选择只确定 evidence
+source 与决策工作流，
+不冻结 `δ_MME`，不采用任何数值 protocol field，也不推进 `O1E-MME`、`O1E-ADJ`、
+`O1E-POWER`、alpha 或 implementation 权限。三者与 `δ_MME` 继续 pending / `UNFROZEN`。
 
-O1-effect evidence-path 的 A/B/C 处置如下：
+O1E-PATH 的 A/B/C 处置如下：
 
 - **A（selected evidence-source/workflow path）**：按以下完整顺序派生并审查：endpoint
   authority + endpoint semantics → target population + operational domain → aggregation/window/
@@ -345,34 +360,60 @@ O1-effect evidence-path 的 A/B/C 处置如下：
   assumptions + formula → derived candidate positive `δ_MME [rad²]`（同时明确 `μ_d` estimand）→
   rounding rule → strict boundary。目标 population 上 true mean paired squared-SO(3)-loss
   improvement `μ_d [rad²]` 是未知 estimand，只用于明确映射目标语义；它不是 owner 可采用的
-  设计阈值，也不能替代 `δ_MME`。完成 strict boundary 只得到 adoption-ready evidence
-  package，不能预先闭合 effect chain；此时 owner 才能另作独立 adoption decision。只有 owner
-  明确 adopt 该 positive `δ_MME`，effect chain 才 closed、effect 才 resolved，`δ_MME` 才冻结；
-  未明确 adopt 时仍为 `UNFROZEN`，且本条本身没有 qualification authority。
+  设计阈值，也不能替代 `δ_MME`。完成 strict boundary 只得到 `O1E-MME` adoption-ready evidence
+  package，不能预先闭合 `O1E-MME`；此时 owner 才能另作独立 `O1E-MME` adoption
+  decision。只有 owner 明确 adopt 该 positive `δ_MME`，`O1E-MME` 才 closed/resolved，
+  `δ_MME` 才冻结；未明确 adopt 时，`O1E-MME` 与 `δ_MME` 仍为 pending / `UNFROZEN`，
+  且本条本身没有 qualification authority。
 - **B（not selected / non-normative / no qualification authority）**：owner 直接给出 exact
   `δ_MME [rad²]` policy，不补 product/hazard/mission endpoint 到目标 estimand 的映射链。
 - **C（not selected / non-normative / no qualification authority）**：以 sensor-floor proxy
   代替 product/hazard/mission requirement。§2 的 illustrative sensor source facts 仍只保留其
   原有 evidence/sanity 含义，不成为 effect candidate 或 protocol 值。
 
+### 7.4 O1E-ANCHOR：primary positive minimum meaningful effect endpoint anchor
+
+决策来源：用户于 2026-08-17 选择 **O1E-ANCHOR=A**，即将 downstream
+1 s relative-orientation consistency / product orientation-quality requirement 作为 positive
+`δ_MME` evidence chain 的唯一上位 normative anchor。该 decision 与 O1E-PATH=A
+互不可代替，两者均不是 protocol schema field。exact product requirement
+identifier/version/owner/baseline provenance 尚未提供；不得伪造或用本轮选择替代。
+
+O1E-ANCHOR 的 A/B/C 处置如下：
+
+- **A（selected）**：downstream 1 s relative-orientation consistency / product
+  orientation-quality requirement。它持有 meaningful-effect evidence authority；Q3 design 仍持有
+  唯一 executable protocol authority。`1 s` 只是所选 product endpoint 的 identity/horizon，
+  不自动冻结 Q3 analytical aggregation/window/block/axis/frame/reference semantics。
+- **B（not selected as co-equal anchor）**：existing hazard-analysis orientation endpoint。本轮仅
+  未将它选为 co-equal normative anchor，不作 hazard 有效性或风险结论。
+- **C（not selected as co-equal anchor）**：existing mission-success orientation endpoint。本轮仅
+  未将它选为 co-equal normative anchor，不作 mission 成功语义或风险结论。
+
+该选择未冻结 exact endpoint semantics，也未采用 threshold、population/domain、
+aggregation/window/axis、severity/risk、mapping/formula、candidate、rounding、strict boundary
+或 `O1E-MME` adoption。`O1E-MME` 与 `δ_MME` 仍为 pending / `UNFROZEN`。
+
 ## 8. Owner choices 顺序与最小下一步
 
-`O0=A` 与 O1 `primary.delta_loss_rad2=0` 已 resolved 并退出待决队列。以下只记录依赖顺序、
+`O0=A` 与 O1-DELTA=A（`primary.delta_loss_rad2=0`）已 resolved 并退出待决队列。以下只记录依赖顺序、
 候选职责与待 owner 选择的
 alternatives，不构成 adopted protocol；按顺序一次只问一项：
 
-1. `O1-effect`：evidence-path A 已选择，但 effect 本身仍未决。严格按以下顺序逐项冻结，
-   不得合并提问或越级采用结果：endpoint authority + endpoint semantics → target population +
+1. `O1E-MME`（pending / `UNFROZEN`）：O1E-PATH=A 与 O1E-ANCHOR=A 已选择，
+   但 primary positive `δ_MME` evidence package + owner adoption decision 本身仍未决。
+   endpoint authority 已从 pending 变为 selected；下一项只能冻结 exact endpoint semantics，
+   随后严格按以下顺序逐项冻结，不得合并提问或越级采用结果：target population +
    operational domain → aggregation/window/axis semantics → severity/risk class →
-   product/hazard/mission requirement threshold → mapping assumptions + formula → derived
+   product requirement threshold → mapping assumptions + formula → derived
    candidate positive `δ_MME [rad²]`（同时明确 `μ_d` 是未知 estimand，只表达映射目标语义）→
-   rounding rule → strict boundary。到此只完成 adoption-ready evidence package；随后 owner
-   才独立决定是否 adopt 该 positive `δ_MME`。只有 owner 明确 adopt 后，effect chain 才
-   closed、effect 才 resolved，`δ_MME` 才冻结；在此之前（包括 candidate、rounding 与 strict
+   rounding rule → strict boundary。到此只完成 `O1E-MME` adoption-ready evidence package；
+   随后 owner 才独立作 `O1E-MME` adoption decision。只有 owner 明确 adopt 后，`O1E-MME`
+   才 closed/resolved，`δ_MME` 才冻结；在此之前（包括 candidate、rounding 与 strict
    boundary 已完成但尚未 adopt）均保持 `UNFROZEN`，`μ_d` 也不得被采用为设计阈值。
-2. `O1` 随后 pending：只有 owner 明确 adopt positive `δ_MME`、使上项 effect resolved 后，
-   才进入 adjacent-equivalence effect/margin。
-3. `O1` 再随后 pending：只有 adjacent-equivalence 完成后才进入 target power。
+2. `O1E-ADJ`（pending / `UNFROZEN`）：只有 owner 明确 adopt positive `δ_MME`、使
+   `O1E-MME` resolved 后，才进入 adjacent-equivalence effect/margin。
+3. `O1E-POWER`（pending / `UNFROZEN`）：只有 `O1E-ADJ` 完成后才进入 target power。
 4. `O2`：ADI typical specs 只作 sanity floor，还是在何种明确模型下进入三轴
    full-fit uncertainty 与 half-stability budgets；
 5. `O3`：在已冻结 O0=A 下选择 12 项 equivalence margins 与 design alternatives，并保持 sole
@@ -383,8 +424,9 @@ alternatives，不构成 adopted protocol；按顺序一次只问一项：
 8. `U2`：独立冻结 block/adjacent estimands、duration normalization 与 calendar index；
 9. `U3`：独立冻结 zero-init objective、Q2-helper central-FD Jacobian、rank rule 与 HAC
    sandwich estimator；
-10. `S1`：在 `U1/U2/U3/O1/O2/O3` 都冻结后，冻结与 O0=A 一致的 alpha/critical law、TOST、
-   calendar-gap、Bartlett bandwidth/normalization/correction；IUT 代数不会替 owner 冻结 alpha；
+10. `S1`：在 `U1/U2/U3/O1E-MME/O1E-ADJ/O1E-POWER/O2/O3` 都冻结后，冻结与
+    O0=A 一致的 alpha/critical law、TOST、
+    calendar-gap、Bartlett bandwidth/normalization/correction；IUT 代数不会替 owner 冻结 alpha；
 11. `S2`：只有 owner 另行授权 prefix-only nuisance 后，才冻结 prospective sizing、support 与
     precision-infeasible semantics；
 12. `V1`：先冻结逐 gate boundary truth table；
@@ -400,17 +442,13 @@ alternatives，不构成 adopted protocol；按顺序一次只问一项：
     V2。
 14. `A1`：最后冻结 canonical JSON/CSV/manifest schemas 与 external trust anchor。
 
-下一次只问 `endpoint authority`，且当前三项都为 pending；其中“推荐”只描述来源优先级，
-不代表已选择：
-
-- **A（pending / 推荐来源但未选择）**：已有可审计的 product orientation-quality endpoint；
-- **B（pending）**：existing hazard-analysis orientation endpoint；
-- **C（pending）**：existing mission-success orientation endpoint。
-
-本轮不同时冻结 endpoint semantics、target population + operational domain、aggregation/window/
-axis semantics、severity/risk class、product/hazard/mission requirement threshold、mapping
+下一次只问 `exact endpoint semantics`。所选 product endpoint 的 exact requirement
+identifier/version/owner/baseline provenance 仍待提供；该证据缺口不允许伪造标识，
+也不允许越级推导后续字段。本轮不同时冻结 endpoint semantics、target population + operational domain、aggregation/window/
+axis semantics、severity/risk class、product requirement threshold、mapping
 assumptions + formula、derived candidate positive `δ_MME [rad²]`、rounding rule 或 strict
-boundary；也不进入其后的独立 adoption decision，不把未知 estimand `μ_d` 当成设计阈值。
+boundary；也不进入其后的独立 `O1E-MME` adoption decision，不把未知 estimand `μ_d`
+当成设计阈值。
 
 最小实验也必须在上述数值与 protocol hash 冻结后进行：先只用 synthetic fixtures 和 boundary
 mutants 验证单位、timestamp、eligibility、duration split invariance、calendar gap、FD step-halving、
@@ -419,8 +457,9 @@ HAC/TOST truth table 与 manifest attacks。primary strict-boundary 的 executab
 本 budget 不复制或扩展该 oracle。再由独立 reviewer 检查 protocol bytes。不得为这一步读取 Q3
 suffix 或运行 DUT。
 
-当前结论保持：**O0=A 与 O1 `primary.delta_loss_rad2=0` 已决；O1-effect evidence-path A
-已选择，但 `δ_MME` 仍为 `UNFROZEN`，下一次只问 endpoint authority；adjacent-equivalence
-effect/margin 仅在 owner 明确 adopt positive `δ_MME`、effect resolved 后才进入，target power
-仍在 adjacent-equivalence 完成后 pending；其余 owner/protocol decisions pending；Q3
+当前结论保持：**O0=A、O1-DELTA=A（`primary.delta_loss_rad2=0`）、O1E-PATH=A
+与 O1E-ANCHOR=A 已决，但 `δ_MME` 仍为 `UNFROZEN`，下一次只问 exact endpoint
+semantics；`O1E-MME`、`O1E-ADJ`、`O1E-POWER` 仍依序 pending / `UNFROZEN`：
+`O1E-ADJ` 仅在 owner 明确 adopt positive `δ_MME`、`O1E-MME` resolved 后才进入，
+`O1E-POWER` 仍在 `O1E-ADJ` 完成后 pending；其余 owner/protocol decisions pending；Q3
 implementation STOP；没有任何 Q3 PASS/FAIL/INCONCLUSIVE outcome。**

@@ -2,8 +2,8 @@
 
 日期：2026-08-13
 
-状态：module/data/structural contract draft 已完成；**O0=A 与 O1 `primary.delta_loss_rad2=0`
-已冻结，其余 amendment pending，
+状态：module/data/structural contract draft 已完成；**O0=A、O1-DELTA=A
+（`primary.delta_loss_rad2=0`）与 O1E-ANCHOR=A 已冻结，其余 amendment pending，
 protocol amendment STOP**。这不是 DUT fail：完整统计、solver、schema 与 owner budgets 尚未
 冻结，Q3 implementation 与 Q4+ 未授权。
 
@@ -17,8 +17,10 @@ protocol amendment STOP**。这不是 DUT fail：完整统计、solver、schema 
 - [证据门控的信息接入](../agents/evidence-gated-integration.md)
 - [Q3 实施计划](../plans/2026-08-13_m4_gyro_q3_align_0e897ba8.plan.md)
 
-本文是 Q3 O0/统计合同的**唯一 normative protocol authority**。其中明确标为已冻结的
-O0/O1 条款可规范性引用；标为 pending 的条目仍不可执行。budget 文档只记录 evidence
+本文是 Q3 O0/统计合同的**唯一 normative executable protocol authority**。其中明确标为已冻结的
+O0/O1-DELTA/O1E-ANCHOR 条款可规范性引用；标为 pending 的条目仍不可执行。所选
+product endpoint 持有 meaningful-effect evidence authority；它不持有 executable protocol
+authority。budget 文档只记录 evidence
 与 owner decision history，structural research 只记录来源/历史，implementation plan 只安排步骤，
 roadmap 只给出状态和 wayfinding；它们均不构成平行的 executable protocol authority。
 
@@ -35,12 +37,16 @@ qualification 权限；不得接入 `StereoVoEstimator`、`OfflineVoSession` 或
 qualification 或 Q5、产生 Q4+ 结果，或把 offline bias 称为 online initializer。Q3 source、tests
 与 CMake 也仍为 STOP。
 
-当前文档冻结不依赖 owner threshold 的结构、O0=A 以及 O1 的零损失容忍，并完整列出
+当前文档冻结不依赖 owner threshold 的结构、O0=A 以及 O1-DELTA=A 的零损失容忍，并完整列出
 amendment blockers。不得把 candidate formula、future allowlist 或接口草图描述为已完成
 protocol。
 
-本次 amendment 只在 O0=A 之上写入 O1 的 `primary.delta_loss_rad2=0`。O1 的
-primary positive minimum meaningful effect、adjacent effect 与 target power 仍 pending；
+本次 amendment 在 O0=A 之上已写入 O1-DELTA=A 的
+`primary.delta_loss_rad2=0`，并写入 O1E-ANCHOR=A。O1-DELTA 以外的
+`O1E-MME`（primary positive `δ_MME` evidence package + owner adoption decision）、
+`O1E-ADJ`（adjacent-equivalence effect/margin）与 `O1E-POWER`（target power）
+仍 pending / `UNFROZEN`。这三个名称只是稳定的 textual decision-record IDs，不是
+JSON/schema/protocol fields；
 `O2/O3/O4`、`U1/U2/U3`、`S1/S2`、`V1/V2`、`A1/R1` 也继续 pending。尤其不设置
 positive effect、alpha，不冻结 mixed verdict precedence，也不改 schema、solver、Jacobian、
 support 的实质合同。pending decisions 的依赖与提问顺序只引用
@@ -293,7 +299,7 @@ overall Type-I 不大于 alpha。不得跨 component 做 Bonferroni、Holm、FWE
 ### 6.1 Primary diagnostic component：HAC
 
 保留 primary 的结构性名称；其 sample unit 是完整 1 s block 的
-\(d_k\,[\mathrm{rad}^2]\)，但它不是独立 confirmatory claim。O1=A 已冻结唯一规范定义：
+\(d_k\,[\mathrm{rad}^2]\)，但它不是独立 confirmatory claim。O1-DELTA=A 已冻结唯一规范定义：
 
 \[
 d_k=loss_{zero,k}-loss_{corrected,k}
@@ -307,9 +313,25 @@ d_k=loss_{zero,k}-loss_{corrected,k}
 primary.delta_loss_rad2 = 0  # rad^2
 ```
 
-因此 owner 不允许 corrected arm 的 held-out mean squared loss 变差。这个零损失容忍不是
-positive primary minimum meaningful effect，也不替 owner 选择 design alternative 或 target power；这些仍
-pending。
+因此 owner 不允许 corrected arm 的 held-out mean squared loss 变差。该决策的精确标签是
+O1-DELTA=A，不得使用未限定的简写。这个零损失容忍不是
+positive primary minimum meaningful effect，也不替 owner 完成 `O1E-MME`、选择 design
+alternative 或 `O1E-POWER`；这些仍 pending / `UNFROZEN`。
+
+O1E-ANCHOR=A 冻结且仅冻结以下规范条款：downstream 1 s
+relative-orientation consistency / product orientation-quality requirement 是 positive `δ_MME`
+evidence chain 的唯一上位 normative anchor，并持有 meaningful-effect evidence authority。
+Q3 design 仍是唯一 executable protocol authority。`O1E-ANCHOR=A` 与 budget 中只选定
+workflow 的 `O1E-PATH=A` 是不同 decision labels；两者都不是 protocol schema
+field。exact product requirement identifier/version/owner/baseline provenance 与 exact endpoint
+semantics 仍待提供和冻结。`1 s` 只是该 product endpoint 的 identity/horizon，不自动
+冻结 Q3 analytical aggregation/window/block/axis/frame/reference semantics。
+
+该 endpoint-anchor 决策不冻结 `δ_MME`；`δ_MME` 仍为 `UNFROZEN`，`μ_d [rad²]`
+仍是目标 population 上 true mean paired squared-SO(3)-loss improvement 的未知 estimand。
+threshold、population/domain、aggregation/window/axis、severity/risk、mapping/formula、candidate、
+rounding、strict boundary、`O1E-MME` adoption、`O1E-ADJ`、`O1E-POWER` 与其他
+owner/protocol decisions 均仍 pending / `UNFROZEN`。
 
 当且仅当该 component 的全部前置与 support 充分，且按 S1 最终冻结的同一 overall
 alpha/critical law 计算的 held-out mean improvement 单侧下置置信界满足
@@ -321,7 +343,8 @@ LCB(d)>0\ \mathrm{rad}^2
 时，primary component 才 reject 其完整 null。不等号是严格的：`LCB(d)=0`、零收益、
 负收益，或仅有正 point estimate 但 `LCB(d)<=0`，均不 reject。primary component reject 只是
 O0 sole overall conjunctive IUT 的一个必要 component，绝不单独产生 overall `PASS`。
-本次 O1 adoption 不设置 alpha 或 critical law；两者仍由 S1 冻结，当前 pending。
+`O1E-MME` adoption 本身不设置 alpha 或 critical law；`O1E-MME` 仍 pending /
+`UNFROZEN`，两者仍由 S1 冻结，当前 pending。
 
 候选 bandwidth 为
 
@@ -402,7 +425,7 @@ suffix outcome 前冻结：
 
 1. 只由 prefix 构造的 primary `d`-like series 的 exact block/pseudo-block definition；
 2. prefix long-run variance estimator，与 primary 分析是否同 normalization/gap rule；
-3. outcome 外 primary design alternative（rad²）、target power，以及 S1 冻结的
+3. outcome 外 primary design alternative（rad²）、`O1E-POWER` target power，以及 S1 冻结的
    overall alpha；
 4. sample-size/power equation、critical distribution、ceil、integer overflow 与 infeasible 结果；
 5. 12 项 equivalence 的 precision/power rule、每项 design alternative 与 family requirement；
@@ -418,8 +441,9 @@ qualifying weight 为 `0`。
 
 owner 必须独立提供且说明量纲/来源：
 
-- primary design effect（与已冻结的 `delta_loss=0` 不是同一个量）；
-- target power；
+- primary design effect（与已冻结的 `delta_loss=0` 不是同一个量；
+  O1E-ANCHOR=A 只冻结上位 evidence authority，不冻结该 effect）；
+- `O1E-POWER` target power；
 - 3 个 full-fit bias uncertainty budgets；
 - 3 个 half-bias difference margins；
 - 3 个 residual-mean margins；
@@ -569,8 +593,8 @@ knobs、fallback、第二套积分器及无实际必要的 README 修改。
 2. §5 complete solver/Jacobian/rank/uncertainty/determinism contract；
 3. §6 primary、12 项 equivalence、mandatory adjacent diagnostic components 的完整自身 null、
    S1 单一 overall alpha/critical law/df/SE/HAC validity、各自 support/power、严格 component
-   boundary 与全部剩余 owner budgets；O1 `primary.delta_loss_rad2=0` 已冻结，但不代表本项
-   其他 blockers 已闭合；
+   boundary 与全部剩余 owner budgets；O1-DELTA=A 的 `primary.delta_loss_rad2=0`
+   与 O1E-ANCHOR=A 已冻结，但不代表本项其他 blockers 已闭合；
 4. §8.1 exact versioned artifact/manifest schemas，以及 machine-checkable `claim_scope`、
    `diagnostic-only`、`no-component-claim` 语义；
 5. near-\(\pi\)、gap-run、nonconvergence、V1 component truth table 与 V2 aggregate precedence 的
