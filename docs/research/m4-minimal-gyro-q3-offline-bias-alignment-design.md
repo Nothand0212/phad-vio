@@ -4,10 +4,12 @@
 
 状态：module/data/structural contract draft 已完成；**O0=A、O1-DELTA=A
 （`primary.delta_loss_rad2=0`）、O1E-ANCHOR=A、O1E-BASIS=A 与 O1E-REFERENCE=A 已冻结，
-O1E-PATH=A 已选择；O1E-ANCHOR-CONTRACT pending / `UNFROZEN`，下一项仅为
-O1E-ANCHOR-CONTRACT，O1E-ENDPOINT 必须等待，其余 amendment pending，
-protocol amendment STOP**。这不是 DUT fail：完整统计、solver、schema 与 owner budgets 尚未
-冻结，Q3 plan 5/5 todos 仍 pending，Q3 implementation 与 Q4+ 未授权。
+O1E-PATH=A 与 O1E-ANCHOR-CONTRACT-PATH=A 已选择；当前为
+`PATH_A_SELECTED / AWAITING_LOCATOR`，O1E-ANCHOR-CONTRACT pending / `UNFROZEN`，
+下一项仅为 O1E-ANCHOR-CONTRACT-LOCATOR，O1E-ENDPOINT 必须等待，其余 amendment pending，
+protocol amendment STOP**。这不是 DUT fail：actual identifier/version/owner/baseline provenance
+与 category locator/authorization 均未提供、未验证，完整统计、solver、schema 与 owner budgets
+尚未冻结，Q3 plan 5/5 todos 仍 pending，Q3 implementation 与 Q4+ 未授权。
 
 关联：issue [#38](https://github.com/Nothand0212/phad-vio/issues/38)
 
@@ -15,6 +17,7 @@ protocol amendment STOP**。这不是 DUT fail：完整统计、solver、schema 
 
 - [Q3 一手资料调研](m4-minimal-gyro-q3-offline-bias-alignment-research.md)
 - [Q3 outcome-independent budget 调研](m4-minimal-gyro-q3-outcome-independent-budget-research.md)
+- [O1E-ANCHOR-CONTRACT existing-record 审计](m4-minimal-gyro-q3-anchor-contract-record-audit.md)
 - [Q2 资格结果](m4-minimal-gyro-q2-known-bias-predict-result.md)
 - [证据门控的信息接入](../agents/evidence-gated-integration.md)
 - [Q3 实施计划](../plans/2026-08-13_m4_gyro_q3_align_0e897ba8.plan.md)
@@ -45,6 +48,9 @@ protocol。
 
 本次 amendment 在 O0=A 之上已写入 O1-DELTA=A 的
 `primary.delta_loss_rad2=0`，并写入 O1E-ANCHOR=A、O1E-BASIS=A 与 O1E-REFERENCE=A。
+`O1E-ANCHOR-CONTRACT-PATH=A` 也是 user/owner selected 的 stable textual decision label；它不是
+schema field，只冻结采用 existing qualified record 路径，不闭合 O1E-ANCHOR-CONTRACT，也不冻结
+endpoint semantics。
 O1E-REFERENCE=A 是 stable textual decision-record，只冻结 common reference bytes/source
 identity，不是 schema field 或 methodology PASS。O1-DELTA 以外的
 `O1E-ANCHOR-CONTRACT`（已选 requirement 的 exact record identifier/version/owner/baseline
@@ -56,9 +62,14 @@ JSON/schema/protocol fields；
 `O2/O3/O4`、`U1/U2/U3`、`S1/S2`、`V1/V2`、`A1/R1` 也继续 pending。尤其不设置
 positive effect、alpha，不冻结 mixed verdict precedence，也不改 schema、solver、Jacobian、
 support 的实质合同。pending decisions 的依赖与提问顺序只引用
-[budget §6 decision DAG](m4-minimal-gyro-q3-outcome-independent-budget-research.md#6-无循环-decision-dag)
+[budget §6 唯一 canonical decision DAG](m4-minimal-gyro-q3-outcome-independent-budget-research.md#6-无循环-decision-dag)
 和 [budget §8 owner choices](m4-minimal-gyro-q3-outcome-independent-budget-research.md#8-owner-choices-顺序与最小下一步)；
 本文不复制该 DAG 或 V2 alternatives，owner 选择后只在本文单向写入 adopted normative contract。
+当前 contract 状态是 `PATH_A_SELECTED / AWAITING_LOCATOR`；actual tuple 与 category
+locator/authorization 均未提供、未验证。可检索 repo/Git/Issue 范围的三条独立审计均为
+`QUALIFIED existing record=0`；该 `NOT FOUND` 只覆盖
+[审计 note](m4-minimal-gyro-q3-anchor-contract-record-audit.md)声明的范围，不证明不存在任何外部
+record。
 
 ## 2. Deep module 与依赖方向
 
@@ -367,8 +378,10 @@ Q3 design 仍是唯一 executable protocol authority。`O1E-ANCHOR=A` 与 budget
 workflow 的 `O1E-PATH=A` 是不同 decision labels；两者都不是 protocol schema
 field。exact product requirement identifier/version/owner/baseline provenance 由 stable textual
 pending node O1E-ANCHOR-CONTRACT 单独管理，实际 tuple 尚未提供和验证；common reference
-bytes/source identity 已由 O1E-REFERENCE=A 独立冻结，两者不得合并。下一项只允许选择
-O1E-ANCHOR-CONTRACT 的 closure path，O1E-ENDPOINT 与 exact endpoint semantics 必须等待。
+bytes/source identity 已由 O1E-REFERENCE=A 独立冻结，两者不得合并。
+O1E-ANCHOR-CONTRACT-PATH=A 已由 user/owner 选择，只冻结采用 existing qualified record 路径；
+当前 `PATH_A_SELECTED / AWAITING_LOCATOR`。下一项只允许选择
+O1E-ANCHOR-CONTRACT-LOCATOR，O1E-ENDPOINT 与 exact endpoint semantics 必须等待。
 `1 s` 只是该 product
 endpoint 的 identity/horizon，不自动
 冻结 Q3 analytical aggregation/window/block/axis/frame/reference semantics。
@@ -396,12 +409,28 @@ physical-orientation oracle、reference gyro bias、arm output，也不是 indep
 product-qualification oracle。任何 arm、fitted bias、future DUT/outcome、desired PASS 或
 post-outcome analysis 都不得改变或重新解释其 reference 角色。
 
-O1E-ANCHOR-CONTRACT 不是 schema field，当前也不是 adopted normative contract。它只负责
+O1E-ANCHOR-CONTRACT 不是 schema field，当前继续 pending / `UNFROZEN`。它只负责
 O1E-ANCHOR=A 已选 requirement 的 exact record identifier/version/owner/baseline provenance；
 不冻结 endpoint semantics、threshold、risk、metric、reference、mapping 或任何 numeric gate。
-其 pending A/B/C closure-path candidates 只见
+closure path A 的 selected 历史与当前 pending locator A/B/C 见
 [budget §7.5](m4-minimal-gyro-q3-outcome-independent-budget-research.md#75-o1e-anchor-contractselected-requirement-的-record-contract)，
-任何实际 tuple 均未提供或选择。
+任何 actual identifier/version/owner/baseline provenance 与 category locator/authorization 均未
+提供、未验证；本次也不得自动补造 tuple。anchor contract 的唯一 canonical DAG 只见
+[budget §6](m4-minimal-gyro-q3-outcome-independent-budget-research.md#6-无循环-decision-dag)，本文不复制
+该子 DAG。当前状态摘要仍是 `PATH_A_SELECTED / AWAITING_LOCATOR`；下一节点仅为 locator，
+tuple verification 必须在 locator 之后，owner authorization 又必须在 verification 通过之后，
+不得合并或先行；合同 closed 前 O1E-ENDPOINT 必须等待。
+
+locator alternatives 按 canonical authority 的实际所在地互斥，并与 budget/audit 同义：
+
+- **A（推荐，pending）**：canonical authority 位于非 repo/GitHub Issue 的受控
+  product-requirement system；提供 immutable canonical permalink / exact record ID。
+- **B（pending）**：canonical authority 本身位于 repo 或 GitHub Issue；提供 immutable
+  `commit:path#anchor` 或 issue/comment permalink。外部 requirement system 的 repo/Issue 镜像不属于 B。
+- **C（pending）**：确认没有 qualified existing record，撤回当前 existing-record closure 路线，
+  切换到创建并批准新 versioned requirement baseline 的路线；在新 baseline 获批准前继续 STOP。
+
+三项均保持可选，B/C 不是永久否决；任一选择都不得自动补造 tuple 或越级进入 O1E-ENDPOINT。
 
 上述条款只定义 product endpoint evidence semantics，不改写或升级当前 Q3 analytic
 \(\Delta R^{vis}\)、\(r_{0,k}\)、\(r_{b,k}\)、\(d_k\)、primary 或 adjacent estimand，也不把它们冒充已选
@@ -416,8 +445,10 @@ bias。prefix fit、half-fit 与 arm-quality comparison 都不得冒充 confirma
 evidence；suffix 只支持相对该 proxy 的 temporal held-out consistency，shared-source error 与
 visual systematic error 仍存在。
 
-O1E-ANCHOR=A、O1E-BASIS=A 与 O1E-REFERENCE=A 均不冻结 `δ_MME`；O1E-ANCHOR-CONTRACT
-仍为 pending / `UNFROZEN`，`δ_MME` 仍为 `UNFROZEN`，
+O1E-ANCHOR=A、O1E-BASIS=A 与 O1E-REFERENCE=A 均不冻结 `δ_MME`；
+O1E-ANCHOR-CONTRACT-PATH=A 也只冻结 closure path。O1E-ANCHOR-CONTRACT 仍为 pending /
+`UNFROZEN`，`δ_MME`
+仍为 `UNFROZEN`，
 `μ_d [rad²]` 仍是目标 population 上 true mean paired squared-SO(3)-loss improvement 的未知
 estimand。仍未冻结：requirement record tuple、exact endpoint semantic object/record selection、
 timestamp parser/pairing、
@@ -425,8 +456,9 @@ timestamp parser/pairing、
 population/domain、severity/risk、requirement threshold、mapping、`μ_d`、positive `δ_MME`、
 rounding/strict boundary、`O1E-MME` adoption、
 `O1E-ADJ`/`O1E-POWER`、`U/S/V/A` decisions、schema/solver/Jacobian/support、protocol numeric
-field、implementation go 与 Q3 outcome。它们均保持 pending / `UNFROZEN`；下一项只能是
-O1E-ANCHOR-CONTRACT，O1E-ENDPOINT 必须等待且不得提前代选。
+field、implementation go 与 Q3 outcome。除已选择的 path label 外，它们均保持 pending /
+`UNFROZEN`；下一项只能是 O1E-ANCHOR-CONTRACT-LOCATOR，O1E-ENDPOINT 必须等待且不得提前
+代选。没有 locator 时不得询问 endpoint。
 
 当且仅当该 component 的全部前置与 support 充分，且按 S1 最终冻结的同一 overall
 alpha/critical law 计算的 held-out mean improvement 单侧下置置信界满足
@@ -689,8 +721,10 @@ knobs、fallback、第二套积分器及无实际必要的 README 修改。
 3. §6 primary、12 项 equivalence、mandatory adjacent diagnostic components 的完整自身 null、
    S1 单一 overall alpha/critical law/df/SE/HAC validity、各自 support/power、严格 component
    boundary 与全部剩余 owner budgets；O1-DELTA=A 的 `primary.delta_loss_rad2=0`
-   以及 O1E-ANCHOR=A、O1E-BASIS=A、O1E-REFERENCE=A 已冻结，但 O1E-ANCHOR-CONTRACT 仍
-   pending / `UNFROZEN`，且不代表本项其他 blockers 已闭合；
+   以及 O1E-ANCHOR=A、O1E-BASIS=A、O1E-REFERENCE=A 已冻结，
+   O1E-ANCHOR-CONTRACT-PATH=A 已选择；但当前仍为 `PATH_A_SELECTED / AWAITING_LOCATOR`，
+   actual tuple 与 category locator/authorization 均未提供、未验证，O1E-ANCHOR-CONTRACT 仍
+   pending / `UNFROZEN`，O1E-ENDPOINT waiting，且不代表本项其他 blockers 已闭合；
 4. §8.1 exact versioned artifact/manifest schemas，以及 machine-checkable `claim_scope`、
    `diagnostic-only`、`no-component-claim` 语义；
 5. near-\(\pi\)、gap-run、nonconvergence、V1 component truth table 与 V2 aggregate precedence 的
@@ -700,4 +734,5 @@ knobs、fallback、第二套积分器及无实际必要的 README 修改。
 8. issue/comment 明确授予 §10.3 allowlist。
 
 在此之前，正确动作是保留 Q2 已验证能力、记录 **protocol amendment STOP**，不实现“先跑再
-补门”。
+补门”。Q3 implementation 保持 STOP，Q3 plan 5/5 todos 保持 pending；当前唯一下一项 owner
+decision 是 O1E-ANCHOR-CONTRACT-LOCATOR，未取得 locator 前不得询问 O1E-ENDPOINT。
