@@ -4,12 +4,14 @@
 
 状态：module/data/structural contract draft 已完成；**O0=A、O1-DELTA=A
 （`primary.delta_loss_rad2=0`）、O1E-ANCHOR=A、O1E-BASIS=A 与 O1E-REFERENCE=A 已冻结，
-O1E-PATH=A 与 O1E-ANCHOR-CONTRACT-PATH=A 已选择；当前为
-`PATH_A_SELECTED / AWAITING_LOCATOR`，O1E-ANCHOR-CONTRACT pending / `UNFROZEN`，
-下一项仅为 O1E-ANCHOR-CONTRACT-LOCATOR，O1E-ENDPOINT 必须等待，其余 amendment pending，
-protocol amendment STOP**。这不是 DUT fail：actual identifier/version/owner/baseline provenance
-与 category locator/authorization 均未提供、未验证，完整统计、solver、schema 与 owner budgets
-尚未冻结，Q3 plan 5/5 todos 仍 pending，Q3 implementation 与 Q4+ 未授权。
+O1E-PATH=A、O1E-ANCHOR-CONTRACT-PATH=A 与 O1E-ANCHOR-CONTRACT-LOCATOR=A 已选择；当前为
+`PATH_A_SELECTED / LOCATOR_A_SELECTED(EXTERNAL_AUTHORITY) / AWAITING_CANONICAL_LOCATOR`，
+O1E-ANCHOR-CONTRACT pending / `UNFROZEN`，下一项仅为
+O1E-ANCHOR-CONTRACT-CANONICAL-LOCATOR，O1E-ENDPOINT 必须等待，其余 amendment pending，
+protocol amendment STOP**。这不是 DUT fail：actual canonical locator、identifier、version、
+owner、baseline provenance、category locator、authorization 与 adoption 均未提供、未验证，
+完整统计、solver、schema 与 owner budgets 尚未冻结，Q3 plan 5/5 todos 仍 pending，Q3
+implementation 与 Q4+ 未授权。
 
 关联：issue [#38](https://github.com/Nothand0212/phad-vio/issues/38)
 
@@ -51,6 +53,10 @@ protocol。
 `O1E-ANCHOR-CONTRACT-PATH=A` 也是 user/owner selected 的 stable textual decision label；它不是
 schema field，只冻结采用 existing qualified record 路径，不闭合 O1E-ANCHOR-CONTRACT，也不冻结
 endpoint semantics。
+`O1E-ANCHOR-CONTRACT-LOCATOR=A selected` 是另一个必须原样保留的 stable textual decision
+label，不得事后改名为 `AUTHORITY=A`；它只选择 canonical authority 的 location/class 为非
+repo/GitHub Issue 的受控 product-requirement system，不是 actual locator payload。严格下游
+textual node `O1E-ANCHOR-CONTRACT-CANONICAL-LOCATOR` 仍 pending。
 O1E-REFERENCE=A 是 stable textual decision-record，只冻结 common reference bytes/source
 identity，不是 schema field 或 methodology PASS。O1-DELTA 以外的
 `O1E-ANCHOR-CONTRACT`（已选 requirement 的 exact record identifier/version/owner/baseline
@@ -65,8 +71,11 @@ support 的实质合同。pending decisions 的依赖与提问顺序只引用
 [budget §6 唯一 canonical decision DAG](m4-minimal-gyro-q3-outcome-independent-budget-research.md#6-无循环-decision-dag)
 和 [budget §8 owner choices](m4-minimal-gyro-q3-outcome-independent-budget-research.md#8-owner-choices-顺序与最小下一步)；
 本文不复制该 DAG 或 V2 alternatives，owner 选择后只在本文单向写入 adopted normative contract。
-当前 contract 状态是 `PATH_A_SELECTED / AWAITING_LOCATOR`；actual tuple 与 category
-locator/authorization 均未提供、未验证。可检索 repo/Git/Issue 范围的三条独立审计均为
+当前 contract 状态是
+`PATH_A_SELECTED / LOCATOR_A_SELECTED(EXTERNAL_AUTHORITY) / AWAITING_CANONICAL_LOCATOR`；
+actual canonical locator、identifier、version、owner、baseline provenance、category locator、
+authorization 与 adoption 均未提供、未验证，且不能从 external system class 推定。可检索
+repo/Git/Issue 范围的三条独立审计均为
 `QUALIFIED existing record=0`；该 `NOT FOUND` 只覆盖
 [审计 note](m4-minimal-gyro-q3-anchor-contract-record-audit.md)声明的范围，不证明不存在任何外部
 record。
@@ -380,8 +389,11 @@ field。exact product requirement identifier/version/owner/baseline provenance �
 pending node O1E-ANCHOR-CONTRACT 单独管理，实际 tuple 尚未提供和验证；common reference
 bytes/source identity 已由 O1E-REFERENCE=A 独立冻结，两者不得合并。
 O1E-ANCHOR-CONTRACT-PATH=A 已由 user/owner 选择，只冻结采用 existing qualified record 路径；
-当前 `PATH_A_SELECTED / AWAITING_LOCATOR`。下一项只允许选择
-O1E-ANCHOR-CONTRACT-LOCATOR，O1E-ENDPOINT 与 exact endpoint semantics 必须等待。
+O1E-ANCHOR-CONTRACT-LOCATOR=A 也已由 user/owner 选择，但只冻结 canonical authority 的
+location/class 为 external controlled product-requirement system，不是 actual locator payload。
+当前为 `PATH_A_SELECTED / LOCATOR_A_SELECTED(EXTERNAL_AUTHORITY) / AWAITING_CANONICAL_LOCATOR`。
+下一项只允许选择
+O1E-ANCHOR-CONTRACT-CANONICAL-LOCATOR，O1E-ENDPOINT 与 exact endpoint semantics 必须等待。
 `1 s` 只是该 product
 endpoint 的 identity/horizon，不自动
 冻结 Q3 analytical aggregation/window/block/axis/frame/reference semantics。
@@ -412,25 +424,39 @@ post-outcome analysis 都不得改变或重新解释其 reference 角色。
 O1E-ANCHOR-CONTRACT 不是 schema field，当前继续 pending / `UNFROZEN`。它只负责
 O1E-ANCHOR=A 已选 requirement 的 exact record identifier/version/owner/baseline provenance；
 不冻结 endpoint semantics、threshold、risk、metric、reference、mapping 或任何 numeric gate。
-closure path A 的 selected 历史与当前 pending locator A/B/C 见
+closure path A、locator A 的 selected 历史与当前 pending canonical-locator A/B/C 见
 [budget §7.5](m4-minimal-gyro-q3-outcome-independent-budget-research.md#75-o1e-anchor-contractselected-requirement-的-record-contract)，
-任何 actual identifier/version/owner/baseline provenance 与 category locator/authorization 均未
-提供、未验证；本次也不得自动补造 tuple。anchor contract 的唯一 canonical DAG 只见
+actual canonical locator、identifier、version、owner、baseline provenance、category locator、
+authorization 与 adoption 均未提供、未验证；本次也不得从 external system class 自动补造。
+anchor contract 的唯一 canonical DAG 只见
 [budget §6](m4-minimal-gyro-q3-outcome-independent-budget-research.md#6-无循环-decision-dag)，本文不复制
-该子 DAG。当前状态摘要仍是 `PATH_A_SELECTED / AWAITING_LOCATOR`；下一节点仅为 locator，
-tuple verification 必须在 locator 之后，owner authorization 又必须在 verification 通过之后，
-不得合并或先行；合同 closed 前 O1E-ENDPOINT 必须等待。
+该子 DAG。当前状态摘要仍是
+`PATH_A_SELECTED / LOCATOR_A_SELECTED(EXTERNAL_AUTHORITY) / AWAITING_CANONICAL_LOCATOR`；
+下一节点仅为 canonical locator；actual canonical locator 未取得前不得进入 tuple verification，
+owner authorization 又必须在 verification 通过之后，不得合并或先行；合同 closed 前
+O1E-ENDPOINT 必须等待。
 
-locator alternatives 按 canonical authority 的实际所在地互斥，并与 budget/audit 同义：
+原 locator location/class alternatives 现为历史决策记录，并与 budget/audit 同义：
 
-- **A（推荐，pending）**：canonical authority 位于非 repo/GitHub Issue 的受控
-  product-requirement system；提供 immutable canonical permalink / exact record ID。
-- **B（pending）**：canonical authority 本身位于 repo 或 GitHub Issue；提供 immutable
-  `commit:path#anchor` 或 issue/comment permalink。外部 requirement system 的 repo/Issue 镜像不属于 B。
-- **C（pending）**：确认没有 qualified existing record，撤回当前 existing-record closure 路线，
-  切换到创建并批准新 versioned requirement baseline 的路线；在新 baseline 获批准前继续 STOP。
+- **A（selected）**：canonical authority 位于非 repo/GitHub Issue 的受控
+  product-requirement system。
+- **B（not selected for this decision）**：canonical authority 本身位于 repo 或 GitHub Issue。
+- **C（not selected for this decision）**：确认没有 qualified existing record 并切换到新 baseline
+  路线。
 
-三项均保持可选，B/C 不是永久否决；任一选择都不得自动补造 tuple 或越级进入 O1E-ENDPOINT。
+B/C 不是永久否决未来路径变更。stable label 必须原样保留为
+`O1E-ANCHOR-CONTRACT-LOCATOR=A selected`，不得改名为 `AUTHORITY=A`。
+
+下一项 `O1E-ANCHOR-CONTRACT-CANONICAL-LOCATOR` 按当前可提供性互斥：
+
+- **A（推荐，pending）**：现在提供 immutable canonical permalink；若知道 exact record ID，可
+  一并提供。
+- **B（pending）**：仅当该受控系统没有 immutable permalink 时，提供明确 system instance/name
+  与 exact record ID。
+- **C（pending）**：当前两者都不能提供，继续 pending / STOP；不等于 record 不存在，不自动
+  撤回 path A/locator A，也不授权新 baseline。
+
+任一选择都不得自动补造 tuple 或越级进入 O1E-ENDPOINT。
 
 上述条款只定义 product endpoint evidence semantics，不改写或升级当前 Q3 analytic
 \(\Delta R^{vis}\)、\(r_{0,k}\)、\(r_{b,k}\)、\(d_k\)、primary 或 adjacent estimand，也不把它们冒充已选
@@ -457,8 +483,8 @@ population/domain、severity/risk、requirement threshold、mapping、`μ_d`、p
 rounding/strict boundary、`O1E-MME` adoption、
 `O1E-ADJ`/`O1E-POWER`、`U/S/V/A` decisions、schema/solver/Jacobian/support、protocol numeric
 field、implementation go 与 Q3 outcome。除已选择的 path label 外，它们均保持 pending /
-`UNFROZEN`；下一项只能是 O1E-ANCHOR-CONTRACT-LOCATOR，O1E-ENDPOINT 必须等待且不得提前
-代选。没有 locator 时不得询问 endpoint。
+`UNFROZEN`；下一项只能是 O1E-ANCHOR-CONTRACT-CANONICAL-LOCATOR，O1E-ENDPOINT 必须等待且
+不得提前代选。没有 actual canonical locator 时不得进入 tuple verification 或询问 endpoint。
 
 当且仅当该 component 的全部前置与 support 充分，且按 S1 最终冻结的同一 overall
 alpha/critical law 计算的 held-out mean improvement 单侧下置置信界满足
@@ -722,8 +748,11 @@ knobs、fallback、第二套积分器及无实际必要的 README 修改。
    S1 单一 overall alpha/critical law/df/SE/HAC validity、各自 support/power、严格 component
    boundary 与全部剩余 owner budgets；O1-DELTA=A 的 `primary.delta_loss_rad2=0`
    以及 O1E-ANCHOR=A、O1E-BASIS=A、O1E-REFERENCE=A 已冻结，
-   O1E-ANCHOR-CONTRACT-PATH=A 已选择；但当前仍为 `PATH_A_SELECTED / AWAITING_LOCATOR`，
-   actual tuple 与 category locator/authorization 均未提供、未验证，O1E-ANCHOR-CONTRACT 仍
+   O1E-ANCHOR-CONTRACT-PATH=A 与 O1E-ANCHOR-CONTRACT-LOCATOR=A 已选择；后者只选择
+   external authority location/class，不是 actual locator payload。当前仍为
+   `PATH_A_SELECTED / LOCATOR_A_SELECTED(EXTERNAL_AUTHORITY) / AWAITING_CANONICAL_LOCATOR`，
+   actual canonical locator、identifier、version、owner、baseline provenance、category locator、
+   authorization 与 adoption 均未提供、未验证，O1E-ANCHOR-CONTRACT 仍
    pending / `UNFROZEN`，O1E-ENDPOINT waiting，且不代表本项其他 blockers 已闭合；
 4. §8.1 exact versioned artifact/manifest schemas，以及 machine-checkable `claim_scope`、
    `diagnostic-only`、`no-component-claim` 语义；
@@ -735,4 +764,5 @@ knobs、fallback、第二套积分器及无实际必要的 README 修改。
 
 在此之前，正确动作是保留 Q2 已验证能力、记录 **protocol amendment STOP**，不实现“先跑再
 补门”。Q3 implementation 保持 STOP，Q3 plan 5/5 todos 保持 pending；当前唯一下一项 owner
-decision 是 O1E-ANCHOR-CONTRACT-LOCATOR，未取得 locator 前不得询问 O1E-ENDPOINT。
+decision 是 O1E-ANCHOR-CONTRACT-CANONICAL-LOCATOR，未取得 actual canonical locator 前不得进入
+TUPLE_VERIFICATION 或询问 O1E-ENDPOINT。
