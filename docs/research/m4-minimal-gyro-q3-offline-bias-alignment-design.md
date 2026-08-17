@@ -3,9 +3,10 @@
 日期：2026-08-13
 
 状态：module/data/structural contract draft 已完成；**O0=A、O1-DELTA=A
-（`primary.delta_loss_rad2=0`）与 O1E-ANCHOR=A 已冻结，其余 amendment pending，
+（`primary.delta_loss_rad2=0`）、O1E-ANCHOR=A 与 O1E-BASIS=A 已冻结，
+O1E-PATH=A 已选择；下一项仅为 exact product reference identity，其余 amendment pending，
 protocol amendment STOP**。这不是 DUT fail：完整统计、solver、schema 与 owner budgets 尚未
-冻结，Q3 implementation 与 Q4+ 未授权。
+冻结，Q3 plan 5/5 todos 仍 pending，Q3 implementation 与 Q4+ 未授权。
 
 关联：issue [#38](https://github.com/Nothand0212/phad-vio/issues/38)
 
@@ -18,7 +19,7 @@ protocol amendment STOP**。这不是 DUT fail：完整统计、solver、schema 
 - [Q3 实施计划](../plans/2026-08-13_m4_gyro_q3_align_0e897ba8.plan.md)
 
 本文是 Q3 O0/统计合同的**唯一 normative executable protocol authority**。其中明确标为已冻结的
-O0/O1-DELTA/O1E-ANCHOR 条款可规范性引用；标为 pending 的条目仍不可执行。所选
+O0/O1-DELTA/O1E-ANCHOR/O1E-BASIS 条款可规范性引用；标为 pending 的条目仍不可执行。所选
 product endpoint 持有 meaningful-effect evidence authority；它不持有 executable protocol
 authority。budget 文档只记录 evidence
 与 owner decision history，structural research 只记录来源/历史，implementation plan 只安排步骤，
@@ -42,7 +43,7 @@ amendment blockers。不得把 candidate formula、future allowlist 或接口草
 protocol。
 
 本次 amendment 在 O0=A 之上已写入 O1-DELTA=A 的
-`primary.delta_loss_rad2=0`，并写入 O1E-ANCHOR=A。O1-DELTA 以外的
+`primary.delta_loss_rad2=0`，并写入 O1E-ANCHOR=A 与 O1E-BASIS=A。O1-DELTA 以外的
 `O1E-MME`（primary positive `δ_MME` evidence package + owner adoption decision）、
 `O1E-ADJ`（adjacent-equivalence effect/margin）与 `O1E-POWER`（target power）
 仍 pending / `UNFROZEN`。这三个名称只是稳定的 textual decision-record IDs，不是
@@ -323,15 +324,35 @@ relative-orientation consistency / product orientation-quality requirement 是 p
 evidence chain 的唯一上位 normative anchor，并持有 meaningful-effect evidence authority。
 Q3 design 仍是唯一 executable protocol authority。`O1E-ANCHOR=A` 与 budget 中只选定
 workflow 的 `O1E-PATH=A` 是不同 decision labels；两者都不是 protocol schema
-field。exact product requirement identifier/version/owner/baseline provenance 与 exact endpoint
-semantics 仍待提供和冻结。`1 s` 只是该 product endpoint 的 identity/horizon，不自动
+field。exact product requirement identifier/version/owner/baseline provenance、exact product
+reference identity/bytes/identifier/version/owner/baseline provenance 与 exact endpoint semantics
+仍待提供和冻结；下一项只允许冻结 exact product reference identity。`1 s` 只是该 product
+endpoint 的 identity/horizon，不自动
 冻结 Q3 analytical aggregation/window/block/axis/frame/reference semantics。
 
-该 endpoint-anchor 决策不冻结 `δ_MME`；`δ_MME` 仍为 `UNFROZEN`，`μ_d [rad²]`
-仍是目标 population 上 true mean paired squared-SO(3)-loss improvement 的未知 estimand。
-threshold、population/domain、aggregation/window/axis、severity/risk、mapping/formula、candidate、
-rounding、strict boundary、`O1E-MME` adoption、`O1E-ADJ`、`O1E-POWER` 与其他
-owner/protocol decisions 均仍 pending / `UNFROZEN`。
+O1E-BASIS=A 冻结且仅冻结以下规范条款：downstream product endpoint 的 primitive comparison
+basis 是 **arm-wise common-reference quality**。zero-bias arm 与 fitted-bias arm 必须先各自相对
+同一个 downstream product-reference role 评价 endpoint-native quality；paired benefit 只能随后由
+这两项 arm quality 派生。该 common-reference 关系必须两臂共享、arm-independent 且
+pre-outcome；reference 不得由任一 arm output、fitted bias、future DUT/outcome 或 desired PASS
+选择。`O1E-BASIS=A` 是稳定 textual decision-record ID，不是 JSON/schema/protocol field。
+
+上述条款只定义 product endpoint evidence semantics，不改写或升级当前 Q3 analytic
+\(\Delta R^{vis}\)、\(r_{0,k}\)、\(r_{b,k}\)、\(d_k\)、primary 或 adjacent estimand，也不把它们冒充已选
+product reference。只有 exact reference、metric 与 mapping 后续分别冻结后，两项 product
+endpoint arm quality 才可单向映射到 Q3 paired estimand；绝不能由 `d_k`、`μ_d` 或 outcome
+反向定义 reference 或 threshold。hazard-analysis 与 mission-success endpoint 仍只是未选作
+co-equal anchor；该状态不是对它们的全局否决。
+
+O1E-ANCHOR=A 与 O1E-BASIS=A 均不冻结 `δ_MME`；`δ_MME` 仍为 `UNFROZEN`，
+`μ_d [rad²]` 仍是目标 population 上 true mean paired squared-SO(3)-loss improvement 的未知
+estimand。仍未冻结：exact product reference identity/bytes/identifier/version/owner/baseline
+provenance、任何具体 GT/reference、metric/loss/formula、1 s analytical window/block、time pairing、
+axis/frame/direction/handedness、target population/domain、risk/severity/threshold、mapping
+assumptions/formula、`μ_d`、positive `δ_MME`、rounding/strict boundary、`O1E-MME`/
+`O1E-ADJ`/`O1E-POWER`、`U/S/V/A` decisions、schema/protocol numeric field、implementation go
+与 Q3 outcome。它们均保持 pending / `UNFROZEN`；下一项只能是 exact product reference
+identity，不得提前代选。
 
 当且仅当该 component 的全部前置与 support 充分，且按 S1 最终冻结的同一 overall
 alpha/critical law 计算的 held-out mean improvement 单侧下置置信界满足
@@ -594,7 +615,7 @@ knobs、fallback、第二套积分器及无实际必要的 README 修改。
 3. §6 primary、12 项 equivalence、mandatory adjacent diagnostic components 的完整自身 null、
    S1 单一 overall alpha/critical law/df/SE/HAC validity、各自 support/power、严格 component
    boundary 与全部剩余 owner budgets；O1-DELTA=A 的 `primary.delta_loss_rad2=0`
-   与 O1E-ANCHOR=A 已冻结，但不代表本项其他 blockers 已闭合；
+   以及 O1E-ANCHOR=A、O1E-BASIS=A 已冻结，但不代表本项其他 blockers 已闭合；
 4. §8.1 exact versioned artifact/manifest schemas，以及 machine-checkable `claim_scope`、
    `diagnostic-only`、`no-component-claim` 语义；
 5. near-\(\pi\)、gap-run、nonconvergence、V1 component truth table 与 V2 aggregate precedence 的
