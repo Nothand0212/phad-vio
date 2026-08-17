@@ -3,8 +3,9 @@
 日期：2026-08-13
 
 状态：module/data/structural contract draft 已完成；**O0=A、O1-DELTA=A
-（`primary.delta_loss_rad2=0`）、O1E-ANCHOR=A 与 O1E-BASIS=A 已冻结，
-O1E-PATH=A 已选择；下一项仅为 exact product reference identity，其余 amendment pending，
+（`primary.delta_loss_rad2=0`）、O1E-ANCHOR=A、O1E-BASIS=A 与 O1E-REFERENCE=A 已冻结，
+O1E-PATH=A 已选择；O1E-ANCHOR-CONTRACT pending / `UNFROZEN`，下一项仅为
+O1E-ANCHOR-CONTRACT，O1E-ENDPOINT 必须等待，其余 amendment pending，
 protocol amendment STOP**。这不是 DUT fail：完整统计、solver、schema 与 owner budgets 尚未
 冻结，Q3 plan 5/5 todos 仍 pending，Q3 implementation 与 Q4+ 未授权。
 
@@ -19,7 +20,7 @@ protocol amendment STOP**。这不是 DUT fail：完整统计、solver、schema 
 - [Q3 实施计划](../plans/2026-08-13_m4_gyro_q3_align_0e897ba8.plan.md)
 
 本文是 Q3 O0/统计合同的**唯一 normative executable protocol authority**。其中明确标为已冻结的
-O0/O1-DELTA/O1E-ANCHOR/O1E-BASIS 条款可规范性引用；标为 pending 的条目仍不可执行。所选
+O0/O1-DELTA/O1E-ANCHOR/O1E-BASIS/O1E-REFERENCE 条款可规范性引用；标为 pending 的条目仍不可执行。所选
 product endpoint 持有 meaningful-effect evidence authority；它不持有 executable protocol
 authority。budget 文档只记录 evidence
 与 owner decision history，structural research 只记录来源/历史，implementation plan 只安排步骤，
@@ -43,10 +44,14 @@ amendment blockers。不得把 candidate formula、future allowlist 或接口草
 protocol。
 
 本次 amendment 在 O0=A 之上已写入 O1-DELTA=A 的
-`primary.delta_loss_rad2=0`，并写入 O1E-ANCHOR=A 与 O1E-BASIS=A。O1-DELTA 以外的
+`primary.delta_loss_rad2=0`，并写入 O1E-ANCHOR=A、O1E-BASIS=A 与 O1E-REFERENCE=A。
+O1E-REFERENCE=A 是 stable textual decision-record，只冻结 common reference bytes/source
+identity，不是 schema field 或 methodology PASS。O1-DELTA 以外的
+`O1E-ANCHOR-CONTRACT`（已选 requirement 的 exact record identifier/version/owner/baseline
+provenance）、
 `O1E-MME`（primary positive `δ_MME` evidence package + owner adoption decision）、
 `O1E-ADJ`（adjacent-equivalence effect/margin）与 `O1E-POWER`（target power）
-仍 pending / `UNFROZEN`。这三个名称只是稳定的 textual decision-record IDs，不是
+仍 pending / `UNFROZEN`。这四个名称都只是稳定的 textual decision-record IDs，不是
 JSON/schema/protocol fields；
 `O2/O3/O4`、`U1/U2/U3`、`S1/S2`、`V1/V2`、`A1/R1` 也继续 pending。尤其不设置
 positive effect、alpha，不冻结 mixed verdict precedence，也不改 schema、solver、Jacobian、
@@ -108,6 +113,42 @@ paths → size/SHA-256 → parse/schema → cross-file order/join → eligibilit
 Q1 final ledger 的 `config_hash=402d1925` 与 input manifest v2 SHA-256
 `aee187f5fd147a1f44e6da2ff68a27cc0eed0c6de8cbbb22264ea7d899bfe5c5` 是 protocol
 provenance，必须写入 report；runner 不能声称从四文件重新验证 config 或原 manifest。
+
+#### 3.1.1 O1E-REFERENCE=A：frozen common-reference identity
+
+本文为已选的唯一 common reference bytes/source identity 定义 stable normalization alias
+`q1-final-visual-posterior-proxy-v1`，它指向
+[Q1 final independent PASS ledger](m4-minimal-gyro-q1-observe-result.md) 中
+`q1_observe_final_q1_final_verifier` 发布的 `est.tum` exact bytes。冻结 identity 为：
+
+```text
+reference_alias=q1-final-visual-posterior-proxy-v1
+artifact=est.tum
+artifact_sha256=18fc4aa6f54977b7bb8386f0b13f4b50b3d67efa5cc61f99982d2ea9bf349321
+source_run=q1_observe_final_q1_final_verifier
+source_commit=74270572cc1fcc2eac82559117efd0951c800ab9
+git_tree_object=e4379bf44db8d1127450d674b60b2e451fbe0aef
+git_ls_tree_sha256=bb5a7854e4a3a89a52c8c0332e965474b8b9b2f2d4cbe0b83bcd7224e35f94ec
+meta_sha256=bbeaa21edaee34733f61b8ef093d45d5b8f4268fc4c0a36da261ee6664e9fab1
+config_hash=402d1925
+input_manifest_v2_sha256=aee187f5fd147a1f44e6da2ff68a27cc0eed0c6de8cbbb22264ea7d899bfe5c5
+```
+
+`O1E-REFERENCE=A` 是本轮 user/owner adopted textual decision record，其
+adoption 对象是已选的 exact `est.tum` bytes/source identity。
+`q1-final-visual-posterior-proxy-v1` 是本文为该 identity 定义的 stable normalization
+alias；它不是用户在原始 A/B/C 中显式采用的命名，也不是 Q1 ledger 的原生字段。
+`O1E-REFERENCE=A` 同样不是 Q1 ledger 原生字段；`source_run` 仍是从 ledger canonical
+output locator 规范化出的 run leaf。其余列出的 artifact、digests、source commit、`git_tree_object`、
+`git_ls_tree_sha256`、meta、config 与 manifest provenance 才逐项摘录/引用 Q1 ledger，且不改写
+ledger。ledger 中的绝对 runtime path 仅是 locator，不属于 stable identity；ledger 明确判废的
+input manifest v1 不得作为有效来源。ledger 另证实 control 与该 run 的 `est.tum`、`kf.tum`、
+`diag.csv` 三项 `cmp` 均 exit `0`；本合同不据此臆造 size、row schema 或额外 reference。
+
+future runner 的两臂只能读取上表中同一份 hash-verified `est.tum` bytes；它不是两份逻辑副本，
+也不得按 arm 选择不同记录来源。本节只冻结 bytes/source identity，不闭合
+O1E-ANCHOR-CONTRACT；`est.tum` 内 exact endpoint semantic object/record selection 与 timestamp
+parser 只能在 O1E-ANCHOR-CONTRACT 闭合后，由 §3.2 和 O1E-ENDPOINT 后续冻结。
 
 ### 3.2 Protocol amendment 必须冻结的 input contract
 
@@ -324,9 +365,11 @@ relative-orientation consistency / product orientation-quality requirement 是 p
 evidence chain 的唯一上位 normative anchor，并持有 meaningful-effect evidence authority。
 Q3 design 仍是唯一 executable protocol authority。`O1E-ANCHOR=A` 与 budget 中只选定
 workflow 的 `O1E-PATH=A` 是不同 decision labels；两者都不是 protocol schema
-field。exact product requirement identifier/version/owner/baseline provenance、exact product
-reference identity/bytes/identifier/version/owner/baseline provenance 与 exact endpoint semantics
-仍待提供和冻结；下一项只允许冻结 exact product reference identity。`1 s` 只是该 product
+field。exact product requirement identifier/version/owner/baseline provenance 由 stable textual
+pending node O1E-ANCHOR-CONTRACT 单独管理，实际 tuple 尚未提供和验证；common reference
+bytes/source identity 已由 O1E-REFERENCE=A 独立冻结，两者不得合并。下一项只允许选择
+O1E-ANCHOR-CONTRACT 的 closure path，O1E-ENDPOINT 与 exact endpoint semantics 必须等待。
+`1 s` 只是该 product
 endpoint 的 identity/horizon，不自动
 冻结 Q3 analytical aggregation/window/block/axis/frame/reference semantics。
 
@@ -334,25 +377,56 @@ O1E-BASIS=A 冻结且仅冻结以下规范条款：downstream product endpoint �
 basis 是 **arm-wise common-reference quality**。zero-bias arm 与 fitted-bias arm 必须先各自相对
 同一个 downstream product-reference role 评价 endpoint-native quality；paired benefit 只能随后由
 这两项 arm quality 派生。该 common-reference 关系必须两臂共享、arm-independent 且
-pre-outcome；reference 不得由任一 arm output、fitted bias、future DUT/outcome 或 desired PASS
-选择。`O1E-BASIS=A` 是稳定 textual decision-record ID，不是 JSON/schema/protocol field。
+pre-outcome；reference 不得由任一 arm output、fitted bias、future DUT/outcome、desired PASS 或
+post-outcome analysis 生成、替换、筛选、修改或重新解释。`O1E-BASIS=A` 是稳定 textual
+decision-record ID，不是 JSON/schema/protocol field。
+
+O1E-REFERENCE=A 冻结且仅冻结以下规范条款：唯一 common reference 是 Q1 final independent PASS run
+`q1_observe_final_q1_final_verifier` 发布且 SHA-256 为
+`18fc4aa6f54977b7bb8386f0b13f4b50b3d67efa5cc61f99982d2ea9bf349321` 的 `est.tum`
+exact bytes；§3.1.1 以 `q1-final-visual-posterior-proxy-v1` 作为该已选 identity 的 stable
+normalization alias。`O1E-REFERENCE=A` 是 user/owner adopted textual decision record，alias 是本文
+定义而非用户在原始 A/B/C 中显式采用的命名，也不是 Q1 ledger 原生字段。该 reference 的角色是 **immutable Q1
+final-qualified visual-posterior reference proxy**，并且是
+two arms shared、arm-independent、pre-outcome、source-identity-only。zero-bias arm 与 fitted-bias
+arm 只能读取同一份 hash-verified bytes。
+
+O1E-REFERENCE=A 不是 schema field 或 methodology PASS。该 proxy 不是 GT、truth、
+physical-orientation oracle、reference gyro bias、arm output，也不是 independent
+product-qualification oracle。任何 arm、fitted bias、future DUT/outcome、desired PASS 或
+post-outcome analysis 都不得改变或重新解释其 reference 角色。
+
+O1E-ANCHOR-CONTRACT 不是 schema field，当前也不是 adopted normative contract。它只负责
+O1E-ANCHOR=A 已选 requirement 的 exact record identifier/version/owner/baseline provenance；
+不冻结 endpoint semantics、threshold、risk、metric、reference、mapping 或任何 numeric gate。
+其 pending A/B/C closure-path candidates 只见
+[budget §7.5](m4-minimal-gyro-q3-outcome-independent-budget-research.md#75-o1e-anchor-contractselected-requirement-的-record-contract)，
+任何实际 tuple 均未提供或选择。
 
 上述条款只定义 product endpoint evidence semantics，不改写或升级当前 Q3 analytic
 \(\Delta R^{vis}\)、\(r_{0,k}\)、\(r_{b,k}\)、\(d_k\)、primary 或 adjacent estimand，也不把它们冒充已选
-product reference。只有 exact reference、metric 与 mapping 后续分别冻结后，两项 product
-endpoint arm quality 才可单向映射到 Q3 paired estimand；绝不能由 `d_k`、`μ_d` 或 outcome
+product endpoint metric。只有 exact endpoint semantics、metric 与 mapping 后续分别冻结后，两项
+product endpoint arm quality 才可单向映射到 Q3 paired estimand；绝不能由 `d_k`、`μ_d` 或 outcome
 反向定义 reference 或 threshold。hazard-analysis 与 mission-success endpoint 仍只是未选作
 co-equal anchor；该状态不是对它们的全局否决。
 
-O1E-ANCHOR=A 与 O1E-BASIS=A 均不冻结 `δ_MME`；`δ_MME` 仍为 `UNFROZEN`，
+Q3 prefix bias fit 对冻结 visual residual 的使用不构成 feedback loop；但 `b_hat` 的唯一允许称谓是
+**visual-posterior-aligned constant gyro bias nuisance estimate**，不得称为 physical/reference gyro
+bias。prefix fit、half-fit 与 arm-quality comparison 都不得冒充 confirmatory held-out/product
+evidence；suffix 只支持相对该 proxy 的 temporal held-out consistency，shared-source error 与
+visual systematic error 仍存在。
+
+O1E-ANCHOR=A、O1E-BASIS=A 与 O1E-REFERENCE=A 均不冻结 `δ_MME`；O1E-ANCHOR-CONTRACT
+仍为 pending / `UNFROZEN`，`δ_MME` 仍为 `UNFROZEN`，
 `μ_d [rad²]` 仍是目标 population 上 true mean paired squared-SO(3)-loss improvement 的未知
-estimand。仍未冻结：exact product reference identity/bytes/identifier/version/owner/baseline
-provenance、任何具体 GT/reference、metric/loss/formula、1 s analytical window/block、time pairing、
-axis/frame/direction/handedness、target population/domain、risk/severity/threshold、mapping
-assumptions/formula、`μ_d`、positive `δ_MME`、rounding/strict boundary、`O1E-MME`/
-`O1E-ADJ`/`O1E-POWER`、`U/S/V/A` decisions、schema/protocol numeric field、implementation go
-与 Q3 outcome。它们均保持 pending / `UNFROZEN`；下一项只能是 exact product reference
-identity，不得提前代选。
+estimand。仍未冻结：requirement record tuple、exact endpoint semantic object/record selection、
+timestamp parser/pairing、
+1 s product analytical window/block、frame/axis/direction/handedness、metric/loss/formula/aggregation、
+population/domain、severity/risk、requirement threshold、mapping、`μ_d`、positive `δ_MME`、
+rounding/strict boundary、`O1E-MME` adoption、
+`O1E-ADJ`/`O1E-POWER`、`U/S/V/A` decisions、schema/solver/Jacobian/support、protocol numeric
+field、implementation go 与 Q3 outcome。它们均保持 pending / `UNFROZEN`；下一项只能是
+O1E-ANCHOR-CONTRACT，O1E-ENDPOINT 必须等待且不得提前代选。
 
 当且仅当该 component 的全部前置与 support 充分，且按 S1 最终冻结的同一 overall
 alpha/critical law 计算的 held-out mean improvement 单侧下置置信界满足
@@ -615,7 +689,8 @@ knobs、fallback、第二套积分器及无实际必要的 README 修改。
 3. §6 primary、12 项 equivalence、mandatory adjacent diagnostic components 的完整自身 null、
    S1 单一 overall alpha/critical law/df/SE/HAC validity、各自 support/power、严格 component
    boundary 与全部剩余 owner budgets；O1-DELTA=A 的 `primary.delta_loss_rad2=0`
-   以及 O1E-ANCHOR=A、O1E-BASIS=A 已冻结，但不代表本项其他 blockers 已闭合；
+   以及 O1E-ANCHOR=A、O1E-BASIS=A、O1E-REFERENCE=A 已冻结，但 O1E-ANCHOR-CONTRACT 仍
+   pending / `UNFROZEN`，且不代表本项其他 blockers 已闭合；
 4. §8.1 exact versioned artifact/manifest schemas，以及 machine-checkable `claim_scope`、
    `diagnostic-only`、`no-component-claim` 语义；
 5. near-\(\pi\)、gap-run、nonconvergence、V1 component truth table 与 V2 aggregate precedence 的
