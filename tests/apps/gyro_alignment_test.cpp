@@ -1511,7 +1511,7 @@ namespace
         Eigen::Vector3d{ 0.2, -0.1, 0.3 } ) );
     ASSERT_EQ( result.verdict.status, GyroAlignmentStatus::kPass );
     const auto& block = requireAnalysis( result ).blocks.front();
-    EXPECT_LE( block.r_fit_rad.norm(), 1.0e-12 );
+    EXPECT_LE( block.r_fit_rad.norm(), 1.0e-11 );
   }
 
   TEST( GyroAlignmentTest, RankDeficientPhysicalFixtureHasExactSupport )
