@@ -492,6 +492,19 @@ if(PHAD_BUILD_TESTS)
   )
   gtest_discover_tests(phad_estimator_tests PROPERTIES LABELS "unit")
 
+  add_executable(phad_online_gyro_bias_oracle_tests
+    tests/estimator/online_gyro_bias_oracle_test.cpp
+  )
+  target_compile_features(phad_online_gyro_bias_oracle_tests PRIVATE cxx_std_20)
+  target_link_libraries(phad_online_gyro_bias_oracle_tests PRIVATE
+    Eigen3::Eigen GTest::gtest_main
+  )
+  target_compile_options(phad_online_gyro_bias_oracle_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+  gtest_discover_tests(phad_online_gyro_bias_oracle_tests
+    PROPERTIES LABELS "unit")
+
   add_executable(phad_viz_tests
     tests/viz/trajectory_panel_test.cpp
   )
