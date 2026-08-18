@@ -4,11 +4,11 @@
 
 状态：设计修订完成；Q1 Observe final independent PASS；Q2 deterministic known-bias
 rotation-only 已在 `d1c4385` 取得 technical PASS under one-time post-hoc
-evidence-retention waiver，original frozen-plan RED exact-record conformance NOT MET。Q3 已完成
-一手研究、无依据 hints 废止、deep one-call seam 选择及 module/data/structural contract draft；
-O0=A 与 O1 primary delta-loss 零容忍已冻结，但完整 input/statistics/solver/schema/
-owner-budget protocol 尚未冻结，当前为 **protocol amendment STOP**。这不是 DUT fail。
-Q3 implementation 与 Q4–Q5 仍未授权。
+evidence-retention waiver，original frozen-plan RED exact-record conformance NOT MET。Q3 的
+repo-owned 协议 `PHAD-M4-Q3-GYRO-ALIGN-V1` 已于 2026-08-18 预注册；其 exact input、split、
+one-shot solver、support、scientific gates、verdict 与 artifact transaction 已冻结。Q3 implementation
+与 qualification 尚未执行；旧 external locator 路线已 superseded、qualification weight=0。
+Q4–Q5 仍未授权。
 
 控制基线：`main@7026ebf` 的 M3 production VO + M4.1 IMU sync 数据通路。MH_01
 权威控制组见 [M4 最小 gyro-aided VO：MH_01 控制组](m4-minimal-gyro-mh01-control.md)。
@@ -29,8 +29,8 @@ Q1 结果：[M4 gyro Q1 Observe 资格结果](m4-minimal-gyro-q1-observe-result.
 Q2 计划与结果：[M4 gyro Q2 Predict](../plans/2026-08-12_m4_gyro_q2_predict_3f69becc.plan.md)；
 [M4 gyro Q2 Predict 资格结果](m4-minimal-gyro-q2-known-bias-predict-result.md)
 
-Q3 structural draft：[调研](m4-minimal-gyro-q3-offline-bias-alignment-research.md)；
-[设计草案](m4-minimal-gyro-q3-offline-bias-alignment-design.md)；
+Q3 protocol：[historical research](m4-minimal-gyro-q3-offline-bias-alignment-research.md)；
+[normative design](m4-minimal-gyro-q3-offline-bias-alignment-design.md)；
 [实施计划](../plans/2026-08-13_m4_gyro_q3_align_0e897ba8.plan.md)
 
 本文档描述当前约定，不是绝对约束，会随项目开发修订。
@@ -177,24 +177,26 @@ sensor / calibration 合同中增加显式的 \(\mathbf T_{BI}\)，不能在实�
 
 ### 4.2 离线 alignment：fit 与 held-out 分开
 
-**Q3 structural draft 勘误（2026-08-13，2026-08-14 更新）：**本节早期描述中的未冻结统计占位，现以
-[Q3 调研](m4-minimal-gyro-q3-offline-bias-alignment-research.md)与
-[Q3 唯一 normative 设计](m4-minimal-gyro-q3-offline-bias-alignment-design.md)为准。固定
-`condition <= 1e6`、至少 60 blocks 和未枚举的 22 项 Holm family 均已废止；历史 Q1 plan
-只作审计、不回写。当前只完成 block/fit-half/SO(3)/module 等结构草案；exact input predicates、
-solver/Jacobian/rank、primary/equivalence/support、outcome 外 owner budgets 与 versioned artifact
-schemas 均须在独立 amendment 冻结并评审。当前是 protocol amendment STOP，不能开始 Q3
-implementation。O0=A 与 O1 primary delta-loss 零容忍的当前状态已在上述 normative design
-同步；本 historical 文档不复制其符号、公式或 strict-boundary oracle。
+**Q3 V1 勘误（2026-08-18）：**本节早期统计占位全部以
+[Q3 唯一 normative design](m4-minimal-gyro-q3-offline-bias-alignment-design.md)为准。
+`condition<=1e6`、至少 60 个完整 validation blocks、90/45 s fit support、20%/2/3/per-axis/
+half-stability gates 现由团队作为 outcome-independent engineering boundaries 重新冻结；它们不是
+外部产品需求。旧 Holm/HAC/TOST/power 与 external locator 层级已删除，不具资格权重。
+implementation、一次真实 qualification 与 result ledger 仍 pending；本文不复制可执行细节。
 
 离线工具只使用第 1 趟已经发布的 \(\mathbf T_{WB}\) 和 packet dump，不重新实现 sync。
 
 对 MH_01 使用固定的时间协议：
 
-- fit：从首个 eligible interval 起的前 100 s；
-- validation：100 s 之后的剩余 suffix；
+- `t0` 无条件取 input contract 中唯一 `first_zero` sentinel 的 `t_cur_ns`，不得由 eligibility、
+  near-pi、fit status 或结果移动；
+- fit：以 checked add 得到 `t_mid=t0+50 s`、`t_split=t0+100 s`，并按该固定 range 取 full/early/late；
+- validation：`t_split` 之后的剩余 suffix；
 - exact 起止 timestamp、eligible count 和 duration 写入产物；
 - 100 s 是本实验 protocol，不是 production initializer 参数。
+
+以上只作跨 slice 摘要；空 fit-universe、calendar slots 与全部可执行细节仍只由
+[Q3 唯一 normative design](m4-minimal-gyro-q3-offline-bias-alignment-design.md)定义。
 
 在 fit prefix 上求一个全局常值 bias：
 
@@ -234,9 +236,9 @@ alignment 证据包括：
 5. 当时拟议报告 exact contiguous visual interval 的 packet count/duration 占 all-valid packet
    的比例；该比例不设 95% 硬门，也不得通过 merge packet 或新增全帧 state 提高。
 
-现行唯一统计合同、已冻结决策和全部 pending blockers 只见
-[Q3 normative design](m4-minimal-gyro-q3-offline-bias-alignment-design.md)。不得从上述历史列表推导当前
-condition、half、adjacent、1 s 或任何“显著结构”门，也不得看到 ATE 后回改现行合同。
+现行唯一统计/数值合同只见
+[Q3 normative design](m4-minimal-gyro-q3-offline-bias-alignment-design.md)。不得从上述历史列表推导
+额外门，也不得在真实 qualification 后回改现行合同。
 
 不再设置 \(\lVert\hat b_g\rVert<0.05\) rad/s 之类绝对大小门。bias 大小本身不证明
 alignment 错误；应由可观性、稳定性和 held-out residual 决定。
@@ -354,8 +356,9 @@ VO 合同：
 |---|---|
 | `gyro_packets.csv` | packet 端点、segment、gap、sample count、sum_dt、合同状态；Q1 必需 |
 | `gyro_samples.csv` | 每个 packet 的逐样本 timestamp 与三轴 gyro（rad/s），保留 sample 顺序与共享端点；Q1 必需 |
-| `gyro_alignment.json` | fit / validation 范围、bias、rank、condition、covariance、门结果、输入 hash |
-| `gyro_alignment.csv` | 每 interval 的 visual / IMU rotation、zero / corrected residual、split |
+| `gyro_alignment.json` | V1 summary/provenance/ranges/fit/rank/support/gates/verdict |
+| `gyro_alignment_blocks.csv` | 完整 validation block 的 zero/fitted 三轴 residual 与 loss；不复制 summary |
+| `gyro_alignment.manifest.json` | 最后发布的 completion marker；两项 science outputs 与四输入 size/hash |
 | `gyro_factor.csv` | eligible、attached、skip reason、covariance eigenvalues、factor residual |
 | 第 2 趟 `meta.json` | frozen bias / covariance 来源、实验开关、canonical config、artifact hash |
 
@@ -386,7 +389,7 @@ factor-enabled run 才记录 `enable_gyro_factor=true` 及全部冻结参数。G
 |---|---|
 | Q0 / Q1 | IMU-off 三主产物与 control byte-identical；canonical hash `402d1925` |
 | Q2 | known-bias synthetic integration 解析门通过；不使用 MH_01 bias fit 或 ATE |
-| Q3 | structural draft 已完成；O0=A 与 O1 primary delta-loss 零容忍已冻结；其余 protocol amendment pending/STOP；implementation 未授权；完整 PASS 前不开 factor |
+| Q3 | `PHAD-M4-Q3-GYRO-ALIGN-V1` 已预注册；implementation/qualification/result pending；只有 PASS 可另写 Q4 controlled-factor plan，完整 PASS 前不开 factor |
 | Q4 active | 以 graph-state-compatible packets 为唯一 eligible 分母，`attached / eligible = 1.0` 且 attached 非零；另报 compatible / all-valid packet count 与 duration，仅作描述性覆盖，不设 0.95 硬门 |
 | Q4 mechanism | synthetic fixed graph 全过；frozen-input 首次变化符合 factor 作用方向 |
 | Q5 translation guardrail | exact-common ATE RMSE ≤ `0.100 m` |
@@ -465,8 +468,8 @@ lifecycle 可接受，再让 IMU 取得进入该 posterior 的资格。
    调用固定 `d1c4385` / tree archive，fresh 定向 10/10，并重现相同 shared-endpoint
    actual、closure 与 duration。v1 header 与实际 `env -i` 矛盾，已被 supersede，不得作最终
    命令证据，无需删除。
-3. Q3 已完成一手研究、旧 `condition <= 1e6`/固定 60 blocks/未枚举 22 项 family 的废止、
-   deep one-call seam 选择与 structural draft；O0=A 与 O1 primary delta-loss 零容忍已冻结，
-   但完整 input/statistics/solver/schema/owner-budget amendment 仍 pending。当前是 protocol
-   amendment STOP，不是 DUT fail；Q3 implementation 保持未授权。
+3. Q3 的 repo-owned `PHAD-M4-Q3-GYRO-ALIGN-V1` 已冻结为短小可执行合同；旧 external
+   locator、Holm/HAC/TOST/power 层级已 superseded。下一步严格按五步计划完成 eval hardening、
+   exact RED、GREEN synthetic verification、一次独立 frozen-input qualification 与 result ledger；
+   当前 implementation/qualification 尚未执行。
 4. 后续 Q4–Q5 仍须在各自上一层通过后逐层新建独立计划，不直接跳到 full VIO。

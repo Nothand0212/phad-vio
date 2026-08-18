@@ -606,14 +606,15 @@ PnP stereo 一致性仲裁：[#25](https://github.com/Nothand0212/phad-vio/issue
 
 ## M4：接入 IMU
 
-**当前状态（2026-08-14）：M4.1 数据路径已完成；Q1 Observe final independent PASS；
+**当前状态（2026-08-18）：M4.1 数据路径已完成；Q1 Observe final independent PASS；
 Q2 deterministic known-bias rotation-only 已在 `d1c4385` 取得 technical PASS under
 one-time post-hoc evidence-retention waiver，original frozen-plan RED exact-record conformance
-NOT MET；Q3 已完成一手研究、无依据 hints 废止、deep one-call seam 选择及
-module/data/structural contract draft；O0=A 与 O1 `primary.delta_loss_rad2=0` 已 resolved。剩余
-effects/power、S1、V2、schema、solver/Jacobian 与 support 仍 pending，当前 protocol amendment
-STOP（非 DUT fail）。O0/O1 的规范语义只见
-[Q3 normative design](research/m4-minimal-gyro-q3-offline-bias-alignment-design.md#6-o0-normative-statistical-protocol)。**
+NOT MET。Q3 repo-owned protocol `PHAD-M4-Q3-GYRO-ALIGN-V1` 已预注册，exact input、split、
+one-shot solver、support、scientific gates、verdict 与 artifact transaction 已冻结；
+`implementation_go=satisfied`、`docs_gate=pending`，故 implementation 仍 STOP，一次 frozen-input
+qualification 与 result ledger 尚未执行。旧 external locator 路线已 superseded、qualification
+weight=0；唯一规范语义见
+[Q3 normative design](research/m4-minimal-gyro-q3-offline-bias-alignment-design.md)。**
 M4.1 之后的
 measurement / factor 接入改按
 [证据门控的信息接入](agents/evidence-gated-integration.md)与
@@ -632,27 +633,32 @@ lifecycle 仅作 historical non-qualifying，qualifying weight = `0`，later del
 调用固定 `d1c4385` / tree archive，fresh 定向 10/10，并重现相同 shared-endpoint actual、closure
 与 duration。v1 inherited-environment header 与实际 `env -i` 矛盾，已被 supersede，不得作最终
 命令证据，无需删除。这是一次性且不泛化的 evidence-retention 例外，不声明 MH_01、EuRoC、
-ATE/RPE、noise/covariance/whitening 或 stochastic 产品资格；只授权 Q3
-plan/design，Q3 implementation 仍未授权。Q3 文档按角色分工：
+ATE/RPE、noise/covariance/whitening 或 stochastic 产品资格。Q2 ledger 当时“只授权 Q3
+plan/design”的历史边界保持原样；2026-08-18 后置用户指令明确唯一目标是做出 VIO、实现路径交由
+团队决定，构成 Issue #39 要求的 separate explicit Q3 implementation go，并仅为 Q3 supersede
+该旧权限上限，不修改或否认 Q2 历史结论。当前 `implementation_go=satisfied`，但
+`docs_gate=pending`；docs review/verifier/精确 docs commit/clean 只是使用既有 go 的先决条件，不会
+自动产生授权。gate 闭合后仅可按五步计划进入 hardening、RED、GREEN 与恰好一次 qualification，
+不授权 Q4 implementation。Q3 文档按角色分工：
 
-- research inputs：[outcome-independent budget / owner decision record](research/m4-minimal-gyro-q3-outcome-independent-budget-research.md)
-  与 [structural/historical research](research/m4-minimal-gyro-q3-offline-bias-alignment-research.md)；
+- historical inputs：[superseded budget research](research/m4-minimal-gyro-q3-outcome-independent-budget-research.md)
+  与 [structural/source research](research/m4-minimal-gyro-q3-offline-bias-alignment-research.md)；
 - 唯一 normative protocol authority：[Q3 design](research/m4-minimal-gyro-q3-offline-bias-alignment-design.md)；
 - implementation sequence：[Q3 plan](plans/2026-08-13_m4_gyro_q3_align_0e897ba8.plan.md)。
 
-旧 `condition <= 1e6`、固定 60 blocks 与 22-Holm 只是已废止历史 hints。fixed-point 旧
-alpha 数值/分配也已全部退役，不得当作候选资格证据；唯一逐项账本见
-[budget research §4.1](research/m4-minimal-gyro-q3-outcome-independent-budget-research.md#41-fixed-point-旧-alpha-tuple-退役账本)。
+V1 将 `condition<=1e6`、60 blocks、90/45 s 与 20%/2/3/per-axis/half-stability 明确作为团队
+outcome-independent engineering boundaries；不冒充外部产品需求。旧 22-Holm、HAC/TOST/power、
+alpha tuple 与 locator DAG 均只作 historical record，不进入 V1 verdict。
 
 当前权威路线只包含：
 
 - **M4.1 数据路径（已完成）**：`StereoPairSynchronizer::pushImu()` 与
   `StereoImuPacket` 的时间区间、插值和 `imu_gap` 合同；
 - **Q1→Q5（逐层 stop/go）**：只有上一层的证据门通过，下一层才能另建
-  独立计划；Q1 已 PASS，Q2 为 PASS under 上述 one-time waiver；Q3 structural draft
-  已完成，O0=A 与 O1 primary delta-loss 零容忍已 resolved，但剩余 effects/power、S1、
-  V2、schema、solver/Jacobian、support 与 independent review 仍 pending，protocol amendment STOP；
-  Q3 implementation、qualification 与 Q4–Q5 均未被本 roadmap 授权；
+  独立计划；Q1 已 PASS，Q2 为 PASS under 上述 one-time waiver；Q3 V1 protocol 已预注册，
+  `implementation_go=satisfied`、`docs_gate=pending`，gate 闭合前仍 STOP；闭合后按 eval hardening →
+  exact RED → GREEN synthetic → 一次 independent qualification → result ledger 五步推进。只有 Q3
+  PASS 可另写 Q4 controlled-factor plan；Q4–Q5 implementation 均未授权；
 - **Q6 Default（未授权）**：Q1–Q5 即使全部通过，也只能授权另建 online-init /
   跨序列资格设计；不得据此新增或默认开启 production IMU 路径。
 
