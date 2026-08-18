@@ -523,7 +523,7 @@ checkpoint 见
   track-only；关键帧=IMU预积分边界；window_size=10 只含关键帧；见
   [设计](research/m3.3-keyframe-design.md)、
   [开源对照](research/m3.3-keyframe-open-source-refs.md)、
-  [计划](../plans/2026-08-05_m3.3_slice5_keyframe_790dd106.plan.md)）；
+  [计划](plans/2026-08-05_m3.3_slice5_keyframe_790dd106.plan.md)）；
   **Slice ⑤ 实施后全序列恶化已诊断**（5 改善 / 6 恶化，V2_02 +5400% 灾难；
   根因：非 KF PnP 位姿质量差 + CV 链污染 + 关键帧选择对旋转不敏感；见
   [诊断](research/m3.3-slice5-full-suite-results.md)、
@@ -532,7 +532,7 @@ checkpoint 见
   shared<min_pnp_inliers 拒绝门控 + 旋转补偿视差 + 低 track 强制关键帧 +
   snapshot 条件更新；见
   [设计](research/m3.3-slice5b-pose-refine-design.md)、
-  [计划](../plans/2026-08-05_m3.3_slice5b_pose_refine_b42c4a2b.plan.md)）；
+  [计划](plans/2026-08-05_m3.3_slice5b_pose_refine_b42c4a2b.plan.md)）；
   **Slice ⑤b 已实施**（`78f2746` 起）：门控 + pose-only 精修 + 旋转补偿视差 +
   低 track 强制 + snapshot 条件更新；修复 V2_02 灾难（121.2→1.906 m）与
   MH_01 关键帧爆炸（89%→18%，根因是 raw 像素当方向向量 + 旋转方向反）；
@@ -544,7 +544,7 @@ checkpoint 见
   依旧——MH 系列 30px 最优（MH_01 0.063 / MH_05 0.306，门控全过），V1_01
   10px 最优（0.234 vs 30px 0.514）；V1_01 已知债待动态阈值方案；见
   [⑤c 设计](research/m3.3-slice5c-all-frames-ba-design.md)、
-  [⑤c 计划](../plans/2026-08-05_m3.3_slice5c_all_frames_ba_5e9f1a22.plan.md)）；
+  [⑤c 计划](plans/2026-08-05_m3.3_slice5c_all_frames_ba_5e9f1a22.plan.md)）；
   **MH_03 回归根因已诊断**
   （i=1388 仲裁正确拒绝 358 px RMS proposal，但 CV guess 收敛到更差的
   LM 局部极小值——帧级 RMS 比较的内在权衡，不修复；见

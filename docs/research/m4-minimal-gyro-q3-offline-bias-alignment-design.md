@@ -54,24 +54,77 @@ GyroAlignmentResult analyzeGyroAlignment(const GyroAlignmentInput& input);
 `GyroAlignmentInput` 必须已经 typed、parsed、cross-file joined，且不含 path、stream、threshold、
 solver strategy 或 publish callback。`GyroAlignmentResult` 是纯值；分析器不打开文件、不写 artifact。
 
+app 层新增唯一 runner deep module：
+
+```text
+apps/gyro_alignment_runner.hpp
+apps/gyro_alignment_runner.cpp
+```
+
+它公开 owned-value `GyroAlignmentProtocolDescriptor`、唯一 production factory
+`makeGyroAlignmentV1ProtocolDescriptor()` 与
+`runGyroAlignment(descriptor, q1_dir, out_dir)`。descriptor 只包含 `protocol_id`、顺序和长度均冻结的
+exact-four `basename + expected_sha256`、`protocol_identity`、`analyzer_identity` 与 `provenance`；所有
+string、array 与 identity/provenance 成员都由 descriptor 自身持有。descriptor 不含 threshold、solver、
+callback 或 path strategy。runner 是 app deep module，不进入 `phad/` libraries；它是 `lstat`、single-read
+immutable buffers、hash-before-parse、strict parse 与 exact join、调用 analyzer、serialization、atomic
+publish 和 stable error/exit mapping 的唯一所有者。analyzer 与下述 CLI 均不得复制这些职责。
+
 唯一 CLI 是：
 
 ```text
 phad_gyro_align <q1-run-dir> --out <new-output-dir>
 ```
 
-load、hash-before-parse、parse、join、结果序列化与 publish 全属 app composition root。依赖冻结为：
+factory 返回 owned value，并且是 exact V1 binding 的唯一 production authority：固化 V1 ID、§3 exact-four
+basename/hash、preflight receipt 的 protocol identity、§3 Q1/Q2 provenance，以及由当前 build identity
+生成的 analyzer identity。CMake/build 只把已冻结 receipt identity 与
+`source_commit,source_tree,build_type,compiler,compiler_version` build identity 注入 runner target；factory
+负责把它们物化为 descriptor，禁止其他 production 文件复制这些字段或另造 V1 descriptor。
+
+`apps/phad_gyro_align.cpp` 必须是 thin main：只解析上述 exact CLI、调用
+`makeGyroAlignmentV1ProtocolDescriptor()`、把返回值传给 runner 并返回其 exit；不得自行复制任一 V1
+字段，也不得提供 test flag、environment override、descriptor CLI 或其他隐藏入口。production CLI 与
+artifact 合同保持不变。依赖与 target 方向冻结为：
 
 ```text
-analyzer -> Q2 integrateGyroRotation helper + Eigen3::Eigen
-CLI      -> analyzer + phad::eval + nlohmann_json::nlohmann_json + OpenSSL::Crypto
+phad_gyro_alignment        -> phad::estimator + Eigen3::Eigen
+phad_gyro_alignment_runner -> phad_gyro_alignment + phad::eval
+                              + nlohmann_json::nlohmann_json + OpenSSL::Crypto
+phad_gyro_align            -> phad_gyro_alignment_runner
+Q3 tests                   -> phad_gyro_alignment_runner
 ```
 
 Q3 analyzer 不得直接依赖 GTSAM；rotation integration 只经 Q2 helper，其他矩阵、SVD 与 principal
-SO(3) Log 只用 Eigen/std。
+SO(3) Log 只用 Eigen/std。runner 与 CLI 都不得依赖 `phad::io_dataset`、GT reader、ATE 或 RPE。
 
-OpenSSL 只用于 Q3 CLI 的 SHA-256/artifact identity，不扩散到其他产品库。实施前须用 future CMake
-配置实际 probe `OpenSSL::Crypto`；若不可用立即 STOP，不新增自研 SHA、shell helper 或替代依赖。
+OpenSSL 只用于 Q3 runner 的 SHA-256/artifact identity，不扩散到其他产品库。future CMake 必须使用
+`find_package(OpenSSL REQUIRED COMPONENTS Crypto)` 并新增上述 runner target；实施前须实际 probe
+`OpenSSL::Crypto`，若不可用立即 STOP，不新增自研 SHA、shell helper 或替代依赖。
+
+这一 seam 是必要而非测试专用绕路：V1 四个真实 SHA 已冻结，pure synthetic CLI success path 因而
+不可达；把 protocol execution 收进可直接传 owned descriptor 的 runner，既让 synthetic tests 走与
+生产完全相同的读取、校验、分析和发布路径，也保持 pure analyzer 与 production CLI 合同不变。
+方案 B（conditional compilation/test-only flag 绕过 V1 identity）和方案 C（不测试成功的 CLI/runner
+transaction path）均否决；禁止 hidden fallback、conditional compile 或 hash bypass。
+
+synthetic tests 必须传固定非资格协议 ID
+`PHAD-M4-Q3-GYRO-ALIGN-SYNTHETIC-TEST-V1`、exact-four fixture basenames 与由 fixture bytes 独立预冻结的
+SHA-256；它们直接构造 synthetic descriptor，不得调用 V1 factory。synthetic protocol identity、
+analyzer identity 与 provenance 使用 test 中独立预冻结且与 V1 binding 不同的 fixture-owned values；
+它不得只把 factory descriptor 的 ID 改为 synthetic 而复用其余 V1 fields。其 artifact 只能作为
+测试证据，V1 consumer/verifier 必须按 ID 拒绝；V1 qualification 仍必须同时
+满足 exact `PHAD-M4-Q3-GYRO-ALIGN-V1`、冻结 protocol identity 与 §3 四个真实 hashes。runner 必须拒绝
+用 V1 ID 搭配 synthetic/nonfrozen hashes 的 descriptor，synthetic descriptor 也不得冒用 V1 ID；
+descriptor 身份不得改变 analyzer 的 threshold 或 solver 合同。
+
+runner 必须在任何 `lstat`、open/read、output-directory 创建或其他 filesystem side effect 之前完整验证
+descriptor。只接受 exact V1 factory binding 或上述固定 synthetic ID；unknown ID、V1 任一 canonical
+ID/basename/hash/protocol identity/Q1-Q2 provenance/analyzer build identity mismatch，以及 synthetic 的
+basename/order/exact-four shape 或字段 shape 不合法，都唯一返回
+`HARD_ERROR/INVALID_PROTOCOL_DESCRIPTOR`, exit `1`，且不产生 artifact。synthetic fixture hashes/identity
+的具体值允许由 tests 预冻结，但不因此获得资格；valid descriptor 下实际 input bytes 与其 expected hash
+不符才是 `INPUT_HASH_MISMATCH`，不得用该 code 误报 descriptor 错误。
 
 ## 3. 冻结输入、provenance 与 parse 顺序
 
@@ -422,6 +475,10 @@ engineering boundaries，不冒充外部产品需求或统计显著性。冻结�
 CLI grammar 错误返回 usage `64`，不创建 output directory。接受 CLI 后，任何阶段发现 hard error 都
 立即优先返回；若无 hard error，则必须完成三个 sibling fit 后才按下列唯一 precedence 汇总：
 
+接受 CLI 后的第一项 runtime 动作必须是 §2 descriptor validation；其失败优先于
+`INPUT_NOT_FOUND`、`INPUT_HASH_MISMATCH`、`OUTPUT_EXISTS` 与全部其他 runtime code，并保证尚未发生
+filesystem side effect。
+
 1. 任一 integrity/contract/finite/I/O/publish error → `HARD_ERROR`, exit `1`；
 2. 否则任一 fit/validation support、rank、condition、observability不足 → `INCONCLUSIVE`, exit `3`；
 3. 否则任一 nonlinear prefix 或 scientific gate 未达 → `HYPOTHESIS_FAIL`, exit `2`；
@@ -435,6 +492,7 @@ overall success。`HARD_ERROR` 不发布 completion manifest。
 stable error taxonomy：
 
 ```text
+INVALID_PROTOCOL_DESCRIPTOR,
 INPUT_NOT_FOUND, INPUT_NOT_REGULAR_FILE, INPUT_HASH_MISMATCH,
 INPUT_IO, INPUT_GRAMMAR, INPUT_SCHEMA, UNKNOWN_ENUM, DIAG_FAILED, INDEX_ORDER,
 COUNT_MISMATCH, DURATION_MISMATCH, ENDPOINT_MISMATCH, JOIN_MISMATCH,
@@ -465,7 +523,7 @@ UTF-8、LF、无 BOM；使用 `nlohmann::ordered_json` 按下表 insertion order
 | key | type | required content / units |
 |---|---|---|
 | `schema_version` | string | exact schema id |
-| `protocol_id` | string | `PHAD-M4-Q3-GYRO-ALIGN-V1` |
+| `protocol_id` | string | production/qualification 必须为 `PHAD-M4-Q3-GYRO-ALIGN-V1`；synthetic runner test artifact 必须为 `PHAD-M4-Q3-GYRO-ALIGN-SYNTHETIC-TEST-V1`，且不可被 V1 consumer/verifier 接受 |
 | `protocol_identity` | object | string `design_commit,design_tree,design_blob,design_sha256` |
 | `analyzer_identity` | object | string `source_commit,source_tree,build_type,compiler,compiler_version` |
 | `summary` | object | string `claim="frozen_visual_proxy_suffix_rotation_consistency"`; bool `offline_future_data=true,physical_bias=false,online_initializer=false,product_benefit=false`; string `bias_role="visual_posterior_aligned_nuisance",pass_authority="q4_controlled_factor_plan_only"` |
@@ -592,7 +650,9 @@ CSV 追加或暗藏新的 exclusion 字段。FD branch-safety guard 命中仍只
 
 ### 9.3 Manifest v1
 
-`schema_version` 固定 `phad.gyro_alignment.manifest.v1`。required key/顺序为：
+`schema_version` 固定 `phad.gyro_alignment.manifest.v1`。manifest 的 `protocol_id` 必须逐值等于同一 run
+summary 与 descriptor 的 ID；production/qualification 只能是 V1，synthetic runner test 只能是 §2 的
+非资格 ID。required key/顺序为：
 
 ```text
 schema_version:string
@@ -614,11 +674,16 @@ temp，flush、close、rename 为最终名。任一阶段失败：返回 `HARD_E
 best-effort 删除本次创建的 temp/final science files，清理失败仍不得发布 manifest。consumer 只有验证 manifest schema、protocol
 identity 与列出的全部 input/output size/hash 后才接受结果。
 
-## 10. TDD、synthetic qualification 与唯一真实 run
+## 10. TDD、synthetic verification 与唯一真实 run
 
 任何 implementation edit 前都有不可跳过的 docs gate。若 pre-gate 检查意外发现已有本轮
 `docs/research/m4-minimal-gyro-q3-offline-bias-alignment-result.md` 或等价 Q3 V1 result
 ledger，必须阻断 gate 并保留现场；禁止删除、改名或改写 ledger 绕过阻断。
+
+本次 protocol amendment/link correction 已改变 candidate bytes，因此旧 candidate 上已有的 Standards/
+Spec/docs-verifier gate 结论与 protocol preflight identity 均不能授权后续实现或 qualification；状态仍为
+`docs_gate=pending`。旧 protocol/preflight receipts 必须原样保留，不得修改、覆盖、truncate 或删除；
+新 candidate 必须按本节重新走完整 gate，并在闭合后写入新的 write-once identity receipt。
 
 相对本轮 fixed point 的七份 docs 是一个不可拆分的 candidate：每一轮 fresh Standards
 review 与 fresh Spec review 必须审查同一 candidate 的七文件 tree/blob bytes。任一轴产生
@@ -637,9 +702,10 @@ identity receipt。receipt 至少包含 `protocol_id`、docs commit/tree、七�
 git blob 与 SHA-256，并显式包含 `design_commit,design_tree,design_blob,design_sha256`、
 生成命令、cwd、时间、effective environment 和 tool versions。若目标 receipt 已存在，
 禁止覆盖、truncate 或删除后重建；必须只读验证，内容不一致则 STOP。Git objects
-始终是权威，receipt 只提供可审计绑定。该 identity 必须原样进入后续 build 证据与
-qualification CLI 产出的 `protocol_identity`；真实 run 后 result ledger 必须原样引用
-receipt，不得等到 ledger 才首次声称 identity。
+始终是权威，receipt 只提供可审计绑定。该 identity 必须原样进入 compiled V1 factory 与 binary build
+evidence；one-shot 前不得声称尚不存在的 qualification CLI artifact
+已经包含该值。真实 one-shot 产出后，artifact 的 `protocol_identity` 必须与 compiled factory/build
+evidence 逐值相等，result ledger 再原样引用 receipt；不得等到 artifact 或 ledger 才首次声称 identity。
 
 自 preflight receipt 形成起，七 docs bytes 与它们的 blob identities 成为后续实现和
 qualification 的冻结输入。此后任一 byte/identity 变化立即使 docs gate 失效；必须
@@ -650,66 +716,106 @@ STOP 并回到 Step 0 的完整双轴循环。已有 Q3-only go、hardening/RED/
 hardening → RED → GREEN → implementation clean commit/tree 与 preflight identity 复核 →
 独立 one-shot qualification → result ledger**。其中：
 
-1. dependency probe 与前置 hardening：先实际 probe `OpenSSL::Crypto`；通过后只修改
+1. dependency probe 与前置 hardening：future CMake 先以
+   `find_package(OpenSSL REQUIRED COMPONENTS Crypto)` 实际 probe `OpenSSL::Crypto`；通过后只修改
    `phad/eval/tum_io.hpp`、`phad/eval/tum_io.cpp` 与 `tests/eval/tum_io_test.cpp`，先为 bytes seam、
    单次读取、signed seconds×`1e9`/fraction add/sub overflow 写边界 test，再完成实现并固定 receipt。
    hardening 全部通过前不得进入 RED。
 2. RED：只修改 `CMakeLists.txt`、`tests/apps/gyro_alignment_test.cpp`、
-   `tests/apps/gyro_alignment_cli_test.cpp`。保留 exact command、cwd、environment、build dir、
-   stdout/stderr、exit、first expected failure 与 log SHA-256；RED 必须因缺 interface/symbol 或冻结
-   行为未实现而失败。exact RED receipt 必须独立审核通过后才允许 GREEN。
+   `tests/apps/gyro_alignment_cli_test.cpp`，一次性写入最终 targets 与最终 tests。CMake 的 production
+   targets 引用全部五个尚不存在的 app 文件。唯一有效 RED 是在五文件尚不存在时执行 fresh configure，
+   configure 非零退出且完整 log 同时命中下述 required semantic pair：
+
+   ```text
+   failure_class=CMAKE_MISSING_PRODUCTION_SOURCE
+   required_missing_source=(Cannot find source file) associated with apps/gyro_alignment.cpp
+   required_empty_target=(No SOURCES given to target:) associated with phad_gyro_alignment
+   ```
+
+   pair 的可执行匹配固定为：
+
+   ```sh
+   perl -e '$s = do { local $/; <> }; exit !(
+     $s =~ /Cannot find source file:\s*(?:[^\r\n]*\/)?apps\/gyro_alignment\.cpp(?:\s|$)/ &&
+     $s =~ /No SOURCES given to target:\s*phad_gyro_alignment(?:\s|$)/
+   )' <configure-log>
+   ```
+
+   该 matcher 容许 CMake 在 label/path 间换行，也容许 path 带绝对前缀；不依赖跨 target diagnostic
+   emission order。该 class 唯一表示 missing production implementation。receipt 必须额外原样记录
+   actual first diagnostic 作为证据，但它不参与 pass/fail。另保留 exact command、cwd、environment、fresh
+   build dir、stdout/stderr、exit 与 log SHA-256。RED 阶段
+   不编译或运行 tests；interface/symbol/test assertion 或“冻结行为尚未实现”均不是本协议的 RED 首败。
+   dependency、compiler 或 unrelated failure 也无效。exact RED receipt 必须独立审核通过后才允许 GREEN。
 3. GREEN：只新增 `apps/gyro_alignment.hpp`、`apps/gyro_alignment.cpp`、
+   `apps/gyro_alignment_runner.hpp`、`apps/gyro_alignment_runner.cpp` 与
    `apps/phad_gyro_align.cpp`；不得在 GREEN 再改 tests/CMake。完成 synthetic verification 后
    形成 implementation clean commit/tree，并在 qualification 前复核该 `HEAD`、clean worktree、
    receipt 与该 `HEAD` 内七个 frozen docs blobs 全部一致。任一不一致都 STOP 并回到
    Step 0，不得进入 qualification。
 
-synthetic tests 必须覆盖 one-read immutable-buffer identity、strict-Q3/generic-TUM seam、known-bias exact
-oracle、zero bias、calendar gap、half/full split、first_zero-only empty fit-universe、全部 nonfirst
-contract-valid 但合法 local-excluded 的 empty fit-universe、rank deficient、condition、candidate-bias
-`observability_failed` 且确认 candidate `bhat` 不使用 `m_fd`、principal Log analytic oracle、
-near-zero/near-pi branches、SO(3) contract 破坏的
-hard error、validation block near-pi local exclusion、层级 eligibility schema/nullability、support boundaries、
-所有 scientific equality boundaries、`full -> early -> late` sibling 顺序与 soft no-short-circuit、
-早先 sibling soft failure 后后续 sibling hard error 必须 overall `HARD_ERROR` 且无 artifact、
-`INCONCLUSIVE`/`HYPOTHESIS_FAIL` 软状态以两种先后组合仍由前者优先、manifest-last 与 output-exists。
-FD branch-safety 还必须有以下参数化 oracle：
+synthetic tests 必须以 §2 固定的非资格 protocol ID 和 fixture hashes 走 runner 的真实
+`lstat -> single read -> hash-before-parse -> strict parse/join -> analyzer -> serialize -> atomic publish`
+路径，并覆盖 V1 ID 搭配 synthetic hashes 必须拒绝、V1 consumer/verifier 必须拒绝 synthetic artifact、
+one-read immutable-buffer identity、strict-Q3/generic-TUM seam、known-bias oracle、zero bias、calendar gap、
+half/full split、first_zero-only empty fit-universe、全部 nonfirst contract-valid 但合法 local-excluded 的
+empty fit-universe、rank deficient、condition、candidate-bias `observability_failed` 且 candidate `bhat`
+不使用 `m_fd`、principal Log analytic oracle、near-zero/near-pi branches、SO(3) contract hard error、
+validation block near-pi local exclusion、层级 eligibility schema/nullability、support boundaries、
+`full -> early -> late` sibling completion 与 soft no-short-circuit、早先 sibling soft failure 后后续 sibling
+hard error 必须 overall `HARD_ERROR` 且无 artifact、`INCONCLUSIVE`/`HYPOTHESIS_FAIL` 两种先后组合仍由
+前者优先、manifest-last 与 output-exists。公开 `GyroAlignmentResult`、artifact schema 与
+`PASS|HYPOTHESIS_FAIL|INCONCLUSIVE|HARD_ERROR` 四态必须完整测试。
 
-- 对 axis `x,y,z` 和两个 signed crossing direction 分别构造 `T=1 s`、
-  `theta0=pi-5e-6`；旧七点的各点 `pi-theta` 各自都大于 `eps_pi`，但会翻越
-  principal branch；新 guard 必须唯一计为 `near_pi`，不构造 `J`、不进入 SVD；该组只验证
-  crossing，不作为 equality oracle；
-- equality/boundary 改用一个端到端可达的冻结 B fixture。future test anonymous namespace 中固定
-  `interval_ns=16'532'239`、`T=0x1.0edd3c756afffp-6`
-  （bits `0x3f90edd3c756afff`）、`eps_pi=0x1p-26`、`h=1e-5`、
-  `m_fd=0x1.6306f1fp-23`（bits `0x3e86306f1f000000`）、
-  `q=eps_pi+m_fd=0x1.8306f1fp-23`（bits `0x3e88306f1f000000`）与
-  `theta=pi-q=0x1.921fb3c13bdf9p+1`（bits `0x400921fb3c13bdf9`）。zero gyro 使
-  `Rimu=I`，typed analyzer 输入的 `Rvis=Q` 按 row-major 精确为：
+GREEN tests 还必须把 `makeGyroAlignmentV1ProtocolDescriptor()` 返回值与 independent frozen oracle
+逐字段对拍：V1 ID、exact-four basename/hash、receipt protocol identity、全部 Q1/Q2 provenance，以及
+由同一 build evidence 冻结的 analyzer build identity。随后对每个类别及其每个成员构造一次只改变
+单字段的 V1 mutant，全部必须在零 filesystem side effect 前得到
+`HARD_ERROR/INVALID_PROTOCOL_DESCRIPTOR`, exit `1`、无 artifact；unknown ID 与 synthetic
+basename/order/shape mutants 同样覆盖，且不得误报 `INPUT_HASH_MISMATCH`。source/link review 必须证明
+thin main 唯一调用 V1 factory，且 binary/main 中没有第二份 V1 ID、hash、identity 或 provenance binding。
+synthetic tests 仍直接构造非资格 descriptor，不与 factory 共用 V1 constants。
 
-  ```text
-  [0x1p+0, 0, 0;
-   0, -0x1.fffffffffff6ep-1, -0x1.8306f1f469874p-23;
-   0,  0x1.8306f1f469874p-23, -0x1.fffffffffff6ep-1]
-  ```
+边界证据不改变 §4、§6、§7 的公式、`<=` comparator 或 equality-pass/exclude 语义，但必须遵守以下
+可执行性规则：
 
-  生产路径必须按 §6 的 `v/s/c/std::atan2` 重算，并使最终 `pi-theta0` 与 `q` bitwise
-  相等；正确 `pi-theta0 <= eps_pi+m_fd` 必须唯一计为 `near_pi` 且不进入 `J`/SVD，
-  将 `<=` 改为 `<` 的 mutant 会错误放行该 equality fixture，必须被拒绝。围绕同一可观察边界，
-  adjacent representable gaps 固定为 inside/exclude
-  `q-0x1p-51=0x1.8306f1ep-23` 与 outside/admit
-  `q+0x1p-51=0x1.8306f2p-23`；两者保持上述 diagonal，分别令 `Q(2,1)` 为
-  `0x1.8306f1e469874p-23`、`0x1.8306f20469874p-23`，并令 `Q(1,2)` 取对应负值。
-  inside 必须排除，outside 必须放行。禁止以 `nextafter(q,+infinity)` 声称可观察边界；
-  所有这些常数只进入 future test anonymous namespace，不新增 scalar comparator 或 public seam；
-- 对 `T=0.1 s` 与 `T=1 s` 检查 `m_fd` 按 `h*T` 缩放，且 first-match census、
-  FIT_SUPPORT 路径与全部公开 schema 不变；该组只验证 scaling，不作为 equality oracle。
+- integer gate 与 exact integer arithmetic 的边界必须直接命中并 exact 断言，例如
+  `n_improved=40,n_blocks=60`、validation support `60` blocks，以及 exact `90/45 s` duration；
+- 对 aggregate loss、per-axis loss、half-bias、condition、nonlinear nonincrease、near-pi margin 等由
+  多步 binary64 运算组成的 gate，只有独立构造的 physical typed-input fixture 在所有支持工具链上
+  稳定 bit-exact 可达时，才要求 equality fixture；否则必须在 RED 前预冻结两个 physical typed-input
+  fixtures，从 pass/fail 两侧夹住阈值。独立 oracle 对每侧记录实际 metric、阈值相对位置，以及
+  非零 ULP margin 和数值 margin；两侧都必须执行 production analyzer，再由 source review 确认
+  production comparator 是 `<=`。fixture 不得在 runtime 搜索，不得从 DUT output 反求，不得增加
+  stats-centered public seam、scalar comparator、callback、counter 或 test-only hook；
+- `exactly seven points`、guard 后不构造 `J`/不执行 SVD，以及实际 `full -> early -> late` 顺序，使用
+  联合证据：mutation-sensitive black-box physical fixtures、test-local independent mutant oracle 与
+  source review。不得为这些内部事实新增 public instrumentation seam。black-box 断言必须落在公开
+  result、四态、error、artifact 或 census 上，而不是 production callback/counter。
+
+FD branch-safety 仍须对 axis `x/y/z` 和两个 signed crossing direction 分别构造 `T=1 s`、
+`theta0=pi-5e-6` 的 physical fixture；旧七点各自通过 `eps_pi` 但跨越 principal branch，production
+结果必须唯一分类为 `near_pi`，并用上述联合证据证明 guard 阻止后续 Jacobian/SVD。另以
+`T=0.1 s` 与 `T=1 s` 的预冻结 physical fixtures 验证 `m_fd` 按 `h*T` 缩放；first-match census、
+`FIT_SUPPORT` 与公开 schema 不变。near-pi composite equality 本身仍服从上一段的 bit-exact-or-bracket
+规则，不得以运行时 `nextafter` 搜索或不可重复 hex 推导冒充可达 equality。
+
+rank-deficient fixture 可以循环生成 `4500` 条、每条 `T=0.02 s` 的 physical rows；每个 half 恰
+`2250` 条，每 row 中心旋转为 `2*pi` 且 `Rvis=I`，从而 exact 满足 `90/45 s` support，且无需 public
+matrix seam。condition 与 candidate observability fixture 只需在 RED 中冻结 physical typed inputs
+及独立 oracle，不要求本文抄录完整 hex。
 
 mutants 至少覆盖 bias sign、visual transpose/frame/`T_B_left`、compose order、axis order、rad/deg、
-double subtraction、gap compression、遗漏 FD margin、将 `<=` 改为 `<`、FD `ns/s` 单位错误、
-用 `2*h*T` 过度排除、遗漏任一 signed axis arm，以及添加/替换 compound arm、
-hash-after-parse、hash 后 path reopen 与 early manifest；每类必须被 oracle 拒绝。deletion check 删除三个 app 文件时，RED
-tests 必须重新出现预期失败。CLI target 的 transitive link map 必须证明无 GT reader、ATE 或 RPE symbol。
+double subtraction、gap compression、遗漏 FD margin、FD `ns/s` 单位错误、用 `2*h*T` 过度排除、
+遗漏任一 signed axis arm、添加/替换 compound arm、hash-after-parse、hash 后 path reopen 与 early
+manifest；每类必须被独立 oracle 拒绝。`<=` 改为 `<` 仅在独立证明 bit-exact physical equality
+fixture 稳定可达时用 mutation test 拒绝，否则由双侧 bracket 与 source review 提供证据。
+deletion check 只能在 repo 外的 GREEN archive 中执行：保留最终 `CMakeLists.txt` 与两个 tests，只删除
+五个 app 文件，再用 fresh build dir configure；必须复现与 RED receipt 完全相同的
+`CMAKE_MISSING_PRODUCTION_SOURCE` failure class 与上述 required semantic pair；deletion run 的 actual
+first diagnostic 仍须原样记录，但允许与 RED 不同且不参与 acceptance。不得在工作仓库删除文件，也不得
+把 test failure 当 deletion 证据。CLI target 的 transitive link map 必须证明无
+`phad::io_dataset`、GT reader、ATE 或 RPE symbol。
 
 另有一个冻结 `ok(t0) -> rejected(t1) -> ok(t2)` endpoint oracle：在各 interval 未先命中 gap/empty
 的 fixture 中，相对三端均 ok 的 control，断言 `packet_total_nonfirst` 不变、
@@ -734,6 +840,8 @@ post-gate implementation 阶段唯一可修改 allowlist：
 CMakeLists.txt
 apps/gyro_alignment.hpp
 apps/gyro_alignment.cpp
+apps/gyro_alignment_runner.hpp
+apps/gyro_alignment_runner.cpp
 apps/phad_gyro_align.cpp
 tests/apps/gyro_alignment_test.cpp
 tests/apps/gyro_alignment_cli_test.cpp
