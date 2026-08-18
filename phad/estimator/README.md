@@ -17,6 +17,30 @@ samples 与同 frame、同为 rad/s 的已知常值 bias，返回 `delta_R_i_j` 
 fallback。该 helper 当前没有 production caller，不进入 visual posterior、factor、
 optimizer、配置或 feedback。
 
+M4 的 `PHAD-M4-ONLINE-GYRO-BIAS-SYNTHETIC-V1` 另行冻结 default-off、无
+real caller 的 estimator-private online gyro-bias 资格机制。本 README 与
+[synthetic design](../../docs/research/m4-online-gyro-bias-synthetic-design.md)、
+[ADR-0002](../../docs/adr/0002-stage-gated-gyro-only-bias-state.md)、
+[conventions](../../docs/conventions.md)、[roadmap](../../docs/roadmap.md) 和
+[implementation plan](../../docs/plans/2026-08-18_m4_online_gyro_bias_synthetic_1e3569b4.plan.md)
+共同构成 pre-implementation exact-six authority。`EstimatorOptions::m_gyro_bias` 只允许
+synthetic test 直接构造 in-memory POD；不得接 parser、`flattenConfig()`、
+`config_hash`、persistent artifact、apps/session 或真实数据。`G(k)` key/type、PIM、
+factor、graph lifecycle 与 ownership 继续只在 PIMPL/private implementation；完整
+`X/V/B` 获授权时直接删除该阶段机制，不保留兼容层。visual staging 后会变化的
+mutable ownership 聚合在 private `StereoVoUpdateState`，由 production 实际使用的
+`StereoVoUpdateTransaction` RAII seam 统一 commit/rollback；public diagnostics 不存入
+State，而从 committed topology 确定性生成。
+
+本片新增或迁出的所有 C++ `struct` / `class` data member 遵守 `m_` +
+snake_case，transform 用 `m_T_target_source`。已有 public aggregate 旧成员不改名；只新增
+`KeyframeMeasurement::m_gyro_interval`、`EstimatorOptions::m_gyro_bias` 与
+`UpdateDiagnostics::m_gyro`。新 diagnostics 使用 `m_bias_radps`、`m_window_biases`、
+`m_rotation_factors`、`m_rw_factors`、`m_root_priors`、`m_relinearization_rounds` 与
+`m_break_reason`。`m_relinearization_rounds` 只在最终 `kOk` 时报告实际 extra count，包括
+内部成功/fallback 后最终 `kOk`；它不是 solver trace，任何最终 `kRejected` /
+`kFailed` 均为 `0`，即使 cap 前执行过 extra round。
+
 ## 职责边界
 
 | 做 | 不做 |
@@ -60,7 +84,7 @@ apps/stereo_vo_glue.hpp  ── filter kValid ──► KeyframeMeasurement
 ## 段生命周期（M3.3）
 
 `update()` 在已初始化且 `num_shared == 0`（新帧 landmark id 与窗口内
-`landmarks_W` 无交集）时视为**重叠断裂**，不再永久拒帧：
+`m_landmarks_w` 无交集）时视为**重叠断裂**，不再永久拒帧：
 
 | 条件 | 结果 |
 |---|---|
@@ -68,8 +92,8 @@ apps/stereo_vo_glue.hpp  ── filter kValid ──► KeyframeMeasurement
 | `num_obs < min_seed_observations` | `kRejected`，**不污染**窗口 / landmark / `segment_id` |
 | 否则 | `seedSegment(anchor)`，`segment_id` 递增，继续 `kOk` |
 
-`seedSegment` 初始化与 re-anchor **共用**：清空 `window` 与 `landmarks_W`，
-只保留本帧；`track_times` 与 `next_frame_index` 继续累积（保证
+`seedSegment` 初始化与 re-anchor **共用**：清空 `m_window` 与 `m_landmarks_w`，
+只保留本帧；`m_track_times` 与 `m_next_frame_index` 继续累积（保证
 `prior_key` 在图里唯一）。首段 anchor 为 `Identity()`；re-anchor 的 anchor
 为 `poseInitialValue()`（`use_constant_velocity_init` 开则恒速外推，关则
 沿用上一位姿）。
@@ -96,15 +120,43 @@ VioUpdateResult update(const KeyframeMeasurement& measurement,
 | 校验 | 共享 | 共享 |
 | reanchor/首帧 | 可 | **不可**（非关键帧 `shared=0` → `kRejected`） |
 | PnP + 仲裁 | 正常 | 正常（复用同一 `tryPnpInit` + stereo RMS 仲裁） |
-| landmark backproject | 是 | **不** |
-| 窗口 push/pop | 是 | **不** |
-| buildGraph + LM | 是 | **不** |
-| cull + reopt | 是 | **不** |
-| 位姿输出 | `estimate` 字段有值 → 写 `est.tum` | `estimate` 为 `nullopt` → **不**写轨迹 |
-| last/prev_accepted | LM 后更新 | PnP 后更新（保持恒速预测链） |
+| landmark backproject | new-id seeding；existing-id refresh 共用 | 不 seed new id；existing-id refresh/backproject 共用 |
+| 窗口 push/pop | 是 | 是；作为 temporal graph state 入窗，满窗时优先逐出最老 non-KF |
+| buildGraph + LM | 是 | 是；与窗口内 keyframe/non-KF 一起优化 |
+| cull + reopt | 是 | 是；共享同一 graph lifecycle |
+| 位姿输出 | 成功时 `estimate` 有值 | 成功时同样有 `estimate`，可写轨迹 |
+| last/prev_accepted | LM 后更新 | LM 后更新 |
+| visual-staging transaction / hard-failure rollback | staging-entry 全窗口、landmark 与 accepted-pose state 同一 transaction | 与 keyframe 完全相同；不得因 `keyframe=false` 跳过 snapshot/restore |
 
 非关键帧 `shared < min_pnp_inliers` 时返回 `kRejected`（不更新 last/prev）。
-snapshot 回退备份仅在 `keyframe=true` 时执行。
+通过该门的 accepted non-KF 会拥有自己的 `frame_index`、window entry、`Pose3 X(k)`、LM
+与优化后 estimate；`keyframe` 只控制首段/re-anchor、new-id seeding、7-keyframe cap 与 eviction
+priority，不控制 graph state ownership。任何 post-staging `kRejected` / `kFailed` 都必须恢复 update
+的 visual-staging-entry committed snapshot，KF/non-KF 语义相同。M4 迁出的 private `WindowFrame`
+使用 `m_frame_index`、`m_timestamp`、`m_T_W_B`、`m_observations`、`m_is_keyframe`、
+`m_gyro`；`GyroFrameState` 使用 `m_bias_radps`、`m_segment_id`、`m_component_id`、
+`m_predecessor_frame_index`、`m_interval`。snapshot 覆盖 `StereoVoUpdateState` 的 `m_window`、
+`m_landmarks_w`、`m_track_times`、`m_T_W_B_last_stereo`、`m_T_W_B_last_accepted`、
+`m_T_W_B_prev_accepted`、`m_next_frame_index`、`m_initialized`、`m_segment_id`、`m_culled_ids`、
+`m_pending_seed_obs`、`m_eligible_visual_rejected_timestamp`、`m_next_gyro_component_id`，以及全部
+`G`/link/root/component。`Impl` 的唯一 mutable owner 是
+`std::unique_ptr<StereoVoUpdateState> m_state`。
+
+transaction constructor 只 deep-copy backup，不把 copy swap 成 live owner；正常 gyro on/off 成功
+update 的 `m_state.get()` 地址保持不变。rollback 用 owner/backup `unique_ptr::swap` 恢复
+snapshot-owned 对象，因此 rollback 后只要求字段 exact 恢复，不要求返回已销毁的原
+owner 地址。basic/gyro validation、visual support 以及既有 intentional pre-staging
+`m_pending_seed_obs` / rejected-endpoint provenance 动作发生在 snapshot 前，保持原有持久语义；
+不得把它们误称为 post-staging rollback 的一部分。
+
+所有 post-staging hard result 只能经唯一 private/local
+`finalizePostStagingHardResult(...)`，严格先 explicit rollback，再从恢复后 `*m_state`
+重新生成 result 与 `m_gyro` topology diagnostics，最后 return；禁止 transaction region 直接 hard
+return，也不能跨 rollback 复用 state 内部 reference/pointer/iterator。stable public
+`StereoVoOnlineGyroBias.UnknownPredecessorRollsBackBeforeDiagnostics` 必须以 structurally valid
+unknown-predecessor interval 触达该顺序：返回 `kRejected`，scalar null、rounds `0`、reason none，
+`m_window_biases` 和 counts exact 等于 rollback committed topology，随后 exact update 与 fresh control
+bit-exact，不声称触达 public optimizer exception。
 
 关键帧选择逻辑（`isKeyframe()`）在 apps/session 层，不在 estimator。
 
@@ -119,7 +171,7 @@ snapshot 回退备份仅在 `keyframe=true` 时执行。
 
 ## PnP 初值与 stereo 一致性仲裁（M3.3 Slice ③）
 
-正常路径（`initialized && num_shared > 0`）在 `poseInitialValue()` guess 之上
+正常路径（`m_initialized && num_shared > 0`）在 `poseInitialValue()` guess 之上
 可选跑 `cv::solvePnPRansac`（PIMPL 内、`PRIVATE opencv_calib3d`）：
 
 | 条件 | 结果 |
@@ -138,9 +190,9 @@ PnP 成功只生成 proposal，不直接授权 pose 或 mask。proposal 与 gues
 等价带，不新增配置或 `config_hash` 输入。只有仲裁采用 proposal 后才应用其
 inlier mask；回退不修改 measurement。
 
-**掩码语义**：被掩码的 shared 外点仍写入 `track_times` /
+**掩码语义**：被掩码的 shared 外点仍写入 `m_track_times` /
 `observationTimestamps()`；`num_observations` 保持测量原值（不是入图观测数）。
-`landmarks_W` 与 frontend track 不动——伪永久生命周期见 Slice ④。
+`m_landmarks_w` 与 frontend track 不动——伪永久生命周期见 Slice ④。
 
 诊断：`UpdateDiagnostics.pnp_success` / `pnp_inliers`；session 汇总
 `pnp_successes` / `pnp_fallbacks`（仅正常路径；seed / re-anchor 不计
@@ -151,14 +203,14 @@ fallback）。详见 `docs/research/m3.3-slice3-pnp-design.md`、
 ## 外点剔除与多轮重优（M3.3 Slice ④ / ④b / ④e）
 
 LM₁ 收敛写回位姿后、返回 `kOk` 前，可选按 landmark **平均 stereo 重投影**
-（`||unwhitenedError||` 均值，≥4 观测）从 `landmarks_W` 删除高误差点，并经
+（`||unwhitenedError||` 均值，≥4 观测）从 `m_landmarks_w` 删除高误差点，并经
 共用 helper 清窗口观测。`reproj_rms_after_px` **始终**是 LM₁ 后、mean-cull
 **前** 的全图 RMS（不受后续 reopt 轮次影响）。
 
 **多轮热路径（Slice ④e）**：每趟 mean-cull / cheirality 必须用**该趟** LM 的
 graph + values 打分。若本趟 `culled_round >= 4`（仅 mean-cull 计数；cheirality
 不计触发）且 `enable_outlier_reopt`，且已成功轮数 `< max_outlier_reopts`，则
-用剩余窗口观测与 `landmarks_W` **重建 factor graph** 再跑一趟 LM，写回后再次
+用剩余窗口观测与 `m_landmarks_w` **重建 factor graph** 再跑一趟 LM，写回后再次
 cull。如此循环直至本趟 cull `< 4`、达到 `max_outlier_reopts`、或开关关闭。
 某趟 LM 失败则回退到该趟开始前的 window / landmarks（保留此前已成功轮次），
 仍返回 `kOk`（`outlier_reopt_failed=true`；`outlier_reopt == (rounds > 0)`）。
@@ -173,8 +225,8 @@ cull。如此循环直至本趟 cull `< 4`、达到 `max_outlier_reopts`、或�
 | `block_culled_rebirth`（默认 `true`） | `false` → 允许同 id stereo-backproject 重生（复现 Slice ④ 伪永久，仅 A/B） |
 
 **拒复生（Slice ④c）**：mean-cull 与 cheirality 真正 erase 的 id 写入
-`culled_ids_`；`block_culled_rebirth` 时 seed / 正常路径 skip 同 id
-backproject。被删 id 的 `track_times` / `observationTimestamps()` **仍保留**。
+`m_culled_ids`；`block_culled_rebirth` 时 seed / 正常路径 skip 同 id
+backproject。被删 id 的 `m_track_times` / `observationTimestamps()` **仍保留**。
 本帧列表 `UpdateDiagnostics.culled_landmark_ids`（mean-cull ∪ cheirality）
 仅在提交成功路径填充；`restore()` 后为空；**不**进 `diag.csv`。
 `outliers_culled` / `unique` **仍只计** mean-reproj cull（跨轮累计）。
@@ -218,9 +270,10 @@ is_keyframe
 `outliers_culled,reproj_rms_after_cull_px` → 18；Slice ⑤ 再追加
 `is_keyframe` → 19；有意的契约变更）。
 `pnp_success` 为 `0/1` 整数，`is_keyframe` 为 `0/1` 整数。`status` 为
-`ok` / `rejected` / `failed`。非关键帧的优化相关列
+`ok` / `rejected` / `failed`。accepted 非关键帧实际进入 graph/LM，因此优化相关列
 （`reproj_rms_before/after`、`num_cheirality`、`lm_iterations`、`outliers_culled`
-等）填 0。stdout summary 增加 `total_keyframes` / `total_track_only_frames`。
+等）记录真实本帧结果；只有在 staging 前被拒绝的路径保持未执行值。
+stdout summary 增加 `total_keyframes` / `total_track_only_frames`。
 
 ## 相关入口
 

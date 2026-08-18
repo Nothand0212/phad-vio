@@ -609,58 +609,68 @@ PnP stereo 一致性仲裁：[#25](https://github.com/Nothand0212/phad-vio/issue
 **当前状态（2026-08-18）：M4.1 数据路径已完成；Q1 Observe final independent PASS；
 Q2 deterministic known-bias rotation-only 已在 `d1c4385` 取得 technical PASS under
 one-time post-hoc evidence-retention waiver，original frozen-plan RED exact-record conformance
-NOT MET。Q3 repo-owned protocol `PHAD-M4-Q3-GYRO-ALIGN-V1` 已预注册，exact input、split、
-one-shot solver、support、scientific gates、verdict 与 artifact transaction 已冻结；
-`implementation_go=satisfied`、`docs_gate=pending`，故 implementation 仍 STOP，一次 frozen-input
-qualification 与 result ledger 尚未执行。旧 external locator 路线已 superseded、qualification
-weight=0；唯一规范语义见
-[Q3 normative design](research/m4-minimal-gyro-q3-offline-bias-alignment-design.md)。**
-M4.1 之后的
-measurement / factor 接入改按
-[证据门控的信息接入](agents/evidence-gated-integration.md)与
-[M4 gyro measurement / factor 资格实验设计](research/m4-minimal-gyro-slice-design.md)
-的 Q1→Q5 stop/go 顺序重新资格化。[Q1 Observe 实施计划](plans/2026-08-12_m4_gyro_q1_observe_7d3a91e6.plan.md)
-已完成：packet summary 与 raw gyro samples 已冻结，M3 off 路径字节不变；独立证据见
-[Q1 Observe 结果](research/m4-minimal-gyro-q1-observe-result.md)。Q1 PASS 只把 Q2 状态改为
-**go to plan only**；[Q2 Predict 实施计划](plans/2026-08-12_m4_gyro_q2_predict_3f69becc.plan.md)
+NOT MET。Q3 `PHAD-M4-Q3-GYRO-ALIGN-V1` 已完成且只完成一次 frozen-input qualification；唯一
+scientific verdict 为 `HYPOTHESIS_FAIL`，失败原因为 `HALF_STABILITY`，权限为 `STOP`。Q3 冻结结论
+不重跑、不调阈值、不改判；下一条候选路线是全新的 default-off、no-real online gyro-bias
+synthetic 协议，不是旧 Q4，也不推翻 Q3。**
+
+M4.1 之后的 measurement / factor 接入继续服从
+[证据门控的信息接入](agents/evidence-gated-integration.md)。
+[Q1 Observe 实施计划](plans/2026-08-12_m4_gyro_q1_observe_7d3a91e6.plan.md)已完成：packet summary
+与 raw gyro samples 已冻结，M3 off 路径字节不变；独立证据见
+[Q1 Observe 结果](research/m4-minimal-gyro-q1-observe-result.md)。Q1 PASS 当时只把 Q2 状态改为
+**go to plan only**。[Q2 Predict 实施计划](plans/2026-08-12_m4_gyro_q2_predict_3f69becc.plan.md)
 现已完成，独立证据见
-[Q2 Predict 结果](research/m4-minimal-gyro-q2-known-bias-predict-result.md)。该 technical PASS
-under waiver 只覆盖无 production caller 的 deterministic known-bias rotation helper；原 RED
-lifecycle 仅作 historical non-qualifying，qualifying weight = `0`，later deletion 不作原 RED
-替代。最终 command evidence 以 `/tmp/q2-missing-evidence-replay-v2.md`（SHA-256
+[Q2 Predict 结果](research/m4-minimal-gyro-q2-known-bias-predict-result.md)。该 technical PASS under
+waiver 只覆盖无 production caller 的 deterministic known-bias rotation helper；原 RED lifecycle
+仅作 historical non-qualifying，qualifying weight=`0`，later deletion 不作原 RED 替代。最终 command
+evidence 仍以 `/tmp/q2-missing-evidence-replay-v2.md`（SHA-256
 `06951458173c910dc09e36624a782b233d85ef777703ccf8d155a9ba39ea8809`）为权威：父进程以
 `/usr/bin/env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/home/lin LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=Asia/Shanghai /bin/bash --noprofile --norc /tmp/q2-missing-evidence-replay-v2/run.sh`
 调用固定 `d1c4385` / tree archive，fresh 定向 10/10，并重现相同 shared-endpoint actual、closure
 与 duration。v1 inherited-environment header 与实际 `env -i` 矛盾，已被 supersede，不得作最终
-命令证据，无需删除。这是一次性且不泛化的 evidence-retention 例外，不声明 MH_01、EuRoC、
-ATE/RPE、noise/covariance/whitening 或 stochastic 产品资格。Q2 ledger 当时“只授权 Q3
-plan/design”的历史边界保持原样；2026-08-18 后置用户指令明确唯一目标是做出 VIO、实现路径交由
-团队决定，构成 Issue #39 要求的 separate explicit Q3 implementation go，并仅为 Q3 supersede
-该旧权限上限，不修改或否认 Q2 历史结论。当前 `implementation_go=satisfied`，但
-`docs_gate=pending`；docs review/verifier/精确 docs commit/clean 只是使用既有 go 的先决条件，不会
-自动产生授权。gate 闭合后仅可按五步计划进入 hardening、RED、GREEN 与恰好一次 qualification，
-不授权 Q4 implementation。Q3 文档按角色分工：
+命令证据。这是一次性且不泛化的 evidence-retention 例外，不声明 MH_01、EuRoC、ATE/RPE、
+noise/covariance/whitening 或 stochastic 产品资格；Q1/Q2 的历史 verdict 与 provenance 均不因
+Q3 或新路线而改写。
 
-- historical inputs：[superseded budget research](research/m4-minimal-gyro-q3-outcome-independent-budget-research.md)
-  与 [structural/source research](research/m4-minimal-gyro-q3-offline-bias-alignment-research.md)；
-- 唯一 normative protocol authority：[Q3 design](research/m4-minimal-gyro-q3-offline-bias-alignment-design.md)；
-- implementation sequence：[Q3 plan](plans/2026-08-13_m4_gyro_q3_align_0e897ba8.plan.md)。
+Q3 唯一 qualification 的 support、fit 与 effect gates 通过，但最大 early/late 逐轴差
+`0.001227119335357879 rad/s` 超过冻结 half-stability 门 `0.001 rad/s`。权威事实与权限只见
+[Q3 result ledger](research/m4-minimal-gyro-q3-offline-bias-alignment-result.md)；
+[Q3 normative design](research/m4-minimal-gyro-q3-offline-bias-alignment-design.md)继续保留该次运行的
+协议语义。禁止把失败后的窗口重选、threshold 修改或第二次运行称为 Q3 qualification，也禁止把
+Q3 nuisance estimate 当作 physical bias、online prior 或旧 Q4 的 implementation go。
 
-V1 将 `condition<=1e6`、60 blocks、90/45 s 与 20%/2/3/per-axis/half-stability 明确作为团队
-outcome-independent engineering boundaries；不冒充外部产品需求。旧 22-Holm、HAC/TOST/power、
-alpha tuple 与 locator DAG 均只作 historical record，不进入 V1 verdict。
+下一步改为 explicit online gyro bias state + random walk 的独立资格链：
+
+- [online-bias research](research/m4-vio-online-gyro-bias-state-research.md)只提供方案与证据来源；
+- [ADR-0002](adr/0002-stage-gated-gyro-only-bias-state.md)记录放弃全局常值 nuisance 路线、采用
+  stage-gated gyro-only bias state 的架构决策；
+- [online-bias synthetic design](research/m4-online-gyro-bias-synthetic-design.md)是新协议的 normative
+  gate authority；
+- [online-bias implementation plan](plans/2026-08-18_m4_online_gyro_bias_synthetic_1e3569b4.plan.md)
+  只规定该新协议的 RED→GREEN 与 qualification 顺序。
+
+pre-implementation authority transaction 的 exact six 只包含：online-bias synthetic design、
+ADR-0002、`docs/conventions.md`、本 roadmap、online-bias implementation plan 与
+`phad/estimator/README.md`。上述
+online-bias research 只是已经存在的只读方案/证据依据，不属于该 transaction，也不得借此改写；
+Q3 design/result 同样只读。exact six 必须在同一 commit/tree 上完成 fresh Standards + Spec 双轴零
+finding review；transaction identity、新 plan 和双审锁定前，implementation 一律 `STOP`。该文档
+闭合不会重开 Q3，也不会自动产生更宽权限；production RED→GREEN 生效后 exact-six 六文件全部
+只读，estimator README 不再属于 production allowlist。跟踪 issue：
+[#40](https://github.com/Nothand0212/phad-vio/issues/40)。
 
 当前权威路线只包含：
 
-- **M4.1 数据路径（已完成）**：`StereoPairSynchronizer::pushImu()` 与
-  `StereoImuPacket` 的时间区间、插值和 `imu_gap` 合同；
-- **Q1→Q5（逐层 stop/go）**：只有上一层的证据门通过，下一层才能另建
-  独立计划；Q1 已 PASS，Q2 为 PASS under 上述 one-time waiver；Q3 V1 protocol 已预注册，
-  `implementation_go=satisfied`、`docs_gate=pending`，gate 闭合前仍 STOP；闭合后按 eval hardening →
-  exact RED → GREEN synthetic → 一次 independent qualification → result ledger 五步推进。只有 Q3
-  PASS 可另写 Q4 controlled-factor plan；Q4–Q5 implementation 均未授权；
-- **Q6 Default（未授权）**：Q1–Q5 即使全部通过，也只能授权另建 online-init /
-  跨序列资格设计；不得据此新增或默认开启 production IMU 路径。
+- **M4.1 数据路径（已完成）**：`StereoPairSynchronizer::pushImu()` 与 `StereoImuPacket` 的时间区间、
+  插值和 `imu_gap` 合同；
+- **Q1/Q2 provenance（冻结）**：Q1 independent PASS；Q2 technical PASS under 上述 one-time waiver；
+- **Q3（冻结失败）**：唯一 qualification=`HYPOTHESIS_FAIL/HALF_STABILITY/STOP`，不重跑且不进入旧 Q4；
+- **online-bias synthetic（待 docs gate）**：只允许 default-off、无 real caller 的 synthetic 资格。
+  即使 synthetic `PASS`，也只授权保留 estimator-private mechanism，并另写 eviction-information-handoff
+  plan；
+- **仍未授权**：apps/session 接线、真实序列、GT/ATE/RPE、natural feedback、完整 `X/V/B`、
+  accelerometer/gravity、bounded-online 声称与 default-on 产品路径。
 
 ### 历史 M4.2+ 路线（non-normative；不可执行）
 
