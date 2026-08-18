@@ -16,6 +16,60 @@ find_package(Eigen3 3.4 REQUIRED NO_MODULE)
 find_package(yaml-cpp 0.8 REQUIRED)
 find_package(GTSAM 4.3 REQUIRED)
 find_package(nlohmann_json 3.11 REQUIRED)
+find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+
+set(PHAD_Q3_SOURCE_COMMIT "" CACHE STRING
+  "Git commit embedded in the Q3 gyro-alignment runner")
+set(PHAD_Q3_SOURCE_TREE "" CACHE STRING
+  "Git tree embedded in the Q3 gyro-alignment runner")
+execute_process(
+  COMMAND git rev-parse HEAD
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+  RESULT_VARIABLE _phad_q3_git_commit_result
+  OUTPUT_VARIABLE _phad_q3_git_commit
+  ERROR_QUIET
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+execute_process(
+  COMMAND git rev-parse HEAD^{tree}
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+  RESULT_VARIABLE _phad_q3_git_tree_result
+  OUTPUT_VARIABLE _phad_q3_git_tree
+  ERROR_QUIET
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(_phad_q3_git_commit_result EQUAL 0 AND _phad_q3_git_tree_result EQUAL 0)
+  if(NOT PHAD_Q3_SOURCE_COMMIT STREQUAL "" AND
+      NOT PHAD_Q3_SOURCE_COMMIT STREQUAL _phad_q3_git_commit)
+    message(FATAL_ERROR
+      "PHAD_Q3_SOURCE_COMMIT must equal git rev-parse HEAD")
+  endif()
+  if(NOT PHAD_Q3_SOURCE_TREE STREQUAL "" AND
+      NOT PHAD_Q3_SOURCE_TREE STREQUAL _phad_q3_git_tree)
+    message(FATAL_ERROR
+      "PHAD_Q3_SOURCE_TREE must equal git rev-parse HEAD^{tree}")
+  endif()
+  set(PHAD_Q3_SOURCE_COMMIT "${_phad_q3_git_commit}")
+  set(PHAD_Q3_SOURCE_TREE "${_phad_q3_git_tree}")
+elseif(PHAD_Q3_SOURCE_COMMIT STREQUAL "" OR PHAD_Q3_SOURCE_TREE STREQUAL "")
+  message(FATAL_ERROR
+    "A source archive without Git must provide PHAD_Q3_SOURCE_COMMIT and PHAD_Q3_SOURCE_TREE")
+endif()
+unset(_phad_q3_git_commit_result)
+unset(_phad_q3_git_tree_result)
+unset(_phad_q3_git_commit)
+unset(_phad_q3_git_tree)
+foreach(_phad_q3_identity IN ITEMS
+    PHAD_Q3_SOURCE_COMMIT PHAD_Q3_SOURCE_TREE)
+  string(LENGTH "${${_phad_q3_identity}}" _phad_q3_identity_length)
+  if(NOT _phad_q3_identity_length EQUAL 40 OR
+      NOT ${_phad_q3_identity} MATCHES "^[0-9a-f]+$")
+    message(FATAL_ERROR
+      "${_phad_q3_identity} must be an exact lowercase 40-hex Git object")
+  endif()
+endforeach()
+unset(_phad_q3_identity)
+unset(_phad_q3_identity_length)
 
 add_library(phad_common
   phad/common/trajectory.cpp
@@ -230,6 +284,74 @@ target_compile_options(phad_gyro_observe_writer PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
+add_library(phad_gyro_alignment STATIC
+  apps/gyro_alignment.cpp
+  apps/gyro_alignment.hpp
+)
+target_compile_features(phad_gyro_alignment PUBLIC cxx_std_20)
+target_include_directories(phad_gyro_alignment PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_link_libraries(phad_gyro_alignment
+  PUBLIC phad::estimator Eigen3::Eigen
+)
+target_compile_options(phad_gyro_alignment PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
+# Q3's analyzer reaches GTSAM only behind the Q2 estimator helper. It must not
+# grow a direct dependency or acquire dataset/GT I/O.
+get_target_property(_phad_q3_analyzer_link_libs phad_gyro_alignment
+  LINK_LIBRARIES)
+if(_phad_q3_analyzer_link_libs MATCHES
+    "(^|;)(gtsam|phad_io_dataset|phad::io_dataset)(;|$)")
+  message(FATAL_ERROR
+    "phad_gyro_alignment has a forbidden direct GTSAM/dataset dependency")
+endif()
+unset(_phad_q3_analyzer_link_libs)
+
+add_library(phad_gyro_alignment_runner STATIC
+  apps/gyro_alignment_runner.cpp
+  apps/gyro_alignment_runner.hpp
+)
+target_compile_features(phad_gyro_alignment_runner PUBLIC cxx_std_20)
+target_include_directories(phad_gyro_alignment_runner PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_link_libraries(phad_gyro_alignment_runner
+  PUBLIC phad_gyro_alignment
+  PRIVATE phad::eval nlohmann_json::nlohmann_json OpenSSL::Crypto
+)
+target_compile_definitions(phad_gyro_alignment_runner PRIVATE
+  PHAD_Q3_DESIGN_COMMIT="16affcd2fc271f1db4d6a060b3d2864004d8a40b"
+  PHAD_Q3_DESIGN_TREE="634b048fd9501a9c807ebfcc645f5ce9fe4d8bb3"
+  PHAD_Q3_DESIGN_BLOB="a6eaa88b4553cb03f012bd090d502bc3ff3576e3"
+  PHAD_Q3_DESIGN_SHA256="1e2f20d181af5453b383ceb09d53850045e7b68ec17b13f8d40c883d417c081b"
+  PHAD_Q3_SOURCE_COMMIT="${PHAD_Q3_SOURCE_COMMIT}"
+  PHAD_Q3_SOURCE_TREE="${PHAD_Q3_SOURCE_TREE}"
+  PHAD_Q3_BUILD_TYPE="$<IF:$<BOOL:$<CONFIG>>,$<CONFIG>,Unspecified>"
+  PHAD_Q3_COMPILER="${CMAKE_CXX_COMPILER_ID}"
+  PHAD_Q3_COMPILER_VERSION="${CMAKE_CXX_COMPILER_VERSION}"
+)
+target_compile_options(phad_gyro_alignment_runner PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
+get_target_property(_phad_q3_runner_link_libs phad_gyro_alignment_runner
+  LINK_LIBRARIES)
+if(_phad_q3_runner_link_libs MATCHES
+    "(^|;)(phad_io_dataset|phad::io_dataset)(;|$)")
+  message(FATAL_ERROR
+    "phad_gyro_alignment_runner must not link dataset or GT I/O")
+endif()
+unset(_phad_q3_runner_link_libs)
+
+add_executable(phad_gyro_align apps/phad_gyro_align.cpp)
+target_link_libraries(phad_gyro_align PRIVATE phad_gyro_alignment_runner)
+target_compile_options(phad_gyro_align PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
 add_executable(phad_euroc_inspect apps/phad_euroc_inspect.cpp)
 target_link_libraries(phad_euroc_inspect PRIVATE phad::io_dataset)
 
@@ -413,6 +535,28 @@ if(PHAD_BUILD_TESTS)
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
   )
   gtest_discover_tests(phad_apps_tests PROPERTIES LABELS "unit")
+
+  add_executable(phad_gyro_alignment_tests
+    tests/apps/gyro_alignment_test.cpp
+    tests/apps/gyro_alignment_cli_test.cpp
+  )
+  target_link_libraries(phad_gyro_alignment_tests PRIVATE
+    phad_gyro_alignment_runner GTest::gtest_main
+    nlohmann_json::nlohmann_json OpenSSL::Crypto
+  )
+  target_compile_definitions(phad_gyro_alignment_tests PRIVATE
+    PHAD_GYRO_ALIGN_PATH="$<TARGET_FILE:phad_gyro_align>"
+    PHAD_Q3_EXPECTED_SOURCE_COMMIT="${PHAD_Q3_SOURCE_COMMIT}"
+    PHAD_Q3_EXPECTED_SOURCE_TREE="${PHAD_Q3_SOURCE_TREE}"
+    PHAD_Q3_EXPECTED_BUILD_TYPE="$<IF:$<BOOL:$<CONFIG>>,$<CONFIG>,Unspecified>"
+    PHAD_Q3_EXPECTED_COMPILER="${CMAKE_CXX_COMPILER_ID}"
+    PHAD_Q3_EXPECTED_COMPILER_VERSION="${CMAKE_CXX_COMPILER_VERSION}"
+  )
+  add_dependencies(phad_gyro_alignment_tests phad_gyro_align)
+  target_compile_options(phad_gyro_alignment_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+  gtest_discover_tests(phad_gyro_alignment_tests PROPERTIES LABELS "unit")
 
   add_executable(phad_io_dataset_tests
     tests/common/timestamp_test.cpp
