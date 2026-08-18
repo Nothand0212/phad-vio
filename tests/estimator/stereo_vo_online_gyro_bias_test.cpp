@@ -15,10 +15,14 @@
 #include <functional>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <numbers>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -27,6 +31,7 @@
 #include "phad/estimator/internal/gyro_bias_initial_value.hpp"
 #include "phad/estimator/internal/gyro_interval_reducer.hpp"
 #include "phad/estimator/internal/gyro_rotation_factor.hpp"
+#include "phad/estimator/internal/stereo_vo_update_transaction.hpp"
 #include "phad/estimator/stereo_vo_estimator.hpp"
 #include "phad/sensor/rigid_transform.hpp"
 
@@ -488,8 +493,11 @@ namespace
   using phad::estimator::internal::GyroNoiseScales;
   using phad::estimator::internal::GyroNoiseScalesResult;
   using phad::estimator::internal::selectGyroBiasInitialValue;
+  using phad::estimator::internal::StereoVoUpdateState;
+  using phad::estimator::internal::StereoVoUpdateTransaction;
   using phad::estimator::internal::ValidatedGyroInterval;
   using phad::estimator::internal::validateGyroInterval;
+  using phad::estimator::internal::WindowFrame;
 
   [[nodiscard]] ImuMeasurement reducerSample(
       std::int64_t timestamp_ns, const Eigen::Vector3d& gyro )
@@ -517,7 +525,348 @@ namespace
     return error;
   }
 
+  [[nodiscard]] Eigen::Isometry3d transactionPose( double offset )
+  {
+    Eigen::Isometry3d pose = Eigen::Isometry3d::Identity();
+    pose.linear()          = Eigen::AngleAxisd(
+                        0.01 * offset,
+                        Eigen::Vector3d{ 1.0, 2.0, 3.0 }.normalized() )
+                        .toRotationMatrix();
+    pose.translation() = Eigen::Vector3d{ offset, -2.0 * offset,
+                                          3.0 * offset };
+    return pose;
+  }
+
+  [[nodiscard]] ValidatedGyroInterval transactionInterval(
+      std::int64_t t_prev_ns, double offset )
+  {
+    const std::int64_t    t_mid_ns  = t_prev_ns + 25'000'000;
+    const std::int64_t    t_curr_ns = t_prev_ns + 100'000'000;
+    const Eigen::Vector3d first{ offset, offset + 1.0, offset + 2.0 };
+    const Eigen::Vector3d middle{ offset + 3.0, offset + 4.0,
+                                  offset + 5.0 };
+    const Eigen::Vector3d last{ offset + 6.0, offset + 7.0, offset + 8.0 };
+    const std::array      samples{
+        reducerSample( t_prev_ns, first ), reducerSample( t_mid_ns, middle ),
+        reducerSample( t_curr_ns, last ) };
+    const GyroIntervalResult result = validateGyroInterval( samples );
+    EXPECT_TRUE( std::holds_alternative<ValidatedGyroInterval>( result ) );
+    return std::get<ValidatedGyroInterval>( result );
+  }
+
+  [[nodiscard]] StereoObservation transactionObservation(
+      LandmarkId id, double offset )
+  {
+    return StereoObservation{ id, Eigen::Vector2d{ offset, -offset },
+                              offset + 0.5 };
+  }
+
+  [[nodiscard]] std::unique_ptr<StereoVoUpdateState> transactionState(
+      std::uint64_t salt )
+  {
+    auto state = std::make_unique<StereoVoUpdateState>();
+
+    const std::uint64_t root_index = 10U * salt + 1U;
+    WindowFrame         root;
+    root.m_frame_index = root_index;
+    root.m_timestamp   = phad::common::Timestamp{
+        static_cast<std::int64_t>( root_index ) * 100'000'000 };
+    root.m_T_W_B        = transactionPose( static_cast<double>( salt ) + 0.25 );
+    root.m_observations = {
+        transactionObservation( 100U + salt, 0.25 + static_cast<double>( salt ) ),
+        transactionObservation( 200U + salt, 0.5 + static_cast<double>( salt ) ) };
+    root.m_is_keyframe = ( salt % 2U ) == 0U;
+    root.m_gyro.emplace();
+    root.m_gyro->m_bias_radps =
+        Eigen::Vector3d{ 0.01, -0.02, 0.03 } * static_cast<double>( salt );
+    root.m_gyro->m_segment_id   = static_cast<std::uint32_t>( salt + 2U );
+    root.m_gyro->m_component_id = salt + 3U;
+
+    WindowFrame link;
+    link.m_frame_index = root_index + 1U;
+    link.m_timestamp   = phad::common::Timestamp{
+        root.m_timestamp.nanoseconds() + 100'000'000 };
+    link.m_T_W_B        = transactionPose( static_cast<double>( salt ) + 1.25 );
+    link.m_observations = {
+        transactionObservation( 300U + salt, 1.25 + static_cast<double>( salt ) ) };
+    link.m_is_keyframe = !root.m_is_keyframe;
+    link.m_gyro.emplace();
+    link.m_gyro->m_bias_radps =
+        Eigen::Vector3d{ -0.04, 0.05, -0.06 } * static_cast<double>( salt );
+    link.m_gyro->m_segment_id              = static_cast<std::uint32_t>( salt + 4U );
+    link.m_gyro->m_component_id            = salt + 5U;
+    link.m_gyro->m_predecessor_frame_index = root.m_frame_index;
+    link.m_gyro->m_interval                = transactionInterval(
+        root.m_timestamp.nanoseconds(), static_cast<double>( salt ) );
+
+    WindowFrame no_gyro;
+    no_gyro.m_frame_index = root_index + 2U;
+    no_gyro.m_timestamp   = phad::common::Timestamp{
+        link.m_timestamp.nanoseconds() + 100'000'000 };
+    no_gyro.m_T_W_B        = transactionPose( static_cast<double>( salt ) + 2.25 );
+    no_gyro.m_observations = {
+        transactionObservation( 400U + salt, 2.25 + static_cast<double>( salt ) ) };
+    no_gyro.m_is_keyframe = root.m_is_keyframe;
+
+    state->m_window = { std::move( root ), std::move( link ),
+                        std::move( no_gyro ) };
+    state->m_landmarks_w.emplace(
+        500U + salt,
+        Eigen::Vector3d{ static_cast<double>( salt ),
+                         static_cast<double>( salt ) + 1.0,
+                         static_cast<double>( salt ) + 2.0 } );
+    state->m_track_times.emplace(
+        600U + salt,
+        std::vector<phad::common::Timestamp>{
+            phad::common::Timestamp{ static_cast<std::int64_t>( salt ) },
+            phad::common::Timestamp{ static_cast<std::int64_t>( salt + 1U ) } } );
+    state->m_T_W_B_last_stereo.emplace(
+        700U + salt, transactionPose( static_cast<double>( salt ) + 3.25 ) );
+    if ( ( salt % 2U ) == 0U )
+    {
+      state->m_T_W_B_last_accepted =
+          transactionPose( static_cast<double>( salt ) + 4.25 );
+    }
+    else
+    {
+      state->m_T_W_B_prev_accepted =
+          transactionPose( static_cast<double>( salt ) + 5.25 );
+    }
+    state->m_next_frame_index = root_index + 3U;
+    state->m_initialized      = ( salt % 2U ) == 0U;
+    state->m_segment_id       = static_cast<std::uint32_t>( salt + 6U );
+    state->m_culled_ids.insert( 800U + salt );
+    state->m_pending_seed_obs.emplace(
+        900U + salt,
+        transactionObservation( 900U + salt,
+                                static_cast<double>( salt ) + 6.25 ) );
+    if ( ( salt % 2U ) == 0U )
+    {
+      state->m_eligible_visual_rejected_timestamp =
+          phad::common::Timestamp{ static_cast<std::int64_t>( salt + 7U ) };
+    }
+    state->m_next_gyro_component_id = salt + 8U;
+    return state;
+  }
+
+  void expectVectorExact( const Eigen::Vector3d& actual,
+                          const Eigen::Vector3d& expected )
+  {
+    EXPECT_TRUE( ( actual.array() == expected.array() ).all() );
+  }
+
+  void expectPoseExact( const Eigen::Isometry3d& actual,
+                        const Eigen::Isometry3d& expected )
+  {
+    EXPECT_TRUE( ( actual.matrix().array() == expected.matrix().array() ).all() );
+  }
+
+  void expectObservationExact( const StereoObservation& actual,
+                               const StereoObservation& expected )
+  {
+    EXPECT_EQ( actual.id, expected.id );
+    EXPECT_TRUE( ( actual.left_pixel.array() == expected.left_pixel.array() ).all() );
+    EXPECT_EQ( actual.disparity_px, expected.disparity_px );
+  }
+
+  void expectIntervalExact( const ValidatedGyroInterval& actual,
+                            const ValidatedGyroInterval& expected )
+  {
+    ASSERT_EQ( actual.m_samples.size(), expected.m_samples.size() );
+    for ( std::size_t index = 0; index < actual.m_samples.size(); ++index )
+    {
+      EXPECT_EQ( actual.m_samples[ index ].timestamp,
+                 expected.m_samples[ index ].timestamp );
+      EXPECT_EQ( actual.m_samples[ index ].accel_mps2,
+                 expected.m_samples[ index ].accel_mps2 );
+      EXPECT_EQ( actual.m_samples[ index ].gyro_radps,
+                 expected.m_samples[ index ].gyro_radps );
+    }
+    ASSERT_EQ( actual.m_steps.size(), expected.m_steps.size() );
+    for ( std::size_t index = 0; index < actual.m_steps.size(); ++index )
+    {
+      expectVectorExact( actual.m_steps[ index ].m_omega_mean_radps,
+                         expected.m_steps[ index ].m_omega_mean_radps );
+      EXPECT_EQ( actual.m_steps[ index ].m_dt_ns,
+                 expected.m_steps[ index ].m_dt_ns );
+      EXPECT_EQ( actual.m_steps[ index ].m_dt_s,
+                 expected.m_steps[ index ].m_dt_s );
+    }
+    EXPECT_EQ( actual.m_t_prev, expected.m_t_prev );
+    EXPECT_EQ( actual.m_t_curr, expected.m_t_curr );
+    EXPECT_EQ( actual.m_duration_ns, expected.m_duration_ns );
+  }
+
+  void expectWindowFrameExact( const WindowFrame& actual,
+                               const WindowFrame& expected )
+  {
+    EXPECT_EQ( actual.m_frame_index, expected.m_frame_index );
+    EXPECT_EQ( actual.m_timestamp, expected.m_timestamp );
+    expectPoseExact( actual.m_T_W_B, expected.m_T_W_B );
+    ASSERT_EQ( actual.m_observations.size(), expected.m_observations.size() );
+    for ( std::size_t index = 0; index < actual.m_observations.size(); ++index )
+    {
+      expectObservationExact( actual.m_observations[ index ],
+                              expected.m_observations[ index ] );
+    }
+    EXPECT_EQ( actual.m_is_keyframe, expected.m_is_keyframe );
+    ASSERT_EQ( actual.m_gyro.has_value(), expected.m_gyro.has_value() );
+    if ( actual.m_gyro.has_value() )
+    {
+      expectVectorExact( actual.m_gyro->m_bias_radps,
+                         expected.m_gyro->m_bias_radps );
+      EXPECT_EQ( actual.m_gyro->m_segment_id,
+                 expected.m_gyro->m_segment_id );
+      EXPECT_EQ( actual.m_gyro->m_component_id,
+                 expected.m_gyro->m_component_id );
+      EXPECT_EQ( actual.m_gyro->m_predecessor_frame_index,
+                 expected.m_gyro->m_predecessor_frame_index );
+      ASSERT_EQ( actual.m_gyro->m_interval.has_value(),
+                 expected.m_gyro->m_interval.has_value() );
+      if ( actual.m_gyro->m_interval.has_value() )
+      {
+        expectIntervalExact( *actual.m_gyro->m_interval,
+                             *expected.m_gyro->m_interval );
+      }
+    }
+  }
+
+  void expectStateExact( const StereoVoUpdateState& actual,
+                         const StereoVoUpdateState& expected )
+  {
+    ASSERT_EQ( actual.m_window.size(), expected.m_window.size() );
+    for ( std::size_t index = 0; index < actual.m_window.size(); ++index )
+    {
+      expectWindowFrameExact( actual.m_window[ index ],
+                              expected.m_window[ index ] );
+    }
+
+    ASSERT_EQ( actual.m_landmarks_w.size(), expected.m_landmarks_w.size() );
+    for ( const auto& [ id, point ] : expected.m_landmarks_w )
+    {
+      const auto it = actual.m_landmarks_w.find( id );
+      ASSERT_NE( it, actual.m_landmarks_w.end() );
+      expectVectorExact( it->second, point );
+    }
+    EXPECT_EQ( actual.m_track_times, expected.m_track_times );
+
+    ASSERT_EQ( actual.m_T_W_B_last_stereo.size(),
+               expected.m_T_W_B_last_stereo.size() );
+    for ( const auto& [ id, pose ] : expected.m_T_W_B_last_stereo )
+    {
+      const auto it = actual.m_T_W_B_last_stereo.find( id );
+      ASSERT_NE( it, actual.m_T_W_B_last_stereo.end() );
+      expectPoseExact( it->second, pose );
+    }
+
+    ASSERT_EQ( actual.m_T_W_B_last_accepted.has_value(),
+               expected.m_T_W_B_last_accepted.has_value() );
+    if ( actual.m_T_W_B_last_accepted.has_value() )
+    {
+      expectPoseExact( *actual.m_T_W_B_last_accepted,
+                       *expected.m_T_W_B_last_accepted );
+    }
+    ASSERT_EQ( actual.m_T_W_B_prev_accepted.has_value(),
+               expected.m_T_W_B_prev_accepted.has_value() );
+    if ( actual.m_T_W_B_prev_accepted.has_value() )
+    {
+      expectPoseExact( *actual.m_T_W_B_prev_accepted,
+                       *expected.m_T_W_B_prev_accepted );
+    }
+
+    EXPECT_EQ( actual.m_next_frame_index, expected.m_next_frame_index );
+    EXPECT_EQ( actual.m_initialized, expected.m_initialized );
+    EXPECT_EQ( actual.m_segment_id, expected.m_segment_id );
+    EXPECT_EQ( actual.m_culled_ids, expected.m_culled_ids );
+
+    ASSERT_EQ( actual.m_pending_seed_obs.size(),
+               expected.m_pending_seed_obs.size() );
+    for ( const auto& [ id, observation ] : expected.m_pending_seed_obs )
+    {
+      const auto it = actual.m_pending_seed_obs.find( id );
+      ASSERT_NE( it, actual.m_pending_seed_obs.end() );
+      expectObservationExact( it->second, observation );
+    }
+    EXPECT_EQ( actual.m_eligible_visual_rejected_timestamp,
+               expected.m_eligible_visual_rejected_timestamp );
+    EXPECT_EQ( actual.m_next_gyro_component_id,
+               expected.m_next_gyro_component_id );
+  }
+
 }  // namespace
+
+TEST( StereoVoUpdateTransaction, ScopeExitRestoresEveryField )
+{
+  auto                       owner           = transactionState( 2U );
+  auto                       expected_after  = transactionState( 3U );
+  const StereoVoUpdateState  expected_before = *owner;
+  const StereoVoUpdateState* owner_before    = owner.get();
+
+  {
+    StereoVoUpdateTransaction transaction( owner );
+    EXPECT_EQ( owner.get(), owner_before );
+    *owner = *expected_after;
+  }
+
+  EXPECT_NE( owner.get(), owner_before );
+  expectStateExact( *owner, expected_before );
+}
+
+TEST( StereoVoUpdateTransaction, ExceptionUnwindRestoresEveryField )
+{
+  auto                       owner           = transactionState( 4U );
+  auto                       expected_after  = transactionState( 5U );
+  const StereoVoUpdateState  expected_before = *owner;
+  const StereoVoUpdateState* owner_before    = owner.get();
+
+  EXPECT_THROW(
+      {
+        StereoVoUpdateTransaction transaction( owner );
+        EXPECT_EQ( owner.get(), owner_before );
+        *owner = *expected_after;
+        throw std::runtime_error( "transaction unwind" );
+      },
+      std::runtime_error );
+
+  EXPECT_NE( owner.get(), owner_before );
+  expectStateExact( *owner, expected_before );
+}
+
+TEST( StereoVoUpdateTransaction, ExplicitRollbackRestoresEveryField )
+{
+  auto                       owner           = transactionState( 6U );
+  auto                       expected_after  = transactionState( 7U );
+  const StereoVoUpdateState  expected_before = *owner;
+  const StereoVoUpdateState* owner_before    = owner.get();
+
+  StereoVoUpdateTransaction transaction( owner );
+  EXPECT_EQ( owner.get(), owner_before );
+  *owner = *expected_after;
+  transaction.rollback();
+  transaction.rollback();
+
+  EXPECT_NE( owner.get(), owner_before );
+  expectStateExact( *owner, expected_before );
+}
+
+TEST( StereoVoUpdateTransaction, CommitPublishesEveryField )
+{
+  auto                       owner          = transactionState( 8U );
+  auto                       expected_after = transactionState( 9U );
+  const StereoVoUpdateState* owner_before   = owner.get();
+
+  {
+    StereoVoUpdateTransaction transaction( owner );
+    EXPECT_EQ( owner.get(), owner_before );
+    *owner = *expected_after;
+    transaction.commit();
+    transaction.commit();
+    EXPECT_EQ( owner.get(), owner_before );
+  }
+
+  EXPECT_EQ( owner.get(), owner_before );
+  expectStateExact( *owner, *expected_after );
+}
 
 TEST( GyroBiasInitialValue, SelectsExactLinkAndComponentRootSources )
 {
