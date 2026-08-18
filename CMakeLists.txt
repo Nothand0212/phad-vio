@@ -468,6 +468,7 @@ if(PHAD_BUILD_TESTS)
   add_executable(phad_estimator_tests
     tests/estimator/gyro_rotation_predictor_test.cpp
     tests/estimator/gtsam_smoke_test.cpp
+    tests/estimator/stereo_vo_online_gyro_bias_test.cpp
     tests/estimator/types_test.cpp
     tests/estimator/stereo_point_mapping_test.cpp
     tests/estimator/stereo_vo_estimator_test.cpp
