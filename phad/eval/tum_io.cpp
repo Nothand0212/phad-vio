@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -39,6 +40,14 @@ namespace phad::eval
     {
       return EvalError{ code, std::move( path ), line, std::move( field ),
                         std::move( cause ) };
+    }
+
+    EvalError makeTimestampRangeError( const fs::path& path,
+                                       std::size_t     line )
+    {
+      return makeError( EvalErrorCode::kInvalidRecord, path, line,
+                        "timestamp",
+                        "timestamp is outside the int64 nanosecond range" );
     }
 
     /// 把整数纳秒写成 `<秒>.<9 位小数>`，不经过浮点。
@@ -84,20 +93,28 @@ namespace phad::eval
                                                   const fs::path&  path,
                                                   std::size_t      line )
     {
-      const auto       dot           = text.find( '.' );
-      std::string_view seconds_text  = text.substr( 0, dot );
-      std::string_view fraction_text = dot == std::string_view::npos
-                                           ? std::string_view{}
-                                           : text.substr( dot + 1 );
-      const bool       negative      = !seconds_text.empty() &&
+      const auto       dot          = text.find( '.' );
+      std::string_view seconds_text = text.substr( 0, dot );
+      const bool       negative     = !seconds_text.empty() &&
                             seconds_text.front() == '-';
+      const std::string_view seconds_magnitude_text =
+          negative ? seconds_text.substr( 1 ) : seconds_text;
+      const std::string_view fraction_text =
+          dot == std::string_view::npos ? std::string_view{}
+                                        : text.substr( dot + 1 );
 
-      std::int64_t seconds = 0;
-      const auto   parsed  = std::from_chars(
-          seconds_text.data(), seconds_text.data() + seconds_text.size(),
+      std::uint64_t seconds = 0;
+      const auto    parsed  = std::from_chars(
+          seconds_magnitude_text.data(),
+          seconds_magnitude_text.data() + seconds_magnitude_text.size(),
           seconds, 10 );
+      if ( parsed.ec == std::errc::result_out_of_range )
+      {
+        return makeTimestampRangeError( path, line );
+      }
       if ( parsed.ec != std::errc{} ||
-           parsed.ptr != seconds_text.data() + seconds_text.size() )
+           parsed.ptr != seconds_magnitude_text.data() +
+                             seconds_magnitude_text.size() )
       {
         return makeError( EvalErrorCode::kInvalidRecord, path, line,
                           "timestamp",
@@ -111,7 +128,7 @@ namespace phad::eval
             "time contract cannot represent" );
       }
 
-      std::int64_t fraction = 0;
+      std::uint64_t fraction = 0;
       if ( !fraction_text.empty() )
       {
         const auto fraction_parsed = std::from_chars(
@@ -132,9 +149,33 @@ namespace phad::eval
         }
       }
 
-      const std::int64_t magnitude =
-          ( negative ? -seconds : seconds ) * kNanosPerSecond + fraction;
-      return common::Timestamp{ negative ? -magnitude : magnitude };
+      const auto max_seconds = static_cast<std::uint64_t>(
+          std::numeric_limits<std::int64_t>::max() / kNanosPerSecond );
+      if ( seconds > max_seconds )
+      {
+        return makeTimestampRangeError( path, line );
+      }
+
+      const auto seconds_ns = static_cast<std::int64_t>( seconds ) *
+                              kNanosPerSecond;
+      const auto fraction_ns = static_cast<std::int64_t>( fraction );
+      if ( negative )
+      {
+        const std::int64_t negative_seconds_ns = -seconds_ns;
+        if ( negative_seconds_ns <
+             std::numeric_limits<std::int64_t>::min() + fraction_ns )
+        {
+          return makeTimestampRangeError( path, line );
+        }
+        return common::Timestamp{ negative_seconds_ns - fraction_ns };
+      }
+
+      if ( seconds_ns >
+           std::numeric_limits<std::int64_t>::max() - fraction_ns )
+      {
+        return makeTimestampRangeError( path, line );
+      }
+      return common::Timestamp{ seconds_ns + fraction_ns };
     }
 
     EvalResult<double> parseFinite( std::string_view text,
@@ -203,25 +244,26 @@ namespace phad::eval
     return std::nullopt;
   }
 
-  EvalResult<common::Trajectory> readTum( const fs::path& path )
+  EvalResult<common::Trajectory> readTumBytes(
+      std::string_view bytes, const fs::path& source_label )
   {
-    std::ifstream stream( path );
-    if ( !stream )
-    {
-      return makeError( EvalErrorCode::kIoError, path, std::nullopt, {},
-                        "failed to open trajectory file for reading" );
-    }
-
     std::vector<common::TimedPose> poses;
     std::vector<std::size_t>       lines;
-    std::string                    line_text;
     std::size_t                    line_number = 0;
-    while ( std::getline( stream, line_text ) )
+    std::size_t                    line_begin  = 0;
+    while ( line_begin < bytes.size() )
     {
       ++line_number;
+      const std::size_t line_end = bytes.find( '\n', line_begin );
+      std::string_view  line_text =
+          line_end == std::string_view::npos
+               ? bytes.substr( line_begin )
+               : bytes.substr( line_begin, line_end - line_begin );
+      line_begin = line_end == std::string_view::npos ? bytes.size()
+                                                      : line_end + 1U;
       if ( !line_text.empty() && line_text.back() == '\r' )
       {
-        line_text.pop_back();
+        line_text.remove_suffix( 1U );
       }
       const auto fields = splitWhitespace( line_text );
       if ( fields.empty() || fields.front().front() == '#' )
@@ -231,11 +273,12 @@ namespace phad::eval
       if ( fields.size() != kFieldCount )
       {
         return makeError(
-            EvalErrorCode::kInvalidRecord, path, line_number, {},
+            EvalErrorCode::kInvalidRecord, source_label, line_number, {},
             "TUM row must contain timestamp tx ty tz qx qy qz qw" );
       }
 
-      auto timestamp = parseTimestamp( fields[ 0 ], path, line_number );
+      auto timestamp =
+          parseTimestamp( fields[ 0 ], source_label, line_number );
       if ( !timestamp )
       {
         return timestamp.error();
@@ -246,8 +289,9 @@ namespace phad::eval
       std::array<double, 7> values{};
       for ( std::size_t index = 0; index < values.size(); ++index )
       {
-        auto value = parseFinite( fields[ index + 1U ], path, line_number,
-                                  std::string{ kFieldNames[ index ] } );
+        auto value =
+            parseFinite( fields[ index + 1U ], source_label, line_number,
+                         std::string{ kFieldNames[ index ] } );
         if ( !value )
         {
           return value.error();
@@ -259,8 +303,9 @@ namespace phad::eval
                                          values[ 4 ], values[ 5 ] };
       if ( std::abs( rotation.norm() - 1.0 ) > kUnitQuaternionTolerance )
       {
-        return makeError( EvalErrorCode::kInvalidRecord, path, line_number,
-                          "qx qy qz qw", "quaternion must have unit norm" );
+        return makeError( EvalErrorCode::kInvalidRecord, source_label,
+                          line_number, "qx qy qz qw",
+                          "quaternion must have unit norm" );
       }
 
       common::TimedPose pose;
@@ -271,18 +316,32 @@ namespace phad::eval
       poses.push_back( pose );
       lines.push_back( line_number );
     }
+
+    auto trajectory = common::Trajectory::create( std::move( poses ) );
+    if ( !trajectory )
+    {
+      return mapTrajectoryError( trajectory.error(), source_label, lines );
+    }
+    return std::move( trajectory ).value();
+  }
+
+  EvalResult<common::Trajectory> readTum( const fs::path& path )
+  {
+    std::ifstream stream( path, std::ios::binary );
+    if ( !stream )
+    {
+      return makeError( EvalErrorCode::kIoError, path, std::nullopt, {},
+                        "failed to open trajectory file for reading" );
+    }
+
+    const std::string bytes{ std::istreambuf_iterator<char>{ stream },
+                             std::istreambuf_iterator<char>{} };
     if ( stream.bad() )
     {
       return makeError( EvalErrorCode::kIoError, path, std::nullopt, {},
                         "failed while reading trajectory file" );
     }
-
-    auto trajectory = common::Trajectory::create( std::move( poses ) );
-    if ( !trajectory )
-    {
-      return mapTrajectoryError( trajectory.error(), path, lines );
-    }
-    return std::move( trajectory ).value();
+    return readTumBytes( bytes, path );
   }
 
 }  // namespace phad::eval

@@ -7,10 +7,12 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <numbers>
 #include <random>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -25,6 +27,7 @@ namespace
   using phad::common::Trajectory;
   using phad::eval::EvalErrorCode;
   using phad::eval::readTum;
+  using phad::eval::readTumBytes;
   using phad::eval::writeTum;
   using phad::testing::kEurocEpochNs;
   using phad::testing::kStepNs;
@@ -68,6 +71,113 @@ namespace
   private:
     fs::path m_path;
   };
+
+  [[nodiscard]] std::string tumRow( std::string_view timestamp )
+  {
+    return std::string{ timestamp } + " 0 0 0 0 0 0 1\n";
+  }
+
+  void expectTimestampOverflow( std::string_view timestamp )
+  {
+    const fs::path source_label = "opaque-timestamp-overflow.tum";
+    const auto     read         = readTumBytes( tumRow( timestamp ), source_label );
+
+    ASSERT_FALSE( read ) << timestamp;
+    EXPECT_EQ( read.error().code, EvalErrorCode::kInvalidRecord );
+    EXPECT_EQ( read.error().source_path, source_label );
+    ASSERT_TRUE( read.error().line.has_value() );
+    EXPECT_EQ( *read.error().line, 1U );
+    EXPECT_EQ( read.error().field, "timestamp" );
+    EXPECT_EQ( read.error().cause,
+               "timestamp is outside the int64 nanosecond range" );
+  }
+
+  TEST( TumIoTest, ReadTumBytesParsesMaximumInt64Timestamp )
+  {
+    const auto read = readTumBytes(
+        tumRow( "9223372036.854775807" ), "opaque-max-timestamp.tum" );
+
+    ASSERT_TRUE( read ) << read.error().describe();
+    EXPECT_EQ( read.value().firstTimestamp().nanoseconds(),
+               std::numeric_limits<std::int64_t>::max() );
+  }
+
+  TEST( TumIoTest, ReadTumBytesParsesMinimumInt64Timestamp )
+  {
+    const auto read = readTumBytes(
+        tumRow( "-9223372036.854775808" ), "opaque-min-timestamp.tum" );
+
+    ASSERT_TRUE( read ) << read.error().describe();
+    EXPECT_EQ( read.value().firstTimestamp().nanoseconds(),
+               std::numeric_limits<std::int64_t>::min() );
+  }
+
+  TEST( TumIoTest, ReadTumBytesPreservesLexicalSignAcrossZero )
+  {
+    const auto read = readTumBytes(
+        tumRow( "-1.5" ) + tumRow( "-0.5" ) + tumRow( "0.5" ) +
+            tumRow( "1.5" ),
+        "opaque-signed-timestamps.tum" );
+
+    ASSERT_TRUE( read ) << read.error().describe();
+    ASSERT_EQ( read.value().size(), 4U );
+    EXPECT_EQ( read.value().poses()[ 0 ].timestamp.nanoseconds(),
+               -1'500'000'000 );
+    EXPECT_EQ( read.value().poses()[ 1 ].timestamp.nanoseconds(),
+               -500'000'000 );
+    EXPECT_EQ( read.value().poses()[ 2 ].timestamp.nanoseconds(),
+               500'000'000 );
+    EXPECT_EQ( read.value().poses()[ 3 ].timestamp.nanoseconds(),
+               1'500'000'000 );
+  }
+
+  TEST( TumIoTest, ReadTumBytesRejectsSecondsMultiplicationOverflow )
+  {
+    expectTimestampOverflow( "9223372037" );
+    expectTimestampOverflow( "-9223372037" );
+  }
+
+  TEST( TumIoTest, ReadTumBytesRejectsFractionCombinationOverflow )
+  {
+    expectTimestampOverflow( "9223372036.854775808" );
+    expectTimestampOverflow( "-9223372036.854775809" );
+  }
+
+  TEST( TumIoTest, ReadTumBytesDoesNotOpenOpaqueSourceLabel )
+  {
+    const fs::path source_label =
+        "/phad/nonexistent/read_tum_bytes/opaque-source.tum";
+    ASSERT_FALSE( fs::exists( source_label ) );
+
+    const auto read = readTumBytes(
+        "# generated in memory\r\n"
+        "\r\n"
+        "0.000000000 0 0 0 0 0 0 1\r\n"
+        "   \r\n"
+        "1.000000000 1 0 0 0 0 0 1\r\n",
+        source_label );
+
+    ASSERT_TRUE( read ) << read.error().describe();
+    ASSERT_EQ( read.value().size(), 2U );
+    EXPECT_EQ( read.value().firstTimestamp().nanoseconds(), 0 );
+    EXPECT_EQ( read.value().lastTimestamp().nanoseconds(), 1'000'000'000 );
+  }
+
+  TEST( TumIoTest, ReadTumBytesReportsExactSourceLabelAndPhysicalLine )
+  {
+    const fs::path source_label = "opaque://joined-estimate.tum";
+    const auto     read         = readTumBytes(
+        "# in-memory source\n"
+                    "0.000000000 0 0 0 0 0 0 1\n"
+                    "invalid third line\n",
+        source_label );
+
+    ASSERT_FALSE( read );
+    EXPECT_EQ( read.error().code, EvalErrorCode::kInvalidRecord );
+    EXPECT_EQ( read.error().source_path, source_label );
+    ASSERT_TRUE( read.error().line.has_value() );
+    EXPECT_EQ( *read.error().line, 3U );
+  }
 
   TEST( TumIoTest, RoundTripPreservesNanosecondTimestamps )
   {
