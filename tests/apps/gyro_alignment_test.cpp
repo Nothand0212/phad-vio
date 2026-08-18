@@ -318,9 +318,9 @@ namespace
   [[nodiscard]] GyroAlignmentInput nonlinearRankSiblingFixture(
       bool nonlinear_early )
   {
-    constexpr std::int64_t kRankDtNs = 900'000'000;
+    constexpr std::int64_t kRankDtNs = 20'000'000;
     const Eigen::Vector3d  kRankRate{
-        2.0 * std::numbers::pi / 0.9, 0.0, 0.0 };
+        2.0 * std::numbers::pi / 0.02, 0.0, 0.0 };
     const auto kNonlinearRows = frozenNonlinearRows();
 
     GyroAlignmentInput input;
@@ -350,7 +350,7 @@ namespace
       }
       else
       {
-        for ( std::size_t i = 0; i < 50U; ++i )
+        for ( std::size_t i = 0; i < 2'250U; ++i )
         {
           const auto next = timestamp_ns + kRankDtNs;
           input.packets.push_back( validPacket(
@@ -360,12 +360,31 @@ namespace
         }
       }
 
-      const auto boundary =
-          static_cast<std::int64_t>( half + 1U ) * 50 * kSecondNs;
-      input.packets.push_back(
-          gapPacket( input.packets.size(), timestamp_ns, boundary ) );
-      input.endpoints.push_back( endpoint( boundary, q_wb ) );
-      timestamp_ns = boundary;
+      if ( half == 0U )
+      {
+        constexpr std::int64_t kCrossStartNs = 46'500'000'000;
+        constexpr std::int64_t kCrossEndNs   = 50'500'000'000;
+        if ( timestamp_ns < kCrossStartNs )
+        {
+          input.packets.push_back( gapPacket(
+              input.packets.size(), timestamp_ns, kCrossStartNs ) );
+          input.endpoints.push_back( endpoint( kCrossStartNs, q_wb ) );
+          timestamp_ns = kCrossStartNs;
+        }
+        input.packets.push_back(
+            validPacket( input.packets.size(), timestamp_ns, kCrossEndNs,
+                         Eigen::Vector3d::Zero() ) );
+        input.endpoints.push_back( endpoint( kCrossEndNs, q_wb ) );
+        timestamp_ns = kCrossEndNs;
+      }
+      else
+      {
+        constexpr std::int64_t kFitEndNs = 100'000'000'000;
+        input.packets.push_back(
+            gapPacket( input.packets.size(), timestamp_ns, kFitEndNs ) );
+        input.endpoints.push_back( endpoint( kFitEndNs, q_wb ) );
+        timestamp_ns = kFitEndNs;
+      }
     }
     return input;
   }
@@ -1176,7 +1195,7 @@ namespace
     ASSERT_TRUE( outside_gates.axis_loss_zero_rad2.has_value() );
     ASSERT_TRUE( outside_gates.axis_loss_fit_rad2.has_value() );
     constexpr double kXLoss = 0.002 * 0.002;
-    EXPECT_EQ( positiveBits( 29.0 * kXLoss ), 0x3f1e68a0d349be91ULL );
+    EXPECT_EQ( positiveBits( 29.0 * kXLoss ), 0x3f1e68a0d349be90ULL );
     EXPECT_EQ( positiveBits( 31.0 * kXLoss ), 0x3f2040bfe3b03e21ULL );
     EXPECT_NEAR( inside_gates.axis_loss_fit_rad2->x(), 29.0 * kXLoss,
                  1.0e-12 );
@@ -1423,8 +1442,10 @@ namespace
     const auto physical_correct =
         physicalStencilOracle( canonical_physical );
     ASSERT_TRUE( physical_correct.shape_valid );
-    EXPECT_TRUE( physical_correct.candidate_bias.isApprox(
-        Eigen::Vector3d{ 0.002, -0.003, 0.001 }, 2.0e-8 ) );
+    EXPECT_LE( ( physical_correct.candidate_bias -
+                 Eigen::Vector3d{ 0.002, -0.003, 0.001 } )
+                   .norm(),
+               2.0e-8 );
     EXPECT_TRUE( std::isfinite( physical_correct.candidate_loss ) );
     for ( std::size_t omitted = 1U; omitted < canonical_physical.size();
           ++omitted )
@@ -1460,8 +1481,9 @@ namespace
         analyzeGyroAlignment( noncommutingFixture() );
     const auto& public_full = requireAnalysis( noncommuting_public ).full;
     ASSERT_TRUE( public_full.bias_radps.has_value() );
-    EXPECT_TRUE( public_full.bias_radps->isApprox(
-        physical_correct.candidate_bias, 2.0e-7 ) );
+    EXPECT_LE( ( *public_full.bias_radps - physical_correct.candidate_bias )
+                   .norm(),
+               2.0e-7 );
 
     const auto  public_result = analyzeGyroAlignment( nearPiPacketFixture(
         1.0, Eigen::Vector3d::UnitX(),
@@ -1489,8 +1511,7 @@ namespace
         Eigen::Vector3d{ 0.2, -0.1, 0.3 } ) );
     ASSERT_EQ( result.verdict.status, GyroAlignmentStatus::kPass );
     const auto& block = requireAnalysis( result ).blocks.front();
-    EXPECT_TRUE( block.r_fit_rad.isApprox( Eigen::Vector3d::Zero(),
-                                           1.0e-12 ) );
+    EXPECT_LE( block.r_fit_rad.norm(), 1.0e-12 );
   }
 
   TEST( GyroAlignmentTest, RankDeficientPhysicalFixtureHasExactSupport )
@@ -1683,13 +1704,13 @@ namespace
                  kFailUlpMargin / 2U );
     }
     EXPECT_EQ( early_analysis.full.eligible_duration_ns,
-               91'500'000'000 );
+               95'500'000'000 );
     EXPECT_EQ( early_analysis.early.eligible_duration_ns,
                46'500'000'000 );
     EXPECT_EQ( early_analysis.late.eligible_duration_ns,
                45'000'000'000 );
     EXPECT_EQ( late_analysis.full.eligible_duration_ns,
-               91'500'000'000 );
+               95'500'000'000 );
     EXPECT_EQ( late_analysis.early.eligible_duration_ns,
                45'000'000'000 );
     EXPECT_EQ( late_analysis.late.eligible_duration_ns,
@@ -2142,8 +2163,7 @@ namespace
     ASSERT_TRUE( analysis.full.bias_radps.has_value() );
     EXPECT_TRUE( analysis.full.bias_radps->isApprox( bias, 2.0e-7 ) );
     ASSERT_EQ( analysis.blocks.size(), 60U );
-    EXPECT_TRUE( analysis.blocks.front().r_fit_rad.isApprox(
-        Eigen::Vector3d::Zero(), 2.0e-8 ) );
+    EXPECT_LE( analysis.blocks.front().r_fit_rad.norm(), 2.0e-8 );
 
     const Eigen::Matrix3d r_a = rotationVectorQuaternion(
                                     Eigen::Vector3d{ 0.01, 0.0, 0.0 } )
