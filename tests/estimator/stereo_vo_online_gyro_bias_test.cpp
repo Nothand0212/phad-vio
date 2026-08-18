@@ -295,3 +295,168 @@ TEST( StereoVoOnlineGyroBias, AuthorityBaselineVisualControl )
             << toHex( canonical ) << '\n';
 }
 // PHAD_M4_ONLINE_BIAS_AUTHORITY_CONTROL_END
+
+// PHAD_M4_ONLINE_BIAS_NO_EVICTION_BEGIN
+#include "phad/sensor/imu_measurement.hpp"
+
+namespace
+{
+
+  using phad::estimator::GyroBiasOptions;
+  using phad::estimator::GyroBreakReason;
+  using phad::estimator::GyroDiagnostics;
+  using phad::estimator::GyroInterval;
+  using phad::sensor::ImuMeasurement;
+
+  const Eigen::Vector3d kBiasBase{ 0.012, -0.018, 0.025 };
+  const Eigen::Vector3d kBiasStep{ 0.0001, -0.00015, 0.0002 };
+
+  [[nodiscard]] Eigen::Vector3d biasTruth( std::size_t frame_index )
+  {
+    return kBiasBase + static_cast<double>( frame_index ) * kBiasStep;
+  }
+
+  [[nodiscard]] GyroInterval makeGyroInterval( std::size_t frame_index )
+  {
+    const std::size_t  interval_index = frame_index - 1U;
+    const std::int64_t t_prev_ns =
+        static_cast<std::int64_t>( frame_index ) * 100'000'000;
+    const Eigen::Vector3d bias_left  = biasTruth( interval_index );
+    const Eigen::Vector3d bias_mid   = bias_left - 0.5 * kBiasStep;
+    const Eigen::Vector3d bias_right = biasTruth( frame_index );
+
+    auto make_sample = []( std::int64_t           timestamp_ns,
+                           const Eigen::Vector3d& gyro ) {
+      ImuMeasurement sample;
+      sample.timestamp  = phad::common::Timestamp{ timestamp_ns };
+      sample.accel_mps2 = { 0.0, 0.0, 0.0 };
+      sample.gyro_radps = { gyro.x(), gyro.y(), gyro.z() };
+      return sample;
+    };
+
+    GyroInterval interval;
+    interval.m_t_prev  = phad::common::Timestamp{ t_prev_ns };
+    interval.m_samples = {
+        make_sample( t_prev_ns, bias_left ),
+        make_sample( t_prev_ns + 50'000'000, bias_mid ),
+        make_sample( t_prev_ns + 100'000'000, bias_right ),
+    };
+    interval.m_imu_gap = false;
+    return interval;
+  }
+
+  [[nodiscard]] GyroBiasOptions makeGyroOptions()
+  {
+    GyroBiasOptions options;
+    options.m_gyr_nd            = 1e-4;
+    options.m_gyr_rw            = 1e-3;
+    options.m_prior_mean_radps  = Eigen::Vector3d::Zero();
+    options.m_prior_sigma_radps = 0.1;
+    return options;
+  }
+
+  void expectBiasNearTruth( const Eigen::Vector3d& bias,
+                            std::size_t            frame_index )
+  {
+    EXPECT_TRUE( bias.allFinite() );
+    EXPECT_LE( ( bias - biasTruth( frame_index ) ).cwiseAbs().maxCoeff(),
+               5e-4 );
+  }
+
+}  // namespace
+
+TEST( StereoVoOnlineGyroBias, NoEvictionFourteenPoseRecovery )
+{
+  const RectifiedStereoCalibration calibration = makeVisualCalibration();
+  EstimatorOptions                 options     = makeVisualOptions();
+  options.m_gyro_bias                          = makeGyroOptions();
+  StereoVoEstimator estimator( calibration, options );
+
+  Eigen::Vector3d frame_one_bias = Eigen::Vector3d::Zero();
+  bool            have_frame_one = false;
+  Eigen::Vector3d final_bias     = Eigen::Vector3d::Zero();
+
+  for ( std::size_t frame_index = 0; frame_index < 14U; ++frame_index )
+  {
+    KeyframeMeasurement measurement =
+        makeVisualMeasurement( calibration, frame_index );
+    if ( frame_index > 0U )
+    {
+      measurement.m_gyro_interval = makeGyroInterval( frame_index );
+    }
+    const bool            keyframe = frame_index < 2U;
+    const VioUpdateResult result   = estimator.update( measurement, keyframe );
+
+    ASSERT_EQ( result.status, UpdateStatus::kOk ) << result.message;
+    ASSERT_TRUE( result.estimate.has_value() );
+    ASSERT_TRUE( result.diagnostics.m_gyro.has_value() );
+    const GyroDiagnostics& gyro = *result.diagnostics.m_gyro;
+    EXPECT_EQ( result.diagnostics.window_size,
+               static_cast<std::uint32_t>( frame_index + 1U ) );
+    EXPECT_EQ( gyro.m_window_biases.size(), frame_index + 1U );
+    EXPECT_EQ( gyro.m_rotation_factors,
+               static_cast<std::uint32_t>( frame_index ) );
+    EXPECT_EQ( gyro.m_rw_factors,
+               static_cast<std::uint32_t>( frame_index ) );
+    EXPECT_EQ( gyro.m_root_priors, 1U );
+    EXPECT_EQ( gyro.m_relinearization_rounds,
+               frame_index == 1U ? 1U : 0U );
+    EXPECT_EQ( gyro.m_break_reason, GyroBreakReason::kNone );
+
+    for ( std::size_t window_index = 0;
+          window_index < gyro.m_window_biases.size(); ++window_index )
+    {
+      const auto& window_bias = gyro.m_window_biases[ window_index ];
+      EXPECT_EQ( window_bias.m_frame_index, window_index );
+      EXPECT_EQ( window_bias.m_timestamp.nanoseconds(),
+                 static_cast<std::int64_t>( window_index + 1U ) *
+                     100'000'000 );
+      if ( frame_index == 0U )
+      {
+        EXPECT_FALSE( window_bias.m_bias_radps.has_value() );
+      }
+      else
+      {
+        ASSERT_TRUE( window_bias.m_bias_radps.has_value() );
+        expectBiasNearTruth( *window_bias.m_bias_radps, window_index );
+      }
+    }
+
+    if ( frame_index == 0U )
+    {
+      EXPECT_FALSE( gyro.m_bias_radps.has_value() );
+      continue;
+    }
+
+    ASSERT_TRUE( gyro.m_bias_radps.has_value() );
+    ASSERT_TRUE( gyro.m_window_biases.back().m_bias_radps.has_value() );
+    EXPECT_TRUE(
+        ( gyro.m_bias_radps->array() ==
+          gyro.m_window_biases.back().m_bias_radps->array() )
+            .all() );
+    if ( frame_index == 1U )
+    {
+      frame_one_bias = *gyro.m_bias_radps;
+      have_frame_one = true;
+    }
+    if ( frame_index == 13U )
+    {
+      final_bias = *gyro.m_bias_radps;
+    }
+  }
+
+  ASSERT_TRUE( have_frame_one );
+  const Eigen::Vector3d truth_drift  = biasTruth( 12U ) - biasTruth( 0U );
+  const Eigen::Vector3d actual_drift = final_bias - frame_one_bias;
+  for ( Eigen::Index axis = 0; axis < actual_drift.size(); ++axis )
+  {
+    EXPECT_GT( actual_drift[ axis ] * truth_drift[ axis ], 0.0 );
+    const double ratio = actual_drift[ axis ] / truth_drift[ axis ];
+    EXPECT_GE( ratio, 0.85 );
+    EXPECT_LE( ratio, 1.05 );
+  }
+  const double l2_ratio = actual_drift.norm() / truth_drift.norm();
+  EXPECT_GE( l2_ratio, 0.85 );
+  EXPECT_LE( l2_ratio, 1.05 );
+}
+// PHAD_M4_ONLINE_BIAS_NO_EVICTION_END
