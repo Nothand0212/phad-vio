@@ -59,6 +59,13 @@ namespace
     Eigen::VectorXd m_rhs;
   };
 
+  struct MutantLinearSystem
+  {
+    Eigen::MatrixXd m_matrix;
+    Eigen::MatrixXd m_rhs;
+    Eigen::Index    m_bias_offset;
+  };
+
   [[nodiscard]] Eigen::Index stateColumn( std::size_t state,
                                           std::size_t axis )
   {
@@ -68,6 +75,23 @@ namespace
   [[nodiscard]] Eigen::Vector3d truthBias( std::size_t state )
   {
     return kBiasBase + static_cast<double>( state ) * kBiasStep;
+  }
+
+  [[nodiscard]] Eigen::Matrix3d skew( const Eigen::Vector3d& vector )
+  {
+    Eigen::Matrix3d result;
+    result << 0.0, -vector.z(), vector.y(), vector.z(), 0.0, -vector.x(),
+        -vector.y(), vector.x(), 0.0;
+    return result;
+  }
+
+  [[nodiscard]] Eigen::Matrix3d rodrigues( const Eigen::Vector3d& vector )
+  {
+    const double angle = vector.norm();
+    EXPECT_GT( angle, 0.0 );
+    const Eigen::Matrix3d generator = skew( vector ) / angle;
+    return Eigen::Matrix3d::Identity() + std::sin( angle ) * generator +
+           ( 1.0 - std::cos( angle ) ) * generator * generator;
   }
 
   [[nodiscard]] LinearSystem makeRecoverySystem()
@@ -113,6 +137,156 @@ namespace
         system.m_matrix( row, stateColumn( link + 1U, axis ) ) = rw_scale;
         ++row;
       }
+    }
+    EXPECT_EQ( row, system.m_matrix.rows() );
+    return system;
+  }
+
+  [[nodiscard]] Eigen::Matrix<double, 3, 3> projectionJacobian(
+      const Eigen::Vector3d& point )
+  {
+    constexpr double kFx       = 400.0;
+    constexpr double kFy       = 400.0;
+    constexpr double kBaseline = 0.12;
+    const double     x         = point.x();
+    const double     y         = point.y();
+    const double     z         = point.z();
+    Eigen::Matrix3d  jacobian;
+    jacobian << kFx / z, 0.0, -kFx * x / ( z * z ), kFx / z, 0.0,
+        -kFx * ( x - kBaseline ) / ( z * z ), 0.0, kFy / z,
+        -kFy * y / ( z * z );
+    return jacobian;
+  }
+
+  [[nodiscard]] MutantLinearSystem makeNonIdentityJointSystem()
+  {
+    constexpr std::size_t kLandmarkCount = 20U;
+    constexpr std::size_t kLinkCount     = kStateCount - 1U;
+    constexpr std::size_t kPoseColumns   = 6U * kStateCount;
+    constexpr std::size_t kPointColumns  = 3U * kLandmarkCount;
+    constexpr std::size_t kBiasColumns   = 3U * kStateCount;
+    constexpr std::size_t kColumnCount =
+        kPoseColumns + kPointColumns + kBiasColumns;
+    constexpr std::size_t kRowCount =
+        3U * kStateCount * kLandmarkCount + 6U +
+        6U * kLinkCount + 3U;
+    constexpr double kStereoSigma = 0.003;
+    constexpr double kPosePrior   = 1e-4;
+
+    const std::array<Eigen::Vector3d, kLandmarkCount> landmarks{
+        Eigen::Vector3d{ 0.40, 0.10, 5.0 },
+        Eigen::Vector3d{ -0.30, 0.20, 4.5 },
+        Eigen::Vector3d{ 0.10, -0.25, 6.0 },
+        Eigen::Vector3d{ 0.60, -0.10, 5.5 },
+        Eigen::Vector3d{ -0.50, -0.20, 4.8 },
+        Eigen::Vector3d{ 0.00, 0.30, 5.2 },
+        Eigen::Vector3d{ 0.25, 0.15, 4.2 },
+        Eigen::Vector3d{ -0.20, -0.15, 5.8 },
+        Eigen::Vector3d{ 0.35, -0.05, 5.3 },
+        Eigen::Vector3d{ -0.15, 0.25, 4.6 },
+        Eigen::Vector3d{ 1.40, -0.30, 5.4 },
+        Eigen::Vector3d{ 0.90, 0.35, 4.9 },
+        Eigen::Vector3d{ 1.10, -0.15, 6.2 },
+        Eigen::Vector3d{ 1.60, 0.05, 5.1 },
+        Eigen::Vector3d{ 0.65, -0.40, 4.7 },
+        Eigen::Vector3d{ 1.00, 0.20, 5.6 },
+        Eigen::Vector3d{ 1.25, -0.20, 4.4 },
+        Eigen::Vector3d{ 0.80, 0.30, 5.9 },
+        Eigen::Vector3d{ 1.35, -0.05, 5.0 },
+        Eigen::Vector3d{ 0.85, 0.15, 4.8 },
+    };
+    const Eigen::Matrix3d R_B_left =
+        rodrigues( Eigen::Vector3d{ 0.2, -0.1, 0.05 } );
+    const Eigen::Vector3d t_B_left{ 0.1, -0.02, 0.03 };
+
+    MutantLinearSystem system{
+        Eigen::MatrixXd::Zero( static_cast<Eigen::Index>( kRowCount ),
+                               static_cast<Eigen::Index>( kColumnCount ) ),
+        Eigen::MatrixXd::Zero( static_cast<Eigen::Index>( kRowCount ), 3 ),
+        static_cast<Eigen::Index>( kPoseColumns + kPointColumns ),
+    };
+    const Eigen::Index point_offset =
+        static_cast<Eigen::Index>( kPoseColumns );
+    Eigen::Index row = 0;
+
+    for ( std::size_t frame = 0; frame < kStateCount; ++frame )
+    {
+      for ( std::size_t landmark = 0; landmark < landmarks.size(); ++landmark )
+      {
+        const Eigen::Vector3d point_left =
+            R_B_left.transpose() * ( landmarks[ landmark ] - t_B_left );
+        const Eigen::Matrix3d projection =
+            projectionJacobian( point_left ) / kStereoSigma;
+        const Eigen::Matrix3d rotation =
+            projection * R_B_left.transpose() * skew( landmarks[ landmark ] );
+        const Eigen::Matrix3d translation =
+            -projection * R_B_left.transpose();
+        const Eigen::Matrix3d point = projection * R_B_left.transpose();
+        const Eigen::Index    pose_column =
+            static_cast<Eigen::Index>( 6U * frame );
+        const Eigen::Index point_column =
+            point_offset + static_cast<Eigen::Index>( 3U * landmark );
+        for ( Eigen::Index residual_axis = 0; residual_axis < 3;
+              ++residual_axis )
+        {
+          system.m_matrix.block<1, 3>( row, pose_column ) =
+              rotation.row( residual_axis );
+          system.m_matrix.block<1, 3>( row, pose_column + 3 ) =
+              translation.row( residual_axis );
+          system.m_matrix.block<1, 3>( row, point_column ) =
+              point.row( residual_axis );
+          ++row;
+        }
+      }
+    }
+
+    for ( Eigen::Index axis = 0; axis < 6; ++axis )
+    {
+      system.m_matrix( row, axis ) = 1.0 / kPosePrior;
+      ++row;
+    }
+
+    const double rotation_sigma = kRecoveryNd * std::sqrt( kRecoveryDt );
+    const double rw_sigma       = kRecoveryRw * std::sqrt( kRecoveryDt );
+    for ( std::size_t link = 0; link < kLinkCount; ++link )
+    {
+      const Eigen::Vector3d observed_body    = truthBias( link );
+      const Eigen::Vector3d observed_forward = R_B_left * observed_body;
+      const Eigen::Vector3d observed_inverse =
+          R_B_left.transpose() * observed_body;
+      for ( std::size_t axis = 0; axis < kAxisCount; ++axis )
+      {
+        const Eigen::Index axis_index = static_cast<Eigen::Index>( axis );
+        const Eigen::Index pose_i =
+            static_cast<Eigen::Index>( 6U * link ) + axis_index;
+        const Eigen::Index pose_j =
+            static_cast<Eigen::Index>( 6U * ( link + 1U ) ) + axis_index;
+        const Eigen::Index bias_i =
+            system.m_bias_offset + stateColumn( link, axis );
+        const Eigen::Index bias_j =
+            system.m_bias_offset + stateColumn( link + 1U, axis );
+        system.m_matrix( row, pose_i ) = -1.0 / rotation_sigma;
+        system.m_matrix( row, pose_j ) = 1.0 / rotation_sigma;
+        system.m_matrix( row, bias_i ) = kRecoveryDt / rotation_sigma;
+        system.m_rhs( row, 0 ) =
+            kRecoveryDt * observed_body[ axis_index ] / rotation_sigma;
+        system.m_rhs( row, 1 ) =
+            kRecoveryDt * observed_forward[ axis_index ] / rotation_sigma;
+        system.m_rhs( row, 2 ) =
+            kRecoveryDt * observed_inverse[ axis_index ] / rotation_sigma;
+        ++row;
+
+        system.m_matrix( row, bias_i ) = -1.0 / rw_sigma;
+        system.m_matrix( row, bias_j ) = 1.0 / rw_sigma;
+        ++row;
+      }
+    }
+
+    for ( std::size_t axis = 0; axis < kAxisCount; ++axis )
+    {
+      system.m_matrix( row, system.m_bias_offset + stateColumn( 0U, axis ) ) =
+          1.0 / kPriorSigma;
+      ++row;
     }
     EXPECT_EQ( row, system.m_matrix.rows() );
     return system;
@@ -310,4 +484,42 @@ TEST( OnlineGyroBiasOracle, FreezesObservabilityRankAndCondition )
   expectAbsoluteAndRelative( condition_normal, 14.8750128761, 1e-9,
                              1e-10 );
   EXPECT_LE( condition_normal, 16.0 );
+}
+
+TEST( OnlineGyroBiasOracle, NonIdentityFrameMutantsCrossRecoveryGate )
+{
+  const MutantLinearSystem system = makeNonIdentityJointSystem();
+  const Eigen::MatrixXd    solutions =
+      system.m_matrix.bdcSvd( Eigen::ComputeThinU | Eigen::ComputeThinV )
+          .solve( system.m_rhs );
+  ASSERT_EQ( solutions.rows(), system.m_matrix.cols() );
+  ASSERT_EQ( solutions.cols(), 3 );
+
+  std::array<double, 3U> worst_errors{};
+  for ( Eigen::Index candidate = 0; candidate < solutions.cols(); ++candidate )
+  {
+    for ( std::size_t state = 0; state < kStateCount; ++state )
+    {
+      const Eigen::Vector3d bias = solutions.block<3, 1>(
+          system.m_bias_offset + stateColumn( state, 0U ), candidate );
+      worst_errors[ static_cast<std::size_t>( candidate ) ] = std::max(
+          worst_errors[ static_cast<std::size_t>( candidate ) ],
+          ( bias - truthBias( state ) ).cwiseAbs().maxCoeff() );
+    }
+  }
+
+  const Eigen::Vector3d correct_final = solutions.block<3, 1>(
+      system.m_bias_offset + stateColumn( kStateCount - 1U, 0U ), 0 );
+  const Eigen::Vector3d kExpectedCorrectFinal{
+      0.013126669336378, -0.019698172265706, 0.027261275987490 };
+  EXPECT_LE( ( correct_final - kExpectedCorrectFinal )
+                 .cwiseAbs()
+                 .maxCoeff(),
+             1e-12 );
+  EXPECT_LE( worst_errors[ 0 ], 5e-4 );
+  EXPECT_NEAR( worst_errors[ 1 ], 0.0044797796936201645, 1e-12 );
+  EXPECT_NEAR( worst_errors[ 2 ], 0.0052243530191383447, 1e-12 );
+  EXPECT_GT( worst_errors[ 1 ], 5e-4 );
+  EXPECT_GT( worst_errors[ 2 ], 5e-4 );
+  EXPECT_NE( worst_errors[ 1 ], worst_errors[ 2 ] );
 }

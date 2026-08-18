@@ -3,6 +3,12 @@
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/navigation/AHRSFactor.h>
+#include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
+#include <gtsam/nonlinear/NonlinearEquality.h>
+#include <gtsam/nonlinear/NonlinearFactorGraph.h>
+#include <gtsam/nonlinear/PriorFactor.h>
+#include <gtsam/nonlinear/Values.h>
+#include <gtsam/slam/BetweenFactor.h>
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -487,17 +493,71 @@ namespace
   using phad::estimator::internal::deriveGyroNoiseScales;
   using phad::estimator::internal::GyroBiasInitialErrorCode;
   using phad::estimator::internal::GyroBiasInitialKind;
+  using phad::estimator::internal::GyroFrameState;
   using phad::estimator::internal::GyroIntervalError;
   using phad::estimator::internal::GyroIntervalErrorCode;
   using phad::estimator::internal::GyroIntervalResult;
   using phad::estimator::internal::GyroNoiseScales;
   using phad::estimator::internal::GyroNoiseScalesResult;
+  using phad::estimator::internal::GyroRotationFactor;
+  using phad::estimator::internal::preintegrateGyroInterval;
   using phad::estimator::internal::selectGyroBiasInitialValue;
   using phad::estimator::internal::StereoVoUpdateState;
   using phad::estimator::internal::StereoVoUpdateTransaction;
   using phad::estimator::internal::ValidatedGyroInterval;
   using phad::estimator::internal::validateGyroInterval;
   using phad::estimator::internal::WindowFrame;
+
+  const Eigen::Vector3d kNonIdentityRotationVector{ 0.2, -0.1, 0.05 };
+  const Eigen::Vector3d kNonIdentityTranslation{ 0.1, -0.02, 0.03 };
+
+  [[nodiscard]] RectifiedStereoCalibration
+  makeNonIdentityVisualCalibration()
+  {
+    Eigen::Isometry3d T_B_left = Eigen::Isometry3d::Identity();
+    T_B_left.linear() =
+        gtsam::Rot3::Expmap( kNonIdentityRotationVector ).matrix();
+    T_B_left.translation() = kNonIdentityTranslation;
+    auto rigid             = RigidTransform::create( T_B_left.matrix() ).value();
+    return RectifiedStereoCalibration::create(
+               400.0, 400.0, 320.0, 240.0, 0.12, 640, 480,
+               std::move( rigid ) )
+        .value();
+  }
+
+  [[nodiscard]] KeyframeMeasurement makeBodyStationaryMeasurement(
+      const RectifiedStereoCalibration& calibration,
+      std::size_t                       frame_index )
+  {
+    Eigen::Isometry3d T_B_left = Eigen::Isometry3d::Identity();
+    T_B_left.linear()          = calibration.T_B_left_rectified().rotation();
+    T_B_left.translation() =
+        calibration.T_B_left_rectified().translation();
+
+    KeyframeMeasurement measurement;
+    measurement.timestamp = phad::common::Timestamp{
+        static_cast<std::int64_t>( frame_index + 1U ) * 100'000'000 };
+    measurement.observations.reserve( kVisualLandmarks.size() );
+    for ( const VisualLandmark& landmark : kVisualLandmarks )
+    {
+      const Eigen::Vector3d point_left =
+          T_B_left.inverse() * landmark.m_point_W;
+      EXPECT_GT( point_left.z(), 0.0 );
+      const double u_l = calibration.fxPixels() * point_left.x() /
+                             point_left.z() +
+                         calibration.cxPixels();
+      const double v = calibration.fyPixels() * point_left.y() /
+                           point_left.z() +
+                       calibration.cyPixels();
+      const double disparity = calibration.fxPixels() *
+                               calibration.baselineM() /
+                               point_left.z();
+      measurement.observations.push_back(
+          StereoObservation{ landmark.m_id, Eigen::Vector2d{ u_l, v },
+                             disparity } );
+    }
+    return measurement;
+  }
 
   [[nodiscard]] ImuMeasurement reducerSample(
       std::int64_t timestamp_ns, const Eigen::Vector3d& gyro )
@@ -507,6 +567,21 @@ namespace
         .accel_mps2 = { 0.0, 0.0, 0.0 },
         .gyro_radps = { gyro.x(), gyro.y(), gyro.z() },
     };
+  }
+
+  [[nodiscard]] GyroInterval lifecycleGyroInterval(
+      std::int64_t t_prev_ns, std::int64_t t_curr_ns,
+      const Eigen::Vector3d& gyro )
+  {
+    const std::int64_t t_mid_ns =
+        t_prev_ns + ( t_curr_ns - t_prev_ns ) / 2;
+    GyroInterval interval;
+    interval.m_t_prev  = phad::common::Timestamp{ t_prev_ns };
+    interval.m_samples = { reducerSample( t_prev_ns, gyro ),
+                           reducerSample( t_mid_ns, gyro ),
+                           reducerSample( t_curr_ns, gyro ) };
+    interval.m_imu_gap = false;
+    return interval;
   }
 
   [[nodiscard]] const ValidatedGyroInterval& requireValidated(
@@ -567,49 +642,70 @@ namespace
     auto state = std::make_unique<StereoVoUpdateState>();
 
     const std::uint64_t root_index = 10U * salt + 1U;
-    WindowFrame         root;
-    root.m_frame_index = root_index;
-    root.m_timestamp   = phad::common::Timestamp{
+    WindowFrame         first;
+    first.m_frame_index = root_index;
+    first.m_timestamp   = phad::common::Timestamp{
         static_cast<std::int64_t>( root_index ) * 100'000'000 };
-    root.m_T_W_B        = transactionPose( static_cast<double>( salt ) + 0.25 );
-    root.m_observations = {
+    first.m_T_W_B        = transactionPose( static_cast<double>( salt ) + 0.25 );
+    first.m_observations = {
         transactionObservation( 100U + salt, 0.25 + static_cast<double>( salt ) ),
         transactionObservation( 200U + salt, 0.5 + static_cast<double>( salt ) ) };
-    root.m_is_keyframe = ( salt % 2U ) == 0U;
-    root.m_gyro.emplace();
-    root.m_gyro->m_bias_radps =
-        Eigen::Vector3d{ 0.01, -0.02, 0.03 } * static_cast<double>( salt );
-    root.m_gyro->m_segment_id   = static_cast<std::uint32_t>( salt + 2U );
-    root.m_gyro->m_component_id = salt + 3U;
+    first.m_is_keyframe = ( salt % 2U ) == 0U;
 
-    WindowFrame link;
-    link.m_frame_index = root_index + 1U;
-    link.m_timestamp   = phad::common::Timestamp{
-        root.m_timestamp.nanoseconds() + 100'000'000 };
-    link.m_T_W_B        = transactionPose( static_cast<double>( salt ) + 1.25 );
-    link.m_observations = {
+    WindowFrame middle;
+    middle.m_frame_index = root_index + 1U;
+    middle.m_timestamp   = phad::common::Timestamp{
+        first.m_timestamp.nanoseconds() + 100'000'000 };
+    middle.m_T_W_B        = transactionPose( static_cast<double>( salt ) + 1.25 );
+    middle.m_observations = {
         transactionObservation( 300U + salt, 1.25 + static_cast<double>( salt ) ) };
-    link.m_is_keyframe = !root.m_is_keyframe;
-    link.m_gyro.emplace();
-    link.m_gyro->m_bias_radps =
-        Eigen::Vector3d{ -0.04, 0.05, -0.06 } * static_cast<double>( salt );
-    link.m_gyro->m_segment_id              = static_cast<std::uint32_t>( salt + 4U );
-    link.m_gyro->m_component_id            = salt + 5U;
-    link.m_gyro->m_predecessor_frame_index = root.m_frame_index;
-    link.m_gyro->m_interval                = transactionInterval(
-        root.m_timestamp.nanoseconds(), static_cast<double>( salt ) );
+    middle.m_is_keyframe = !first.m_is_keyframe;
 
-    WindowFrame no_gyro;
-    no_gyro.m_frame_index = root_index + 2U;
-    no_gyro.m_timestamp   = phad::common::Timestamp{
-        link.m_timestamp.nanoseconds() + 100'000'000 };
-    no_gyro.m_T_W_B        = transactionPose( static_cast<double>( salt ) + 2.25 );
-    no_gyro.m_observations = {
+    WindowFrame tail;
+    tail.m_frame_index = root_index + 2U;
+    tail.m_timestamp   = phad::common::Timestamp{
+        middle.m_timestamp.nanoseconds() + 100'000'000 };
+    tail.m_T_W_B        = transactionPose( static_cast<double>( salt ) + 2.25 );
+    tail.m_observations = {
         transactionObservation( 400U + salt, 2.25 + static_cast<double>( salt ) ) };
-    no_gyro.m_is_keyframe = root.m_is_keyframe;
+    tail.m_is_keyframe = first.m_is_keyframe;
 
-    state->m_window = { std::move( root ), std::move( link ),
-                        std::move( no_gyro ) };
+    const auto make_root = [ salt ]() {
+      GyroFrameState gyro;
+      gyro.m_bias_radps =
+          Eigen::Vector3d{ 0.01, -0.02, 0.03 } *
+          static_cast<double>( salt );
+      gyro.m_segment_id   = static_cast<std::uint32_t>( salt + 2U );
+      gyro.m_component_id = salt + 3U;
+      return gyro;
+    };
+    const auto make_link = [ salt ]( const WindowFrame& predecessor ) {
+      GyroFrameState gyro;
+      gyro.m_bias_radps =
+          Eigen::Vector3d{ -0.04, 0.05, -0.06 } *
+          static_cast<double>( salt );
+      gyro.m_segment_id              = static_cast<std::uint32_t>( salt + 4U );
+      gyro.m_component_id            = salt + 3U;
+      gyro.m_predecessor_frame_index = predecessor.m_frame_index;
+      gyro.m_interval                = transactionInterval(
+          predecessor.m_timestamp.nanoseconds(),
+          static_cast<double>( salt ) );
+      return gyro;
+    };
+    if ( ( salt % 2U ) == 0U )
+    {
+      middle.m_gyro = make_root();
+      tail.m_gyro   = make_link( middle );
+    }
+    else
+    {
+      first.m_gyro  = make_root();
+      middle.m_gyro = make_link( first );
+    }
+
+    state->m_window.push_back( first );
+    state->m_window.push_back( middle );
+    state->m_window.push_back( tail );
     state->m_landmarks_w.emplace(
         500U + salt,
         Eigen::Vector3d{ static_cast<double>( salt ),
@@ -793,6 +889,82 @@ namespace
                expected.m_next_gyro_component_id );
   }
 
+  void expectGyroDiagnosticsExact( const GyroDiagnostics& actual,
+                                   const GyroDiagnostics& expected )
+  {
+    ASSERT_EQ( actual.m_bias_radps.has_value(),
+               expected.m_bias_radps.has_value() );
+    if ( actual.m_bias_radps.has_value() )
+    {
+      expectVectorExact( *actual.m_bias_radps, *expected.m_bias_radps );
+    }
+    ASSERT_EQ( actual.m_window_biases.size(),
+               expected.m_window_biases.size() );
+    for ( std::size_t index = 0; index < actual.m_window_biases.size();
+          ++index )
+    {
+      const auto& actual_bias   = actual.m_window_biases[ index ];
+      const auto& expected_bias = expected.m_window_biases[ index ];
+      EXPECT_EQ( actual_bias.m_frame_index, expected_bias.m_frame_index );
+      EXPECT_EQ( actual_bias.m_timestamp, expected_bias.m_timestamp );
+      ASSERT_EQ( actual_bias.m_bias_radps.has_value(),
+                 expected_bias.m_bias_radps.has_value() );
+      if ( actual_bias.m_bias_radps.has_value() )
+      {
+        expectVectorExact( *actual_bias.m_bias_radps,
+                           *expected_bias.m_bias_radps );
+      }
+    }
+    EXPECT_EQ( actual.m_rotation_factors, expected.m_rotation_factors );
+    EXPECT_EQ( actual.m_rw_factors, expected.m_rw_factors );
+    EXPECT_EQ( actual.m_root_priors, expected.m_root_priors );
+    EXPECT_EQ( actual.m_relinearization_rounds,
+               expected.m_relinearization_rounds );
+    EXPECT_EQ( actual.m_break_reason, expected.m_break_reason );
+  }
+
+  void appendOptionalVector( std::string&                          bytes,
+                             const std::optional<Eigen::Vector3d>& value )
+  {
+    appendBool( bytes, value.has_value() );
+    if ( value.has_value() )
+    {
+      appendDouble( bytes, value->x() );
+      appendDouble( bytes, value->y() );
+      appendDouble( bytes, value->z() );
+    }
+  }
+
+  [[nodiscard]] std::string encodeOnlineBiasResults(
+      const std::vector<VioUpdateResult>& results )
+  {
+    std::string bytes = encodeVisualResults( results );
+    for ( const VioUpdateResult& result : results )
+    {
+      appendBool( bytes, result.diagnostics.m_gyro.has_value() );
+      if ( !result.diagnostics.m_gyro.has_value() )
+      {
+        continue;
+      }
+      const GyroDiagnostics& gyro = *result.diagnostics.m_gyro;
+      appendOptionalVector( bytes, gyro.m_bias_radps );
+      appendU64( bytes,
+                 static_cast<std::uint64_t>( gyro.m_window_biases.size() ) );
+      for ( const auto& window_bias : gyro.m_window_biases )
+      {
+        appendU64( bytes, window_bias.m_frame_index );
+        appendI64( bytes, window_bias.m_timestamp.nanoseconds() );
+        appendOptionalVector( bytes, window_bias.m_bias_radps );
+      }
+      appendU32( bytes, gyro.m_rotation_factors );
+      appendU32( bytes, gyro.m_rw_factors );
+      appendU32( bytes, gyro.m_root_priors );
+      appendU32( bytes, gyro.m_relinearization_rounds );
+      appendU8( bytes, static_cast<std::uint8_t>( gyro.m_break_reason ) );
+    }
+    return bytes;
+  }
+
 }  // namespace
 
 TEST( StereoVoUpdateTransaction, ScopeExitRestoresEveryField )
@@ -866,6 +1038,1447 @@ TEST( StereoVoUpdateTransaction, CommitPublishesEveryField )
 
   EXPECT_EQ( owner.get(), owner_before );
   expectStateExact( *owner, *expected_after );
+}
+
+TEST( StereoVoOnlineGyroBias, RejectedEndpointStartsIndependentComponent )
+{
+  const RectifiedStereoCalibration calibration = makeVisualCalibration();
+  EstimatorOptions                 options     = makeVisualOptions();
+  options.m_gyro_bias                          = makeGyroOptions();
+  StereoVoEstimator estimator( calibration, options );
+
+  const VioUpdateResult root =
+      estimator.update( makeVisualMeasurement( calibration, 0U ), true );
+  ASSERT_EQ( root.status, UpdateStatus::kOk ) << root.message;
+  ASSERT_TRUE( root.diagnostics.m_gyro.has_value() );
+  EXPECT_EQ( root.diagnostics.m_gyro->m_root_priors, 1U );
+
+  KeyframeMeasurement rejected = makeVisualMeasurement( calibration, 1U );
+  rejected.m_gyro_interval     = makeGyroInterval( 1U );
+  for ( StereoObservation& observation : rejected.observations )
+  {
+    observation.id += 10'000U;
+  }
+  const VioUpdateResult rejected_result = estimator.update( rejected, true );
+  EXPECT_EQ( rejected_result.status, UpdateStatus::kRejected );
+  EXPECT_EQ( rejected_result.message, "zero shared landmarks with window" );
+
+  KeyframeMeasurement after_rejected =
+      makeVisualMeasurement( calibration, 2U );
+  after_rejected.m_gyro_interval = makeGyroInterval( 2U );
+  const VioUpdateResult broken   = estimator.update( after_rejected, false );
+  ASSERT_EQ( broken.status, UpdateStatus::kOk ) << broken.message;
+  ASSERT_TRUE( broken.diagnostics.m_gyro.has_value() );
+  const GyroDiagnostics& broken_gyro = *broken.diagnostics.m_gyro;
+  EXPECT_EQ( broken_gyro.m_break_reason,
+             GyroBreakReason::kRejectedEndpoint );
+  EXPECT_EQ( broken_gyro.m_rotation_factors, 0U );
+  EXPECT_EQ( broken_gyro.m_rw_factors, 0U );
+  EXPECT_EQ( broken_gyro.m_root_priors, 2U );
+  ASSERT_EQ( broken_gyro.m_window_biases.size(), 2U );
+  EXPECT_EQ( broken_gyro.m_window_biases[ 0 ].m_frame_index, 0U );
+  EXPECT_EQ( broken_gyro.m_window_biases[ 0 ].m_timestamp.nanoseconds(),
+             100'000'000 );
+  EXPECT_FALSE( broken_gyro.m_window_biases[ 0 ].m_bias_radps.has_value() );
+  EXPECT_EQ( broken_gyro.m_window_biases[ 1 ].m_frame_index, 1U );
+  EXPECT_EQ( broken_gyro.m_window_biases[ 1 ].m_timestamp.nanoseconds(),
+             300'000'000 );
+  EXPECT_FALSE( broken_gyro.m_window_biases[ 1 ].m_bias_radps.has_value() );
+  EXPECT_FALSE( broken_gyro.m_bias_radps.has_value() );
+
+  KeyframeMeasurement exact    = makeVisualMeasurement( calibration, 3U );
+  exact.m_gyro_interval        = makeGyroInterval( 3U );
+  const VioUpdateResult linked = estimator.update( exact, false );
+  ASSERT_EQ( linked.status, UpdateStatus::kOk ) << linked.message;
+  ASSERT_TRUE( linked.diagnostics.m_gyro.has_value() );
+  const GyroDiagnostics& linked_gyro = *linked.diagnostics.m_gyro;
+  EXPECT_EQ( linked_gyro.m_break_reason, GyroBreakReason::kNone );
+  EXPECT_EQ( linked_gyro.m_rotation_factors, 1U );
+  EXPECT_EQ( linked_gyro.m_rw_factors, 1U );
+  EXPECT_EQ( linked_gyro.m_root_priors, 2U );
+  ASSERT_EQ( linked_gyro.m_window_biases.size(), 3U );
+  EXPECT_FALSE( linked_gyro.m_window_biases[ 0 ].m_bias_radps.has_value() );
+  EXPECT_TRUE( linked_gyro.m_window_biases[ 1 ].m_bias_radps.has_value() );
+  EXPECT_TRUE( linked_gyro.m_window_biases[ 2 ].m_bias_radps.has_value() );
+  ASSERT_TRUE( linked_gyro.m_bias_radps.has_value() );
+  EXPECT_TRUE(
+      ( linked_gyro.m_bias_radps->array() ==
+        linked_gyro.m_window_biases.back().m_bias_radps->array() )
+          .all() );
+}
+
+TEST( StereoVoOnlineGyroBias,
+      LowSharedRejectedEndpointStartsIndependentComponent )
+{
+  const RectifiedStereoCalibration calibration = makeVisualCalibration();
+  EstimatorOptions                 options     = makeVisualOptions();
+  options.enable_reanchor                      = true;
+  options.m_gyro_bias                          = makeGyroOptions();
+  StereoVoEstimator estimator( calibration, options );
+
+  const VioUpdateResult root =
+      estimator.update( makeVisualMeasurement( calibration, 0U ), true );
+  ASSERT_EQ( root.status, UpdateStatus::kOk ) << root.message;
+
+  KeyframeMeasurement rejected = makeVisualMeasurement( calibration, 1U );
+  rejected.observations.resize( 5U );
+  rejected.m_gyro_interval              = makeGyroInterval( 1U );
+  const VioUpdateResult rejected_result = estimator.update( rejected, false );
+  EXPECT_EQ( rejected_result.status, UpdateStatus::kRejected );
+  EXPECT_EQ( rejected_result.message,
+             "insufficient shared landmarks (non-keyframe)" );
+
+  KeyframeMeasurement after_rejected =
+      makeVisualMeasurement( calibration, 2U );
+  after_rejected.m_gyro_interval = makeGyroInterval( 2U );
+  const VioUpdateResult broken   = estimator.update( after_rejected, false );
+  ASSERT_EQ( broken.status, UpdateStatus::kOk ) << broken.message;
+  ASSERT_TRUE( broken.diagnostics.m_gyro.has_value() );
+  const GyroDiagnostics& gyro = *broken.diagnostics.m_gyro;
+  EXPECT_EQ( gyro.m_break_reason, GyroBreakReason::kRejectedEndpoint );
+  EXPECT_EQ( gyro.m_rotation_factors, 0U );
+  EXPECT_EQ( gyro.m_rw_factors, 0U );
+  EXPECT_EQ( gyro.m_root_priors, 2U );
+}
+
+TEST( StereoVoOnlineGyroBias, FirstStateRejectsNonGapInterval )
+{
+  const RectifiedStereoCalibration calibration = makeVisualCalibration();
+  EstimatorOptions                 options     = makeVisualOptions();
+  options.m_gyro_bias                          = makeGyroOptions();
+  StereoVoEstimator estimator( calibration, options );
+
+  KeyframeMeasurement first = makeVisualMeasurement( calibration, 0U );
+  first.m_gyro_interval     = lifecycleGyroInterval(
+      0, first.timestamp.nanoseconds(), kBiasBase );
+  const VioUpdateResult result = estimator.update( first, true );
+
+  EXPECT_EQ( result.status, UpdateStatus::kRejected );
+  EXPECT_EQ( result.message,
+             "gyro interval endpoints do not match pose timestamps" );
+  EXPECT_FALSE( result.estimate.has_value() );
+  ASSERT_TRUE( result.diagnostics.m_gyro.has_value() );
+  const GyroDiagnostics& gyro = *result.diagnostics.m_gyro;
+  EXPECT_FALSE( gyro.m_bias_radps.has_value() );
+  EXPECT_TRUE( gyro.m_window_biases.empty() );
+  EXPECT_EQ( gyro.m_rotation_factors, 0U );
+  EXPECT_EQ( gyro.m_rw_factors, 0U );
+  EXPECT_EQ( gyro.m_root_priors, 0U );
+  EXPECT_EQ( gyro.m_relinearization_rounds, 0U );
+  EXPECT_EQ( gyro.m_break_reason, GyroBreakReason::kNone );
+}
+
+TEST( StereoVoOnlineGyroBias, InteriorEvictionBreaksLinkWithoutCrossing )
+{
+  const RectifiedStereoCalibration calibration = makeVisualCalibration();
+  EstimatorOptions                 options     = makeVisualOptions();
+  options.window_size                          = 3;
+  options.m_gyro_bias                          = makeGyroOptions();
+  StereoVoEstimator estimator( calibration, options );
+
+  VioUpdateResult result;
+  for ( std::size_t frame_index = 0; frame_index < 4U; ++frame_index )
+  {
+    KeyframeMeasurement measurement =
+        makeVisualMeasurement( calibration, frame_index );
+    if ( frame_index > 0U )
+    {
+      measurement.m_gyro_interval = makeGyroInterval( frame_index );
+    }
+    result = estimator.update( measurement, frame_index < 2U );
+    ASSERT_EQ( result.status, UpdateStatus::kOk ) << result.message;
+  }
+
+  ASSERT_TRUE( result.diagnostics.m_gyro.has_value() );
+  const GyroDiagnostics& gyro = *result.diagnostics.m_gyro;
+  EXPECT_EQ( result.diagnostics.window_size, 3U );
+  EXPECT_EQ( gyro.m_break_reason, GyroBreakReason::kEvictedEndpoint );
+  EXPECT_EQ( gyro.m_rotation_factors, 1U );
+  EXPECT_EQ( gyro.m_rw_factors, 1U );
+  EXPECT_EQ( gyro.m_root_priors, 2U );
+  ASSERT_EQ( gyro.m_window_biases.size(), 3U );
+  EXPECT_EQ( gyro.m_window_biases[ 0 ].m_frame_index, 0U );
+  EXPECT_EQ( gyro.m_window_biases[ 1 ].m_frame_index, 1U );
+  EXPECT_EQ( gyro.m_window_biases[ 2 ].m_frame_index, 3U );
+  EXPECT_TRUE( gyro.m_window_biases[ 0 ].m_bias_radps.has_value() );
+  EXPECT_TRUE( gyro.m_window_biases[ 1 ].m_bias_radps.has_value() );
+  EXPECT_FALSE( gyro.m_window_biases[ 2 ].m_bias_radps.has_value() );
+  EXPECT_FALSE( gyro.m_bias_radps.has_value() );
+}
+
+TEST( StereoVoOnlineGyroBias,
+      UnknownPredecessorRollsBackBeforeDiagnostics )
+{
+  const RectifiedStereoCalibration calibration = makeVisualCalibration();
+  EstimatorOptions                 options     = makeVisualOptions();
+  options.m_gyro_bias                          = makeGyroOptions();
+  StereoVoEstimator subject( calibration, options );
+  StereoVoEstimator control( calibration, options );
+
+  const KeyframeMeasurement root         = makeVisualMeasurement( calibration, 0U );
+  const VioUpdateResult     subject_root = subject.update( root, true );
+  const VioUpdateResult     control_root = control.update( root, true );
+  ASSERT_EQ( subject_root.status, UpdateStatus::kOk ) << subject_root.message;
+  ASSERT_EQ( control_root.status, UpdateStatus::kOk ) << control_root.message;
+
+  KeyframeMeasurement unknown = makeVisualMeasurement( calibration, 1U );
+  unknown.m_gyro_interval     = lifecycleGyroInterval(
+      50'000'000, unknown.timestamp.nanoseconds(), kBiasBase );
+  const VioUpdateResult rejected = subject.update( unknown, false );
+  EXPECT_EQ( rejected.status, UpdateStatus::kRejected );
+  EXPECT_EQ( rejected.message,
+             "gyro interval endpoints do not match pose timestamps" );
+  EXPECT_FALSE( rejected.estimate.has_value() );
+  ASSERT_TRUE( rejected.diagnostics.m_gyro.has_value() );
+  const GyroDiagnostics& rejected_gyro = *rejected.diagnostics.m_gyro;
+  EXPECT_FALSE( rejected_gyro.m_bias_radps.has_value() );
+  EXPECT_EQ( rejected_gyro.m_relinearization_rounds, 0U );
+  EXPECT_EQ( rejected_gyro.m_break_reason, GyroBreakReason::kNone );
+  EXPECT_EQ( rejected_gyro.m_rotation_factors, 0U );
+  EXPECT_EQ( rejected_gyro.m_rw_factors, 0U );
+  EXPECT_EQ( rejected_gyro.m_root_priors, 1U );
+  ASSERT_EQ( rejected_gyro.m_window_biases.size(), 1U );
+  EXPECT_EQ( rejected_gyro.m_window_biases.front().m_frame_index, 0U );
+  EXPECT_EQ( rejected_gyro.m_window_biases.front().m_timestamp,
+             root.timestamp );
+  EXPECT_FALSE(
+      rejected_gyro.m_window_biases.front().m_bias_radps.has_value() );
+
+  KeyframeMeasurement exact = makeVisualMeasurement( calibration, 2U );
+  exact.m_gyro_interval     = lifecycleGyroInterval(
+      root.timestamp.nanoseconds(), exact.timestamp.nanoseconds(),
+      kBiasBase );
+  const VioUpdateResult subject_after = subject.update( exact, false );
+  const VioUpdateResult control_after = control.update( exact, false );
+  ASSERT_EQ( subject_after.status, UpdateStatus::kOk )
+      << subject_after.message;
+  ASSERT_EQ( control_after.status, UpdateStatus::kOk )
+      << control_after.message;
+  EXPECT_EQ( encodeVisualResults( { subject_after } ),
+             encodeVisualResults( { control_after } ) );
+  ASSERT_TRUE( subject_after.diagnostics.m_gyro.has_value() );
+  ASSERT_TRUE( control_after.diagnostics.m_gyro.has_value() );
+  expectGyroDiagnosticsExact( *subject_after.diagnostics.m_gyro,
+                              *control_after.diagnostics.m_gyro );
+}
+
+TEST( StereoVoOnlineGyroBias,
+      MalformedIntervalRejectsWithoutStateMutation )
+{
+  const RectifiedStereoCalibration calibration = makeVisualCalibration();
+  EstimatorOptions                 options     = makeVisualOptions();
+  options.m_gyro_bias                          = makeGyroOptions();
+  StereoVoEstimator subject( calibration, options );
+  StereoVoEstimator control( calibration, options );
+
+  const KeyframeMeasurement root = makeVisualMeasurement( calibration, 0U );
+  ASSERT_EQ( subject.update( root, true ).status, UpdateStatus::kOk );
+  ASSERT_EQ( control.update( root, true ).status, UpdateStatus::kOk );
+
+  KeyframeMeasurement malformed = makeVisualMeasurement( calibration, 1U );
+  GyroInterval        interval;
+  interval.m_t_prev  = root.timestamp;
+  interval.m_samples = {
+      reducerSample( root.timestamp.nanoseconds(), kBiasBase ) };
+  malformed.m_gyro_interval      = std::move( interval );
+  const VioUpdateResult rejected = subject.update( malformed, false );
+  EXPECT_EQ( rejected.status, UpdateStatus::kRejected );
+  EXPECT_EQ( rejected.message,
+             "gyro interval requires at least two samples" );
+  EXPECT_FALSE( rejected.estimate.has_value() );
+  ASSERT_TRUE( rejected.diagnostics.m_gyro.has_value() );
+  const GyroDiagnostics& rejected_gyro = *rejected.diagnostics.m_gyro;
+  EXPECT_FALSE( rejected_gyro.m_bias_radps.has_value() );
+  EXPECT_EQ( rejected_gyro.m_relinearization_rounds, 0U );
+  EXPECT_EQ( rejected_gyro.m_break_reason, GyroBreakReason::kNone );
+  EXPECT_EQ( rejected_gyro.m_rotation_factors, 0U );
+  EXPECT_EQ( rejected_gyro.m_rw_factors, 0U );
+  EXPECT_EQ( rejected_gyro.m_root_priors, 1U );
+  ASSERT_EQ( rejected_gyro.m_window_biases.size(), 1U );
+  EXPECT_EQ( rejected_gyro.m_window_biases.front().m_frame_index, 0U );
+  EXPECT_EQ( rejected_gyro.m_window_biases.front().m_timestamp,
+             root.timestamp );
+  EXPECT_FALSE(
+      rejected_gyro.m_window_biases.front().m_bias_radps.has_value() );
+
+  KeyframeMeasurement exact = makeVisualMeasurement( calibration, 2U );
+  exact.m_gyro_interval     = lifecycleGyroInterval(
+      root.timestamp.nanoseconds(), exact.timestamp.nanoseconds(),
+      kBiasBase );
+  const VioUpdateResult subject_after = subject.update( exact, false );
+  const VioUpdateResult control_after = control.update( exact, false );
+  ASSERT_EQ( subject_after.status, UpdateStatus::kOk )
+      << subject_after.message;
+  ASSERT_EQ( control_after.status, UpdateStatus::kOk )
+      << control_after.message;
+  EXPECT_EQ( encodeVisualResults( { subject_after } ),
+             encodeVisualResults( { control_after } ) );
+  ASSERT_TRUE( subject_after.diagnostics.m_gyro.has_value() );
+  ASSERT_TRUE( control_after.diagnostics.m_gyro.has_value() );
+  expectGyroDiagnosticsExact( *subject_after.diagnostics.m_gyro,
+                              *control_after.diagnostics.m_gyro );
+}
+
+TEST( StereoVoOnlineGyroBias,
+      HardResultsHideScalarAndExposeCommittedTopology )
+{
+  enum class FailureKind
+  {
+    kBasic,
+    kMalformedGyro,
+    kVisualSupport,
+  };
+
+  const RectifiedStereoCalibration calibration = makeVisualCalibration();
+  for ( const FailureKind kind : { FailureKind::kBasic,
+                                   FailureKind::kMalformedGyro,
+                                   FailureKind::kVisualSupport } )
+  {
+    EstimatorOptions options = makeVisualOptions();
+    options.m_gyro_bias      = makeGyroOptions();
+    StereoVoEstimator estimator( calibration, options );
+
+    const KeyframeMeasurement root =
+        makeVisualMeasurement( calibration, 0U );
+    const VioUpdateResult root_result = estimator.update( root, true );
+    ASSERT_EQ( root_result.status, UpdateStatus::kOk )
+        << root_result.message;
+
+    KeyframeMeasurement linked =
+        makeVisualMeasurement( calibration, 1U );
+    linked.m_gyro_interval              = makeGyroInterval( 1U );
+    const VioUpdateResult linked_result = estimator.update( linked, true );
+    ASSERT_EQ( linked_result.status, UpdateStatus::kOk )
+        << linked_result.message;
+    ASSERT_TRUE( linked_result.diagnostics.m_gyro.has_value() );
+    ASSERT_TRUE(
+        linked_result.diagnostics.m_gyro->m_bias_radps.has_value() );
+
+    KeyframeMeasurement rejected =
+        makeVisualMeasurement( calibration, 2U );
+    rejected.m_gyro_interval = makeGyroInterval( 2U );
+    if ( kind == FailureKind::kBasic )
+    {
+      rejected.observations.clear();
+    }
+    else if ( kind == FailureKind::kMalformedGyro )
+    {
+      rejected.m_gyro_interval->m_samples.resize( 1U );
+    }
+    else
+    {
+      for ( StereoObservation& observation : rejected.observations )
+      {
+        observation.id += 10'000U;
+      }
+    }
+
+    const VioUpdateResult rejected_result =
+        estimator.update( rejected, false );
+    EXPECT_EQ( rejected_result.status, UpdateStatus::kRejected );
+    EXPECT_FALSE( rejected_result.estimate.has_value() );
+    ASSERT_TRUE( rejected_result.diagnostics.m_gyro.has_value() );
+
+    GyroDiagnostics expected = *linked_result.diagnostics.m_gyro;
+    expected.m_bias_radps.reset();
+    expected.m_relinearization_rounds = 0U;
+    expected.m_break_reason           = GyroBreakReason::kNone;
+    expectGyroDiagnosticsExact( *rejected_result.diagnostics.m_gyro,
+                                expected );
+  }
+}
+
+TEST( StereoVoOnlineGyroBias, MissingIntervalStartsIndependentComponent )
+{
+  const RectifiedStereoCalibration calibration = makeVisualCalibration();
+  EstimatorOptions                 options     = makeVisualOptions();
+  options.m_gyro_bias                          = makeGyroOptions();
+  StereoVoEstimator estimator( calibration, options );
+
+  ASSERT_EQ( estimator.update( makeVisualMeasurement( calibration, 0U ), true )
+                 .status,
+             UpdateStatus::kOk );
+  const VioUpdateResult missing =
+      estimator.update( makeVisualMeasurement( calibration, 1U ), false );
+  ASSERT_EQ( missing.status, UpdateStatus::kOk ) << missing.message;
+  ASSERT_TRUE( missing.diagnostics.m_gyro.has_value() );
+  const GyroDiagnostics& missing_gyro = *missing.diagnostics.m_gyro;
+  EXPECT_EQ( missing_gyro.m_break_reason,
+             GyroBreakReason::kMissingInterval );
+  EXPECT_EQ( missing_gyro.m_rotation_factors, 0U );
+  EXPECT_EQ( missing_gyro.m_rw_factors, 0U );
+  EXPECT_EQ( missing_gyro.m_root_priors, 2U );
+  ASSERT_EQ( missing_gyro.m_window_biases.size(), 2U );
+  EXPECT_FALSE( missing_gyro.m_window_biases[ 0 ].m_bias_radps.has_value() );
+  EXPECT_FALSE( missing_gyro.m_window_biases[ 1 ].m_bias_radps.has_value() );
+
+  KeyframeMeasurement exact    = makeVisualMeasurement( calibration, 2U );
+  exact.m_gyro_interval        = makeGyroInterval( 2U );
+  const VioUpdateResult linked = estimator.update( exact, false );
+  ASSERT_EQ( linked.status, UpdateStatus::kOk ) << linked.message;
+  ASSERT_TRUE( linked.diagnostics.m_gyro.has_value() );
+  const GyroDiagnostics& linked_gyro = *linked.diagnostics.m_gyro;
+  EXPECT_EQ( linked_gyro.m_break_reason, GyroBreakReason::kNone );
+  EXPECT_EQ( linked_gyro.m_rotation_factors, 1U );
+  EXPECT_EQ( linked_gyro.m_rw_factors, 1U );
+  EXPECT_EQ( linked_gyro.m_root_priors, 2U );
+  ASSERT_EQ( linked_gyro.m_window_biases.size(), 3U );
+  EXPECT_FALSE( linked_gyro.m_window_biases[ 0 ].m_bias_radps.has_value() );
+  EXPECT_TRUE( linked_gyro.m_window_biases[ 1 ].m_bias_radps.has_value() );
+  EXPECT_TRUE( linked_gyro.m_window_biases[ 2 ].m_bias_radps.has_value() );
+}
+
+TEST( StereoVoOnlineGyroBias, DeclaredGapIgnoresPayloadAndStartsComponent )
+{
+  const RectifiedStereoCalibration calibration = makeVisualCalibration();
+  EstimatorOptions                 options     = makeVisualOptions();
+  options.m_gyro_bias                          = makeGyroOptions();
+  StereoVoEstimator estimator( calibration, options );
+
+  GyroInterval gap;
+  gap.m_t_prev = phad::common::Timestamp{
+      std::numeric_limits<std::int64_t>::max() };
+  gap.m_samples = {
+      reducerSample( std::numeric_limits<std::int64_t>::max(),
+                     Eigen::Vector3d{
+                         std::numeric_limits<double>::quiet_NaN(),
+                         std::numeric_limits<double>::infinity(), 0.0 } ) };
+  gap.m_imu_gap = true;
+
+  KeyframeMeasurement first  = makeVisualMeasurement( calibration, 0U );
+  first.m_gyro_interval      = gap;
+  const VioUpdateResult root = estimator.update( first, true );
+  ASSERT_EQ( root.status, UpdateStatus::kOk ) << root.message;
+  ASSERT_TRUE( root.diagnostics.m_gyro.has_value() );
+  EXPECT_EQ( root.diagnostics.m_gyro->m_break_reason,
+             GyroBreakReason::kNone );
+  EXPECT_EQ( root.diagnostics.m_gyro->m_root_priors, 1U );
+
+  KeyframeMeasurement second   = makeVisualMeasurement( calibration, 1U );
+  second.m_gyro_interval       = gap;
+  const VioUpdateResult broken = estimator.update( second, false );
+  ASSERT_EQ( broken.status, UpdateStatus::kOk ) << broken.message;
+  ASSERT_TRUE( broken.diagnostics.m_gyro.has_value() );
+  const GyroDiagnostics& broken_gyro = *broken.diagnostics.m_gyro;
+  EXPECT_EQ( broken_gyro.m_break_reason,
+             GyroBreakReason::kDeclaredGap );
+  EXPECT_EQ( broken_gyro.m_rotation_factors, 0U );
+  EXPECT_EQ( broken_gyro.m_rw_factors, 0U );
+  EXPECT_EQ( broken_gyro.m_root_priors, 2U );
+  ASSERT_EQ( broken_gyro.m_window_biases.size(), 2U );
+  EXPECT_FALSE( broken_gyro.m_window_biases[ 0 ].m_bias_radps.has_value() );
+  EXPECT_FALSE( broken_gyro.m_window_biases[ 1 ].m_bias_radps.has_value() );
+
+  KeyframeMeasurement exact    = makeVisualMeasurement( calibration, 2U );
+  exact.m_gyro_interval        = makeGyroInterval( 2U );
+  const VioUpdateResult linked = estimator.update( exact, false );
+  ASSERT_EQ( linked.status, UpdateStatus::kOk ) << linked.message;
+  ASSERT_TRUE( linked.diagnostics.m_gyro.has_value() );
+  const GyroDiagnostics& linked_gyro = *linked.diagnostics.m_gyro;
+  EXPECT_EQ( linked_gyro.m_break_reason, GyroBreakReason::kNone );
+  EXPECT_EQ( linked_gyro.m_rotation_factors, 1U );
+  EXPECT_EQ( linked_gyro.m_rw_factors, 1U );
+  EXPECT_EQ( linked_gyro.m_root_priors, 2U );
+}
+
+TEST( StereoVoOnlineGyroBias, ReanchorClearsOldForestAndStartsNewSegment )
+{
+  const RectifiedStereoCalibration calibration = makeVisualCalibration();
+  EstimatorOptions                 options     = makeVisualOptions();
+  options.enable_reanchor                      = true;
+  options.m_gyro_bias                          = makeGyroOptions();
+  StereoVoEstimator estimator( calibration, options );
+
+  const VioUpdateResult root =
+      estimator.update( makeVisualMeasurement( calibration, 0U ), true );
+  ASSERT_EQ( root.status, UpdateStatus::kOk ) << root.message;
+
+  KeyframeMeasurement reanchor = makeVisualMeasurement( calibration, 1U );
+  reanchor.m_gyro_interval     = makeGyroInterval( 1U );
+  for ( StereoObservation& observation : reanchor.observations )
+  {
+    observation.id += 10'000U;
+  }
+  const VioUpdateResult restarted = estimator.update( reanchor, true );
+  ASSERT_EQ( restarted.status, UpdateStatus::kOk ) << restarted.message;
+  EXPECT_EQ( restarted.diagnostics.segment_id, 1U );
+  ASSERT_TRUE( restarted.diagnostics.m_gyro.has_value() );
+  const GyroDiagnostics& restarted_gyro = *restarted.diagnostics.m_gyro;
+  EXPECT_EQ( restarted_gyro.m_break_reason,
+             GyroBreakReason::kSegmentChange );
+  EXPECT_EQ( restarted_gyro.m_rotation_factors, 0U );
+  EXPECT_EQ( restarted_gyro.m_rw_factors, 0U );
+  EXPECT_EQ( restarted_gyro.m_root_priors, 1U );
+  ASSERT_EQ( restarted_gyro.m_window_biases.size(), 1U );
+  EXPECT_EQ( restarted_gyro.m_window_biases.front().m_frame_index, 1U );
+  EXPECT_EQ( restarted_gyro.m_window_biases.front().m_timestamp,
+             reanchor.timestamp );
+  EXPECT_FALSE(
+      restarted_gyro.m_window_biases.front().m_bias_radps.has_value() );
+
+  KeyframeMeasurement exact = makeVisualMeasurement( calibration, 2U );
+  exact.m_gyro_interval     = makeGyroInterval( 2U );
+  for ( StereoObservation& observation : exact.observations )
+  {
+    observation.id += 10'000U;
+  }
+  const VioUpdateResult linked = estimator.update( exact, false );
+  ASSERT_EQ( linked.status, UpdateStatus::kOk ) << linked.message;
+  EXPECT_EQ( linked.diagnostics.segment_id, 1U );
+  ASSERT_TRUE( linked.diagnostics.m_gyro.has_value() );
+  const GyroDiagnostics& linked_gyro = *linked.diagnostics.m_gyro;
+  EXPECT_EQ( linked_gyro.m_break_reason, GyroBreakReason::kNone );
+  EXPECT_EQ( linked_gyro.m_rotation_factors, 1U );
+  EXPECT_EQ( linked_gyro.m_rw_factors, 1U );
+  EXPECT_EQ( linked_gyro.m_root_priors, 1U );
+  ASSERT_EQ( linked_gyro.m_window_biases.size(), 2U );
+  EXPECT_EQ( linked_gyro.m_window_biases[ 0 ].m_frame_index, 1U );
+  EXPECT_EQ( linked_gyro.m_window_biases[ 1 ].m_frame_index, 2U );
+  EXPECT_TRUE( linked_gyro.m_window_biases[ 0 ].m_bias_radps.has_value() );
+  EXPECT_TRUE( linked_gyro.m_window_biases[ 1 ].m_bias_radps.has_value() );
+}
+
+TEST( StereoVoOnlineGyroBias, OffIgnoresEveryGyroPayloadBitExactly )
+{
+  const RectifiedStereoCalibration calibration = makeVisualCalibration();
+  const EstimatorOptions           options     = makeVisualOptions();
+
+  const auto run = [ & ]( int payload_kind ) {
+    StereoVoEstimator            estimator( calibration, options );
+    std::vector<VioUpdateResult> results;
+    results.reserve( 14U );
+    for ( std::size_t frame_index = 0; frame_index < 14U; ++frame_index )
+    {
+      KeyframeMeasurement measurement =
+          makeVisualMeasurement( calibration, frame_index );
+      const std::int64_t t_curr_ns = measurement.timestamp.nanoseconds();
+      const std::int64_t t_prev_ns = t_curr_ns - 100'000'000;
+      if ( payload_kind == 1 )
+      {
+        measurement.m_gyro_interval =
+            lifecycleGyroInterval( t_prev_ns, t_curr_ns, kBiasBase );
+      }
+      else if ( payload_kind == 2 )
+      {
+        GyroInterval interval;
+        interval.m_t_prev           = phad::common::Timestamp{ t_prev_ns };
+        interval.m_samples          = { reducerSample( t_prev_ns, kBiasBase ) };
+        measurement.m_gyro_interval = std::move( interval );
+      }
+      else if ( payload_kind == 3 )
+      {
+        measurement.m_gyro_interval = lifecycleGyroInterval(
+            t_prev_ns, t_curr_ns,
+            Eigen::Vector3d{
+                std::numeric_limits<double>::quiet_NaN(),
+                std::numeric_limits<double>::infinity(), 0.0 } );
+      }
+      else if ( payload_kind == 4 )
+      {
+        GyroInterval interval;
+        interval.m_t_prev = phad::common::Timestamp{
+            std::numeric_limits<std::int64_t>::min() };
+        interval.m_samples = {
+            reducerSample( std::numeric_limits<std::int64_t>::min(),
+                           kBiasBase ),
+            reducerSample( std::numeric_limits<std::int64_t>::max(),
+                           kBiasBase ) };
+        measurement.m_gyro_interval = std::move( interval );
+      }
+
+      results.push_back( estimator.update( measurement, frame_index < 2U ) );
+      EXPECT_EQ( results.back().status, UpdateStatus::kOk )
+          << results.back().message;
+      EXPECT_FALSE( results.back().diagnostics.m_gyro.has_value() );
+    }
+    return encodeVisualResults( results );
+  };
+
+  const std::string authority_baseline = run( 0 );
+  for ( int payload_kind = 1; payload_kind <= 4; ++payload_kind )
+  {
+    EXPECT_EQ( run( payload_kind ), authority_baseline );
+  }
+}
+
+TEST( StereoVoOnlineGyroBias, SixteenFreshInstancesAreBitDeterministic )
+{
+  const RectifiedStereoCalibration calibration = makeVisualCalibration();
+  EstimatorOptions                 options     = makeVisualOptions();
+  options.m_gyro_bias                          = makeGyroOptions();
+
+  const auto run = [ & ]() {
+    StereoVoEstimator            estimator( calibration, options );
+    std::vector<VioUpdateResult> results;
+    results.reserve( 14U );
+    for ( std::size_t frame_index = 0; frame_index < 14U; ++frame_index )
+    {
+      KeyframeMeasurement measurement =
+          makeVisualMeasurement( calibration, frame_index );
+      if ( frame_index > 0U )
+      {
+        measurement.m_gyro_interval = makeGyroInterval( frame_index );
+      }
+      results.push_back(
+          estimator.update( measurement, frame_index < 2U ) );
+      EXPECT_EQ( results.back().status, UpdateStatus::kOk )
+          << results.back().message;
+    }
+    return encodeOnlineBiasResults( results );
+  };
+
+  const std::string expected = run();
+  for ( int instance = 1; instance < 16; ++instance )
+  {
+    EXPECT_EQ( run(), expected ) << "fresh instance " << instance;
+  }
+}
+
+TEST( StereoVoOnlineGyroBias, ConstantBiasHasZeroDriftAfterThreeIntervals )
+{
+  const RectifiedStereoCalibration calibration = makeVisualCalibration();
+  EstimatorOptions                 options     = makeVisualOptions();
+  options.m_gyro_bias                          = makeGyroOptions();
+  StereoVoEstimator estimator( calibration, options );
+
+  Eigen::Vector3d minimum = Eigen::Vector3d::Constant(
+      std::numeric_limits<double>::infinity() );
+  Eigen::Vector3d maximum = Eigen::Vector3d::Constant(
+      -std::numeric_limits<double>::infinity() );
+
+  for ( std::size_t frame_index = 0; frame_index < 14U; ++frame_index )
+  {
+    KeyframeMeasurement measurement =
+        makeVisualMeasurement( calibration, frame_index );
+    if ( frame_index > 0U )
+    {
+      measurement.m_gyro_interval = lifecycleGyroInterval(
+          static_cast<std::int64_t>( frame_index ) * 100'000'000,
+          static_cast<std::int64_t>( frame_index + 1U ) * 100'000'000,
+          kBiasBase );
+    }
+
+    const VioUpdateResult result =
+        estimator.update( measurement, frame_index < 2U );
+    ASSERT_EQ( result.status, UpdateStatus::kOk ) << result.message;
+    ASSERT_TRUE( result.diagnostics.m_gyro.has_value() );
+    const GyroDiagnostics& gyro = *result.diagnostics.m_gyro;
+    EXPECT_EQ( gyro.m_break_reason, GyroBreakReason::kNone );
+    EXPECT_EQ( gyro.m_rotation_factors,
+               static_cast<std::uint32_t>( frame_index ) );
+    EXPECT_EQ( gyro.m_rw_factors,
+               static_cast<std::uint32_t>( frame_index ) );
+    EXPECT_EQ( gyro.m_root_priors, 1U );
+    ASSERT_EQ( gyro.m_window_biases.size(), frame_index + 1U );
+
+    if ( frame_index == 0U )
+    {
+      EXPECT_FALSE( gyro.m_bias_radps.has_value() );
+      EXPECT_FALSE(
+          gyro.m_window_biases.front().m_bias_radps.has_value() );
+      continue;
+    }
+
+    ASSERT_TRUE( gyro.m_bias_radps.has_value() );
+    EXPECT_TRUE( gyro.m_bias_radps->allFinite() );
+    if ( frame_index >= 3U )
+    {
+      EXPECT_LE( ( *gyro.m_bias_radps - kBiasBase )
+                     .cwiseAbs()
+                     .maxCoeff(),
+                 1e-6 );
+      minimum = minimum.cwiseMin( *gyro.m_bias_radps );
+      maximum = maximum.cwiseMax( *gyro.m_bias_radps );
+    }
+  }
+
+  EXPECT_LE( ( maximum - minimum ).cwiseAbs().maxCoeff(), 1e-6 );
+}
+
+TEST( StereoVoOnlineGyroBias, ExactZeroLeavesBiasAndPoseRotationAtZero )
+{
+  const RectifiedStereoCalibration calibration = makeVisualCalibration();
+  EstimatorOptions                 on_options  = makeVisualOptions();
+  on_options.m_gyro_bias                       = makeGyroOptions();
+  StereoVoEstimator on_estimator( calibration, on_options );
+  StereoVoEstimator off_estimator( calibration, makeVisualOptions() );
+
+  for ( std::size_t frame_index = 0; frame_index < 14U; ++frame_index )
+  {
+    KeyframeMeasurement on_measurement =
+        makeVisualMeasurement( calibration, frame_index );
+    if ( frame_index > 0U )
+    {
+      on_measurement.m_gyro_interval = lifecycleGyroInterval(
+          static_cast<std::int64_t>( frame_index ) * 100'000'000,
+          static_cast<std::int64_t>( frame_index + 1U ) * 100'000'000,
+          Eigen::Vector3d::Zero() );
+    }
+    const KeyframeMeasurement off_measurement =
+        makeVisualMeasurement( calibration, frame_index );
+
+    const bool            keyframe = frame_index < 2U;
+    const VioUpdateResult on_result =
+        on_estimator.update( on_measurement, keyframe );
+    const VioUpdateResult off_result =
+        off_estimator.update( off_measurement, keyframe );
+    ASSERT_EQ( on_result.status, UpdateStatus::kOk ) << on_result.message;
+    ASSERT_EQ( off_result.status, UpdateStatus::kOk ) << off_result.message;
+    ASSERT_TRUE( on_result.estimate.has_value() );
+    ASSERT_TRUE( off_result.estimate.has_value() );
+    ASSERT_TRUE( on_result.diagnostics.m_gyro.has_value() );
+
+    const Eigen::Matrix3d relative =
+        on_result.estimate->T_W_B.linear().transpose() *
+        off_result.estimate->T_W_B.linear();
+    EXPECT_LE( Eigen::AngleAxisd( relative ).angle(), 1e-12 );
+
+    const GyroDiagnostics& gyro = *on_result.diagnostics.m_gyro;
+    EXPECT_EQ( gyro.m_break_reason, GyroBreakReason::kNone );
+    if ( frame_index == 0U )
+    {
+      EXPECT_FALSE( gyro.m_bias_radps.has_value() );
+    }
+    else
+    {
+      ASSERT_TRUE( gyro.m_bias_radps.has_value() );
+      EXPECT_LE( gyro.m_bias_radps->norm(), 1e-12 );
+    }
+  }
+}
+
+TEST( StereoVoOnlineGyroBias, NonIdentityExtrinsicKeepsBiasInBodyFrame )
+{
+  const RectifiedStereoCalibration calibration =
+      makeNonIdentityVisualCalibration();
+  EstimatorOptions options = makeVisualOptions();
+  options.m_gyro_bias      = makeGyroOptions();
+  StereoVoEstimator estimator( calibration, options );
+
+  Eigen::Vector3d frame_one_bias = Eigen::Vector3d::Zero();
+  Eigen::Vector3d final_bias     = Eigen::Vector3d::Zero();
+  for ( std::size_t frame_index = 0; frame_index < 14U; ++frame_index )
+  {
+    KeyframeMeasurement measurement =
+        makeBodyStationaryMeasurement( calibration, frame_index );
+    if ( frame_index > 0U )
+    {
+      measurement.m_gyro_interval = makeGyroInterval( frame_index );
+    }
+
+    const VioUpdateResult result =
+        estimator.update( measurement, frame_index < 2U );
+    ASSERT_EQ( result.status, UpdateStatus::kOk ) << result.message;
+    ASSERT_TRUE( result.diagnostics.m_gyro.has_value() );
+    const GyroDiagnostics& gyro = *result.diagnostics.m_gyro;
+    EXPECT_EQ( result.diagnostics.window_size,
+               static_cast<std::uint32_t>( frame_index + 1U ) );
+    EXPECT_EQ( gyro.m_window_biases.size(), frame_index + 1U );
+    EXPECT_EQ( gyro.m_rotation_factors,
+               static_cast<std::uint32_t>( frame_index ) );
+    EXPECT_EQ( gyro.m_rw_factors,
+               static_cast<std::uint32_t>( frame_index ) );
+    EXPECT_EQ( gyro.m_root_priors, 1U );
+    EXPECT_EQ( gyro.m_relinearization_rounds,
+               frame_index == 1U ? 1U : 0U );
+    EXPECT_EQ( gyro.m_break_reason, GyroBreakReason::kNone );
+
+    for ( std::size_t window_index = 0;
+          window_index < gyro.m_window_biases.size(); ++window_index )
+    {
+      const auto& window_bias = gyro.m_window_biases[ window_index ];
+      EXPECT_EQ( window_bias.m_frame_index, window_index );
+      EXPECT_EQ( window_bias.m_timestamp.nanoseconds(),
+                 static_cast<std::int64_t>( window_index + 1U ) *
+                     100'000'000 );
+      if ( frame_index == 0U )
+      {
+        EXPECT_FALSE( window_bias.m_bias_radps.has_value() );
+      }
+      else
+      {
+        ASSERT_TRUE( window_bias.m_bias_radps.has_value() );
+        expectBiasNearTruth( *window_bias.m_bias_radps, window_index );
+      }
+    }
+
+    if ( frame_index == 0U )
+    {
+      EXPECT_FALSE( gyro.m_bias_radps.has_value() );
+      continue;
+    }
+
+    ASSERT_TRUE( gyro.m_bias_radps.has_value() );
+    EXPECT_TRUE( gyro.m_bias_radps->allFinite() );
+    expectBiasNearTruth( *gyro.m_bias_radps, frame_index );
+    if ( frame_index == 1U )
+    {
+      frame_one_bias = *gyro.m_bias_radps;
+    }
+    if ( frame_index == 13U )
+    {
+      final_bias = *gyro.m_bias_radps;
+    }
+  }
+
+  const Eigen::Vector3d truth_drift  = biasTruth( 12U ) - biasTruth( 0U );
+  const Eigen::Vector3d actual_drift = final_bias - frame_one_bias;
+  for ( Eigen::Index axis = 0; axis < actual_drift.size(); ++axis )
+  {
+    EXPECT_GT( actual_drift[ axis ] * truth_drift[ axis ], 0.0 );
+    const double ratio = actual_drift[ axis ] / truth_drift[ axis ];
+    EXPECT_GE( ratio, 0.85 );
+    EXPECT_LE( ratio, 1.05 );
+  }
+  const double l2_ratio = actual_drift.norm() / truth_drift.norm();
+  EXPECT_GE( l2_ratio, 0.85 );
+  EXPECT_LE( l2_ratio, 1.05 );
+
+  const Eigen::Matrix3d R_B_left =
+      gtsam::Rot3::Expmap( kNonIdentityRotationVector ).matrix();
+  const Eigen::Vector3d final_truth = biasTruth( 12U );
+  const Eigen::Vector3d kIndependentCorrectFinal{
+      0.013126669336378, -0.019698172265706, 0.027261275987490 };
+  const double correct_error =
+      ( kIndependentCorrectFinal - final_truth ).cwiseAbs().maxCoeff();
+  const double body_to_camera_error =
+      ( R_B_left * kIndependentCorrectFinal - final_truth )
+          .cwiseAbs()
+          .maxCoeff();
+  const double inverse_frame_error =
+      ( R_B_left.transpose() * kIndependentCorrectFinal - final_truth )
+          .cwiseAbs()
+          .maxCoeff();
+  EXPECT_LE( correct_error, 5e-4 );
+  EXPECT_GT( body_to_camera_error, 5e-4 );
+  EXPECT_GT( inverse_frame_error, 5e-4 );
+}
+
+TEST( StereoVoOnlineGyroBias, SuccessfulReoptWritesBackGyroBias )
+{
+  const RectifiedStereoCalibration calibration = makeVisualCalibration();
+  EstimatorOptions                 on_options  = makeVisualOptions();
+  on_options.enable_outlier_cull               = true;
+  on_options.enable_outlier_reopt              = true;
+  on_options.max_outlier_reopts                = 1;
+  on_options.outlier_avg_reproj_px             = 3.0;
+  on_options.block_culled_rebirth              = false;
+  on_options.m_gyro_bias                       = makeGyroOptions();
+  EstimatorOptions off_options                 = on_options;
+  off_options.enable_outlier_reopt             = false;
+  StereoVoEstimator on_estimator( calibration, on_options );
+  StereoVoEstimator off_estimator( calibration, off_options );
+
+  const auto poison = []( KeyframeMeasurement& measurement,
+                          std::size_t          frame_index ) {
+    for ( StereoObservation& observation : measurement.observations )
+    {
+      if ( observation.id > 4U )
+      {
+        continue;
+      }
+      const double frame_sign = frame_index % 2U == 0U ? 1.0 : -1.0;
+      const double id_sign    = observation.id % 2U == 0U ? -1.0 : 1.0;
+      observation.left_pixel.x() += 80.0 * frame_sign * id_sign;
+    }
+  };
+
+  bool                           saw_reopt      = false;
+  bool                           saw_warm_start = false;
+  std::optional<Eigen::Vector3d> reopt_bias;
+  std::uint32_t                  reopt_rotation_factors = 0U;
+  for ( std::size_t frame_index = 0; frame_index < 14U; ++frame_index )
+  {
+    KeyframeMeasurement measurement =
+        makeVisualMeasurement( calibration, frame_index );
+    if ( frame_index > 0U )
+    {
+      measurement.m_gyro_interval = makeGyroInterval( frame_index );
+      if ( !saw_reopt )
+      {
+        poison( measurement, frame_index );
+      }
+    }
+    const bool            keyframe = saw_reopt || frame_index < 2U;
+    const VioUpdateResult on_result =
+        on_estimator.update( measurement, keyframe );
+    const VioUpdateResult off_result =
+        off_estimator.update( measurement, keyframe );
+    ASSERT_EQ( on_result.status, UpdateStatus::kOk ) << on_result.message;
+    ASSERT_EQ( off_result.status, UpdateStatus::kOk ) << off_result.message;
+
+    if ( saw_reopt )
+    {
+      ASSERT_TRUE( reopt_bias.has_value() );
+      ASSERT_TRUE( on_result.diagnostics.m_gyro.has_value() );
+      const GyroDiagnostics& gyro = *on_result.diagnostics.m_gyro;
+      ASSERT_TRUE( gyro.m_bias_radps.has_value() );
+      EXPECT_EQ( gyro.m_relinearization_rounds, 0U );
+      EXPECT_EQ( gyro.m_rotation_factors, reopt_rotation_factors + 1U );
+      EXPECT_EQ( gyro.m_rw_factors, gyro.m_rotation_factors );
+      EXPECT_EQ( gyro.m_root_priors, 1U );
+      ASSERT_GE( gyro.m_window_biases.size(), 2U );
+      const auto& prior_frame_bias =
+          gyro.m_window_biases[ gyro.m_window_biases.size() - 2U ];
+      ASSERT_TRUE( prior_frame_bias.m_bias_radps.has_value() );
+      EXPECT_LE( ( *prior_frame_bias.m_bias_radps - *reopt_bias )
+                     .cwiseAbs()
+                     .maxCoeff(),
+                 1e-3 );
+      saw_warm_start = true;
+      break;
+    }
+    if ( !on_result.diagnostics.outlier_reopt )
+    {
+      continue;
+    }
+    EXPECT_FALSE( on_result.diagnostics.outlier_reopt_failed );
+    EXPECT_EQ( on_result.diagnostics.outlier_reopt_rounds, 1U );
+    EXPECT_FALSE( off_result.diagnostics.outlier_reopt );
+    ASSERT_TRUE( on_result.diagnostics.m_gyro.has_value() );
+    ASSERT_TRUE( off_result.diagnostics.m_gyro.has_value() );
+    const GyroDiagnostics& on_gyro  = *on_result.diagnostics.m_gyro;
+    const GyroDiagnostics& off_gyro = *off_result.diagnostics.m_gyro;
+    ASSERT_TRUE( on_gyro.m_bias_radps.has_value() );
+    ASSERT_TRUE( off_gyro.m_bias_radps.has_value() );
+    EXPECT_TRUE( on_gyro.m_bias_radps->allFinite() );
+    EXPECT_EQ( on_gyro.m_rotation_factors, off_gyro.m_rotation_factors );
+    EXPECT_EQ( on_gyro.m_rw_factors, off_gyro.m_rw_factors );
+    EXPECT_EQ( on_gyro.m_root_priors, off_gyro.m_root_priors );
+
+    bool any_bias_bit_changed = false;
+    for ( Eigen::Index axis = 0; axis < on_gyro.m_bias_radps->size(); ++axis )
+    {
+      any_bias_bit_changed =
+          any_bias_bit_changed ||
+          std::bit_cast<std::uint64_t>( ( *on_gyro.m_bias_radps )[ axis ] ) !=
+              std::bit_cast<std::uint64_t>(
+                  ( *off_gyro.m_bias_radps )[ axis ] );
+    }
+    EXPECT_TRUE( any_bias_bit_changed );
+    reopt_bias             = *on_gyro.m_bias_radps;
+    reopt_rotation_factors = on_gyro.m_rotation_factors;
+    saw_reopt              = true;
+  }
+  EXPECT_TRUE( saw_reopt );
+  EXPECT_TRUE( saw_warm_start );
+}
+
+TEST( StereoVoOnlineGyroBias, FailedReoptRestoresLm1GyroBias )
+{
+  const RectifiedStereoCalibration calibration = makeVisualCalibration();
+  EstimatorOptions                 on_options;
+  on_options.min_track_observations_for_seed = 1;
+  on_options.window_size                     = 6;
+  on_options.min_seed_observations           = 4;
+  on_options.min_shared_landmarks            = 2;
+  on_options.min_landmark_observations       = 2;
+  on_options.enable_outlier_cull             = true;
+  on_options.enable_outlier_reopt            = true;
+  on_options.max_outlier_reopts              = 1;
+  on_options.outlier_avg_reproj_px           = 0.5;
+  on_options.block_culled_rebirth            = false;
+  on_options.m_gyro_bias                     = makeGyroOptions();
+  on_options.m_gyro_bias->m_prior_mean_radps = kBiasBase;
+  EstimatorOptions off_options               = on_options;
+  off_options.enable_outlier_reopt           = false;
+  StereoVoEstimator on_estimator( calibration, on_options );
+  StereoVoEstimator off_estimator( calibration, off_options );
+
+  const std::array<Eigen::Vector3d, 4> sparse_landmarks{
+      Eigen::Vector3d{ 0.15, 0.12, 4.5 },
+      Eigen::Vector3d{ -0.15, 0.12, 4.5 },
+      Eigen::Vector3d{ 0.15, -0.12, 4.9 },
+      Eigen::Vector3d{ -0.15, -0.12, 4.9 },
+  };
+
+  const auto make_measurement = [ & ]( std::size_t frame_index,
+                                       bool        inject_outliers ) {
+    Eigen::Isometry3d T_W_B = Eigen::Isometry3d::Identity();
+    T_W_B.translation().x() = 0.05 * static_cast<double>( frame_index );
+    KeyframeMeasurement measurement;
+    measurement.timestamp = phad::common::Timestamp{
+        static_cast<std::int64_t>( frame_index + 1U ) * 50'000'000 };
+    for ( std::size_t index = 0U; index < sparse_landmarks.size(); ++index )
+    {
+      const Eigen::Vector3d point_left =
+          T_W_B.inverse() * sparse_landmarks[ index ];
+      const double u_l = calibration.fxPixels() * point_left.x() /
+                             point_left.z() +
+                         calibration.cxPixels();
+      const double v = calibration.fyPixels() * point_left.y() /
+                           point_left.z() +
+                       calibration.cyPixels();
+      const double disparity = calibration.fxPixels() *
+                               calibration.baselineM() /
+                               point_left.z();
+      measurement.observations.push_back(
+          StereoObservation{ static_cast<LandmarkId>( index + 1U ),
+                             Eigen::Vector2d{ u_l, v },
+                             disparity } );
+    }
+    if ( inject_outliers && frame_index >= 4U )
+    {
+      for ( StereoObservation& observation : measurement.observations )
+      {
+        const double frame_sign = frame_index % 2U == 0U ? 1.0 : -1.0;
+        const double id_sign    = observation.id % 2U == 0U ? -1.0 : 1.0;
+        observation.left_pixel.x() += 200.0 * frame_sign * id_sign;
+      }
+    }
+    if ( frame_index == 1U )
+    {
+      const std::int64_t t_prev_ns =
+          static_cast<std::int64_t>( frame_index ) * 50'000'000;
+      const std::int64_t t_curr_ns =
+          static_cast<std::int64_t>( frame_index + 1U ) * 50'000'000;
+      measurement.m_gyro_interval = lifecycleGyroInterval(
+          t_prev_ns, t_curr_ns, kBiasBase + 20.0 * kBiasStep );
+    }
+    return measurement;
+  };
+
+  bool          saw_failure = false;
+  std::uint32_t max_culled  = 0U;
+  for ( std::size_t frame_index = 0U; frame_index < 20U; ++frame_index )
+  {
+    const KeyframeMeasurement measurement =
+        make_measurement( frame_index, true );
+    const VioUpdateResult on_result = on_estimator.update( measurement, true );
+    const VioUpdateResult off_result =
+        off_estimator.update( measurement, true );
+    ASSERT_EQ( on_result.status, UpdateStatus::kOk ) << on_result.message;
+    ASSERT_EQ( off_result.status, UpdateStatus::kOk ) << off_result.message;
+    max_culled =
+        std::max( max_culled, on_result.diagnostics.outliers_culled );
+
+    if ( on_result.diagnostics.outliers_culled < 4U )
+    {
+      continue;
+    }
+    EXPECT_FALSE( on_result.diagnostics.outlier_reopt );
+    EXPECT_EQ( on_result.diagnostics.outlier_reopt_rounds, 0U );
+    EXPECT_TRUE( on_result.diagnostics.outlier_reopt_failed );
+    EXPECT_FALSE( off_result.diagnostics.outlier_reopt );
+    EXPECT_FALSE( off_result.diagnostics.outlier_reopt_failed );
+    ASSERT_TRUE( on_result.estimate.has_value() );
+    ASSERT_TRUE( off_result.estimate.has_value() );
+    EXPECT_TRUE( on_result.estimate->T_W_B.matrix().isApprox(
+        off_result.estimate->T_W_B.matrix(), 1e-12 ) );
+    ASSERT_TRUE( on_result.diagnostics.m_gyro.has_value() );
+    ASSERT_TRUE( off_result.diagnostics.m_gyro.has_value() );
+    const GyroDiagnostics& on_gyro = *on_result.diagnostics.m_gyro;
+    EXPECT_GT( on_gyro.m_rotation_factors, 0U );
+    EXPECT_EQ( on_gyro.m_rw_factors, on_gyro.m_rotation_factors );
+    EXPECT_GT( on_gyro.m_root_priors, 0U );
+    EXPECT_GT( on_gyro.m_relinearization_rounds, 0U );
+    EXPECT_EQ( on_gyro.m_relinearization_rounds,
+               off_result.diagnostics.m_gyro->m_relinearization_rounds );
+    bool any_linked_bias_changed = false;
+    for ( const auto& window_bias : on_gyro.m_window_biases )
+    {
+      if ( window_bias.m_bias_radps.has_value() )
+      {
+        any_linked_bias_changed =
+            any_linked_bias_changed ||
+            ( *window_bias.m_bias_radps - kBiasBase )
+                    .cwiseAbs()
+                    .maxCoeff() >
+                0.0;
+      }
+    }
+    EXPECT_TRUE( any_linked_bias_changed );
+    GyroDiagnostics expected_gyro = *off_result.diagnostics.m_gyro;
+    expected_gyro.m_relinearization_rounds =
+        on_gyro.m_relinearization_rounds;
+    expectGyroDiagnosticsExact( on_gyro, expected_gyro );
+
+    KeyframeMeasurement continuation =
+        make_measurement( frame_index + 1U, false );
+    continuation.m_gyro_interval = lifecycleGyroInterval(
+        static_cast<std::int64_t>( frame_index + 1U ) * 50'000'000,
+        static_cast<std::int64_t>( frame_index + 2U ) * 50'000'000,
+        kBiasBase + 21.0 * kBiasStep );
+    const VioUpdateResult on_continuation =
+        on_estimator.update( continuation, true );
+    const VioUpdateResult off_continuation =
+        off_estimator.update( continuation, true );
+    ASSERT_EQ( on_continuation.status, UpdateStatus::kOk )
+        << on_continuation.message;
+    ASSERT_EQ( off_continuation.status, UpdateStatus::kOk )
+        << off_continuation.message;
+    EXPECT_EQ( encodeVisualResults( { on_continuation } ),
+               encodeVisualResults( { off_continuation } ) );
+    ASSERT_TRUE( on_continuation.diagnostics.m_gyro.has_value() );
+    ASSERT_TRUE( off_continuation.diagnostics.m_gyro.has_value() );
+    expectGyroDiagnosticsExact( *on_continuation.diagnostics.m_gyro,
+                                *off_continuation.diagnostics.m_gyro );
+    saw_failure = true;
+    break;
+  }
+  EXPECT_TRUE( saw_failure ) << "max_culled=" << max_culled;
+}
+
+TEST( StereoVoOnlineGyroBias,
+      MalformedIntervalMatrixPreservesPrecedenceAndState )
+{
+  struct MalformedCase
+  {
+    std::string                                 m_name;
+    std::string                                 m_message;
+    std::function<void( GyroBiasOptions& )>     m_options;
+    std::function<void( KeyframeMeasurement& )> m_measurement;
+  };
+
+  constexpr std::int64_t kRootNs           = 100'000'000;
+  constexpr std::int64_t kCurrentNs        = 200'000'000;
+  const auto             no_options_change = []( GyroBiasOptions& ) {};
+  const auto             interval          = []( std::int64_t t_prev_ns,
+                            std::int64_t t_curr_ns ) {
+    return lifecycleGyroInterval( t_prev_ns, t_curr_ns, kBiasBase );
+  };
+  const auto set_interval = []( KeyframeMeasurement& measurement,
+                                GyroInterval         gyro ) {
+    measurement.m_gyro_interval = std::move( gyro );
+  };
+
+  const std::vector<MalformedCase> cases{
+      { "too-few", "gyro interval requires at least two samples",
+        no_options_change,
+        [ & ]( KeyframeMeasurement& measurement ) {
+          GyroInterval gyro;
+          gyro.m_t_prev  = phad::common::Timestamp{ kRootNs };
+          gyro.m_samples = { reducerSample( kRootNs, kBiasBase ) };
+          set_interval( measurement, std::move( gyro ) );
+        } },
+      { "endpoint", "gyro interval endpoints do not match pose timestamps",
+        no_options_change,
+        [ & ]( KeyframeMeasurement& measurement ) {
+          GyroInterval gyro = interval( kRootNs, kCurrentNs );
+          gyro.m_t_prev     = phad::common::Timestamp{ kRootNs - 1 };
+          set_interval( measurement, std::move( gyro ) );
+        } },
+      { "duplicate", "gyro sample timestamps must be strictly increasing",
+        no_options_change,
+        [ & ]( KeyframeMeasurement& measurement ) {
+          GyroInterval gyro;
+          gyro.m_t_prev  = phad::common::Timestamp{ kRootNs };
+          gyro.m_samples = { reducerSample( kRootNs, kBiasBase ),
+                             reducerSample( kRootNs, kBiasBase ),
+                             reducerSample( kCurrentNs, kBiasBase ) };
+          set_interval( measurement, std::move( gyro ) );
+        } },
+      { "reverse", "gyro sample timestamps must be strictly increasing",
+        no_options_change,
+        [ & ]( KeyframeMeasurement& measurement ) {
+          GyroInterval gyro;
+          gyro.m_t_prev  = phad::common::Timestamp{ kRootNs };
+          gyro.m_samples = {
+              reducerSample( kRootNs, kBiasBase ),
+              reducerSample( kRootNs - 1, kBiasBase ),
+              reducerSample( kCurrentNs, kBiasBase ) };
+          set_interval( measurement, std::move( gyro ) );
+        } },
+      { "nonfinite", "gyro sample is non-finite", no_options_change,
+        [ & ]( KeyframeMeasurement& measurement ) {
+          GyroInterval gyro = interval( kRootNs, kCurrentNs );
+          gyro.m_samples[ 1 ].gyro_radps[ 0 ] =
+              std::numeric_limits<double>::quiet_NaN();
+          set_interval( measurement, std::move( gyro ) );
+        } },
+      { "overflow", "gyro interval duration overflow", no_options_change,
+        [ & ]( KeyframeMeasurement& measurement ) {
+          GyroInterval gyro;
+          gyro.m_t_prev = phad::common::Timestamp{
+              std::numeric_limits<std::int64_t>::min() };
+          gyro.m_samples = {
+              reducerSample( std::numeric_limits<std::int64_t>::min(),
+                             kBiasBase ),
+              reducerSample( kCurrentNs, kBiasBase ) };
+          set_interval( measurement, std::move( gyro ) );
+        } },
+      { "derived-noise", "gyro interval produces invalid noise scale",
+        []( GyroBiasOptions& options ) { options.m_gyr_nd = 1e150; },
+        [ & ]( KeyframeMeasurement& measurement ) {
+          measurement.timestamp = phad::common::Timestamp{
+              std::numeric_limits<std::int64_t>::max() };
+          GyroInterval gyro;
+          gyro.m_t_prev  = phad::common::Timestamp{ kRootNs };
+          gyro.m_samples = {
+              reducerSample( kRootNs, kBiasBase ),
+              reducerSample( std::numeric_limits<std::int64_t>::max(),
+                             kBiasBase ) };
+          set_interval( measurement, std::move( gyro ) );
+        } },
+      { "too-few-over-endpoint-and-nonfinite",
+        "gyro interval requires at least two samples", no_options_change,
+        [ & ]( KeyframeMeasurement& measurement ) {
+          GyroInterval gyro;
+          gyro.m_t_prev  = phad::common::Timestamp{ kRootNs - 1 };
+          gyro.m_samples = { reducerSample(
+              kRootNs,
+              Eigen::Vector3d{
+                  std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0 } ) };
+          set_interval( measurement, std::move( gyro ) );
+        } },
+      { "endpoint-over-order-and-nonfinite",
+        "gyro interval endpoints do not match pose timestamps",
+        no_options_change,
+        [ & ]( KeyframeMeasurement& measurement ) {
+          GyroInterval gyro;
+          gyro.m_t_prev  = phad::common::Timestamp{ kRootNs - 1 };
+          gyro.m_samples = {
+              reducerSample(
+                  kRootNs,
+                  Eigen::Vector3d{
+                      std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0 } ),
+              reducerSample( kRootNs, kBiasBase ),
+              reducerSample( kCurrentNs, kBiasBase ) };
+          set_interval( measurement, std::move( gyro ) );
+        } },
+      { "order-over-nonfinite", "gyro sample timestamps must be strictly increasing",
+        no_options_change,
+        [ & ]( KeyframeMeasurement& measurement ) {
+          GyroInterval gyro;
+          gyro.m_t_prev  = phad::common::Timestamp{ kRootNs };
+          gyro.m_samples = {
+              reducerSample(
+                  kRootNs,
+                  Eigen::Vector3d{
+                      std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0 } ),
+              reducerSample( kRootNs, kBiasBase ),
+              reducerSample( kCurrentNs, kBiasBase ) };
+          set_interval( measurement, std::move( gyro ) );
+        } },
+      { "nonfinite-over-overflow", "gyro sample is non-finite",
+        no_options_change,
+        [ & ]( KeyframeMeasurement& measurement ) {
+          GyroInterval gyro;
+          gyro.m_t_prev = phad::common::Timestamp{
+              std::numeric_limits<std::int64_t>::min() };
+          gyro.m_samples = {
+              reducerSample(
+                  std::numeric_limits<std::int64_t>::min(),
+                  Eigen::Vector3d{
+                      std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0 } ),
+              reducerSample( kCurrentNs, kBiasBase ) };
+          set_interval( measurement, std::move( gyro ) );
+        } },
+      { "overflow-over-derived-noise", "gyro interval duration overflow",
+        []( GyroBiasOptions& options ) { options.m_gyr_nd = 1e150; },
+        [ & ]( KeyframeMeasurement& measurement ) {
+          GyroInterval gyro;
+          gyro.m_t_prev = phad::common::Timestamp{
+              std::numeric_limits<std::int64_t>::min() };
+          gyro.m_samples = {
+              reducerSample( std::numeric_limits<std::int64_t>::min(),
+                             kBiasBase ),
+              reducerSample( kCurrentNs, kBiasBase ) };
+          set_interval( measurement, std::move( gyro ) );
+        } },
+  };
+
+  const RectifiedStereoCalibration calibration = makeVisualCalibration();
+  for ( const MalformedCase& test_case : cases )
+  {
+    SCOPED_TRACE( test_case.m_name );
+    EstimatorOptions options      = makeVisualOptions();
+    GyroBiasOptions  gyro_options = makeGyroOptions();
+    test_case.m_options( gyro_options );
+    options.m_gyro_bias = gyro_options;
+    StereoVoEstimator subject( calibration, options );
+    StereoVoEstimator control( calibration, options );
+
+    const KeyframeMeasurement root =
+        makeVisualMeasurement( calibration, 0U );
+    ASSERT_EQ( subject.update( root, true ).status, UpdateStatus::kOk );
+    ASSERT_EQ( control.update( root, true ).status, UpdateStatus::kOk );
+
+    KeyframeMeasurement malformed =
+        makeVisualMeasurement( calibration, 1U );
+    test_case.m_measurement( malformed );
+    const VioUpdateResult rejected = subject.update( malformed, false );
+    EXPECT_EQ( rejected.status, UpdateStatus::kRejected );
+    EXPECT_EQ( rejected.message, test_case.m_message );
+    EXPECT_FALSE( rejected.estimate.has_value() );
+    ASSERT_TRUE( rejected.diagnostics.m_gyro.has_value() );
+    const GyroDiagnostics& rejected_gyro = *rejected.diagnostics.m_gyro;
+    EXPECT_FALSE( rejected_gyro.m_bias_radps.has_value() );
+    EXPECT_EQ( rejected_gyro.m_relinearization_rounds, 0U );
+    EXPECT_EQ( rejected_gyro.m_break_reason, GyroBreakReason::kNone );
+    EXPECT_EQ( rejected_gyro.m_rotation_factors, 0U );
+    EXPECT_EQ( rejected_gyro.m_rw_factors, 0U );
+    EXPECT_EQ( rejected_gyro.m_root_priors, 1U );
+    ASSERT_EQ( rejected_gyro.m_window_biases.size(), 1U );
+    EXPECT_EQ( rejected_gyro.m_window_biases.front().m_frame_index, 0U );
+
+    KeyframeMeasurement exact =
+        makeVisualMeasurement( calibration, 2U );
+    exact.m_gyro_interval = lifecycleGyroInterval(
+        root.timestamp.nanoseconds(), exact.timestamp.nanoseconds(),
+        kBiasBase );
+    const VioUpdateResult subject_after = subject.update( exact, false );
+    const VioUpdateResult control_after = control.update( exact, false );
+    ASSERT_EQ( subject_after.status, UpdateStatus::kOk )
+        << subject_after.message;
+    ASSERT_EQ( control_after.status, UpdateStatus::kOk )
+        << control_after.message;
+    EXPECT_EQ( encodeVisualResults( { subject_after } ),
+               encodeVisualResults( { control_after } ) );
+    ASSERT_TRUE( subject_after.diagnostics.m_gyro.has_value() );
+    ASSERT_TRUE( control_after.diagnostics.m_gyro.has_value() );
+    expectGyroDiagnosticsExact( *subject_after.diagnostics.m_gyro,
+                                *control_after.diagnostics.m_gyro );
+  }
+}
+
+TEST( StereoVoOnlineGyroBias, ConstructorRejectsInvalidGyroOptions )
+{
+  using Mutator = std::function<void( GyroBiasOptions& )>;
+  const std::vector<Mutator> mutators{
+      []( GyroBiasOptions& options ) { options.m_gyr_nd = 0.0; },
+      []( GyroBiasOptions& options ) {
+        options.m_gyr_nd = std::numeric_limits<double>::infinity();
+      },
+      []( GyroBiasOptions& options ) { options.m_gyr_rw = 0.0; },
+      []( GyroBiasOptions& options ) {
+        options.m_gyr_rw = std::numeric_limits<double>::quiet_NaN();
+      },
+      []( GyroBiasOptions& options ) {
+        options.m_prior_mean_radps.y() =
+            std::numeric_limits<double>::infinity();
+      },
+      []( GyroBiasOptions& options ) { options.m_prior_sigma_radps = 0.0; },
+      []( GyroBiasOptions& options ) {
+        options.m_prior_sigma_radps =
+            std::numeric_limits<double>::denorm_min();
+      },
+      []( GyroBiasOptions& options ) {
+        options.m_prior_sigma_radps = std::numeric_limits<double>::max();
+      },
+  };
+
+  const RectifiedStereoCalibration calibration = makeVisualCalibration();
+  for ( const Mutator& mutate : mutators )
+  {
+    EstimatorOptions options = makeVisualOptions();
+    GyroBiasOptions  gyro    = makeGyroOptions();
+    mutate( gyro );
+    options.m_gyro_bias = gyro;
+    EXPECT_THROW( StereoVoEstimator( calibration, options ),
+                  std::invalid_argument );
+  }
+}
+
+TEST( OnlineGyroBiasFixedPose, MatchesFrozenBiasOracle )
+{
+  const std::array<Eigen::Vector3d, 14> expected{
+      Eigen::Vector3d{ 0.012061728029528, -0.018092592044293,
+                       0.025123449878755 },
+      Eigen::Vector3d{ 0.012123576676337, -0.018185365014506,
+                       0.025247150992009 },
+      Eigen::Vector3d{ 0.012209001999483, -0.018313502999225,
+                       0.025418003097272 },
+      Eigen::Vector3d{ 0.012303429322112, -0.018455143983168,
+                       0.025606858299808 },
+      Eigen::Vector3d{ 0.012401285966853, -0.018601928950280,
+                       0.025802571802151 },
+      Eigen::Vector3d{ 0.012500428578447, -0.018750642867671,
+                       0.026000857106645 },
+      Eigen::Vector3d{ 0.012599999768489, -0.018899999652733,
+                       0.026199999517784 },
+      Eigen::Vector3d{ 0.012699570727019, -0.019049356090529,
+                       0.026399141446707 },
+      Eigen::Vector3d{ 0.012798712412569, -0.019198068618854,
+                       0.026597424822338 },
+      Eigen::Vector3d{ 0.012896566510688, -0.019344849766032,
+                       0.026793133020306 },
+      Eigen::Vector3d{ 0.012990987119495, -0.019486480679243,
+                       0.026981974238579 },
+      Eigen::Vector3d{ 0.013076394847798, -0.019614592271697,
+                       0.027152789695432 },
+      Eigen::Vector3d{ 0.013138197423899, -0.019707296135849,
+                       0.027276394847716 },
+      Eigen::Vector3d{ 0.013138197423899, -0.019707296135849,
+                       0.027276394847716 },
+  };
+
+  std::array<Eigen::Vector3d, 14> bias_hats;
+  bias_hats.fill( Eigen::Vector3d::Zero() );
+  gtsam::Values optimized;
+  std::size_t   extra_rounds = 0U;
+  for ( std::size_t round = 0U; round < 3U; ++round )
+  {
+    gtsam::NonlinearFactorGraph graph;
+    gtsam::Values               values;
+    for ( std::size_t index = 0U; index < bias_hats.size(); ++index )
+    {
+      const gtsam::Key pose_key = gtsam::Symbol( 'x', index );
+      const gtsam::Key bias_key = gtsam::Symbol( 'g', index );
+      graph.emplace_shared<gtsam::NonlinearEquality<gtsam::Pose3>>(
+          pose_key, gtsam::Pose3{} );
+      values.insert( pose_key, gtsam::Pose3{} );
+      values.insert( bias_key, bias_hats[ index ] );
+    }
+
+    graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(
+        gtsam::Symbol( 'g', 0U ), Eigen::Vector3d::Zero(),
+        gtsam::noiseModel::Isotropic::Sigma( 3, 0.1 ) );
+    for ( std::size_t interval_index = 0U; interval_index < 13U;
+          ++interval_index )
+    {
+      const GyroInterval       source = makeGyroInterval( interval_index + 1U );
+      const GyroIntervalResult reduced =
+          validateGyroInterval( source.m_samples );
+      const ValidatedGyroInterval& interval = requireValidated( reduced );
+      const auto                   pim      = preintegrateGyroInterval(
+          interval, bias_hats[ interval_index ], 1e-4 );
+      graph.emplace_shared<GyroRotationFactor>(
+          gtsam::Symbol( 'x', interval_index ),
+          gtsam::Symbol( 'x', interval_index + 1U ),
+          gtsam::Symbol( 'g', interval_index ), pim );
+      graph.emplace_shared<gtsam::BetweenFactor<gtsam::Vector3>>(
+          gtsam::Symbol( 'g', interval_index ),
+          gtsam::Symbol( 'g', interval_index + 1U ),
+          Eigen::Vector3d::Zero(),
+          gtsam::noiseModel::Isotropic::Sigma( 3, 1e-3 * std::sqrt( 0.1 ) ) );
+    }
+
+    optimized =
+        gtsam::LevenbergMarquardtOptimizer( graph, values ).optimize();
+    bool rebuild = false;
+    for ( std::size_t index = 0U; index < bias_hats.size(); ++index )
+    {
+      const Eigen::Vector3d candidate = optimized.at<gtsam::Vector3>(
+          gtsam::Symbol( 'g', index ) );
+      if ( index < 13U &&
+           ( candidate - bias_hats[ index ] ).cwiseAbs().maxCoeff() >
+               1e-3 )
+      {
+        rebuild = true;
+      }
+      bias_hats[ index ] = candidate;
+    }
+    if ( !rebuild )
+    {
+      break;
+    }
+    ++extra_rounds;
+  }
+
+  EXPECT_EQ( extra_rounds, 1U );
+  for ( std::size_t index = 0U; index < expected.size(); ++index )
+  {
+    const Eigen::Vector3d actual = optimized.at<gtsam::Vector3>(
+        gtsam::Symbol( 'g', index ) );
+    EXPECT_LE( ( actual - expected[ index ] ).cwiseAbs().maxCoeff(), 1e-8 )
+        << "G" << index;
+  }
+  const Eigen::Vector3d terminal = optimized.at<gtsam::Vector3>(
+      gtsam::Symbol( 'g', 13U ) );
+  const Eigen::Vector3d observed = optimized.at<gtsam::Vector3>(
+      gtsam::Symbol( 'g', 12U ) );
+  EXPECT_LE( ( terminal - observed ).cwiseAbs().maxCoeff(), 1e-12 );
 }
 
 TEST( GyroBiasInitialValue, SelectsExactLinkAndComponentRootSources )
@@ -1260,6 +2873,36 @@ TEST( GyroRotationFactor, FreezesNoiseWhiteningAndCost )
   EXPECT_NEAR( 0.5 * ( rotation_whitened.squaredNorm() +
                        rw_whitened.squaredNorm() ),
                2.03, 1e-12 );
+}
+
+TEST( GyroRotationFactor, ExactZeroGraphCostIsNumericalZero )
+{
+  const Eigen::Vector3d       zero = Eigen::Vector3d::Zero();
+  const ValidatedGyroInterval interval =
+      constantGyroInterval( 100'000'000, zero );
+  const auto                                 pim        = preintegrateGyroInterval( interval, zero, 1e-4 );
+  const gtsam::Key                           pose_i_key = gtsam::Symbol( 'x', 0U );
+  const gtsam::Key                           pose_j_key = gtsam::Symbol( 'x', 1U );
+  const gtsam::Key                           bias_i_key = gtsam::Symbol( 'g', 0U );
+  const gtsam::Key                           bias_j_key = gtsam::Symbol( 'g', 1U );
+  const GyroRotationFactor                   rotation_factor( pose_i_key, pose_j_key,
+                                                              bias_i_key, pim );
+  const gtsam::BetweenFactor<gtsam::Vector3> rw_factor(
+      bias_i_key, bias_j_key, zero,
+      gtsam::noiseModel::Isotropic::Sigma( 3, 1e-3 * std::sqrt( 0.1 ) ) );
+  const gtsam::PriorFactor<gtsam::Vector3> root_factor(
+      bias_i_key, zero,
+      gtsam::noiseModel::Isotropic::Sigma( 3, 0.1 ) );
+
+  gtsam::Values values;
+  values.insert( pose_i_key, gtsam::Pose3{} );
+  values.insert( pose_j_key, gtsam::Pose3{} );
+  values.insert( bias_i_key, zero );
+  values.insert( bias_j_key, zero );
+  const double total_cost = rotation_factor.error( values ) +
+                            rw_factor.error( values ) +
+                            root_factor.error( values );
+  EXPECT_LE( total_cost, 1e-18 );
 }
 
 TEST( GyroRotationFactor, CachedCorrectionMatchesFreshReintegrationDomain )
