@@ -1,17 +1,32 @@
 #include <gtest/gtest.h>
+#include <gtsam/base/numericalDerivative.h>
+#include <gtsam/geometry/Pose3.h>
+#include <gtsam/inference/Symbol.h>
+#include <gtsam/navigation/AHRSFactor.h>
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
+#include <algorithm>
+#include <array>
 #include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <iostream>
+#include <limits>
+#include <numbers>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "phad/camera/rectified_stereo_calibration.hpp"
+#include "phad/estimator/internal/gyro_bias_initial_value.hpp"
+#include "phad/estimator/internal/gyro_interval_reducer.hpp"
+#include "phad/estimator/internal/gyro_rotation_factor.hpp"
 #include "phad/estimator/stereo_vo_estimator.hpp"
 #include "phad/sensor/rigid_transform.hpp"
 
@@ -460,3 +475,510 @@ TEST( StereoVoOnlineGyroBias, NoEvictionFourteenPoseRecovery )
   EXPECT_LE( l2_ratio, 1.05 );
 }
 // PHAD_M4_ONLINE_BIAS_NO_EVICTION_END
+
+namespace
+{
+
+  using phad::estimator::internal::deriveGyroNoiseScales;
+  using phad::estimator::internal::GyroBiasInitialErrorCode;
+  using phad::estimator::internal::GyroBiasInitialKind;
+  using phad::estimator::internal::GyroIntervalError;
+  using phad::estimator::internal::GyroIntervalErrorCode;
+  using phad::estimator::internal::GyroIntervalResult;
+  using phad::estimator::internal::GyroNoiseScales;
+  using phad::estimator::internal::GyroNoiseScalesResult;
+  using phad::estimator::internal::selectGyroBiasInitialValue;
+  using phad::estimator::internal::ValidatedGyroInterval;
+  using phad::estimator::internal::validateGyroInterval;
+
+  [[nodiscard]] ImuMeasurement reducerSample(
+      std::int64_t timestamp_ns, const Eigen::Vector3d& gyro )
+  {
+    return ImuMeasurement{
+        .timestamp  = phad::common::Timestamp{ timestamp_ns },
+        .accel_mps2 = { 0.0, 0.0, 0.0 },
+        .gyro_radps = { gyro.x(), gyro.y(), gyro.z() },
+    };
+  }
+
+  [[nodiscard]] const ValidatedGyroInterval& requireValidated(
+      const GyroIntervalResult& result )
+  {
+    EXPECT_TRUE( std::holds_alternative<ValidatedGyroInterval>( result ) );
+    return std::get<ValidatedGyroInterval>( result );
+  }
+
+  GyroIntervalError requireIntervalError(
+      const GyroIntervalResult& result, GyroIntervalErrorCode expected )
+  {
+    EXPECT_TRUE( std::holds_alternative<GyroIntervalError>( result ) );
+    const auto& error = std::get<GyroIntervalError>( result );
+    EXPECT_EQ( error.m_code, expected );
+    return error;
+  }
+
+}  // namespace
+
+TEST( GyroBiasInitialValue, SelectsExactLinkAndComponentRootSources )
+{
+  const Eigen::Vector3d provisional{ 0.03125, -0.0625, 0.125 };
+  const Eigen::Vector3d committed{ -0.25, 0.5, -1.0 };
+  const Eigen::Vector3d prior{ 1.5, -2.0, 0.75 };
+
+  const auto selected_provisional = selectGyroBiasInitialValue(
+      GyroBiasInitialKind::kExactLink, provisional, committed, prior );
+  ASSERT_TRUE(
+      std::holds_alternative<Eigen::Vector3d>( selected_provisional ) );
+  EXPECT_TRUE( ( std::get<Eigen::Vector3d>( selected_provisional ).array() ==
+                 provisional.array() )
+                   .all() );
+
+  const auto selected_committed = selectGyroBiasInitialValue(
+      GyroBiasInitialKind::kExactLink, std::nullopt, committed, prior );
+  ASSERT_TRUE(
+      std::holds_alternative<Eigen::Vector3d>( selected_committed ) );
+  EXPECT_TRUE( ( std::get<Eigen::Vector3d>( selected_committed ).array() ==
+                 committed.array() )
+                   .all() );
+
+  const auto selected_prior = selectGyroBiasInitialValue(
+      GyroBiasInitialKind::kComponentRoot, provisional, committed, prior );
+  ASSERT_TRUE( std::holds_alternative<Eigen::Vector3d>( selected_prior ) );
+  EXPECT_TRUE( ( std::get<Eigen::Vector3d>( selected_prior ).array() ==
+                 prior.array() )
+                   .all() );
+}
+
+TEST( GyroBiasInitialValue, RejectsMissingOrNonFiniteSelectedSource )
+{
+  const Eigen::Vector3d prior{ 1.5, -2.0, 0.75 };
+  const auto            missing = selectGyroBiasInitialValue(
+      GyroBiasInitialKind::kExactLink, std::nullopt, std::nullopt, prior );
+  ASSERT_TRUE( std::holds_alternative<GyroBiasInitialErrorCode>( missing ) );
+  EXPECT_EQ( std::get<GyroBiasInitialErrorCode>( missing ),
+             GyroBiasInitialErrorCode::kMissingPredecessor );
+
+  Eigen::Vector3d bad_provisional{ 0.03125, -0.0625, 0.125 };
+  bad_provisional.x()           = std::numeric_limits<double>::quiet_NaN();
+  const auto nonfinite_selected = selectGyroBiasInitialValue(
+      GyroBiasInitialKind::kExactLink, bad_provisional,
+      Eigen::Vector3d{ -0.25, 0.5, -1.0 }, prior );
+  ASSERT_TRUE( std::holds_alternative<GyroBiasInitialErrorCode>(
+      nonfinite_selected ) );
+  EXPECT_EQ( std::get<GyroBiasInitialErrorCode>( nonfinite_selected ),
+             GyroBiasInitialErrorCode::kNonFiniteSelectedValue );
+
+  Eigen::Vector3d bad_prior = prior;
+  bad_prior.z()             = std::numeric_limits<double>::infinity();
+  const auto nonfinite_root = selectGyroBiasInitialValue(
+      GyroBiasInitialKind::kComponentRoot,
+      Eigen::Vector3d{ 0.03125, -0.0625, 0.125 },
+      Eigen::Vector3d{ -0.25, 0.5, -1.0 }, bad_prior );
+  ASSERT_TRUE(
+      std::holds_alternative<GyroBiasInitialErrorCode>( nonfinite_root ) );
+  EXPECT_EQ( std::get<GyroBiasInitialErrorCode>( nonfinite_root ),
+             GyroBiasInitialErrorCode::kNonFiniteSelectedValue );
+}
+
+TEST( GyroIntervalReducer, FreezesEndpointTrapezoidAndExactDuration )
+{
+  std::vector<ImuMeasurement> samples{
+      reducerSample( 100, Eigen::Vector3d{ 1.0, 2.0, 3.0 } ),
+      reducerSample( 50'000'100, Eigen::Vector3d{ 3.0, 4.0, 5.0 } ),
+      reducerSample( 100'000'100, Eigen::Vector3d{ 5.0, 6.0, 7.0 } ),
+  };
+  const auto result = validateGyroInterval(
+      samples, phad::common::Timestamp{ 100 },
+      phad::common::Timestamp{ 100'000'100 } );
+  const ValidatedGyroInterval& interval = requireValidated( result );
+  ASSERT_EQ( interval.m_samples.size(), 3U );
+  ASSERT_EQ( interval.m_steps.size(), 2U );
+  EXPECT_EQ( interval.m_t_prev.nanoseconds(), 100 );
+  EXPECT_EQ( interval.m_t_curr.nanoseconds(), 100'000'100 );
+  EXPECT_EQ( interval.m_duration_ns, 100'000'000 );
+  EXPECT_EQ( interval.m_steps[ 0 ].m_dt_ns, 50'000'000 );
+  EXPECT_EQ( interval.m_steps[ 1 ].m_dt_ns, 50'000'000 );
+  EXPECT_EQ( interval.m_steps[ 0 ].m_dt_s, 0.05 );
+  EXPECT_EQ( interval.m_steps[ 1 ].m_dt_s, 0.05 );
+  EXPECT_TRUE( ( interval.m_steps[ 0 ].m_omega_mean_radps.array() ==
+                 Eigen::Vector3d{ 2.0, 3.0, 4.0 }.array() )
+                   .all() );
+  EXPECT_TRUE( ( interval.m_steps[ 1 ].m_omega_mean_radps.array() ==
+                 Eigen::Vector3d{ 4.0, 5.0, 6.0 }.array() )
+                   .all() );
+
+  samples[ 0 ].gyro_radps[ 0 ] = 99.0;
+  EXPECT_EQ( interval.m_samples[ 0 ].gyro_radps[ 0 ], 1.0 );
+}
+
+TEST( GyroIntervalReducer, EnforcesFrozenErrorPrecedence )
+{
+  const auto       nan = std::numeric_limits<double>::quiet_NaN();
+  const std::array one_sample{
+      reducerSample( 10, Eigen::Vector3d{ nan, 0.0, 0.0 } ) };
+  requireIntervalError(
+      validateGyroInterval( one_sample, phad::common::Timestamp{ 0 },
+                            phad::common::Timestamp{ 20 } ),
+      GyroIntervalErrorCode::kTooFewSamples );
+
+  const std::array wrong_endpoints{
+      reducerSample( 10, Eigen::Vector3d{ nan, 0.0, 0.0 } ),
+      reducerSample( 10, Eigen::Vector3d::Zero() ) };
+  requireIntervalError(
+      validateGyroInterval( wrong_endpoints, phad::common::Timestamp{ 0 },
+                            phad::common::Timestamp{ 20 } ),
+      GyroIntervalErrorCode::kEndpointMismatch );
+
+  const std::array duplicate_and_nan{
+      reducerSample( 10, Eigen::Vector3d{ nan, 0.0, 0.0 } ),
+      reducerSample( 10, Eigen::Vector3d::Zero() ) };
+  requireIntervalError(
+      validateGyroInterval( duplicate_and_nan,
+                            phad::common::Timestamp{ 10 },
+                            phad::common::Timestamp{ 10 } ),
+      GyroIntervalErrorCode::kNonIncreasingTimestamp );
+
+  const std::array finite_timestamps{
+      reducerSample( 10, Eigen::Vector3d{ nan, 0.0, 0.0 } ),
+      reducerSample( 20, Eigen::Vector3d::Zero() ) };
+  const GyroIntervalError nonfinite = requireIntervalError(
+      validateGyroInterval( finite_timestamps,
+                            phad::common::Timestamp{ 10 },
+                            phad::common::Timestamp{ 20 } ),
+      GyroIntervalErrorCode::kNonFiniteGyro );
+  EXPECT_EQ( nonfinite.m_sample_index, 0U );
+  EXPECT_EQ( nonfinite.m_timestamp_ns, 10 );
+}
+
+TEST( GyroIntervalReducer, RejectsSubtractionAndDurationOverflow )
+{
+  const std::array subtraction_overflow{
+      reducerSample( std::numeric_limits<std::int64_t>::min(),
+                     Eigen::Vector3d::Zero() ),
+      reducerSample( std::numeric_limits<std::int64_t>::max(),
+                     Eigen::Vector3d::Zero() ) };
+  const GyroIntervalError subtraction_error = requireIntervalError(
+      validateGyroInterval( subtraction_overflow ),
+      GyroIntervalErrorCode::kTimestampOverflow );
+  EXPECT_EQ( subtraction_error.m_sample_index, 1U );
+  EXPECT_EQ( subtraction_error.m_interval_index, 0U );
+  EXPECT_EQ( subtraction_error.m_timestamp_ns,
+             std::numeric_limits<std::int64_t>::max() );
+
+  const std::array duration_overflow{
+      reducerSample( std::numeric_limits<std::int64_t>::min(),
+                     Eigen::Vector3d::Zero() ),
+      reducerSample( -1, Eigen::Vector3d::Zero() ),
+      reducerSample( 0, Eigen::Vector3d::Zero() ) };
+  const GyroIntervalError duration_error = requireIntervalError(
+      validateGyroInterval( duration_overflow ),
+      GyroIntervalErrorCode::kTimestampOverflow );
+  EXPECT_FALSE( duration_error.m_sample_index.has_value() );
+  EXPECT_EQ( duration_error.m_interval_index, 1U );
+  EXPECT_FALSE( duration_error.m_timestamp_ns.has_value() );
+}
+
+TEST( GyroIntervalReducer, DerivesFinitePositiveNoiseScales )
+{
+  const GyroNoiseScalesResult result =
+      deriveGyroNoiseScales( 250'000'000, 4e-4, 1e-3, 0.1 );
+  ASSERT_TRUE( std::holds_alternative<GyroNoiseScales>( result ) );
+  const GyroNoiseScales& scales = std::get<GyroNoiseScales>( result );
+  EXPECT_NEAR( scales.m_rotation_variance, 4e-8, 1e-18 );
+  EXPECT_NEAR( scales.m_rw_variance, 2.5e-7, 1e-18 );
+  EXPECT_NEAR( scales.m_rw_sigma, 5e-4, 1e-18 );
+  EXPECT_DOUBLE_EQ( scales.m_prior_variance, 0.1 * 0.1 );
+
+  for ( const auto& bad : {
+            deriveGyroNoiseScales( 0, 4e-4, 1e-3, 0.1 ),
+            deriveGyroNoiseScales( 250'000'000, 0.0, 1e-3, 0.1 ),
+            deriveGyroNoiseScales(
+                250'000'000, std::numeric_limits<double>::max(), 1e-3,
+                0.1 ),
+            deriveGyroNoiseScales(
+                250'000'000, 4e-4,
+                std::numeric_limits<double>::denorm_min(), 0.1 ),
+        } )
+  {
+    ASSERT_TRUE( std::holds_alternative<GyroIntervalError>( bad ) );
+    EXPECT_EQ( std::get<GyroIntervalError>( bad ).m_code,
+               GyroIntervalErrorCode::kInvalidNoiseScale );
+  }
+}
+
+namespace
+{
+
+  using phad::estimator::internal::GyroRotationFactor;
+  using phad::estimator::internal::preintegrateGyroInterval;
+
+  [[nodiscard]] ValidatedGyroInterval constantGyroInterval(
+      std::int64_t duration_ns, const Eigen::Vector3d& measured )
+  {
+    const std::array         samples{ reducerSample( 0, measured ),
+                              reducerSample( duration_ns, measured ) };
+    const GyroIntervalResult result = validateGyroInterval( samples );
+    EXPECT_TRUE( std::holds_alternative<ValidatedGyroInterval>( result ) );
+    return std::get<ValidatedGyroInterval>( result );
+  }
+
+  [[nodiscard]] double rotationDistance( const gtsam::Rot3& first,
+                                         const gtsam::Rot3& second )
+  {
+    return gtsam::Rot3::Logmap( first.between( second ) ).norm();
+  }
+
+  [[nodiscard]] std::vector<ImuMeasurement> noncommutingGyroSamples(
+      const Eigen::Vector3d& bias_hat )
+  {
+    std::vector<ImuMeasurement> samples;
+    samples.reserve( 41U );
+    for ( std::int64_t index = 0; index <= 40; ++index )
+    {
+      const std::int64_t    timestamp_ns = index * 10'000'000;
+      const double          time_s       = static_cast<double>( index ) * 0.01;
+      const Eigen::Vector3d true_omega{
+          1.1 * std::cos( 0.7 * time_s ), 0.7,
+          1.1 * std::sin( 0.7 * time_s ) };
+      samples.push_back(
+          reducerSample( timestamp_ns, true_omega + bias_hat ) );
+    }
+    return samples;
+  }
+
+}  // namespace
+
+TEST( GyroRotationFactor, MatchesOfficialResidualAndPoseJacobians )
+{
+  constexpr double            kNumericalStep = 1e-7;
+  const Eigen::Vector3d       omega{ 0.3, -0.22, 0.17 };
+  const Eigen::Vector3d       bias{ 0.012, -0.018, 0.025 };
+  const ValidatedGyroInterval interval =
+      constantGyroInterval( 1'000'000'000, omega + bias );
+  const auto               pim   = preintegrateGyroInterval( interval, bias, 4e-4 );
+  const gtsam::Key         key_i = gtsam::Symbol( 'x', 0U );
+  const gtsam::Key         key_j = gtsam::Symbol( 'x', 1U );
+  const gtsam::Key         key_g = gtsam::Symbol( 'g', 0U );
+  const GyroRotationFactor factor( key_i, key_j, key_g, pim );
+
+  const gtsam::Rot3 rotation_i =
+      gtsam::Rot3::Expmap( Eigen::Vector3d{ 0.2, -0.1, 0.05 } );
+  const gtsam::Rot3 rotation_j =
+      rotation_i.compose( gtsam::Rot3::Expmap( omega ) );
+  const gtsam::Pose3 pose_i( rotation_i,
+                             gtsam::Point3( 1.0, -2.0, 3.0 ) );
+  const gtsam::Pose3 pose_j( rotation_j,
+                             gtsam::Point3( -4.0, 5.0, -6.0 ) );
+
+  gtsam::Matrix       h_i;
+  gtsam::Matrix       h_j;
+  gtsam::Matrix       h_g;
+  const gtsam::Vector residual =
+      factor.evaluateError( pose_i, pose_j, bias, h_i, h_j, h_g );
+  EXPECT_LE( residual.norm(), 1e-12 );
+  ASSERT_EQ( h_i.rows(), 3 );
+  ASSERT_EQ( h_i.cols(), 6 );
+  ASSERT_EQ( h_j.rows(), 3 );
+  ASSERT_EQ( h_j.cols(), 6 );
+  EXPECT_TRUE( h_i.rightCols<3>().isZero( 0.0 ) );
+  EXPECT_TRUE( h_j.rightCols<3>().isZero( 0.0 ) );
+
+  const gtsam::AHRSFactor official( key_i, key_j, key_g, pim );
+  gtsam::Matrix           official_h_i;
+  gtsam::Matrix           official_h_j;
+  gtsam::Matrix           official_h_g;
+  const gtsam::Vector     official_residual = official.evaluateError(
+      rotation_i, rotation_j, bias, official_h_i, official_h_j,
+      official_h_g );
+  EXPECT_TRUE( residual.isApprox( official_residual, 0.0 ) );
+  EXPECT_TRUE( h_i.leftCols<3>().isApprox( official_h_i, 0.0 ) );
+  EXPECT_TRUE( h_j.leftCols<3>().isApprox( official_h_j, 0.0 ) );
+  EXPECT_TRUE( h_g.isApprox( official_h_g, 0.0 ) );
+
+  const std::function<gtsam::Vector(
+      const gtsam::Pose3&, const gtsam::Pose3&, const gtsam::Vector3& )>
+      evaluate = [ &factor ]( const gtsam::Pose3&   first,
+                              const gtsam::Pose3&   second,
+                              const gtsam::Vector3& candidate ) {
+        return factor.evaluateError( first, second, candidate );
+      };
+  const gtsam::Matrix numerical_h_i =
+      gtsam::numericalDerivative31<gtsam::Vector, gtsam::Pose3,
+                                   gtsam::Pose3, gtsam::Vector3>(
+          evaluate, pose_i, pose_j, bias, kNumericalStep );
+  const gtsam::Matrix numerical_h_j =
+      gtsam::numericalDerivative32<gtsam::Vector, gtsam::Pose3,
+                                   gtsam::Pose3, gtsam::Vector3>(
+          evaluate, pose_i, pose_j, bias, kNumericalStep );
+  const gtsam::Matrix numerical_h_g =
+      gtsam::numericalDerivative33<gtsam::Vector, gtsam::Pose3,
+                                   gtsam::Pose3, gtsam::Vector3>(
+          evaluate, pose_i, pose_j, bias, kNumericalStep );
+  EXPECT_LE( ( h_i - numerical_h_i ).cwiseAbs().maxCoeff(), 1e-6 );
+  EXPECT_LE( ( h_j - numerical_h_j ).cwiseAbs().maxCoeff(), 1e-6 );
+  EXPECT_LE( ( h_g - numerical_h_g ).cwiseAbs().maxCoeff(), 1e-6 );
+
+  const gtsam::Pose3 translated_i( rotation_i,
+                                   gtsam::Point3( 20.0, 30.0, 40.0 ) );
+  const gtsam::Pose3 translated_j( rotation_j,
+                                   gtsam::Point3( -50.0, -60.0, -70.0 ) );
+  EXPECT_LE( ( factor.evaluateError( translated_i, translated_j, bias ) -
+               residual )
+                 .norm(),
+             1e-12 );
+}
+
+TEST( GyroRotationFactor, RejectsFrozenSo3Mutants )
+{
+  const Eigen::Vector3d initial{ 0.2, -0.1, 0.05 };
+  const Eigen::Vector3d omega{ 0.3, -0.22, 0.17 };
+  const Eigen::Vector3d bias{ 0.012, -0.018, 0.025 };
+  const Eigen::Vector3d measured   = omega + bias;
+  const gtsam::Rot3     rotation_i = gtsam::Rot3::Expmap( initial );
+  const gtsam::Rot3     delta      = gtsam::Rot3::Expmap( omega );
+  const gtsam::Rot3     rotation_j = rotation_i.compose( delta );
+  const gtsam::Rot3     actual     = rotation_i.between( rotation_j );
+
+  const auto mutant_norm = [ &actual ]( const gtsam::Rot3& predicted ) {
+    return rotationDistance( predicted, actual );
+  };
+  const double wrong_bias_sign =
+      mutant_norm( gtsam::Rot3::Expmap( measured + bias ) );
+  const double omit_bias  = mutant_norm( gtsam::Rot3::Expmap( measured ) );
+  const double rad_as_deg = mutant_norm(
+      gtsam::Rot3::Expmap( omega * ( std::numbers::pi / 180.0 ) ) );
+  const double deg_as_rad = mutant_norm(
+      gtsam::Rot3::Expmap( omega * ( 180.0 / std::numbers::pi ) ) );
+  const double      visual_inverse = rotationDistance( delta, actual.inverse() );
+  const gtsam::Rot3 left_absolute  = delta.compose( rotation_i );
+  const double      left_compose =
+      rotationDistance( delta, rotation_i.between( left_absolute ) );
+  const gtsam::Rot3 rotation_z_90 =
+      gtsam::Rot3::Rz( std::numbers::pi / 2.0 );
+  const Eigen::Vector3d wrong_frame_omega =
+      rotation_z_90.matrix().transpose() * measured - bias;
+  const double wrong_frame =
+      mutant_norm( gtsam::Rot3::Expmap( wrong_frame_omega ) );
+
+  EXPECT_NEAR( wrong_bias_sign, 0.06601234538, 1e-10 );
+  EXPECT_NEAR( omit_bias, 0.03300615423, 1e-10 );
+  EXPECT_NEAR( rad_as_deg, 0.40188442470, 1e-10 );
+  EXPECT_NEAR( deg_as_rad, 2.10645984131, 1e-10 );
+  EXPECT_NEAR( visual_inverse, 0.81804645345, 1e-10 );
+  EXPECT_NEAR( left_compose, 0.02412947757, 1e-10 );
+  EXPECT_NEAR( wrong_frame, 0.55273358029, 1e-10 );
+  for ( const double mutant : { wrong_bias_sign, omit_bias, rad_as_deg,
+                                deg_as_rad, visual_inverse, left_compose,
+                                wrong_frame } )
+  {
+    EXPECT_GE( mutant, 0.02 );
+  }
+}
+
+TEST( GyroRotationFactor, FreezesNoiseWhiteningAndCost )
+{
+  const Eigen::Vector3d       zero = Eigen::Vector3d::Zero();
+  const ValidatedGyroInterval interval =
+      constantGyroInterval( 250'000'000, zero );
+  const auto               pim = preintegrateGyroInterval( interval, zero, 4e-4 );
+  const GyroRotationFactor factor( gtsam::Symbol( 'x', 0U ),
+                                   gtsam::Symbol( 'x', 1U ),
+                                   gtsam::Symbol( 'g', 0U ), pim );
+  EXPECT_LE( ( pim.preintMeasCov() -
+               4e-8 * Eigen::Matrix3d::Identity() )
+                 .cwiseAbs()
+                 .maxCoeff(),
+             1e-18 );
+
+  const Eigen::Vector3d rotation_residual{ 1e-4, -2e-4, 3e-4 };
+  const Eigen::Vector3d rw_residual{ 2e-4, -1e-4, 3e-4 };
+  const gtsam::Vector   rotation_whitened =
+      factor.noiseModel()->whiten( rotation_residual );
+  const double rw_sigma = 1e-3 * std::sqrt( 0.25 );
+  const auto   rw_model =
+      gtsam::noiseModel::Diagonal::Sigmas(
+          Eigen::Vector3d::Constant( rw_sigma ) );
+  const gtsam::Vector rw_whitened = rw_model->whiten( rw_residual );
+
+  EXPECT_TRUE( rotation_whitened.isApprox(
+      Eigen::Vector3d{ 0.5, -1.0, 1.5 }, 1e-12 ) );
+  EXPECT_TRUE( rw_whitened.isApprox(
+      Eigen::Vector3d{ 0.4, -0.2, 0.6 }, 1e-12 ) );
+  EXPECT_NEAR( rotation_whitened.squaredNorm(), 3.5, 1e-12 );
+  EXPECT_NEAR( rw_whitened.squaredNorm(), 0.56, 1e-12 );
+  EXPECT_NEAR( 0.5 * rotation_whitened.squaredNorm(), 1.75, 1e-12 );
+  EXPECT_NEAR( 0.5 * rw_whitened.squaredNorm(), 0.28, 1e-12 );
+  EXPECT_NEAR( 0.5 * ( rotation_whitened.squaredNorm() +
+                       rw_whitened.squaredNorm() ),
+               2.03, 1e-12 );
+}
+
+TEST( GyroRotationFactor, CachedCorrectionMatchesFreshReintegrationDomain )
+{
+  constexpr double                  kDomain         = 1e-3;
+  constexpr double                  kLatticeStep    = 1e-4;
+  constexpr double                  kDerivativeStep = 1e-7;
+  const Eigen::Vector3d             bias_hat{ 0.12, -0.08, 0.05 };
+  const std::vector<ImuMeasurement> samples =
+      noncommutingGyroSamples( bias_hat );
+  const GyroIntervalResult     reduced  = validateGyroInterval( samples );
+  const ValidatedGyroInterval& interval = requireValidated( reduced );
+  const auto                   cached =
+      preintegrateGyroInterval( interval, bias_hat, 1e-4 );
+
+  double max_rotation_error = 0.0;
+  for ( int x = -10; x <= 10; ++x )
+  {
+    for ( int y = -10; y <= 10; ++y )
+    {
+      for ( int z = -10; z <= 10; ++z )
+      {
+        const Eigen::Vector3d delta{
+            static_cast<double>( x ) * kLatticeStep,
+            static_cast<double>( y ) * kLatticeStep,
+            static_cast<double>( z ) * kLatticeStep };
+        EXPECT_LE( delta.cwiseAbs().maxCoeff(), kDomain );
+        const gtsam::Rot3 first_order =
+            cached.biascorrectedDeltaRij( delta );
+        const auto fresh = preintegrateGyroInterval(
+            interval, bias_hat + delta, 1e-4 );
+        max_rotation_error =
+            std::max( max_rotation_error,
+                      rotationDistance( first_order, fresh.deltaRij() ) );
+      }
+    }
+  }
+  EXPECT_LE( max_rotation_error, 3e-8 );
+  EXPECT_NEAR( max_rotation_error, 2.0431967621531336e-08, 1e-12 );
+
+  double max_jacobian_error = 0.0;
+  for ( const double x : { -kDomain, 0.0, kDomain } )
+  {
+    for ( const double y : { -kDomain, 0.0, kDomain } )
+    {
+      for ( const double z : { -kDomain, 0.0, kDomain } )
+      {
+        const Eigen::Vector3d candidate = bias_hat +
+                                          Eigen::Vector3d{ x, y, z };
+        const auto candidate_pim =
+            preintegrateGyroInterval( interval, candidate, 1e-4 );
+        gtsam::Matrix3 analytic;
+        static_cast<void>( candidate_pim.biascorrectedDeltaRij(
+            Eigen::Vector3d::Zero(), analytic ) );
+        const std::function<gtsam::Rot3( const gtsam::Vector3& )>
+            full_reintegration = [ &interval ](
+                                     const gtsam::Vector3& bias ) {
+              return preintegrateGyroInterval( interval, bias, 1e-4 )
+                  .deltaRij();
+            };
+        const gtsam::Matrix3 numerical =
+            gtsam::numericalDerivative11<gtsam::Rot3, gtsam::Vector3>(
+                full_reintegration, candidate, kDerivativeStep );
+        max_jacobian_error =
+            std::max( max_jacobian_error,
+                      ( analytic - numerical ).cwiseAbs().maxCoeff() );
+      }
+    }
+  }
+  EXPECT_LE( max_jacobian_error, 1e-7 );
+}

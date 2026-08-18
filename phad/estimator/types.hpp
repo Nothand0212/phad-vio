@@ -10,6 +10,7 @@
 
 #include "phad/common/landmark_id.hpp"
 #include "phad/common/timestamp.hpp"
+#include "phad/sensor/imu_measurement.hpp"
 
 namespace phad::estimator
 {
@@ -19,23 +20,39 @@ namespace phad::estimator
   struct StereoObservation
   {
     LandmarkId      id;
-    Eigen::Vector2d left_pixel;    // rectified left
+    Eigen::Vector2d left_pixel;  // rectified left
     // > 0: stereo disparity (depth via backproject); == 0: stereo failed —
     // no depth, kept in the window until stereo returns (Slice ⑦). < 0 is
     // invalid.
-    double          disparity_px;
+    double disparity_px;
+  };
+
+  struct GyroInterval
+  {
+    common::Timestamp                   m_t_prev;
+    std::vector<sensor::ImuMeasurement> m_samples;
+    bool                                m_imu_gap = false;
+  };
+
+  struct GyroBiasOptions
+  {
+    double          m_gyr_nd            = 0.0;
+    double          m_gyr_rw            = 0.0;
+    Eigen::Vector3d m_prior_mean_radps  = Eigen::Vector3d::Zero();
+    double          m_prior_sigma_radps = 0.0;
   };
 
   struct KeyframeMeasurement
   {
     common::Timestamp              timestamp;
     std::vector<StereoObservation> observations;
+    std::optional<GyroInterval>    m_gyro_interval;
   };
 
   struct EstimatorOptions
   {
-    int    window_size                = 10;
-    int    min_landmark_observations  = 2;
+    int window_size               = 10;
+    int min_landmark_observations = 2;
     // init and re-anchor. 10 为 slice-7 原值。pre-M4 round 2 实测否决
     // (2026-08-07): 阈值 5 与跨帧累积使 V2_03 re-anchor 9 → 32-68, 每段
     // 只带自身观测、锚误差无法修正 → 段错位贡献 +2.739 → +3.9~+5.6m,
@@ -46,17 +63,17 @@ namespace phad::estimator
     // seeding (single-frame disparity can be a SAD mismatch). 1 restores
     // the pre-⑥b behavior (tests use 1).
     int    min_track_observations_for_seed = 1;
-    int    min_shared_landmarks       = 10;
-    double stereo_sigma_px            = 1.0;
-    double huber_k_px                 = 3.0;  // <= 0 disables Robust wrapper
-    double prior_rotation_sigma_rad   = 1e-4;
-    double prior_translation_sigma_m  = 1e-4;
-    bool   use_constant_velocity_init = true;
-    bool   enable_reanchor            = true;  // false reproduces M3.2 permanent reject
-    bool   enable_pnp_init            = true;
-    double pnp_reproj_px              = 2.0;
-    double pnp_confidence             = 0.99;
-    int    min_pnp_inliers            = 10;
+    int    min_shared_landmarks            = 10;
+    double stereo_sigma_px                 = 1.0;
+    double huber_k_px                      = 3.0;  // <= 0 disables Robust wrapper
+    double prior_rotation_sigma_rad        = 1e-4;
+    double prior_translation_sigma_m       = 1e-4;
+    bool   use_constant_velocity_init      = true;
+    bool   enable_reanchor                 = true;  // false reproduces M3.2 permanent reject
+    bool   enable_pnp_init                 = true;
+    double pnp_reproj_px                   = 2.0;
+    double pnp_confidence                  = 0.99;
+    int    min_pnp_inliers                 = 10;
     // enable_outlier_cull only gates mean-reproj cull; cheirality always
     // clears window observations for dropped landmarks.
     bool   enable_outlier_cull   = true;
@@ -88,7 +105,8 @@ namespace phad::estimator
     // CLI: --estimator-enable-accumulated-seed (A/B, 不进 config_hash)。
     bool enable_accumulated_seed = false;
     // Session sets true when probe_b_path non-empty; NOT in flattenConfig.
-    bool enable_probe_b = false;
+    bool                           enable_probe_b = false;
+    std::optional<GyroBiasOptions> m_gyro_bias;
   };
 
   enum class UpdateStatus : std::uint8_t
@@ -102,6 +120,34 @@ namespace phad::estimator
   {
     common::Timestamp timestamp;
     Eigen::Isometry3d T_W_B;
+  };
+
+  enum class GyroBreakReason : std::uint8_t
+  {
+    kNone = 0,
+    kMissingInterval,
+    kDeclaredGap,
+    kRejectedEndpoint,
+    kEvictedEndpoint,
+    kSegmentChange
+  };
+
+  struct GyroWindowBias
+  {
+    std::uint64_t                  m_frame_index = 0;
+    common::Timestamp              m_timestamp;
+    std::optional<Eigen::Vector3d> m_bias_radps;
+  };
+
+  struct GyroDiagnostics
+  {
+    std::optional<Eigen::Vector3d> m_bias_radps;
+    std::vector<GyroWindowBias>    m_window_biases;
+    std::uint32_t                  m_rotation_factors       = 0;
+    std::uint32_t                  m_rw_factors             = 0;
+    std::uint32_t                  m_root_priors            = 0;
+    std::uint32_t                  m_relinearization_rounds = 0;
+    GyroBreakReason                m_break_reason           = GyroBreakReason::kNone;
   };
 
   struct UpdateDiagnostics
@@ -138,6 +184,7 @@ namespace phad::estimator
     double                                        probe_res_max_px  = 0.0;
     LandmarkId                                    probe_res_max_id{};
     bool                                          probe_detail_valid = false;
+    std::optional<GyroDiagnostics>                m_gyro;
   };
 
   struct VioUpdateResult

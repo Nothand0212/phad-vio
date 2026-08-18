@@ -10,6 +10,9 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <variant>
+
+#include "phad/estimator/internal/gyro_interval_reducer.hpp"
 
 namespace phad::estimator
 {
@@ -37,16 +40,56 @@ namespace phad::estimator
       return vector.allFinite();
     }
 
-    Eigen::Vector3d gyro( const sensor::ImuMeasurement& sample )
+    GyroRotationError mapIntervalError(
+        const internal::GyroIntervalError&      error,
+        std::span<const sensor::ImuMeasurement> samples )
     {
-      return { sample.gyro_radps[ 0 ], sample.gyro_radps[ 1 ],
-               sample.gyro_radps[ 2 ] };
-    }
-
-    bool subtractOverflows( std::int64_t next, std::int64_t current )
-    {
-      return current < 0 &&
-             next > std::numeric_limits<std::int64_t>::max() + current;
+      using internal::GyroIntervalErrorCode;
+      switch ( error.m_code )
+      {
+        case GyroIntervalErrorCode::kTooFewSamples:
+          return makeError( GyroRotationErrorCode::kInsufficientSamples,
+                            "at least two gyro samples are required" );
+        case GyroIntervalErrorCode::kNonIncreasingTimestamp:
+        {
+          const bool duplicate =
+              error.m_sample_index.has_value() &&
+              *error.m_sample_index > 0U &&
+              samples[ *error.m_sample_index ].timestamp ==
+                  samples[ *error.m_sample_index - 1U ].timestamp;
+          return makeError(
+              duplicate ? GyroRotationErrorCode::kDuplicateTimestamp
+                        : GyroRotationErrorCode::kOutOfOrderTimestamp,
+              duplicate ? "adjacent timestamps must be distinct"
+                        : "timestamps must be strictly increasing",
+              error.m_sample_index, error.m_interval_index,
+              error.m_timestamp_ns );
+        }
+        case GyroIntervalErrorCode::kNonFiniteGyro:
+          return makeError( GyroRotationErrorCode::kNonFiniteGyro,
+                            "gyro sample must be finite",
+                            error.m_sample_index, error.m_interval_index,
+                            error.m_timestamp_ns );
+        case GyroIntervalErrorCode::kTimestampOverflow:
+        {
+          const bool delta_overflow = error.m_sample_index.has_value();
+          return makeError(
+              delta_overflow
+                  ? GyroRotationErrorCode::kTimestampDeltaOverflow
+                  : GyroRotationErrorCode::kDurationOverflow,
+              delta_overflow ? "timestamp delta exceeds int64"
+                             : "accumulated duration exceeds int64",
+              error.m_sample_index, error.m_interval_index,
+              error.m_timestamp_ns );
+        }
+        case GyroIntervalErrorCode::kEndpointMismatch:
+        case GyroIntervalErrorCode::kInvalidNoiseScale:
+          return makeError(
+              GyroRotationErrorCode::kNonFinitePrediction,
+              "internal gyro interval validation contract was violated" );
+      }
+      return makeError( GyroRotationErrorCode::kNonFinitePrediction,
+                        "unknown gyro interval validation error" );
     }
 
   }  // namespace
@@ -55,7 +98,7 @@ namespace phad::estimator
       std::span<const sensor::ImuMeasurement> samples,
       const Eigen::Vector3d&                  known_bias_radps )
   {
-    if ( samples.size() < 2 )
+    if ( samples.size() < 2U )
     {
       return makeError( GyroRotationErrorCode::kInsufficientSamples,
                         "at least two gyro samples are required" );
@@ -65,63 +108,27 @@ namespace phad::estimator
       return makeError( GyroRotationErrorCode::kNonFiniteBias,
                         "known gyro bias must be finite" );
     }
-    for ( std::size_t index = 0; index < samples.size(); ++index )
+
+    const internal::GyroIntervalResult reduced =
+        internal::validateGyroInterval( samples );
+    if ( const auto* error =
+             std::get_if<internal::GyroIntervalError>( &reduced ) )
     {
-      if ( !isFinite( gyro( samples[ index ] ) ) )
-      {
-        return makeError(
-            GyroRotationErrorCode::kNonFiniteGyro,
-            "gyro sample must be finite", index, std::nullopt,
-            samples[ index ].timestamp.nanoseconds() );
-      }
+      return mapIntervalError( *error, samples );
     }
+    const auto& interval =
+        std::get<internal::ValidatedGyroInterval>( reduced );
 
     auto                         params = std::make_shared<gtsam::PreintegratedRotation::Params>();
     gtsam::PreintegratedRotation pim( params );
-    std::int64_t                 duration_ns = 0;
 
-    for ( std::size_t index = 0; index + 1 < samples.size(); ++index )
+    for ( std::size_t index = 0U; index < interval.m_steps.size(); ++index )
     {
-      const std::int64_t current_ns =
-          samples[ index ].timestamp.nanoseconds();
-      const std::int64_t next_ns =
-          samples[ index + 1 ].timestamp.nanoseconds();
-      if ( next_ns == current_ns )
-      {
-        return makeError( GyroRotationErrorCode::kDuplicateTimestamp,
-                          "adjacent timestamps must be distinct", index + 1,
-                          index, next_ns );
-      }
-      if ( next_ns < current_ns )
-      {
-        return makeError( GyroRotationErrorCode::kOutOfOrderTimestamp,
-                          "timestamps must be strictly increasing", index + 1,
-                          index, next_ns );
-      }
-      if ( subtractOverflows( next_ns, current_ns ) )
-      {
-        return makeError( GyroRotationErrorCode::kTimestampDeltaOverflow,
-                          "timestamp delta exceeds int64", index + 1, index,
-                          next_ns );
-      }
-
-      const std::int64_t delta_ns = next_ns - current_ns;
-      if ( delta_ns >
-           std::numeric_limits<std::int64_t>::max() - duration_ns )
-      {
-        return makeError( GyroRotationErrorCode::kDurationOverflow,
-                          "accumulated duration exceeds int64", std::nullopt,
-                          index, std::nullopt );
-      }
-      duration_ns += delta_ns;
-      const double dt_s = static_cast<double>( delta_ns ) * kNsToSeconds;
-
-      const Eigen::Vector3d mean = 0.5 * gyro( samples[ index ] ) +
-                                   0.5 * gyro( samples[ index + 1 ] );
-      const Eigen::Vector3d corrected = mean - known_bias_radps;
-      const Eigen::Vector3d vector    = corrected * dt_s;
-      if ( !isFinite( mean ) || !isFinite( corrected ) ||
-           !isFinite( vector ) )
+      const internal::GyroIntervalStep& step = interval.m_steps[ index ];
+      const Eigen::Vector3d             corrected =
+          step.m_omega_mean_radps - known_bias_radps;
+      const Eigen::Vector3d vector = corrected * step.m_dt_s;
+      if ( !isFinite( corrected ) || !isFinite( vector ) )
       {
         return makeError( GyroRotationErrorCode::kNonFiniteComputation,
                           "gyro interval computation is non-finite",
@@ -130,7 +137,8 @@ namespace phad::estimator
 
       try
       {
-        pim.integrateGyroMeasurement( mean, known_bias_radps, dt_s );
+        pim.integrateGyroMeasurement( step.m_omega_mean_radps,
+                                      known_bias_radps, step.m_dt_s );
       }
       catch ( const std::exception& error )
       {
@@ -150,7 +158,7 @@ namespace phad::estimator
     const Eigen::Matrix3d rotation              = pim.deltaRij().matrix();
     const double          integrated_duration_s = pim.deltaTij();
     const double          expected_duration_s =
-        static_cast<double>( duration_ns ) * kNsToSeconds;
+        static_cast<double>( interval.m_duration_ns ) * kNsToSeconds;
     const double duration_tolerance =
         std::numeric_limits<double>::epsilon() *
         static_cast<double>( samples.size() ) *
@@ -178,7 +186,7 @@ namespace phad::estimator
                         "integrated rotation violates SO(3) invariants" );
     }
 
-    return GyroRotationPrediction{ rotation, duration_ns };
+    return GyroRotationPrediction{ rotation, interval.m_duration_ns };
   }
 
 }  // namespace phad::estimator

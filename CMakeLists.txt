@@ -195,6 +195,8 @@ target_compile_options(phad_viz PRIVATE
 
 add_library(phad_estimator
   phad/estimator/gyro_rotation_predictor.cpp
+  phad/estimator/internal/gyro_interval_reducer.cpp
+  phad/estimator/internal/gyro_rotation_factor.cpp
   phad/estimator/stereo_vo_estimator.cpp
 )
 add_library(phad::estimator ALIAS phad_estimator)
