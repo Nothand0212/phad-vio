@@ -147,6 +147,13 @@ namespace
       "fa81220b68d997d012f8f05c49ab3152c1a2a46144830f516339b11c206d3b9b",
       "e6b7fedd06fe0ff0b9e669156f86f0d9d80f217a0979c72cfc7670bdcc4c0c9a",
   };
+  constexpr std::array<std::string_view, 4>
+      kCrossedRejectedStationaryHashes{
+          "b863ad06a34cc6fefa5e4beca274f40033e59305d50a2c3dc31cd142d717f3a6",
+          "3420cdb9e7c02dbbfd0bd2aec2c837583c8e3fedfaff26820beebca43be47461",
+          "b6004812d4dc668d8cfd444272caebc67db463febc0fb10548510dcf24b4b206",
+          "72d71d27cb4ce2f4292b66e486ffb4eb4e5b1b52059e16e6872674149dd3a113",
+      };
   constexpr std::array<std::string_view, 4> kRankDeficientHashes{
       "6e19731100aa60b8e3289b80e2dceaf1c2af88b15b96c88ea37ddfba73787c74",
       "d068910a977411708181dc59cfcd7a49b3014598d3a9faee18c1e2128e20396d",
@@ -2011,6 +2018,44 @@ namespace
       ++row_count;
     }
     EXPECT_EQ( row_count, 60U );
+  }
+
+  TEST( GyroAlignmentCliTest, ValidPacketCannotCrossRejectedMiddleEndpoint )
+  {
+    auto                       fixture = stationaryFixture( "0.002", "-0.003", "0.001",
+                                                            kRejectedStationaryHashes, false, 162U,
+                                                            130U );
+    constexpr std::string_view kPacketBefore =
+        "131,130000000000,131000000000,0,0,2,1000000000,1000000000,valid\n";
+    constexpr std::string_view kPacketAfter =
+        "131,129000000000,131000000000,0,0,2,2000000000,2000000000,valid\n";
+    constexpr std::string_view kSampleBefore =
+        "131,0,130000000000,0.002,-0.003,0.001\n";
+    constexpr std::string_view kSampleAfter =
+        "131,0,129000000000,0.002,-0.003,0.001\n";
+    const auto packet_position = fixture.files[ 2 ].find( kPacketBefore );
+    const auto sample_position = fixture.files[ 3 ].find( kSampleBefore );
+    ASSERT_NE( packet_position, std::string::npos );
+    ASSERT_NE( sample_position, std::string::npos );
+    ASSERT_EQ( fixture.files[ 2 ].find(
+                   kPacketBefore, packet_position + kPacketBefore.size() ),
+               std::string::npos );
+    ASSERT_EQ( fixture.files[ 3 ].find(
+                   kSampleBefore, sample_position + kSampleBefore.size() ),
+               std::string::npos );
+    fixture.files[ 2 ].replace( packet_position, kPacketBefore.size(),
+                                kPacketAfter.data(), kPacketAfter.size() );
+    fixture.files[ 3 ].replace( sample_position, kSampleBefore.size(),
+                                kSampleAfter.data(), kSampleAfter.size() );
+    fixture.hashes = kCrossedRejectedStationaryHashes;
+    ScopedDirectory root{ "crossed_rejected_endpoint" };
+    const auto      q1_dir  = materializeFixture( root.path, fixture );
+    const auto      out_dir = root.path / "out";
+
+    const auto result = runGyroAlignment( syntheticDescriptor( fixture ),
+                                          q1_dir, out_dir );
+    expectHard( result, GyroAlignmentErrorCode::kJoinMismatch );
+    EXPECT_FALSE( std::filesystem::exists( out_dir ) );
   }
 
   TEST( GyroAlignmentCliTest, ManifestIsLastAndBindsExactInputOutputBytes )

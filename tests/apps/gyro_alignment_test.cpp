@@ -1902,6 +1902,25 @@ namespace
     }
   }
 
+  TEST( GyroAlignmentTest, ValidPacketCannotCrossRejectedMiddleEndpoint )
+  {
+    GyroAlignmentInput input;
+    input.endpoints = {
+        endpoint( 0 ),
+        endpoint( kSecondNs, Eigen::Quaterniond::Identity(),
+                  GyroAlignmentEndpointStatus::kRejected ),
+        endpoint( 2 * kSecondNs ),
+    };
+    input.packets = {
+        firstZero( 0 ),
+        validPacket( 1U, 0, kSecondNs, Eigen::Vector3d::Zero() ),
+        validPacket( 2U, 0, 2 * kSecondNs, Eigen::Vector3d::Zero() ),
+    };
+
+    expectHardError( analyzeGyroAlignment( input ),
+                     GyroAlignmentErrorCode::kJoinMismatch );
+  }
+
   TEST( GyroAlignmentTest, IntervalFirstMatchPreventsDoubleCounting )
   {
     GyroAlignmentInput input;
