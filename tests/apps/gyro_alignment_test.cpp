@@ -807,7 +807,7 @@ namespace
     const Eigen::Vector3d measured_rate = true_rate + known_bias;
     const Eigen::Matrix3d r_vis =
         rotationVectorQuaternion( true_rate * kDt ).toRotationMatrix();
-    const auto residual = [ &measured_rate, &r_vis ](
+    const auto residual = [ &measured_rate, &r_vis, kDt ](
                               const Eigen::Vector3d& bias ) {
       const Eigen::Matrix3d r_imu =
           rotationVectorQuaternion( ( measured_rate - bias ) * kDt )
@@ -863,7 +863,7 @@ namespace
     constexpr double      kDt = 0.02;
     const Eigen::Vector3d gyro{
         ( 2.0 * std::numbers::pi - two_pi_gap ) / kDt, 0.0, 0.0 };
-    const auto residual = [ &gyro ]( const Eigen::Vector3d& bias ) {
+    const auto residual = [ &gyro, kDt ]( const Eigen::Vector3d& bias ) {
       const Eigen::Matrix3d r_imu =
           rotationVectorQuaternion( ( gyro - bias ) * kDt )
               .toRotationMatrix();
