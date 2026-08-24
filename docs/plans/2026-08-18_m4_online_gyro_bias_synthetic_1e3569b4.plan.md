@@ -4,22 +4,22 @@ overview: 以冻结的 PHAD-M4-ONLINE-GYRO-BIAS-SYNTHETIC-V1 为唯一协议，�
 todos:
   - id: authority-lock
     content: 将 exact-six authority 文件锁在同一 commit/tree，记录逐文件 blob/SHA-256，并由身份分离的 Standards 与 Spec reviewer 对 exact bytes 各自 fresh 零 finding 审查
-    status: pending
+    status: completed
   - id: red
     content: 在任何 product declaration 前先冻结旧 public API visual control canonical digest/marker identity，再加入唯一 public NoEvictionFourteenPoseRecovery marker region，并保留缺失 online-bias capability 的有效 RED receipt
-    status: pending
+    status: completed
   - id: oracle
     content: 新建只链接 Eigen3 与 GTest 的独立 oracle target，复算 G0..G13、whitening/cost、rank、奇异值与 condition，并冻结实际输出
-    status: pending
+    status: completed
   - id: reducer-factor
     content: 先以测试闭合唯一 interval reducer、Q2 regression、private AHRS-composed NoiseModelFactorN、fixed-PIM correction、Jacobian、noise 与 mutant gates
-    status: pending
+    status: completed
   - id: estimator-state
     content: 以四个 direct field/address gates 实现 private State/RAII，再在 StereoVoEstimator::Impl 内接入 default-off G/RW/root forest、事务式 writeback 与最多三轮 fixed-PIM solve，使 14-state no-eviction recovery、m_window_biases 和 kOk-only extra-round 主门转 GREEN
-    status: pending
+    status: completed
   - id: lifecycle-gates
     content: 闭合 validation/precedence/provenance、missing/gap/rejected/segment/evicted 断链、unknown-predecessor rollback-before-materialize、reanchor/reopt、private transaction 四门、zero-drift、determinism 与 off byte-identity gates
-    status: pending
+    status: completed
   - id: activation-deletion
     content: 用 RED 前冻结的 repo-external verifier，从只读 clean-GREEN archive 独立执行 positive、两条 deletion、graph activation、3 条 transaction source arms、static-cap 与 12 条 production-source numerical-semantic mutant arms，并恢复同一 source/marker/command/outcome identity
     status: pending
@@ -33,11 +33,18 @@ isProject: false
 
 日期：2026-08-18
 
-状态：**pre-implementation；authority lock 未完成前 implementation STOP；8 个 todo 均为
-预注册步骤，不表示已执行或已通过。**
+状态：**Replay2 已形成 `HARD_ERROR` 并强制 STOP；不是 `PASS` 或 scientific/product `FAIL`。
+前 6 个 todo 已完成；`activation-deletion` 仅完成 5/19 条有效 negative arms，`verify-result` 也未
+完成，二者保持 pending。`permission_granted=false`。**
 
 计划 ID：`1e3569b4`；protocol ID：`PHAD-M4-ONLINE-GYRO-BIAS-SYNTHETIC-V1`；
 跟踪 issue：[#40](https://github.com/Nothand0212/phad-vio/issues/40)。
+
+Post-verdict evidence：
+[result ledger](../research/m4-online-gyro-bias-synthetic-result.md)；冻结 receipt：
+`/home/lin/orca/evidence/phad-m4-online-bias-v1-replay2-634c4ec/replay2-hard-error-receipt.json`
+（mode `0444`，SHA-256
+`bf4dc238eef9751042c7077a2713c9d0fed64fa3c189bf00b48e86179b89716a`）。
 
 ## 0. 唯一 authority、目标与权限边界
 

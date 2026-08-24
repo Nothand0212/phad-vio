@@ -606,13 +606,16 @@ PnP stereo 一致性仲裁：[#25](https://github.com/Nothand0212/phad-vio/issue
 
 ## M4：接入 IMU
 
-**当前状态（2026-08-18）：M4.1 数据路径已完成；Q1 Observe final independent PASS；
+**当前状态（2026-08-24）：M4 仍在进行中且未完成。M4.1 数据路径已完成；Q1 Observe final
+independent PASS；
 Q2 deterministic known-bias rotation-only 已在 `d1c4385` 取得 technical PASS under
 one-time post-hoc evidence-retention waiver，original frozen-plan RED exact-record conformance
 NOT MET。Q3 `PHAD-M4-Q3-GYRO-ALIGN-V1` 已完成且只完成一次 frozen-input qualification；唯一
 scientific verdict 为 `HYPOTHESIS_FAIL`，失败原因为 `HALF_STABILITY`，权限为 `STOP`。Q3 冻结结论
-不重跑、不调阈值、不改判；下一条候选路线是全新的 default-off、no-real online gyro-bias
-synthetic 协议，不是旧 Q4，也不推翻 Q3。**
+不重跑、不调阈值、不改判。新的 default-off、no-real online gyro-bias synthetic authority、RED、
+实现与 positive gates 已发生，但 replay2 qualification 在 negative-arm setup 因 harness/operator
+wrong-argument invocation 得到 `HARD_ERROR` 并 STOP；product/scientific attribution 均为 false，
+`permission_granted=false`。这不是旧 Q4，也不推翻 Q3。**
 
 M4.1 之后的 measurement / factor 接入继续服从
 [证据门控的信息接入](agents/evidence-gated-integration.md)。
@@ -640,7 +643,7 @@ Q3 唯一 qualification 的 support、fit 与 effect gates 通过，但最大 ea
 协议语义。禁止把失败后的窗口重选、threshold 修改或第二次运行称为 Q3 qualification，也禁止把
 Q3 nuisance estimate 当作 physical bias、online prior 或旧 Q4 的 implementation go。
 
-下一步改为 explicit online gyro bias state + random walk 的独立资格链：
+explicit online gyro bias state + random walk 的独立资格链为：
 
 - [online-bias research](research/m4-vio-online-gyro-bias-state-research.md)只提供方案与证据来源；
 - [ADR-0002](adr/0002-stage-gated-gyro-only-bias-state.md)记录放弃全局常值 nuisance 路线、采用
@@ -648,16 +651,20 @@ Q3 nuisance estimate 当作 physical bias、online prior 或旧 Q4 的 implement
 - [online-bias synthetic design](research/m4-online-gyro-bias-synthetic-design.md)是新协议的 normative
   gate authority；
 - [online-bias implementation plan](plans/2026-08-18_m4_online_gyro_bias_synthetic_1e3569b4.plan.md)
-  只规定该新协议的 RED→GREEN 与 qualification 顺序。
+  规定该新协议的 RED→GREEN 与 qualification 顺序；
+- [online-bias replay2 result](research/m4-online-gyro-bias-synthetic-result.md)记录最终
+  `HARD_ERROR`、有效/未运行 gates、STOP event 与未获得权限。
 
 pre-implementation authority transaction 的 exact six 只包含：online-bias synthetic design、
 ADR-0002、`docs/conventions.md`、本 roadmap、online-bias implementation plan 与
-`phad/estimator/README.md`。上述
+`phad/estimator/README.md`；它已锁定在 commit
+`634c4ecfbc5cbd7b0d8da1a295e48c12f7f81194` / tree
+`a7fd588983b1f8597e98517a3d0d4cbcf6609100`。上述
 online-bias research 只是已经存在的只读方案/证据依据，不属于该 transaction，也不得借此改写；
-Q3 design/result 同样只读。exact six 必须在同一 commit/tree 上完成 fresh Standards + Spec 双轴零
-finding review；transaction identity、新 plan 和双审锁定前，implementation 一律 `STOP`。该文档
-闭合不会重开 Q3，也不会自动产生更宽权限；production RED→GREEN 生效后 exact-six 六文件全部
-只读，estimator README 不再属于 production allowlist。跟踪 issue：
+Q3 design/result 同样只读。authority lock 后已取得有效 capability RED，并实现到 default-off candidate
+commit `9bdd32df4089774b667db721815bb89a3007a47b` / tree
+`732c8ea3e8a280693b58dac4211646f5a6a0e44a`；exact-six 六文件在 production 阶段保持只读，estimator
+README 不属于 production allowlist。该链不重开 Q3，也不自动产生更宽权限。跟踪 issue：
 [#40](https://github.com/Nothand0212/phad-vio/issues/40)。
 
 当前权威路线只包含：
@@ -666,11 +673,13 @@ finding review；transaction identity、新 plan 和双审锁定前，implementa
   插值和 `imu_gap` 合同；
 - **Q1/Q2 provenance（冻结）**：Q1 independent PASS；Q2 technical PASS under 上述 one-time waiver；
 - **Q3（冻结失败）**：唯一 qualification=`HYPOTHESIS_FAIL/HALF_STABILITY/STOP`，不重跑且不进入旧 Q4；
-- **online-bias synthetic（待 docs gate）**：只允许 default-off、无 real caller 的 synthetic 资格。
-  即使 synthetic `PASS`，也只授权保留 estimator-private mechanism，并另写 eviction-information-handoff
-  plan；
+- **online-bias synthetic（实现存在，资格未完成）**：authority 与预期 capability RED 已闭合；clean
+  positive arm 为 oracle `4/4`、online targeted `37/37`、Q2 regression `10/10`、estimator module
+  `114/114`。有效 negative arms 仅完成 `5/19`；rollback-order、static-cap 与全部 12 条 numerical
+  arms 未运行。replay2 因 marker 参数漏掉冻结的 `// ` 前缀与 `AUTHORITY_` 部分，以
+  harness/operator `HARD_ERROR` 停止；没有 product/scientific correctness verdict，也不授权 replay3；
 - **仍未授权**：apps/session 接线、真实序列、GT/ATE/RPE、natural feedback、完整 `X/V/B`、
-  accelerometer/gravity、bounded-online 声称与 default-on 产品路径。
+  accelerometer/gravity、bounded-online 声称、default-on 产品路径、eviction handoff 或 M5。
 
 ### 历史 M4.2+ 路线（non-normative；不可执行）
 
