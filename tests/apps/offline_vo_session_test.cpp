@@ -46,7 +46,7 @@ namespace
                                              "data" );
       }
       writeCalibration();
-      writeCsv( "imu0", imuHeader() );
+      writeCsv( "imu0", imuCsv() );
       writeImage( "cam0", "left-a.png" );
       writeImage( "cam0", "left-b.png" );
       writeImage( "cam1", "right-a.png" );
@@ -84,6 +84,20 @@ namespace
       return "#timestamp [ns],w_RS_S_x [rad s^-1],w_RS_S_y [rad s^-1],"
              "w_RS_S_z [rad s^-1],a_RS_S_x [m s^-2],a_RS_S_y [m s^-2],"
              "a_RS_S_z [m s^-2]\n";
+    }
+
+    static std::string imuCsv()
+    {
+      const auto row = []( std::int64_t timestamp_ns ) {
+        return std::to_string( timestamp_ns ) +
+               ",0,0,0,0,0,9.81\n";
+      };
+      return imuHeader() + row( kFirstTimestampNs - 25'000'000LL ) +
+             row( kFirstTimestampNs - 12'500'000LL ) +
+             row( kFirstTimestampNs ) +
+             row( kFirstTimestampNs + 25'000'000LL ) +
+             row( kSecondTimestampNs ) +
+             row( kSecondTimestampNs + 25'000'000LL );
     }
 
     void writeCsv( const std::string& sensor, const std::string& contents )
@@ -196,15 +210,16 @@ namespace
     EXPECT_EQ( result.counts.image_frames, 1U );
 
     // Mid-loop stream errors still run segment finalization, but a run
-    // with no re-anchors and no seed-gate rejections is clean: no
-    // "vo segments summary" warning should be emitted. Cull totals never
+    // With no initialization rejection, no initialization summary warning is
+    // emitted. Cull totals never
     // enter warnings either.
     EXPECT_EQ( result.counts.reanchors, 0U );
     EXPECT_EQ( result.counts.seed_rejected, 0U );
     const bool has_summary_warning =
         std::any_of( result.warnings.begin(), result.warnings.end(),
                      []( const std::string& warning ) {
-                       return warning.rfind( "vo segments summary:", 0 ) == 0;
+                       return warning.rfind( "vo initialization summary:", 0 ) ==
+                              0;
                      } );
     EXPECT_FALSE( has_summary_warning );
     const bool has_cull_warning =
@@ -231,10 +246,13 @@ namespace
     ASSERT_TRUE( result.error.has_value() );
     ASSERT_EQ( result.gyro_observe.packets.size(), 1U );
     EXPECT_EQ( result.gyro_observe.packets.front().status,
-               phad::apps::GyroPacketStatus::kFirstZero );
+               phad::apps::GyroPacketStatus::kValid );
     EXPECT_EQ( result.gyro_observe.packets.front().vo_segment_id,
                result.diag.empty() ? 0U : result.diag.front().segment_id );
-    EXPECT_TRUE( result.gyro_observe.samples.empty() );
+    EXPECT_EQ( result.gyro_observe.samples.size(),
+               result.gyro_observe.packets.front().sample_count );
+    EXPECT_EQ( result.gyro_observe.samples.front().timestamp_ns,
+               TinyEurocFixture::kFirstTimestampNs - 25'000'000LL );
   }
 
   TEST( OfflineVoSessionTest, WriteDiagCsvMatchesProbeContract )
@@ -410,15 +428,15 @@ namespace
     EXPECT_LT( result.first_image_ts, result.last_image_ts );
     EXPECT_GT( result.wall_s, 0.0 );
 
-    // MH_01 is the clean-run reference: no re-anchors, no seed-gate
-    // rejections, so no "vo segments summary" warning is expected.
+    // A clean prefix has no initialization summary warning.
     // Cull counters may be non-zero but must not enter warnings.
     EXPECT_EQ( result.counts.reanchors, 0U );
     EXPECT_EQ( result.counts.seed_rejected, 0U );
     const bool has_summary_warning =
         std::any_of( result.warnings.begin(), result.warnings.end(),
                      []( const std::string& warning ) {
-                       return warning.rfind( "vo segments summary:", 0 ) == 0;
+                       return warning.rfind( "vo initialization summary:", 0 ) ==
+                              0;
                      } );
     EXPECT_FALSE( has_summary_warning );
     const bool has_cull_warning =

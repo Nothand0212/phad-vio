@@ -1,54 +1,35 @@
 #include "phad/sync/stereo_pair_synchronizer.hpp"
 
-#include <array>
+#include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
-/**
- * @file stereo_pair_synchronizer.cpp
- * @brief StereoPairSynchronizer 实现。
- */
-
 namespace phad::sync
 {
-
   namespace
   {
 
-    /// 线性插值:t 严格落在 a.t 与 b.t 之间(a.t < t < b.t)。
-    [[nodiscard]] sensor::ImuMeasurement interpolateImu(
-        const sensor::ImuMeasurement& a, const sensor::ImuMeasurement& b,
-        common::Timestamp t )
+    [[nodiscard]] bool isFinite( const sensor::ImuMeasurement& measurement )
     {
-      const double dt    = static_cast<double>( b.timestamp.nanoseconds() -
-                                                a.timestamp.nanoseconds() );
-      const double alpha = static_cast<double>( t.nanoseconds() -
-                                                a.timestamp.nanoseconds() ) /
-                           dt;
-      sensor::ImuMeasurement out;
-      out.timestamp = t;
-      for ( std::size_t i = 0; i < 3; ++i )
+      for ( std::size_t axis = 0; axis < 3U; ++axis )
       {
-        out.accel_mps2[ i ] =
-            a.accel_mps2[ i ] + alpha * ( b.accel_mps2[ i ] - a.accel_mps2[ i ] );
-        out.gyro_radps[ i ] =
-            a.gyro_radps[ i ] + alpha * ( b.gyro_radps[ i ] - a.gyro_radps[ i ] );
-      }
-      return out;
-    }
-
-    [[nodiscard]] bool isFinite( const sensor::ImuMeasurement& m )
-    {
-      for ( std::size_t i = 0; i < 3; ++i )
-      {
-        if ( !std::isfinite( m.accel_mps2[ i ] ) ||
-             !std::isfinite( m.gyro_radps[ i ] ) )
+        if ( !std::isfinite( measurement.accel_mps2[ axis ] ) ||
+             !std::isfinite( measurement.gyro_radps[ axis ] ) )
         {
           return false;
         }
       }
       return true;
+    }
+
+    [[nodiscard]] bool subtractionOverflows( std::int64_t next,
+                                             std::int64_t current )
+    {
+      return current < 0 &&
+             next > std::numeric_limits<std::int64_t>::max() + current;
     }
 
   }  // namespace
@@ -72,10 +53,10 @@ namespace phad::sync
       throw std::invalid_argument(
           "StereoPairSynchronizerOptions.max_imu_queue must be >= 1" );
     }
-    if ( m_options.imu_gap_ns < 0 )
+    if ( m_options.imu_continuity_limit_ns <= 0 )
     {
       throw std::invalid_argument(
-          "StereoPairSynchronizerOptions.imu_gap_ns must be >= 0" );
+          "StereoPairSynchronizerOptions.imu_continuity_limit_ns must be > 0" );
     }
   }
 
@@ -133,7 +114,11 @@ namespace phad::sync
       updateMaxQueue( sensor::CameraId::kRight );
     }
 
-    drain();
+    drainStereo();
+    if ( m_packet_mode.value_or( false ) )
+    {
+      drainPackets( false );
+    }
     return PushStatus::kOk;
   }
 
@@ -161,50 +146,100 @@ namespace phad::sync
         m_imu_sticky = PushStatus::kDuplicate;
         return *m_imu_sticky;
       }
+      if ( subtractionOverflows( measurement.timestamp.nanoseconds(),
+                                 m_last_imu->nanoseconds() ) )
+      {
+        m_imu_sticky = PushStatus::kInvalidStamp;
+        return *m_imu_sticky;
+      }
     }
     m_last_imu = measurement.timestamp;
 
     ++m_diag.pushed_imu;
-    m_imu.push_back( measurement );
+    m_imu.push_back( std::move( measurement ) );
     while ( m_imu.size() > m_options.max_imu_queue )
     {
       m_imu.pop_front();
       ++m_diag.dropped_imu_overflow;
     }
-    if ( m_imu.size() > m_diag.max_imu_queue )
+    m_diag.max_imu_queue = std::max( m_diag.max_imu_queue, m_imu.size() );
+    if ( m_packet_mode.value_or( false ) )
     {
-      m_diag.max_imu_queue = m_imu.size();
+      drainPackets( false );
     }
     return PushStatus::kOk;
   }
 
   std::optional<sensor::StereoFrame> StereoPairSynchronizer::tryPop()
   {
-    auto packet = tryPopPacket();
-    if ( !packet.has_value() )
+    if ( m_packet_mode.value_or( false ) )
+    {
+      if ( m_ready.empty() )
+      {
+        return std::nullopt;
+      }
+      sensor::StereoFrame frame = std::move( m_ready.front().m_frame );
+      m_ready.pop_front();
+      return frame;
+    }
+    m_packet_mode = false;
+    if ( m_paired.empty() )
     {
       return std::nullopt;
     }
-    return packet->frame;
+    sensor::StereoFrame frame = std::move( m_paired.front() );
+    m_paired.pop_front();
+    return frame;
   }
 
-  std::optional<sensor::StereoImuPacket> StereoPairSynchronizer::tryPopPacket()
+  std::optional<sensor::StereoImuPacket>
+  StereoPairSynchronizer::tryPopPacket()
   {
+    if ( m_packet_mode.has_value() && !*m_packet_mode )
+    {
+      return std::nullopt;
+    }
+    m_packet_mode = true;
+    drainPackets( false );
     if ( m_ready.empty() )
     {
       return std::nullopt;
     }
-    sensor::StereoImuPacket packet = std::move( m_ready.front() );
+    sensor::StereoImuPacket&               front = m_ready.front();
+    std::optional<sensor::StereoImuPacket> packet;
+    if ( auto* raw = std::get_if<sensor::RawImuInterval>( &front.m_imu ) )
+    {
+      packet.emplace( sensor::StereoImuPacket{
+          .m_frame = std::move( front.m_frame ),
+          .m_imu   = sensor::RawImuInterval{
+                .m_t_begin = raw->m_t_begin,
+                .m_t_end   = raw->m_t_end,
+                .m_samples = std::move( raw->m_samples ) } } );
+    }
+    else
+    {
+      packet.emplace( sensor::StereoImuPacket{
+          .m_frame = std::move( front.m_frame ),
+          .m_imu   = std::get<sensor::MeasurementDiscontinuity>(
+              front.m_imu ) } );
+    }
     m_ready.pop_front();
     return packet;
   }
 
   void StereoPairSynchronizer::flush()
   {
+    drainStereo();
     m_diag.dropped_left += static_cast<std::uint64_t>( m_left.size() );
     m_diag.dropped_right += static_cast<std::uint64_t>( m_right.size() );
     m_left.clear();
     m_right.clear();
+
+    if ( m_packet_mode.value_or( false ) )
+    {
+      drainPackets( true );
+      m_paired.clear();
+    }
     m_diag.dropped_imu += static_cast<std::uint64_t>( m_imu.size() );
     m_imu.clear();
   }
@@ -226,12 +261,18 @@ namespace phad::sync
     return m_imu_sticky;
   }
 
-  void StereoPairSynchronizer::drain()
+  void StereoPairSynchronizer::drainStereo()
   {
     while ( !m_left.empty() && !m_right.empty() )
     {
-      const std::int64_t t_l    = m_left.front().timestamp.nanoseconds();
-      const std::int64_t t_r    = m_right.front().timestamp.nanoseconds();
+      const std::int64_t t_l = m_left.front().timestamp.nanoseconds();
+      const std::int64_t t_r = m_right.front().timestamp.nanoseconds();
+      if ( subtractionOverflows( std::max( t_l, t_r ),
+                                 std::min( t_l, t_r ) ) )
+      {
+        m_sticky = PushStatus::kInvalidStamp;
+        return;
+      }
       const std::int64_t dt     = t_l - t_r;
       const std::int64_t abs_dt = dt < 0 ? -dt : dt;
 
@@ -241,11 +282,8 @@ namespace phad::sync
         sensor::ImageFrameEvent right = std::move( m_right.front() );
         m_left.pop_front();
         m_right.pop_front();
-        sensor::StereoFrame frame{ left.timestamp, std::move( left.image ),
-                                   std::move( right.image ) };
-        m_ready.push_back( makePacket( frame.timestamp, m_last_emitted_left,
-                                       std::move( frame ) ) );
-        m_last_emitted_left = m_ready.back().frame.timestamp;
+        m_paired.push_back( sensor::StereoFrame{
+            left.timestamp, std::move( left.image ), std::move( right.image ) } );
         ++m_diag.emitted_stereo;
       }
       else if ( dt < 0 )
@@ -261,106 +299,131 @@ namespace phad::sync
     }
   }
 
-  void StereoPairSynchronizer::dropExpiredImu( common::Timestamp t_prev )
+  void StereoPairSynchronizer::drainPackets( bool source_exhausted )
   {
-    while ( !m_imu.empty() && m_imu.front().timestamp < t_prev )
+    while ( !m_paired.empty() )
+    {
+      std::optional<sensor::StereoImuPacket> packet =
+          makePacket( m_paired.front(), source_exhausted );
+      if ( !packet.has_value() )
+      {
+        return;
+      }
+      m_ready.push_back( std::move( *packet ) );
+      m_paired.pop_front();
+    }
+  }
+
+  std::optional<sensor::StereoImuPacket>
+  StereoPairSynchronizer::makePacket( sensor::StereoFrame& frame,
+                                      bool                 source_exhausted )
+  {
+    const common::Timestamp          t_end   = frame.timestamp;
+    std::optional<common::Timestamp> t_begin = m_last_emitted_left;
+    if ( !t_begin.has_value() )
+    {
+      if ( m_imu.empty() || m_imu.front().timestamp >= t_end )
+      {
+        return std::nullopt;
+      }
+      t_begin = m_imu.front().timestamp;
+    }
+    if ( *t_begin >= t_end )
+    {
+      return std::nullopt;
+    }
+
+    const auto lower = [ this ]( common::Timestamp timestamp ) {
+      return std::lower_bound(
+          m_imu.begin(), m_imu.end(), timestamp,
+          []( const sensor::ImuMeasurement& sample,
+              common::Timestamp             target ) {
+            return sample.timestamp < target;
+          } );
+    };
+    const auto end_right = lower( t_end );
+    if ( end_right == m_imu.end() && !source_exhausted )
+    {
+      return std::nullopt;
+    }
+
+    const auto begin_right = lower( *t_begin );
+    const bool begin_exact =
+        begin_right != m_imu.end() && begin_right->timestamp == *t_begin;
+    const bool end_exact =
+        end_right != m_imu.end() && end_right->timestamp == t_end;
+    const bool begin_bracketed =
+        begin_exact || ( begin_right != m_imu.begin() &&
+                         begin_right != m_imu.end() );
+    const bool end_bracketed =
+        end_exact || ( end_right != m_imu.begin() &&
+                       end_right != m_imu.end() );
+    bool continuous = begin_bracketed && end_bracketed;
+
+    if ( continuous )
+    {
+      for ( auto it = m_imu.begin(); std::next( it ) != m_imu.end(); ++it )
+      {
+        const auto next = std::next( it );
+        if ( it->timestamp < t_end && next->timestamp > *t_begin )
+        {
+          const std::int64_t delta_ns =
+              next->timestamp.nanoseconds() - it->timestamp.nanoseconds();
+          if ( delta_ns > m_options.imu_continuity_limit_ns )
+          {
+            continuous = false;
+            break;
+          }
+        }
+      }
+    }
+
+    if ( continuous )
+    {
+      const auto                          first = begin_exact ? begin_right : std::prev( begin_right );
+      const auto                          last  = end_right;
+      std::vector<sensor::ImuMeasurement> samples;
+      samples.reserve(
+          static_cast<std::size_t>( std::distance( first, last ) ) + 1U );
+      samples.insert( samples.end(), first, std::next( last ) );
+      m_last_emitted_left = t_end;
+      pruneImu( t_end );
+      return sensor::StereoImuPacket{
+          .m_frame = std::move( frame ),
+          .m_imu   = sensor::RawImuInterval{
+                .m_t_begin = *t_begin,
+                .m_t_end   = t_end,
+                .m_samples = std::move( samples ) } };
+    }
+
+    ++m_diag.imu_discontinuity_count;
+    m_last_emitted_left = t_end;
+    pruneImu( t_end );
+    return sensor::StereoImuPacket{
+        .m_frame = std::move( frame ),
+        .m_imu   = sensor::MeasurementDiscontinuity{
+              .m_t_begin = *t_begin,
+              .m_t_end   = t_end } };
+  }
+
+  void StereoPairSynchronizer::pruneImu( common::Timestamp t_end )
+  {
+    while ( m_imu.size() > 1U && m_imu[ 1U ].timestamp <= t_end )
     {
       m_imu.pop_front();
       ++m_diag.dropped_imu;
     }
   }
 
-  sensor::StereoImuPacket StereoPairSynchronizer::makePacket(
-      common::Timestamp                  t_cur,
-      std::optional<common::Timestamp>   t_prev_opt,
-      sensor::StereoFrame                frame )
-  {
-    const common::Timestamp t_cur_stamp = frame.timestamp;
-    // 聚合初始化: frame 需 move 构造(Image 无默认构造)。
-    sensor::StereoImuPacket packet{ std::move( frame ), {}, t_cur_stamp, false };
-
-    if ( !t_prev_opt.has_value() )
-    {
-      // 首个 packet: 不构造段;丢弃 < t_cur 的过期样本,恰在 t_cur 的保留为
-      // 下一段左端(M4.3 前,早于首帧的 IMU 由消费方另行读取)。
-      dropExpiredImu( t_cur );
-      if ( !m_imu.empty() && m_imu.front().timestamp == t_cur )
-      {
-        m_last_boundary = m_imu.front();
-      }
-      return packet;
-    }
-
-    const common::Timestamp t_prev = *t_prev_opt;
-    packet.t_prev = t_prev;
-    dropExpiredImu( t_prev );
-
-    // 1. 左端: 原样本优先,否则用上一段右端(恰在 t_prev 的插值样本)。
-    if ( !m_imu.empty() && m_imu.front().timestamp == t_prev )
-    {
-      packet.samples.push_back( m_imu.front() );
-      m_imu.pop_front();
-    }
-    else if ( m_last_boundary.has_value() &&
-              m_last_boundary->timestamp == t_prev )
-    {
-      packet.samples.push_back( *m_last_boundary );
-    }
-    else
-    {
-      packet.imu_gap = true;  // 无法构造左端
-    }
-
-    // 2. 中间 + 右端: 取 < t_cur 的原样本;t_cur 处原样本优先作右端,
-    //    否则用最靠近 t_cur 的样本与队列 front 线性插值。
-    while ( !m_imu.empty() && m_imu.front().timestamp < t_cur )
-    {
-      packet.samples.push_back( m_imu.front() );
-      m_imu.pop_front();
-    }
-    if ( !m_imu.empty() && m_imu.front().timestamp == t_cur )
-    {
-      packet.samples.push_back( m_imu.front() );
-      m_imu.pop_front();
-      m_last_boundary = packet.samples.back();
-    }
-    else if ( !m_imu.empty() && !packet.samples.empty() )
-    {
-      // 队列 front > t_cur,左侧有样本 → 用最靠近 t_cur 的样本插值右端。
-      packet.samples.push_back(
-          interpolateImu( packet.samples.back(), m_imu.front(), t_cur ) );
-      m_last_boundary = packet.samples.back();
-    }
-    else
-    {
-      packet.imu_gap = true;  // 无法构造右端(无右侧样本)
-    }
-
-    // 3. 大间断判定: 段宽超过阈值或段内无样本。
-    if ( t_cur.nanoseconds() - t_prev.nanoseconds() > m_options.imu_gap_ns ||
-         packet.samples.empty() )
-    {
-      packet.imu_gap = true;
-    }
-    if ( packet.imu_gap )
-    {
-      ++m_diag.imu_gap_count;
-    }
-    return packet;
-  }
-
   void StereoPairSynchronizer::updateMaxQueue( sensor::CameraId camera )
   {
     if ( camera == sensor::CameraId::kLeft )
     {
-      if ( m_left.size() > m_diag.max_left_queue )
-      {
-        m_diag.max_left_queue = m_left.size();
-      }
+      m_diag.max_left_queue = std::max( m_diag.max_left_queue, m_left.size() );
     }
-    else if ( m_right.size() > m_diag.max_right_queue )
+    else
     {
-      m_diag.max_right_queue = m_right.size();
+      m_diag.max_right_queue = std::max( m_diag.max_right_queue, m_right.size() );
     }
   }
 

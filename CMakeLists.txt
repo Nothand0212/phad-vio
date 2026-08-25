@@ -196,8 +196,8 @@ target_compile_options(phad_viz PRIVATE
 add_library(phad_estimator
   phad/estimator/gyro_rotation_predictor.cpp
   phad/estimator/internal/gyro_interval_reducer.cpp
-  phad/estimator/internal/gyro_rotation_factor.cpp
-  phad/estimator/stereo_vo_estimator.cpp
+  phad/estimator/internal/imu_interval.cpp
+  phad/estimator/vio_estimator.cpp
 )
 add_library(phad::estimator ALIAS phad_estimator)
 target_compile_features(phad_estimator PUBLIC cxx_std_20)
@@ -470,18 +470,18 @@ if(PHAD_BUILD_TESTS)
   add_executable(phad_estimator_tests
     tests/estimator/gyro_rotation_predictor_test.cpp
     tests/estimator/gtsam_smoke_test.cpp
-    tests/estimator/stereo_vo_online_gyro_bias_test.cpp
     tests/estimator/types_test.cpp
     tests/estimator/stereo_point_mapping_test.cpp
     tests/estimator/stereo_vo_estimator_test.cpp
     tests/estimator/stereo_vo_diagnostics_test.cpp
-    tests/estimator/stereo_vo_reanchor_test.cpp
+    tests/estimator/vio_lifecycle_test.cpp
     tests/estimator/stereo_vo_pnp_test.cpp
     tests/estimator/stereo_vo_outlier_cull_test.cpp
     tests/estimator/stereo_vo_outlier_reopt_test.cpp
     tests/estimator/stereo_vo_cull_rebirth_test.cpp
     tests/estimator/keyframe_update_test.cpp
     tests/estimator/multiframe_triangulation_test.cpp
+    tests/estimator/vio_full_state_test.cpp
   )
   target_link_libraries(phad_estimator_tests PRIVATE
     phad::estimator gtsam GTest::gtest_main
@@ -493,19 +493,6 @@ if(PHAD_BUILD_TESTS)
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
   )
   gtest_discover_tests(phad_estimator_tests PROPERTIES LABELS "unit")
-
-  add_executable(phad_online_gyro_bias_oracle_tests
-    tests/estimator/online_gyro_bias_oracle_test.cpp
-  )
-  target_compile_features(phad_online_gyro_bias_oracle_tests PRIVATE cxx_std_20)
-  target_link_libraries(phad_online_gyro_bias_oracle_tests PRIVATE
-    Eigen3::Eigen GTest::gtest_main
-  )
-  target_compile_options(phad_online_gyro_bias_oracle_tests PRIVATE
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
-  )
-  gtest_discover_tests(phad_online_gyro_bias_oracle_tests
-    PROPERTIES LABELS "unit")
 
   add_executable(phad_viz_tests
     tests/viz/trajectory_panel_test.cpp

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <utility>
+
 #include "phad/estimator/types.hpp"
 #include "phad/frontend/stereo_tracks.hpp"
 
@@ -13,17 +15,19 @@ namespace phad::apps
   /// constrain the graph, but keep the track alive in the window until
   /// stereo returns. Does not live in `phad_*` libraries (keeps estimator
   /// free of a frontend dependency).
-  [[nodiscard]] inline estimator::KeyframeMeasurement toKeyframeMeasurement(
-      const frontend::FrameTracks& tracks )
+  [[nodiscard]] inline estimator::VioMeasurement toVioMeasurement(
+      const frontend::FrameTracks& tracks, sensor::ImuPayload imu )
   {
-    estimator::KeyframeMeasurement measurement;
-    measurement.timestamp = tracks.timestamp;
-    measurement.observations.reserve( tracks.observations.size() );
+    estimator::VioMeasurement measurement{
+        .m_timestamp    = tracks.timestamp,
+        .m_observations = {},
+        .m_imu          = std::move( imu ) };
+    measurement.m_observations.reserve( tracks.observations.size() );
     for ( const frontend::TrackObservation& observation : tracks.observations )
     {
       if ( observation.status == frontend::StereoStatus::kValid )
       {
-        measurement.observations.push_back( estimator::StereoObservation{
+        measurement.m_observations.push_back( estimator::StereoObservation{
             .id           = observation.id,
             .left_pixel   = observation.left_pixel,
             .disparity_px = observation.disparity_px,
@@ -35,7 +39,7 @@ namespace phad::apps
         // Slice ⑦: stereo failed but the track is stable — zero-disparity
         // observation (kept in the window; seeds only via a later stereo
         // observation).
-        measurement.observations.push_back( estimator::StereoObservation{
+        measurement.m_observations.push_back( estimator::StereoObservation{
             .id           = observation.id,
             .left_pixel   = observation.left_pixel,
             .disparity_px = 0.0,
@@ -52,6 +56,14 @@ namespace phad::apps
     {
       case estimator::UpdateStatus::kOk:
         return "ok";
+      case estimator::UpdateStatus::kInitializing:
+        return "initializing";
+      case estimator::UpdateStatus::kDiscontinuity:
+        return "discontinuity";
+      case estimator::UpdateStatus::kVisualOutage:
+        return "visual_outage";
+      case estimator::UpdateStatus::kInvalidInput:
+        return "invalid_input";
       case estimator::UpdateStatus::kRejected:
         return "rejected";
       case estimator::UpdateStatus::kFailed:

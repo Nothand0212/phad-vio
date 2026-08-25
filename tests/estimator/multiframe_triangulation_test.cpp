@@ -8,9 +8,10 @@
 #include "phad/camera/rectified_stereo_calibration.hpp"
 #include "phad/common/landmark_id.hpp"
 #include "phad/common/timestamp.hpp"
-#include "phad/estimator/stereo_vo_estimator.hpp"
 #include "phad/estimator/types.hpp"
+#include "phad/estimator/vio_estimator.hpp"
 #include "phad/sensor/rigid_transform.hpp"
+#include "tests/estimator/vio_test_utils.hpp"
 
 namespace
 {
@@ -19,10 +20,10 @@ namespace
   using phad::common::LandmarkId;
   using phad::common::Timestamp;
   using phad::estimator::EstimatorOptions;
-  using phad::estimator::KeyframeMeasurement;
   using phad::estimator::StereoObservation;
-  using phad::estimator::StereoVoEstimator;
   using phad::estimator::UpdateStatus;
+  using phad::estimator::VioEstimator;
+  using phad::estimator::VioMeasurement;
   using phad::sensor::RigidTransform;
 
   RectifiedStereoCalibration makeCalibration()
@@ -40,9 +41,9 @@ namespace
       const Eigen::Isometry3d&          T_W_B,
       const Eigen::Vector3d&            point_W )
   {
-    Eigen::Isometry3d T_B_C = Eigen::Isometry3d::Identity();
-    T_B_C.linear()          = calibration.T_B_left_rectified().rotation();
-    T_B_C.translation()     = calibration.T_B_left_rectified().translation();
+    Eigen::Isometry3d T_B_C          = Eigen::Isometry3d::Identity();
+    T_B_C.linear()                   = calibration.T_B_left_rectified().rotation();
+    T_B_C.translation()              = calibration.T_B_left_rectified().translation();
     const Eigen::Vector3d point_left = ( T_W_B * T_B_C ).inverse() * point_W;
     const double          z          = point_left.z();
     EXPECT_GT( z, 0.0 );
@@ -56,9 +57,9 @@ namespace
       const Eigen::Isometry3d&          T_W_B,
       const Eigen::Vector3d&            point_W )
   {
-    Eigen::Isometry3d T_B_C = Eigen::Isometry3d::Identity();
-    T_B_C.linear()          = calibration.T_B_left_rectified().rotation();
-    T_B_C.translation()     = calibration.T_B_left_rectified().translation();
+    Eigen::Isometry3d T_B_C          = Eigen::Isometry3d::Identity();
+    T_B_C.linear()                   = calibration.T_B_left_rectified().rotation();
+    T_B_C.translation()              = calibration.T_B_left_rectified().translation();
     const Eigen::Vector3d point_left = ( T_W_B * T_B_C ).inverse() * point_W;
     return calibration.fxPixels() * calibration.baselineM() / point_left.z();
   }
@@ -68,12 +69,12 @@ namespace
   // (glue channel; the landmark is seeded when its stereo match returns).
   struct Scene
   {
-    RectifiedStereoCalibration    calibration = makeCalibration();
-    std::vector<LandmarkId>       stable_ids;
-    std::vector<Eigen::Vector3d>  stable_W;
-    LandmarkId                    target_id{ 100 };
-    Eigen::Vector3d               target_W{ 0.3, 0.0, 5.0 };
-    const std::int64_t            ts_step_ns = 100'000'000;
+    RectifiedStereoCalibration   calibration = makeCalibration();
+    std::vector<LandmarkId>      stable_ids;
+    std::vector<Eigen::Vector3d> stable_W;
+    LandmarkId                   target_id{ 100 };
+    Eigen::Vector3d              target_W{ 0.3, 0.0, 5.0 };
+    const std::int64_t           ts_step_ns = 100'000'000;
 
     Scene()
     {
@@ -104,21 +105,23 @@ namespace
     // the target's right-eye match succeeds on this frame; include_target
     // omits the target entirely (realistic birth: the frontend drops tracks
     // of length 1, so the target's first estimator sighting is frame 1).
-    [[nodiscard]] KeyframeMeasurement frame(
+    [[nodiscard]] VioMeasurement frame(
         const Eigen::Isometry3d& T_W_B, std::uint32_t k,
         bool include_stereo_target, bool include_target = true ) const
     {
-      KeyframeMeasurement m;
-      m.timestamp = Timestamp{ ts_step_ns * ( static_cast<std::int64_t>( k ) + 1 ) };
+      VioMeasurement m;
+      m.m_timestamp = Timestamp{ ts_step_ns * ( static_cast<std::int64_t>( k ) + 1 ) };
+      m.m_imu       = phad::test_support::stationaryImuPayload(
+          m.m_timestamp, ts_step_ns );
       for ( std::size_t i = 0; i < stable_ids.size(); ++i )
       {
-        m.observations.push_back( StereoObservation{
+        m.m_observations.push_back( StereoObservation{
             stable_ids[ i ], projectLeft( calibration, T_W_B, stable_W[ i ] ),
             stereoDisparity( calibration, T_W_B, stable_W[ i ] ) } );
       }
       if ( include_target )
       {
-        m.observations.push_back( StereoObservation{
+        m.m_observations.push_back( StereoObservation{
             target_id, projectLeft( calibration, T_W_B, target_W ),
             include_stereo_target
                 ? stereoDisparity( calibration, T_W_B, target_W )
@@ -143,12 +146,12 @@ TEST( MultiFrameTriangulationTest, BuildGraphSkipsZeroDisparity )
   // The target's zero-disparity observations must not count toward
   // min_landmark_observations: the landmark enters the BA graph only once it
   // has two real stereo observations (frame 4), never earlier.
-  Scene             scene;
-  StereoVoEstimator estimator( scene.calibration );
+  Scene        scene;
+  VioEstimator estimator( scene.calibration, phad::test_support::testImuParameters() );
 
   auto r0 = estimator.update( scene.frame( translated( 0.0 ), 0,
-                              /*include_stereo_target=*/false,
-                              /*include_target=*/false ),
+                                           /*include_stereo_target=*/false,
+                                           /*include_target=*/false ),
                               /*keyframe=*/true );
   EXPECT_EQ( r0.status, UpdateStatus::kOk );
 

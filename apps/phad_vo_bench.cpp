@@ -94,8 +94,7 @@ namespace
     std::optional<int>           zombie_drop_age;
     std::optional<double>        hanging_gate_m;
     std::optional<double>        far_refresh_px;
-    // pre-M4 round 2: 首段/re-anchor 播种阈值(默认 5, 含跨帧累积);
-    // 进 flattenConfig → config_hash。
+    // Root visual-seed threshold; enters flattenConfig / config_hash.
     std::optional<int> min_seed_observations;
 
     // Attribution A/B overrides (Slice ⑥ frontend mechanisms).
@@ -111,9 +110,6 @@ namespace
     // 零均值 SAD 默认关 (enable_zero_mean_sad=false), --tracker-enable-
     // zero-mean-sad 打开 (A/B)。
     bool enable_zero_mean_sad = false;
-    // CV 常量速度初始化默认开; --no-cv-init 关闭 → re-anchor 锚与 BA init
-    // 回退到最后接受位姿 (A/B, 进 config_hash)。
-    bool no_cv_init = false;
     // 首段累积播种默认关 (实测否决全量版, 残存首段专用版);
     // --estimator-enable-accumulated-seed 打开 (A/B)。
     bool enable_accumulated_seed = false;
@@ -216,11 +212,6 @@ namespace
       if ( flag == "--tracker-enable-zero-mean-sad" )
       {
         arguments.enable_zero_mean_sad = true;
-        continue;
-      }
-      if ( flag == "--no-cv-init" )
-      {
-        arguments.no_cv_init = true;
         continue;
       }
       if ( flag == "--estimator-enable-accumulated-seed" )
@@ -548,14 +539,11 @@ namespace
               estimator.prior_rotation_sigma_rad );
     snap.set( "estimator.prior_translation_sigma_m",
               estimator.prior_translation_sigma_m );
-    snap.set( "estimator.use_constant_velocity_init",
-              estimator.use_constant_velocity_init );
     snap.set( "estimator.min_seed_observations",
               static_cast<std::int64_t>( estimator.min_seed_observations ) );
     snap.set( "estimator.min_track_observations_for_seed",
               static_cast<std::int64_t>(
                   estimator.min_track_observations_for_seed ) );
-    snap.set( "estimator.enable_reanchor", estimator.enable_reanchor );
     snap.set( "estimator.enable_pnp_init", estimator.enable_pnp_init );
     snap.set( "estimator.pnp_reproj_px", estimator.pnp_reproj_px );
     snap.set( "estimator.pnp_confidence", estimator.pnp_confidence );
@@ -726,10 +714,6 @@ namespace
         arguments.enable_exposure_norm;
     session_options.tracker.enable_zero_mean_sad =
         arguments.enable_zero_mean_sad;
-    if ( arguments.no_cv_init )
-    {
-      session_options.estimator.use_constant_velocity_init = false;
-    }
     session_options.estimator.enable_accumulated_seed =
         arguments.enable_accumulated_seed;
     if ( arguments.min_seed_observations.has_value() )

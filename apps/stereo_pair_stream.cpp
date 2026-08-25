@@ -77,17 +77,54 @@ namespace phad::apps
 
   StereoPairReadResult StereoPairStream::next()
   {
-    StereoImuPacketReadResult result = nextPacket();
-    if ( const auto* packet =
-             std::get_if<sensor::StereoImuPacket>( &result ) )
+    if ( m_terminal_error.has_value() )
     {
-      return std::move( packet->frame );
+      return *m_terminal_error;
     }
-    if ( std::holds_alternative<io::EndOfStream>( result ) )
+
+    while ( true )
     {
-      return io::EndOfStream{};
+      if ( auto frame = m_sync.tryPop() )
+      {
+        return std::move( *frame );
+      }
+      if ( m_flushed )
+      {
+        return io::EndOfStream{};
+      }
+
+      io::SensorReadResult read = m_source.next();
+      if ( std::holds_alternative<io::EndOfStream>( read ) )
+      {
+        m_sync.flush();
+        m_flushed = true;
+        noteDiagnosticsWarnings();
+        if ( auto frame = m_sync.tryPop() )
+        {
+          return std::move( *frame );
+        }
+        return io::EndOfStream{};
+      }
+      if ( const auto* error = std::get_if<io::SensorSourceError>( &read ) )
+      {
+        m_terminal_error = StreamError{ error->cause };
+        return *m_terminal_error;
+      }
+
+      auto& event = std::get<io::SensorEvent>( read );
+      if ( std::holds_alternative<sensor::ImuMeasurement>( event ) )
+      {
+        continue;
+      }
+      const sync::PushStatus status = m_sync.pushImage(
+          std::move( std::get<sensor::ImageFrameEvent>( event ) ) );
+      noteDiagnosticsWarnings();
+      if ( status != sync::PushStatus::kOk )
+      {
+        m_terminal_error = StreamError{ "stereo synchronizer sticky error" };
+        return *m_terminal_error;
+      }
     }
-    return std::get<StreamError>( result );
   }
 
   const sync::StereoPairDiagnostics& StereoPairStream::diagnostics()

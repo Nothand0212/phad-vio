@@ -19,7 +19,7 @@
 #include "apps/stereo_vo_glue.hpp"
 #include "phad/camera/stereo_rectifier.hpp"
 #include "phad/common/trajectory.hpp"
-#include "phad/estimator/stereo_vo_estimator.hpp"
+#include "phad/estimator/vio_estimator.hpp"
 #include "phad/frontend/stereo_tracker.hpp"
 #include "phad/io/dataset/dataset_replay_source.hpp"
 #include "phad/io/dataset/euroc/euroc_dataset.hpp"
@@ -32,7 +32,8 @@
 namespace
 {
 
-  constexpr char kWindowName[] = "phad-vio EuRoC stereo";
+  constexpr char         kWindowName[]         = "phad-vio EuRoC stereo";
+  constexpr std::int64_t kImuContinuityLimitNs = 20'000'000;
 
   constexpr int    kPointRadius = 2;
   const cv::Scalar kValidColor{ 0, 255, 0 };      // BGR
@@ -208,9 +209,10 @@ namespace
       std::cerr << "stereo rectifier: " << rectifier.error().detail << '\n';
       return 1;
     }
-    const auto&                        rectified_cal = rectifier.value().calibration();
-    phad::frontend::StereoTracker      tracker( rectified_cal );
-    phad::estimator::StereoVoEstimator estimator( rectified_cal );
+    const auto&                   rectified_cal = rectifier.value().calibration();
+    phad::frontend::StereoTracker tracker( rectified_cal );
+    phad::estimator::VioEstimator estimator(
+        rectified_cal, opened.value().calibration().imu() );
 
     phad::io::dataset::DatasetReplaySource replay_source{ opened.value() };
     phad::io::SensorSource&                source = replay_source;
@@ -223,10 +225,12 @@ namespace
     phad::viz::ImageWindow window{ kWindowName };
     PlaybackClock          playback_clock;
 
-    phad::apps::StereoPairStream stream{ source };
+    phad::apps::StereoPairStream stream{
+        source, phad::sync::StereoPairSynchronizerOptions{
+                    .imu_continuity_limit_ns = kImuContinuityLimitNs } };
     while ( true )
     {
-      phad::apps::StereoPairReadResult result = stream.next();
+      phad::apps::StereoImuPacketReadResult result = stream.nextPacket();
       if ( std::holds_alternative<phad::io::EndOfStream>( result ) )
       {
         return 0;
@@ -238,7 +242,9 @@ namespace
         return 1;
       }
 
-      const auto& frame = std::get<phad::sensor::StereoFrame>( result );
+      const auto& packet =
+          std::get<phad::sensor::StereoImuPacket>( result );
+      const auto& frame = packet.m_frame;
 
       auto rectified = rectifier.value().rectify( frame );
       if ( !rectified )
@@ -249,7 +255,15 @@ namespace
       const phad::frontend::FrameTracks tracks =
           tracker.process( rectified.value() );
       const phad::estimator::VioUpdateResult vo =
-          estimator.update( phad::apps::toKeyframeMeasurement( tracks ) );
+          estimator.update(
+              phad::apps::toVioMeasurement( tracks, packet.m_imu ) );
+      if ( vo.status == phad::estimator::UpdateStatus::kInvalidInput ||
+           vo.status == phad::estimator::UpdateStatus::kFailed )
+      {
+        std::cerr << "VIO estimator " << phad::apps::updateStatusName( vo.status )
+                  << ": " << vo.message << '\n';
+        return 1;
+      }
 
       cv::Mat canvas = renderTracks( rectified.value(), tracks );
       if ( groundtruth.has_value() )

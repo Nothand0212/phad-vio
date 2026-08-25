@@ -1,5 +1,3 @@
-#include "phad/estimator/stereo_vo_estimator.hpp"
-
 #include <gtest/gtest.h>
 
 #include <Eigen/Core>
@@ -11,17 +9,19 @@
 #include <vector>
 
 #include "phad/camera/rectified_stereo_calibration.hpp"
+#include "phad/estimator/vio_estimator.hpp"
 #include "phad/sensor/rigid_transform.hpp"
+#include "tests/estimator/vio_test_utils.hpp"
 
 namespace
 {
 
   using phad::camera::RectifiedStereoCalibration;
   using phad::estimator::EstimatorOptions;
-  using phad::estimator::KeyframeMeasurement;
   using phad::estimator::StereoObservation;
-  using phad::estimator::StereoVoEstimator;
   using phad::estimator::UpdateStatus;
+  using phad::estimator::VioEstimator;
+  using phad::estimator::VioMeasurement;
   using phad::sensor::RigidTransform;
 
   RectifiedStereoCalibration makeCalibration(
@@ -91,15 +91,17 @@ namespace
     };
   }
 
-  KeyframeMeasurement makeMeasurement( const Scene& scene, int frame_index )
+  VioMeasurement makeMeasurement( const Scene& scene, int frame_index )
   {
-    KeyframeMeasurement measurement;
-    measurement.timestamp = phad::common::Timestamp{
+    VioMeasurement measurement;
+    measurement.m_timestamp = phad::common::Timestamp{
         static_cast<std::int64_t>( frame_index + 1 ) * 50'000'000 };
+    measurement.m_imu = phad::test_support::stationaryImuPayload(
+        measurement.m_timestamp, 50'000'000 );
     for ( std::size_t landmark_index = 0;
           landmark_index < scene.landmarks_W.size(); ++landmark_index )
     {
-      measurement.observations.push_back( projectLandmark(
+      measurement.m_observations.push_back( projectLandmark(
           scene.calibration, scene.poses_W_B[ static_cast<std::size_t>( frame_index ) ],
           static_cast<phad::estimator::LandmarkId>( landmark_index + 1 ),
           scene.landmarks_W[ landmark_index ] ) );
@@ -109,17 +111,16 @@ namespace
 
 }  // namespace
 
-TEST( StereoVoEstimator, RecoversTranslationAndLowersReprojRms )
+TEST( VioEstimator, RecoversTranslationAndLowersReprojRms )
 {
   const Scene      scene = makeTranslatingScene( 8 );
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size                = 5;
-  options.min_shared_landmarks       = 3;
-  options.use_constant_velocity_init = true;
+  options.window_size                     = 5;
+  options.min_shared_landmarks            = 3;
 
-  StereoVoEstimator estimator( scene.calibration, options );
-  double            last_after_rms = 0.0;
+  VioEstimator estimator( scene.calibration, phad::test_support::testImuParameters(), options );
+  double       last_after_rms = 0.0;
   for ( int frame_index = 0;
         frame_index < static_cast<int>( scene.poses_W_B.size() );
         ++frame_index )
@@ -145,16 +146,16 @@ TEST( StereoVoEstimator, RecoversTranslationAndLowersReprojRms )
   EXPECT_LT( last_after_rms, 0.5 );
 }
 
-TEST( StereoVoEstimator, PriorStaysOnOldestAndCapsWindow )
+TEST( VioEstimator, PriorStaysOnOldestAndCapsWindow )
 {
   const Scene      scene = makeTranslatingScene( 6 );
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size          = 3;
-  options.min_shared_landmarks = 3;
+  options.window_size                     = 3;
+  options.min_shared_landmarks            = 3;
 
-  StereoVoEstimator estimator( scene.calibration, options );
-  std::uint64_t     expected_prior = 0;
+  VioEstimator  estimator( scene.calibration, phad::test_support::testImuParameters(), options );
+  std::uint64_t expected_prior = 0;
   for ( int frame_index = 0; frame_index < 6; ++frame_index )
   {
     const auto result =
@@ -184,17 +185,17 @@ TEST( StereoVoEstimator, PriorStaysOnOldestAndCapsWindow )
   }
 }
 
-TEST( StereoVoEstimator, SingleObservationLandmarksStayOutOfGraph )
+TEST( VioEstimator, SingleObservationLandmarksStayOutOfGraph )
 {
   const Scene      scene = makeTranslatingScene( 2 );
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size               = 10;
-  options.min_landmark_observations = 2;
-  options.min_shared_landmarks      = 1;
+  options.window_size                     = 10;
+  options.min_landmark_observations       = 2;
+  options.min_shared_landmarks            = 1;
 
-  StereoVoEstimator estimator( scene.calibration, options );
-  const auto        first = estimator.update( makeMeasurement( scene, 0 ) );
+  VioEstimator estimator( scene.calibration, phad::test_support::testImuParameters(), options );
+  const auto   first = estimator.update( makeMeasurement( scene, 0 ) );
   ASSERT_EQ( first.status, UpdateStatus::kOk ) << first.message;
   EXPECT_EQ( first.diagnostics.num_landmarks, 0U );
 
@@ -203,25 +204,30 @@ TEST( StereoVoEstimator, SingleObservationLandmarksStayOutOfGraph )
   EXPECT_EQ( second.diagnostics.num_landmarks, scene.landmarks_W.size() );
 }
 
-TEST( StereoVoEstimator, HuberReducesOutlierPosePull )
+TEST( VioEstimator, HuberReducesOutlierPosePull )
 {
-  const Scene scene = makeTranslatingScene( 5 );
+  Scene scene = makeTranslatingScene( 5 );
+  for ( auto& pose : scene.poses_W_B )
+  {
+    pose = Eigen::Isometry3d::Identity();
+  }
 
   auto run_with_outlier = [ & ]( double huber_k_px ) {
     EstimatorOptions options;
-  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-    options.window_size          = 5;
-    options.min_shared_landmarks = 3;
-    options.huber_k_px           = huber_k_px;
-    StereoVoEstimator                           estimator( scene.calibration, options );
+    options.window_size                     = 5;
+    options.min_shared_landmarks            = 3;
+    options.huber_k_px                      = huber_k_px;
+    VioEstimator estimator(
+        scene.calibration, phad::test_support::constrainingImuParameters(),
+        options );
     std::optional<phad::estimator::VioEstimate> last;
     for ( int frame_index = 0; frame_index < 5; ++frame_index )
     {
-      KeyframeMeasurement measurement = makeMeasurement( scene, frame_index );
+      VioMeasurement measurement = makeMeasurement( scene, frame_index );
       if ( frame_index == 4 )
       {
-        measurement.observations[ 0 ].left_pixel.x() += 40.0;
+        measurement.m_observations[ 0 ].left_pixel.x() += 40.0;
       }
       const auto result = estimator.update( measurement );
       EXPECT_EQ( result.status, UpdateStatus::kOk ) << result.message;

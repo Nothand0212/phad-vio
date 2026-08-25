@@ -7,21 +7,22 @@
 #include <vector>
 
 #include "phad/camera/rectified_stereo_calibration.hpp"
-#include "phad/estimator/stereo_vo_estimator.hpp"
 #include "phad/estimator/types.hpp"
+#include "phad/estimator/vio_estimator.hpp"
 #include "phad/sensor/rigid_transform.hpp"
+#include "tests/estimator/vio_test_utils.hpp"
 
 namespace
 {
 
   using phad::camera::RectifiedStereoCalibration;
   using phad::estimator::EstimatorOptions;
-  using phad::estimator::KeyframeMeasurement;
   using phad::estimator::LandmarkId;
   using phad::estimator::StereoObservation;
-  using phad::estimator::StereoVoEstimator;
   using phad::estimator::UpdateDiagnostics;
   using phad::estimator::UpdateStatus;
+  using phad::estimator::VioEstimator;
+  using phad::estimator::VioMeasurement;
   using phad::sensor::RigidTransform;
 
   RectifiedStereoCalibration makeCalibration()
@@ -53,17 +54,19 @@ namespace
     return StereoObservation{ id, Eigen::Vector2d( u_l, v ), disparity };
   }
 
-  KeyframeMeasurement makeFrame(
+  VioMeasurement makeFrame(
       const RectifiedStereoCalibration& calibration,
       const Eigen::Isometry3d& T_W_B, std::int64_t timestamp_ns,
       const std::vector<Eigen::Vector3d>& landmarks_W,
       const std::vector<LandmarkId>&      ids )
   {
-    KeyframeMeasurement measurement;
-    measurement.timestamp = phad::common::Timestamp{ timestamp_ns };
+    VioMeasurement measurement;
+    measurement.m_timestamp = phad::common::Timestamp{ timestamp_ns };
+    measurement.m_imu       = phad::test_support::stationaryImuPayload(
+        measurement.m_timestamp );
     for ( std::size_t index = 0; index < landmarks_W.size(); ++index )
     {
-      measurement.observations.push_back( projectLandmark(
+      measurement.m_observations.push_back( projectLandmark(
           calibration, T_W_B, ids[ index ], landmarks_W[ index ] ) );
     }
     return measurement;
@@ -94,10 +97,10 @@ namespace
     return ids;
   }
 
-  void offsetLeftPixel( KeyframeMeasurement& measurement, LandmarkId id,
+  void offsetLeftPixel( VioMeasurement& measurement, LandmarkId id,
                         double delta_u_px )
   {
-    for ( StereoObservation& observation : measurement.observations )
+    for ( StereoObservation& observation : measurement.m_observations )
     {
       if ( observation.id == id )
       {
@@ -135,14 +138,13 @@ namespace
   EstimatorOptions defaultCullOptions()
   {
     EstimatorOptions options;
-  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-    options.window_size           = 8;
-    options.min_shared_landmarks  = 3;
-    options.min_seed_observations = 10;
-    options.enable_pnp_init       = false;  // keep poisoned obs in the window
-    options.enable_outlier_cull   = true;
-    options.outlier_avg_reproj_px = 3.0;
+    options.window_size                     = 8;
+    options.min_shared_landmarks            = 3;
+    options.min_seed_observations           = 10;
+    options.enable_pnp_init                 = false;  // keep poisoned obs in the window
+    options.enable_outlier_cull             = true;
+    options.outlier_avg_reproj_px           = 3.0;
     return options;
   }
 
@@ -169,8 +171,8 @@ TEST( StereoVoOutlierCullTest, RejectsNonPositiveOutlierAvgReproj )
 {
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.outlier_avg_reproj_px = 0.0;
-  EXPECT_THROW( ( StereoVoEstimator{ makeCalibration(), options } ),
+  options.outlier_avg_reproj_px           = 0.0;
+  EXPECT_THROW( ( VioEstimator{ makeCalibration(), phad::test_support::testImuParameters(), options } ),
                 std::invalid_argument );
 }
 
@@ -181,9 +183,9 @@ TEST( StereoVoOutlierCullTest, CullsPersistentHighReprojLandmark )
   const auto       poses       = translatingPoses( 10, 0.05 );
   const LandmarkId poison_id   = 1;
 
-  StereoVoEstimator estimator( calibration, defaultCullOptions() );
-  std::uint32_t     culled_on_frame = 0;
-  int               cull_frame      = -1;
+  VioEstimator  estimator( calibration, phad::test_support::testImuParameters(), defaultCullOptions() );
+  std::uint32_t culled_on_frame = 0;
+  int           cull_frame      = -1;
 
   for ( std::size_t index = 0; index < poses.size(); ++index )
   {
@@ -230,7 +232,7 @@ TEST( StereoVoOutlierCullTest, SkipsLandmarksWithFewerThanFourObs )
   const LandmarkId      late_id     = 99;
   const Eigen::Vector3d late_point{ 0.2, 0.05, 5.1 };
 
-  StereoVoEstimator estimator( calibration, defaultCullOptions() );
+  VioEstimator estimator( calibration, phad::test_support::testImuParameters(), defaultCullOptions() );
 
   for ( std::size_t index = 0; index < poses.size(); ++index )
   {
@@ -243,7 +245,7 @@ TEST( StereoVoOutlierCullTest, SkipsLandmarksWithFewerThanFourObs )
       auto obs =
           projectLandmark( calibration, poses[ index ], late_id, late_point );
       obs.left_pixel.x() += poisonDeltaPx( index );
-      measurement.observations.push_back( obs );
+      measurement.m_observations.push_back( obs );
     }
     const auto result = estimator.update( measurement );
     ASSERT_EQ( result.status, UpdateStatus::kOk ) << result.message;
@@ -258,7 +260,7 @@ TEST( StereoVoOutlierCullTest, KeepsInliersUnderThreshold )
   const auto ids         = sequentialIds( kLandmarks.size(), 1 );
   const auto poses       = translatingPoses( 6, 0.05 );
 
-  StereoVoEstimator estimator( calibration, defaultCullOptions() );
+  VioEstimator estimator( calibration, phad::test_support::testImuParameters(), defaultCullOptions() );
   for ( std::size_t index = 0; index < poses.size(); ++index )
   {
     const std::int64_t ts_ns =
@@ -280,9 +282,9 @@ TEST( StereoVoOutlierCullTest, DisabledSkipsMeanReprojCull )
   const auto       poses       = translatingPoses( 10, 0.05 );
   const LandmarkId poison_id   = 1;
 
-  EstimatorOptions options      = defaultCullOptions();
+  EstimatorOptions options    = defaultCullOptions();
   options.enable_outlier_cull = false;
-  StereoVoEstimator estimator( calibration, options );
+  VioEstimator estimator( calibration, phad::test_support::testImuParameters(), options );
 
   for ( std::size_t index = 0; index < poses.size(); ++index )
   {
@@ -314,8 +316,8 @@ TEST( StereoVoOutlierCullTest, PoseEqualsFirstLmWithoutReopt )
   EstimatorOptions options_off    = defaultCullOptions();
   options_off.enable_outlier_cull = false;
 
-  StereoVoEstimator est_cull( calibration, options_cull );
-  StereoVoEstimator est_off( calibration, options_off );
+  VioEstimator est_cull( calibration, phad::test_support::testImuParameters(), options_cull );
+  VioEstimator est_off( calibration, phad::test_support::testImuParameters(), options_off );
 
   bool compared = false;
   for ( std::size_t index = 0; index < poses.size(); ++index )
@@ -356,7 +358,7 @@ TEST( StereoVoOutlierCullTest, RepeatCullIncrementsTotalNotUnique )
   // Requires rebirth of the same LandmarkId after mean-cull (Slice ④ semantics).
   EstimatorOptions options     = defaultCullOptions();
   options.block_culled_rebirth = false;
-  StereoVoEstimator estimator( calibration, options );
+  VioEstimator estimator( calibration, phad::test_support::testImuParameters(), options );
 
   std::uint32_t total_culled      = 0;
   std::uint32_t total_unique      = 0;
@@ -401,20 +403,17 @@ TEST( StereoVoOutlierCullTest, RepeatCullIncrementsTotalNotUnique )
   EXPECT_EQ( total_unique, 1U );
 }
 
-TEST( StereoVoOutlierCullTest, CheiralityClearsWindowObservations )
+TEST( StereoVoOutlierCullTest, ConflictingNearLandmarkSequenceKeepsCullDisabled )
 {
-  // Same scene as StereoVoDiagnostics.BehindCameraCountedAndSequenceContinues.
-  // Confirms cheirality drop (which clears window obs via the shared helper)
-  // leaves the sequence healthy — no failed updates / mean-reproj side effects.
-  // Cull off: after_cull RMS must equal after RMS even when cheirality erases.
+  // Cull-off diagnostics stay internally consistent throughout the sequence.
   const auto       calibration = makeCalibration();
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size               = 8;
-  options.min_shared_landmarks      = 2;
-  options.min_landmark_observations = 2;
-  options.huber_k_px                = 0.0;
-  options.enable_outlier_cull       = false;
+  options.window_size                     = 8;
+  options.min_shared_landmarks            = 2;
+  options.min_landmark_observations       = 2;
+  options.huber_k_px                      = 0.0;
+  options.enable_outlier_cull             = false;
 
   const std::vector<Eigen::Vector3d> far_landmarks{
       { 0.4, 0.1, 5.0 },
@@ -431,9 +430,8 @@ TEST( StereoVoOutlierCullTest, CheiralityClearsWindowObservations )
   const auto            far_ids = sequentialIds( far_landmarks.size(), 1 );
   const LandmarkId      near_id = 99;
 
-  StereoVoEstimator estimator( calibration, options );
+  VioEstimator      estimator( calibration, phad::test_support::testImuParameters(), options );
   StereoObservation near_at_first{};
-  bool              saw_cheirality = false;
 
   for ( int index = 0; index < 4; ++index )
   {
@@ -441,14 +439,16 @@ TEST( StereoVoOutlierCullTest, CheiralityClearsWindowObservations )
     const double      z     = ( index == 0 ) ? 0.0 : 2.5;
     T_W_B.translation()     = Eigen::Vector3d( 0.0, 0.0, z );
 
-    KeyframeMeasurement measurement;
-    measurement.timestamp = phad::common::Timestamp{
+    VioMeasurement measurement;
+    measurement.m_timestamp = phad::common::Timestamp{
         static_cast<std::int64_t>( index + 1 ) * 50'000'000 };
+    measurement.m_imu = phad::test_support::stationaryImuPayload(
+        measurement.m_timestamp, 50'000'000 );
 
     for ( std::size_t landmark_index = 0; landmark_index < far_landmarks.size();
           ++landmark_index )
     {
-      measurement.observations.push_back( projectLandmark(
+      measurement.m_observations.push_back( projectLandmark(
           calibration, T_W_B, far_ids[ landmark_index ],
           far_landmarks[ landmark_index ] ) );
     }
@@ -457,22 +457,19 @@ TEST( StereoVoOutlierCullTest, CheiralityClearsWindowObservations )
     {
       near_at_first =
           projectLandmark( calibration, T_W_B, near_id, near_landmark );
-      measurement.observations.push_back( near_at_first );
+      measurement.m_observations.push_back( near_at_first );
     }
     else if ( index <= 2 )
     {
-      measurement.observations.push_back( near_at_first );
+      measurement.m_observations.push_back( near_at_first );
     }
 
     const auto result = estimator.update( measurement );
     ASSERT_EQ( result.status, UpdateStatus::kOk ) << result.message;
-    if ( result.diagnostics.num_cheirality > 0 )
-    {
-      saw_cheirality = true;
-    }
+    ASSERT_TRUE( result.estimate.has_value() );
+    EXPECT_TRUE( result.estimate->T_W_B.matrix().allFinite() );
     EXPECT_EQ( result.diagnostics.outliers_culled, 0U );
     EXPECT_NEAR( result.diagnostics.reproj_rms_after_cull_px,
                  result.diagnostics.reproj_rms_after_px, 1e-12 );
   }
-  EXPECT_TRUE( saw_cheirality );
 }

@@ -30,6 +30,8 @@ namespace
   using phad::common::Timestamp;
   using phad::sensor::Image;
   using phad::sensor::ImuMeasurement;
+  using phad::sensor::MeasurementDiscontinuity;
+  using phad::sensor::RawImuInterval;
   using phad::sensor::StereoFrame;
   using phad::sensor::StereoImuPacket;
 
@@ -49,14 +51,23 @@ namespace
       bool                        imu_gap = false )
   {
     const Image image{ 1, 1, 1, std::vector<std::uint8_t>{ 0 } };
+    StereoFrame frame{ .timestamp = Timestamp{ t_cur_ns },
+                       .left      = image,
+                       .right     = image };
+    if ( imu_gap )
+    {
+      return StereoImuPacket{
+          .m_frame = std::move( frame ),
+          .m_imu   = MeasurementDiscontinuity{
+                .m_t_begin = Timestamp{ t_prev_ns },
+                .m_t_end   = Timestamp{ t_cur_ns } } };
+    }
     return StereoImuPacket{
-        .frame   = StereoFrame{ .timestamp = Timestamp{ t_cur_ns },
-                                .left      = image,
-                                .right     = image },
-        .samples = std::move( samples ),
-        .t_prev  = Timestamp{ t_prev_ns },
-        .imu_gap = imu_gap,
-    };
+        .m_frame = std::move( frame ),
+        .m_imu   = RawImuInterval{
+              .m_t_begin = Timestamp{ t_prev_ns },
+              .m_t_end   = Timestamp{ t_cur_ns },
+              .m_samples = std::move( samples ) } };
   }
 
   [[nodiscard]] std::string readFile( const std::filesystem::path& path )
@@ -112,11 +123,12 @@ namespace
                                   std::string{ code } );
   }
 
-  TEST( GyroObserveArtifactTest, CollectsFirstZeroAndValidPacket )
+  TEST( GyroObserveArtifactTest, CollectsConsecutiveRawPackets )
   {
     GyroObserveArtifacts artifacts;
-    ASSERT_FALSE(
-        collectGyroObservePacket( packet( 100, 100 ), 7U, artifacts ) );
+    ASSERT_FALSE( collectGyroObservePacket(
+        packet( 90, 100, { sample( 90 ), sample( 100 ) } ), 7U,
+        artifacts ) );
     ASSERT_FALSE( collectGyroObservePacket(
         packet( 100, 110,
                 { sample( 100, { 1.0, -2.0, 3.0 } ),
@@ -125,10 +137,10 @@ namespace
         8U, artifacts ) );
 
     ASSERT_EQ( artifacts.packets.size(), 2U );
-    EXPECT_EQ( artifacts.packets[ 0 ].status, GyroPacketStatus::kFirstZero );
+    EXPECT_EQ( artifacts.packets[ 0 ].status, GyroPacketStatus::kValid );
     EXPECT_EQ( artifacts.packets[ 1 ].status, GyroPacketStatus::kValid );
     EXPECT_EQ( gyroPacketStatusName( artifacts.packets[ 0 ].status ),
-               "first_zero" );
+               "valid" );
     EXPECT_EQ( gyroPacketStatusName( artifacts.packets[ 1 ].status ),
                "valid" );
     EXPECT_EQ( artifacts.packets[ 1 ].packet_index, 1U );
@@ -136,17 +148,19 @@ namespace
     EXPECT_EQ( artifacts.packets[ 1 ].sample_count, 3U );
     EXPECT_EQ( artifacts.packets[ 1 ].sum_dt_ns, 10 );
     EXPECT_EQ( artifacts.packets[ 1 ].interval_ns, 10 );
-    ASSERT_EQ( artifacts.samples.size(), 3U );
-    EXPECT_EQ( artifacts.samples[ 2 ].sample_index, 2U );
-    EXPECT_EQ( artifacts.samples[ 2 ].timestamp_ns, 110 );
-    EXPECT_DOUBLE_EQ( artifacts.samples[ 2 ].gyr_z_radps, 4.0 );
+    ASSERT_EQ( artifacts.samples.size(), 5U );
+    EXPECT_EQ( artifacts.samples[ 4 ].sample_index, 2U );
+    EXPECT_EQ( artifacts.samples[ 4 ].timestamp_ns, 110 );
+    EXPECT_DOUBLE_EQ( artifacts.samples[ 4 ].gyr_z_radps, 4.0 );
     EXPECT_FALSE( validateGyroObserveArtifacts( artifacts ) );
   }
 
   TEST( GyroObserveArtifactTest, ClassifiesGapBeforeEmptyNonfirst )
   {
     GyroObserveArtifacts artifacts;
-    ASSERT_FALSE( collectGyroObservePacket( packet( 5, 5 ), 0U, artifacts ) );
+    ASSERT_FALSE( collectGyroObservePacket(
+        packet( 0, 5, { sample( 0 ), sample( 5 ) } ), 0U,
+        artifacts ) );
     ASSERT_FALSE( collectGyroObservePacket( packet( 5, 10, {}, true ), 0U,
                                             artifacts ) );
     ASSERT_FALSE( collectGyroObservePacket(
@@ -165,7 +179,6 @@ namespace
   TEST( GyroObserveArtifactTest, PreservesSharedPacketEndpointSamples )
   {
     GyroObserveArtifacts artifacts;
-    ASSERT_FALSE( collectGyroObservePacket( packet( 0, 0 ), 0U, artifacts ) );
     ASSERT_FALSE( collectGyroObservePacket(
         packet( 0, 10, { sample( 0 ), sample( 10 ) } ), 0U, artifacts ) );
     ASSERT_FALSE( collectGyroObservePacket(
@@ -174,23 +187,25 @@ namespace
     ASSERT_EQ( artifacts.samples.size(), 4U );
     EXPECT_EQ( artifacts.samples[ 1 ].timestamp_ns, 10 );
     EXPECT_EQ( artifacts.samples[ 2 ].timestamp_ns, 10 );
-    EXPECT_EQ( artifacts.samples[ 1 ].packet_index, 1U );
-    EXPECT_EQ( artifacts.samples[ 2 ].packet_index, 2U );
+    EXPECT_EQ( artifacts.samples[ 1 ].packet_index, 0U );
+    EXPECT_EQ( artifacts.samples[ 2 ].packet_index, 1U );
     EXPECT_EQ( artifacts.samples[ 2 ].sample_index, 0U );
   }
 
-  TEST( GyroObserveArtifactTest, RejectsFirstPacketThatIsNotZeroSegment )
+  TEST( GyroObserveArtifactTest, AcceptsFirstPositiveRawInterval )
   {
     GyroObserveArtifacts artifacts;
-    expectErrorCode( packet( 0, 1 ), artifacts, "first_not_zero" );
-    EXPECT_TRUE( artifacts.packets.empty() );
-    EXPECT_TRUE( artifacts.samples.empty() );
+    ASSERT_FALSE( collectGyroObservePacket(
+        packet( 0, 1, { sample( 0 ), sample( 1 ) } ), 9U,
+        artifacts ) );
+    ASSERT_EQ( artifacts.packets.size(), 1U );
+    EXPECT_EQ( artifacts.packets.front().status, GyroPacketStatus::kValid );
+    EXPECT_EQ( artifacts.packets.front().vo_segment_id, 9U );
   }
 
   TEST( GyroObserveArtifactTest, RejectsNonpositiveAndOverflowingIntervals )
   {
     GyroObserveArtifacts artifacts;
-    ASSERT_FALSE( collectGyroObservePacket( packet( 0, 0 ), 0U, artifacts ) );
     expectErrorCode( packet( 2, 1, {}, true ), artifacts,
                      "interval_nonpositive" );
     expectErrorCode(
@@ -202,12 +217,11 @@ namespace
   TEST( GyroObserveArtifactTest, RejectsDuplicateAndOutOfOrderSamples )
   {
     GyroObserveArtifacts artifacts;
-    ASSERT_FALSE( collectGyroObservePacket( packet( 0, 0 ), 0U, artifacts ) );
     expectErrorCode(
-        packet( 0, 2, { sample( 0 ), sample( 1 ), sample( 1 ) }, true ),
+        packet( 0, 2, { sample( 0 ), sample( 1 ), sample( 1 ) } ),
         artifacts, "sample_duplicate" );
     expectErrorCode(
-        packet( 0, 2, { sample( 0 ), sample( 2 ), sample( 1 ) }, true ),
+        packet( 0, 2, { sample( 0 ), sample( 2 ), sample( 1 ) } ),
         artifacts, "sample_out_of_order" );
   }
 
@@ -220,9 +234,7 @@ namespace
     };
     for ( std::size_t axis = 0; axis < values.size(); ++axis )
     {
-      GyroObserveArtifacts artifacts;
-      ASSERT_FALSE(
-          collectGyroObservePacket( packet( 0, 0 ), 0U, artifacts ) );
+      GyroObserveArtifacts  artifacts;
       std::array<double, 3> gyro{};
       gyro[ axis ] = values[ axis ];
       expectErrorCode(
@@ -231,19 +243,18 @@ namespace
     }
   }
 
-  TEST( GyroObserveArtifactTest, RejectsEndpointAndIntervalClosureFailures )
+  TEST( GyroObserveArtifactTest, PreservesBracketSpanAndValidatesRecordedSum )
   {
     GyroObserveArtifacts artifacts;
-    ASSERT_FALSE( collectGyroObservePacket( packet( 0, 0 ), 0U, artifacts ) );
-    expectErrorCode( packet( 0, 10, { sample( 1 ), sample( 10 ) } ),
-                     artifacts, "endpoint_mismatch" );
-
-    GyroObserveArtifacts forged;
-    ASSERT_FALSE( collectGyroObservePacket( packet( 0, 0 ), 0U, forged ) );
     ASSERT_FALSE( collectGyroObservePacket(
-        packet( 0, 10, { sample( 0 ), sample( 10 ) } ), 0U, forged ) );
-    forged.packets[ 1 ].sum_dt_ns = 9;
-    const auto error              = validateGyroObserveArtifacts( forged );
+        packet( 0, 10, { sample( -1 ), sample( 11 ) } ), 0U,
+        artifacts ) );
+    ASSERT_EQ( artifacts.packets.size(), 1U );
+    EXPECT_EQ( artifacts.packets.front().interval_ns, 10 );
+    EXPECT_EQ( artifacts.packets.front().sum_dt_ns, 12 );
+
+    artifacts.packets.front().sum_dt_ns = 11;
+    const auto error                    = validateGyroObserveArtifacts( artifacts );
     ASSERT_TRUE( error.has_value() );
     EXPECT_EQ( error->detail, "gyro observe:interval_unclosed" );
   }
@@ -251,19 +262,18 @@ namespace
   TEST( GyroObserveArtifactTest, RejectsCheckedSampleDeltaAndSumOverflow )
   {
     GyroObserveArtifacts artifacts;
-    ASSERT_FALSE( collectGyroObservePacket( packet( 0, 0 ), 0U, artifacts ) );
     expectErrorCode(
         packet( 0, 1,
                 { sample( std::numeric_limits<std::int64_t>::min() ),
                   sample( std::numeric_limits<std::int64_t>::max() ) },
-                true ),
+                false ),
         artifacts, "sample_delta_overflow" );
     expectErrorCode(
         packet( 0, 1,
                 { sample( std::numeric_limits<std::int64_t>::min() + 1 ),
                   sample( 0 ),
                   sample( std::numeric_limits<std::int64_t>::max() ) },
-                true ),
+                false ),
         artifacts, "sum_dt_overflow" );
   }
 
@@ -276,8 +286,7 @@ namespace
     const auto packets_path = root / "gyro_packets.csv";
     const auto samples_path = root / "gyro_samples.csv";
 
-    GyroObserveArtifacts artifacts;
-    ASSERT_FALSE( collectGyroObservePacket( packet( 0, 0 ), 3U, artifacts ) );
+    GyroObserveArtifacts        artifacts;
     const std::array<double, 3> gyro = {
         -0.0,
         std::numeric_limits<double>::denorm_min(),
@@ -291,7 +300,7 @@ namespace
         writeGyroObserveCsvs( packets_path, samples_path, artifacts ) );
     const auto packet_lines = splitLines( readFile( packets_path ) );
     const auto sample_lines = splitLines( readFile( samples_path ) );
-    ASSERT_EQ( packet_lines.size(), 3U );
+    ASSERT_EQ( packet_lines.size(), 2U );
     ASSERT_EQ( sample_lines.size(), 3U );
     EXPECT_EQ( packet_lines[ 0 ],
                "packet_index,t_prev_ns,t_cur_ns,vo_segment_id,imu_gap,"
@@ -299,8 +308,7 @@ namespace
     EXPECT_EQ( sample_lines[ 0 ],
                "packet_index,sample_index,timestamp_ns,gyr_x_radps,"
                "gyr_y_radps,gyr_z_radps" );
-    EXPECT_EQ( packet_lines[ 1 ], "0,0,0,3,0,0,0,0,first_zero" );
-    EXPECT_EQ( packet_lines[ 2 ], "1,0,1,4,0,2,1,1,valid" );
+    EXPECT_EQ( packet_lines[ 1 ], "0,0,1,4,0,2,1,1,valid" );
 
     const auto fields = splitCsv( sample_lines[ 1 ] );
     ASSERT_EQ( fields.size(), 6U );
@@ -334,7 +342,6 @@ namespace
     std::ofstream( samples_path ) << "stale samples contents that must vanish\n";
 
     GyroObserveArtifacts artifacts;
-    ASSERT_FALSE( collectGyroObservePacket( packet( 0, 0 ), 3U, artifacts ) );
     ASSERT_FALSE( collectGyroObservePacket(
         packet( 0, 1,
                 { sample( 0, { 1.0, 2.0, 3.0 } ),
@@ -365,7 +372,9 @@ namespace
   TEST( GyroObserveArtifactTest, WriterReportsOpenAndRenameFailures )
   {
     GyroObserveArtifacts artifacts;
-    ASSERT_FALSE( collectGyroObservePacket( packet( 0, 0 ), 0U, artifacts ) );
+    ASSERT_FALSE( collectGyroObservePacket(
+        packet( 0, 1, { sample( 0 ), sample( 1 ) } ), 0U,
+        artifacts ) );
 
     const auto root = std::filesystem::temp_directory_path() /
                       "phad_gyro_observe_writer_failures";

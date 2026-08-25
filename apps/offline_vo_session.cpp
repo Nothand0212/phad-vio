@@ -25,7 +25,7 @@
 #include "phad/camera/rectified_stereo_calibration.hpp"
 #include "phad/camera/stereo_rectifier.hpp"
 #include "phad/common/landmark_id.hpp"
-#include "phad/estimator/stereo_vo_estimator.hpp"
+#include "phad/estimator/vio_estimator.hpp"
 #include "phad/io/dataset/dataset_replay_source.hpp"
 #include "phad/io/dataset/euroc/euroc_dataset.hpp"
 #include "phad/sensor/stereo_frame.hpp"
@@ -39,6 +39,7 @@ namespace phad::apps
 {
   namespace
   {
+    constexpr std::int64_t kImuContinuityLimitNs = 20'000'000;
 
     [[nodiscard]] std::optional<SessionError> gyroObserveError(
         std::string_view code )
@@ -155,42 +156,22 @@ namespace phad::apps
         return gyroObserveError( "interval_unclosed" );
       }
 
-      GyroPacketStatus expected = GyroPacketStatus::kFirstZero;
-      if ( packet.packet_index == 0U )
+      if ( interval_ns <= 0 )
       {
-        if ( packet.t_prev_ns != packet.t_cur_ns || packet.imu_gap ||
-             packet.sample_count != 0U )
-        {
-          return gyroObserveError( "first_not_zero" );
-        }
+        return gyroObserveError( "interval_nonpositive" );
+      }
+      GyroPacketStatus expected;
+      if ( packet.imu_gap )
+      {
+        expected = GyroPacketStatus::kGap;
+      }
+      else if ( samples.empty() )
+      {
+        expected = GyroPacketStatus::kEmptyNonfirst;
       }
       else
       {
-        if ( interval_ns <= 0 )
-        {
-          return gyroObserveError( "interval_nonpositive" );
-        }
-        if ( packet.imu_gap )
-        {
-          expected = GyroPacketStatus::kGap;
-        }
-        else if ( samples.empty() )
-        {
-          expected = GyroPacketStatus::kEmptyNonfirst;
-        }
-        else
-        {
-          if ( samples.front().timestamp_ns != packet.t_prev_ns ||
-               samples.back().timestamp_ns != packet.t_cur_ns )
-          {
-            return gyroObserveError( "endpoint_mismatch" );
-          }
-          if ( sum_dt_ns != interval_ns )
-          {
-            return gyroObserveError( "interval_unclosed" );
-          }
-          expected = GyroPacketStatus::kValid;
-        }
+        expected = GyroPacketStatus::kValid;
       }
       if ( packet.status != expected )
       {
@@ -199,7 +180,7 @@ namespace phad::apps
       return std::nullopt;
     }
 
-    // Must match phad::estimator::StereoVoEstimator::update reject messages.
+    // Must match phad::estimator::VioEstimator::update reject messages.
     constexpr std::string_view kSeedRejectedNewSegment =
         "insufficient observations to seed new segment";
     constexpr std::string_view kSeedRejectedFirstSegment =
@@ -415,7 +396,9 @@ namespace phad::apps
       }
       estimator_options.enable_probe_b = true;
     }
-    estimator::StereoVoEstimator estimator( rectified_cal, estimator_options );
+    estimator::VioEstimator estimator(
+        rectified_cal, opened.value().calibration().imu(),
+        estimator_options );
 
     // Probe: optional deferred top-K drop after skip (see defer_drop_topk).
     std::unordered_set<common::LandmarkId> pending_drop;
@@ -485,47 +468,32 @@ namespace phad::apps
     std::vector<double>            total_s;
 
     std::optional<std::uint32_t> last_segment_id;
-    bool                         any_segment_established = false;
-    bool                         warned_reanchor         = false;
-    std::vector<std::string>     segment_warnings;
 
     const auto                       wall_begin = std::chrono::steady_clock::now();
     io::dataset::DatasetReplaySource source{ opened.value() };
-    StereoPairStream                 stream{ source };
+    StereoPairStream                 stream{
+        source, sync::StereoPairSynchronizerOptions{
+                                    .imu_continuity_limit_ns = kImuContinuityLimitNs } };
 
-    // Shared by the success path and every mid-loop error return so the
-    // "vo segments summary: ..." line and segment_warnings are never lost.
-    const auto finalizeSegmentsAndWarnings =
-        [ &result, &stream, &segment_warnings, &any_segment_established ]() {
-          result.counts.segments =
-              any_segment_established ? result.counts.reanchors + 1U : 0U;
-          result.warnings = stream.warnings();
-          result.warnings.insert( result.warnings.end(),
-                                  segment_warnings.begin(),
-                                  segment_warnings.end() );
-          // Only worth a warning when something actually happened to the
-          // segment lifecycle or PnP fell back. Cull totals stay in
-          // FrameCounts / summary.json robustness only — healthy runs with
-          // normal cull must remain eligible for kCompleted.
-          if ( result.counts.reanchors > 0U ||
-               result.counts.seed_rejected > 0U )
-          {
-            result.warnings.push_back(
-                "vo segments summary: segments=" +
-                std::to_string( result.counts.segments ) +
-                " reanchors=" + std::to_string( result.counts.reanchors ) +
-                " seed_rejected=" +
-                std::to_string( result.counts.seed_rejected ) );
-          }
-          if ( result.counts.pnp_fallbacks > 0U )
-          {
-            result.warnings.push_back(
-                "vo pnp summary: pnp_successes=" +
-                std::to_string( result.counts.pnp_successes ) +
-                " pnp_fallbacks=" +
-                std::to_string( result.counts.pnp_fallbacks ) );
-          }
-        };
+    const auto finalizeSegmentsAndWarnings = [ &result, &stream ]() {
+      result.warnings = stream.warnings();
+      if ( result.counts.seed_rejected > 0U )
+      {
+        result.warnings.push_back(
+            "vo initialization summary: segments=" +
+            std::to_string( result.counts.segments ) +
+            " seed_rejected=" +
+            std::to_string( result.counts.seed_rejected ) );
+      }
+      if ( result.counts.pnp_fallbacks > 0U )
+      {
+        result.warnings.push_back(
+            "vo pnp summary: pnp_successes=" +
+            std::to_string( result.counts.pnp_successes ) +
+            " pnp_fallbacks=" +
+            std::to_string( result.counts.pnp_fallbacks ) );
+      }
+    };
 
     while ( true )
     {
@@ -551,7 +519,7 @@ namespace phad::apps
 
       const auto  frame_begin = std::chrono::steady_clock::now();
       const auto& packet      = std::get<sensor::StereoImuPacket>( loaded );
-      const auto& raw         = packet.frame;
+      const auto& raw         = packet.m_frame;
 
       const auto rectify_begin = std::chrono::steady_clock::now();
       auto       rectified     = rectifier.value().rectify( raw );
@@ -612,8 +580,8 @@ namespace phad::apps
       const bool is_kf = isKeyframe( tracks, tracks.timestamp );
       const auto estimator_begin =
           std::chrono::steady_clock::now();
-      const estimator::KeyframeMeasurement measurement =
-          toKeyframeMeasurement( tracks );
+      const estimator::VioMeasurement measurement =
+          toVioMeasurement( tracks, packet.m_imu );
       const estimator::VioUpdateResult update =
           estimator.update( measurement, is_kf );
       const auto estimator_end = std::chrono::steady_clock::now();
@@ -805,6 +773,20 @@ namespace phad::apps
         case estimator::UpdateStatus::kOk:
           ++result.counts.ok;
           break;
+        case estimator::UpdateStatus::kInitializing:
+        case estimator::UpdateStatus::kDiscontinuity:
+        case estimator::UpdateStatus::kVisualOutage:
+          break;
+        case estimator::UpdateStatus::kInvalidInput:
+        case estimator::UpdateStatus::kFailed:
+          ++result.counts.failed;
+          result.error = SessionError{
+              "VIO estimator " + std::string{ updateStatusName( update.status ) } +
+              ": " + update.message };
+          result.sync = stream.diagnostics();
+          flushPendingDrop();
+          finalizeSegmentsAndWarnings();
+          return result;
         case estimator::UpdateStatus::kRejected:
           ++result.counts.rejected;
           if ( update.message == kSeedRejectedNewSegment ||
@@ -812,9 +794,6 @@ namespace phad::apps
           {
             ++result.counts.seed_rejected;
           }
-          break;
-        case estimator::UpdateStatus::kFailed:
-          ++result.counts.failed;
           break;
       }
       if ( update.diagnostics.low_connectivity )
@@ -841,37 +820,28 @@ namespace phad::apps
           kf_poses.push_back( pose );
         }
 
-        const std::uint32_t segment_id  = d.segment_id;
-        const bool          is_reanchor = last_segment_id.has_value() &&
-                                 segment_id > *last_segment_id;
-        if ( is_reanchor )
+        const std::uint32_t segment_id = d.segment_id;
+        const bool          is_new_segment =
+            !last_segment_id.has_value() || segment_id > *last_segment_id;
+        if ( is_new_segment )
         {
-          ++result.counts.reanchors;
-          if ( !warned_reanchor )
-          {
-            segment_warnings.push_back(
-                "vo re-anchored: ts=" +
-                std::to_string( tracks.timestamp.nanoseconds() ) +
-                " segment_id=" + std::to_string( segment_id ) );
-            warned_reanchor = true;
-          }
+          ++result.counts.segments;
         }
 
-        // Normal-path PnP counters: seed / re-anchor frames are excluded
-        // (num_shared==0 or segment jump). enable_pnp_init=false is not a
+        // Normal-path PnP counters exclude each segment root. A disabled PnP
+        // initializer is not a
         // fallback — that path never attempted PnP.
         if ( d.pnp_success )
         {
           ++result.counts.pnp_successes;
         }
         if ( options.estimator.enable_pnp_init && d.num_shared > 0U &&
-             !d.pnp_success && !is_reanchor )
+             !d.pnp_success && !is_new_segment )
         {
           ++result.counts.pnp_fallbacks;
         }
 
-        any_segment_established = true;
-        last_segment_id         = segment_id;
+        last_segment_id = segment_id;
       }
 
       result.diag.push_back( VoDiagRow{
@@ -963,34 +933,50 @@ namespace phad::apps
       std::uint32_t                  vo_segment_id,
       GyroObserveArtifacts&          artifacts )
   {
+    const auto* raw =
+        std::get_if<sensor::RawImuInterval>( &packet.m_imu );
+    const bool              imu_gap = raw == nullptr;
+    const common::Timestamp t_begin =
+        raw != nullptr
+            ? raw->m_t_begin
+            : std::get<sensor::MeasurementDiscontinuity>( packet.m_imu )
+                  .m_t_begin;
+    const common::Timestamp t_end =
+        raw != nullptr
+            ? raw->m_t_end
+            : std::get<sensor::MeasurementDiscontinuity>( packet.m_imu )
+                  .m_t_end;
+    const std::vector<sensor::ImuMeasurement> empty_samples;
+    const auto&                               samples = raw != nullptr ? raw->m_samples : empty_samples;
+
     std::uint64_t packet_index = 0;
     std::uint64_t sample_count = 0;
     if ( !sizeToUint64( artifacts.packets.size(), packet_index ) )
     {
       return gyroObserveError( "packet_index_overflow" );
     }
-    if ( !sizeToUint64( packet.samples.size(), sample_count ) )
+    if ( !sizeToUint64( samples.size(), sample_count ) )
     {
       return gyroObserveError( "sample_count_overflow" );
     }
 
     std::int64_t interval_ns = 0;
-    if ( !checkedSubtract( packet.frame.timestamp.nanoseconds(),
-                           packet.t_prev.nanoseconds(), interval_ns ) )
+    if ( !checkedSubtract( t_end.nanoseconds(), t_begin.nanoseconds(),
+                           interval_ns ) )
     {
       return gyroObserveError( "interval_overflow" );
     }
 
     std::vector<GyroSampleRow> rows;
-    rows.reserve( packet.samples.size() );
-    for ( std::size_t index = 0; index < packet.samples.size(); ++index )
+    rows.reserve( samples.size() );
+    for ( std::size_t index = 0; index < samples.size(); ++index )
     {
       std::uint64_t sample_index = 0;
       if ( !sizeToUint64( index, sample_index ) )
       {
         return gyroObserveError( "sample_index_overflow" );
       }
-      const sensor::ImuMeasurement& sample = packet.samples[ index ];
+      const sensor::ImuMeasurement& sample = samples[ index ];
       rows.push_back( GyroSampleRow{
           .packet_index = packet_index,
           .sample_index = sample_index,
@@ -1003,10 +989,10 @@ namespace phad::apps
 
     GyroPacketRow packet_row{
         .packet_index  = packet_index,
-        .t_prev_ns     = packet.t_prev.nanoseconds(),
-        .t_cur_ns      = packet.frame.timestamp.nanoseconds(),
+        .t_prev_ns     = t_begin.nanoseconds(),
+        .t_cur_ns      = t_end.nanoseconds(),
         .vo_segment_id = vo_segment_id,
-        .imu_gap       = packet.imu_gap,
+        .imu_gap       = imu_gap,
         .sample_count  = sample_count,
         .sum_dt_ns     = 0,
         .interval_ns   = interval_ns,
@@ -1038,11 +1024,7 @@ namespace phad::apps
     }
     packet_row.sum_dt_ns = sum_dt_ns;
 
-    if ( packet_index == 0U )
-    {
-      packet_row.status = GyroPacketStatus::kFirstZero;
-    }
-    else if ( packet.imu_gap )
+    if ( imu_gap )
     {
       packet_row.status = GyroPacketStatus::kGap;
     }

@@ -66,7 +66,9 @@ namespace
 
     StereoTracker                          tracker( rectifier.value().calibration() );
     phad::io::dataset::DatasetReplaySource source{ opened.value() };
-    phad::apps::StereoPairStream           stream{ source };
+    phad::apps::StereoPairStream           stream{
+        source, phad::sync::StereoPairSynchronizerOptions{
+                              .imu_continuity_limit_ns = 20'000'000 } };
 
     std::set<LandmarkId> seen_ids;
     std::uint64_t        frame_count = 0;

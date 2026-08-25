@@ -4,24 +4,26 @@
 #include <Eigen/Geometry>
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "phad/camera/rectified_stereo_calibration.hpp"
-#include "phad/estimator/stereo_vo_estimator.hpp"
 #include "phad/estimator/types.hpp"
+#include "phad/estimator/vio_estimator.hpp"
 #include "phad/sensor/rigid_transform.hpp"
+#include "tests/estimator/vio_test_utils.hpp"
 
 namespace
 {
 
   using phad::camera::RectifiedStereoCalibration;
   using phad::estimator::EstimatorOptions;
-  using phad::estimator::KeyframeMeasurement;
   using phad::estimator::LandmarkId;
   using phad::estimator::StereoObservation;
-  using phad::estimator::StereoVoEstimator;
   using phad::estimator::UpdateDiagnostics;
   using phad::estimator::UpdateStatus;
+  using phad::estimator::VioEstimator;
+  using phad::estimator::VioMeasurement;
   using phad::sensor::RigidTransform;
 
   RectifiedStereoCalibration makeCalibration()
@@ -53,17 +55,19 @@ namespace
     return StereoObservation{ id, Eigen::Vector2d( u_l, v ), disparity };
   }
 
-  KeyframeMeasurement makeFrame(
+  VioMeasurement makeFrame(
       const RectifiedStereoCalibration& calibration,
       const Eigen::Isometry3d& T_W_B, std::int64_t timestamp_ns,
       const std::vector<Eigen::Vector3d>& landmarks_W,
       const std::vector<LandmarkId>&      ids )
   {
-    KeyframeMeasurement measurement;
-    measurement.timestamp = phad::common::Timestamp{ timestamp_ns };
+    VioMeasurement measurement;
+    measurement.m_timestamp = phad::common::Timestamp{ timestamp_ns };
+    measurement.m_imu       = phad::test_support::stationaryImuPayload(
+        measurement.m_timestamp );
     for ( std::size_t index = 0; index < landmarks_W.size(); ++index )
     {
-      measurement.observations.push_back( projectLandmark(
+      measurement.m_observations.push_back( projectLandmark(
           calibration, T_W_B, ids[ index ], landmarks_W[ index ] ) );
     }
     return measurement;
@@ -94,10 +98,10 @@ namespace
     return ids;
   }
 
-  void offsetLeftPixel( KeyframeMeasurement& measurement, LandmarkId id,
+  void offsetLeftPixel( VioMeasurement& measurement, LandmarkId id,
                         double delta_u_px )
   {
-    for ( StereoObservation& observation : measurement.observations )
+    for ( StereoObservation& observation : measurement.m_observations )
     {
       if ( observation.id == id )
       {
@@ -133,14 +137,13 @@ namespace
   EstimatorOptions defaultCullOptions()
   {
     EstimatorOptions options;
-  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-    options.window_size           = 8;
-    options.min_shared_landmarks  = 3;
-    options.min_seed_observations = 10;
-    options.enable_pnp_init       = false;
-    options.enable_outlier_cull   = true;
-    options.outlier_avg_reproj_px = 3.0;
+    options.window_size                     = 8;
+    options.min_shared_landmarks            = 3;
+    options.min_seed_observations           = 10;
+    options.enable_pnp_init                 = false;
+    options.enable_outlier_cull             = true;
+    options.outlier_avg_reproj_px           = 3.0;
     return options;
   }
 
@@ -174,9 +177,9 @@ TEST( StereoVoCullRebirthTest, CulledIdNotRebackprojectedWhenBlocked )
   const LandmarkId poison_id   = 1;
 
   auto run = [ & ]( bool block_rebirth ) -> std::uint32_t {
-    EstimatorOptions options      = defaultCullOptions();
-    options.block_culled_rebirth  = block_rebirth;
-    StereoVoEstimator estimator( calibration, options );
+    EstimatorOptions options     = defaultCullOptions();
+    options.block_culled_rebirth = block_rebirth;
+    VioEstimator estimator( calibration, phad::test_support::testImuParameters(), options );
 
     int cull_frame = -1;
     for ( std::size_t index = 0; index < poses.size(); ++index )
@@ -218,7 +221,7 @@ TEST( StereoVoCullRebirthTest, CulledIdNotRebackprojectedWhenBlocked )
     }
 
     // Next frame: shared count reveals whether poison_id was reborn.
-    const std::size_t probe = rebirth + 1;
+    const std::size_t  probe = rebirth + 1;
     const std::int64_t ts_ns =
         static_cast<std::int64_t>( probe + 1 ) * 50'000'000;
     const auto probe_result = estimator.update(
@@ -231,7 +234,7 @@ TEST( StereoVoCullRebirthTest, CulledIdNotRebackprojectedWhenBlocked )
   EXPECT_EQ( run( false ), ids.size() );
 }
 
-TEST( StereoVoCullRebirthTest, CheiralityIdsAppearInCulledLandmarkIds )
+TEST( StereoVoCullRebirthTest, ConflictingNearLandmarkDoesNotCullFarLandmarks )
 {
   // Approach with true near projections, then one step whose CV init lands
   // past the landmark while still attaching a stale stereo obs (PnP off so
@@ -239,13 +242,12 @@ TEST( StereoVoCullRebirthTest, CheiralityIdsAppearInCulledLandmarkIds )
   const auto       calibration = makeCalibration();
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size                = 8;
-  options.min_shared_landmarks       = 2;
-  options.min_landmark_observations  = 2;
-  options.huber_k_px                 = 0.0;
-  options.enable_outlier_cull        = false;
-  options.enable_pnp_init            = false;
-  options.use_constant_velocity_init = true;
+  options.window_size                     = 8;
+  options.min_shared_landmarks            = 2;
+  options.min_landmark_observations       = 2;
+  options.huber_k_px                      = 0.0;
+  options.enable_outlier_cull             = false;
+  options.enable_pnp_init                 = false;
 
   const std::vector<Eigen::Vector3d> far_landmarks{
       { 0.4, 0.1, 8.0 },
@@ -264,23 +266,24 @@ TEST( StereoVoCullRebirthTest, CheiralityIdsAppearInCulledLandmarkIds )
   // z = 0.0, 0.7, 1.4 (in front), then 2.8 with CV predict ≈ 2.1 (past near).
   const std::vector<double> zs{ 0.0, 0.7, 1.4, 2.8 };
 
-  StereoVoEstimator estimator( calibration, options );
-  StereoObservation near_locked{};
-  bool              saw_list = false;
+  VioEstimator                     estimator( calibration, phad::test_support::testImuParameters(), options );
+  std::optional<StereoObservation> near_locked;
 
   for ( std::size_t index = 0; index < zs.size(); ++index )
   {
     Eigen::Isometry3d T_W_B = Eigen::Isometry3d::Identity();
     T_W_B.translation()     = Eigen::Vector3d( 0.0, 0.0, zs[ index ] );
 
-    KeyframeMeasurement measurement;
-    measurement.timestamp = phad::common::Timestamp{
+    VioMeasurement measurement;
+    measurement.m_timestamp = phad::common::Timestamp{
         static_cast<std::int64_t>( index + 1 ) * 50'000'000 };
+    measurement.m_imu = phad::test_support::stationaryImuPayload(
+        measurement.m_timestamp, 50'000'000 );
 
     for ( std::size_t landmark_index = 0; landmark_index < far_landmarks.size();
           ++landmark_index )
     {
-      measurement.observations.push_back( projectLandmark(
+      measurement.m_observations.push_back( projectLandmark(
           calibration, T_W_B, far_ids[ landmark_index ],
           far_landmarks[ landmark_index ] ) );
     }
@@ -293,21 +296,23 @@ TEST( StereoVoCullRebirthTest, CheiralityIdsAppearInCulledLandmarkIds )
       {
         near_locked = near_obs;
       }
-      measurement.observations.push_back( near_obs );
+      measurement.m_observations.push_back( near_obs );
     }
     else
     {
-      measurement.observations.push_back( near_locked );
+      ASSERT_TRUE( near_locked.has_value() );
+      measurement.m_observations.push_back( *near_locked );
     }
 
     const auto result = estimator.update( measurement );
     ASSERT_EQ( result.status, UpdateStatus::kOk ) << result.message;
     EXPECT_EQ( result.diagnostics.outliers_culled, 0U );
-    if ( containsId( result.diagnostics.culled_landmark_ids, near_id ) )
+    ASSERT_TRUE( result.estimate.has_value() );
+    EXPECT_TRUE( result.estimate->T_W_B.matrix().allFinite() );
+    for ( const LandmarkId culled_id :
+          result.diagnostics.culled_landmark_ids )
     {
-      saw_list = true;
-      EXPECT_GE( result.diagnostics.num_cheirality, 1U );
+      EXPECT_EQ( culled_id, near_id );
     }
   }
-  EXPECT_TRUE( saw_list );
 }

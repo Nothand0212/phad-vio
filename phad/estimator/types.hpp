@@ -10,7 +10,7 @@
 
 #include "phad/common/landmark_id.hpp"
 #include "phad/common/timestamp.hpp"
-#include "phad/sensor/imu_measurement.hpp"
+#include "phad/sensor/stereo_imu_packet.hpp"
 
 namespace phad::estimator
 {
@@ -27,37 +27,18 @@ namespace phad::estimator
     double disparity_px;
   };
 
-  struct GyroInterval
+  struct VioMeasurement
   {
-    common::Timestamp                   m_t_prev;
-    std::vector<sensor::ImuMeasurement> m_samples;
-    bool                                m_imu_gap = false;
-  };
-
-  struct GyroBiasOptions
-  {
-    double          m_gyr_nd            = 0.0;
-    double          m_gyr_rw            = 0.0;
-    Eigen::Vector3d m_prior_mean_radps  = Eigen::Vector3d::Zero();
-    double          m_prior_sigma_radps = 0.0;
-  };
-
-  struct KeyframeMeasurement
-  {
-    common::Timestamp              timestamp;
-    std::vector<StereoObservation> observations;
-    std::optional<GyroInterval>    m_gyro_interval;
+    common::Timestamp              m_timestamp;
+    std::vector<StereoObservation> m_observations;
+    sensor::ImuPayload             m_imu;
   };
 
   struct EstimatorOptions
   {
     int window_size               = 10;
     int min_landmark_observations = 2;
-    // init and re-anchor. 10 为 slice-7 原值。pre-M4 round 2 实测否决
-    // (2026-08-07): 阈值 5 与跨帧累积使 V2_03 re-anchor 9 → 32-68, 每段
-    // 只带自身观测、锚误差无法修正 → 段错位贡献 +2.739 → +3.9~+5.6m,
-    // ATE 3.628 → 5.2-6.7。门槛是质量门: 只放行足以滋养健康段的富帧。
-    // CLI: --min-seed-observations。
+    // Minimum positive-disparity observations needed to seed a root.
     int min_seed_observations = 10;
     // Slice ⑥b: a new landmark must be observed this many frames before
     // seeding (single-frame disparity can be a SAD mismatch). 1 restores
@@ -68,8 +49,6 @@ namespace phad::estimator
     double huber_k_px                      = 3.0;  // <= 0 disables Robust wrapper
     double prior_rotation_sigma_rad        = 1e-4;
     double prior_translation_sigma_m       = 1e-4;
-    bool   use_constant_velocity_init      = true;
-    bool   enable_reanchor                 = true;  // false reproduces M3.2 permanent reject
     bool   enable_pnp_init                 = true;
     double pnp_reproj_px                   = 2.0;
     double pnp_confidence                  = 0.99;
@@ -98,56 +77,67 @@ namespace phad::estimator
     // disables the refresh entirely (E13 pure-gate runs). Bench CLI:
     // --far-refresh-px.
     double far_return_refresh_px = 6.0;
-    // pre-M4 round 2 残存: 首段跨帧累积播种 (SVO DepthFilter 式证据累积)。
-    // 全量累积(含 re-anchor)已被实测否决 —— re-anchor 放宽是纯毒(见
-    // min_seed_observations 注释); 此处仅保留「首段专用」作用域: Gate F
-    // (未初始化) 累积, Gate E (re-anchor) 保持原拒绝。默认关;
-    // CLI: --estimator-enable-accumulated-seed (A/B, 不进 config_hash)。
+    // Optionally accumulate sparse visual evidence while initializing a root.
+    // CLI-only and excluded from config_hash.
     bool enable_accumulated_seed = false;
     // Session sets true when probe_b_path non-empty; NOT in flattenConfig.
-    bool                           enable_probe_b = false;
-    std::optional<GyroBiasOptions> m_gyro_bias;
+    bool          enable_probe_b                = false;
+    double        m_gravity_mps2                = 9.81;
+    double        m_q_int                       = 0.0;
+    std::int64_t  m_bootstrap_min_duration_ns   = 20'000'000;
+    std::uint32_t m_bootstrap_min_samples       = 3;
+    double        m_bootstrap_max_acc_std_mps2  = 0.05;
+    double        m_bootstrap_max_gyr_std_radps = 0.005;
+    double        m_bootstrap_acc_norm_tol_mps2 = 0.25;
+    std::int64_t  m_bootstrap_timeout_ns        = 1'000'000'000;
+    double        m_velocity_prior_sigma_mps    = 1e-3;
+    double        m_acc_bias_prior_sigma_mps2   = 0.1;
+    double        m_gyr_bias_prior_sigma_radps  = 0.01;
+    std::int64_t  m_visual_coast_horizon_ns     = 500'000'000;
   };
 
   enum class UpdateStatus : std::uint8_t
   {
-    kOk       = 0,
-    kRejected = 1,
-    kFailed   = 2
+    kOk            = 0,
+    kInitializing  = 1,
+    kDiscontinuity = 2,
+    kVisualOutage  = 3,
+    kInvalidInput  = 4,
+    kRejected      = 5,
+    kFailed        = 6
+  };
+
+  struct ImuBias
+  {
+    Eigen::Vector3d m_acc_mps2  = Eigen::Vector3d::Zero();
+    Eigen::Vector3d m_gyr_radps = Eigen::Vector3d::Zero();
   };
 
   struct VioEstimate
   {
     common::Timestamp timestamp;
     Eigen::Isometry3d T_W_B;
+    Eigen::Vector3d   m_v_W_B = Eigen::Vector3d::Zero();
+    ImuBias           m_bias;
+    std::uint32_t     m_segment_id = 0;
   };
 
-  enum class GyroBreakReason : std::uint8_t
+  struct VioDiagnostics
   {
-    kNone = 0,
-    kMissingInterval,
-    kDeclaredGap,
-    kRejectedEndpoint,
-    kEvictedEndpoint,
-    kSegmentChange
-  };
-
-  struct GyroWindowBias
-  {
-    std::uint64_t                  m_frame_index = 0;
-    common::Timestamp              m_timestamp;
-    std::optional<Eigen::Vector3d> m_bias_radps;
-  };
-
-  struct GyroDiagnostics
-  {
-    std::optional<Eigen::Vector3d> m_bias_radps;
-    std::vector<GyroWindowBias>    m_window_biases;
-    std::uint32_t                  m_rotation_factors       = 0;
-    std::uint32_t                  m_rw_factors             = 0;
-    std::uint32_t                  m_root_priors            = 0;
-    std::uint32_t                  m_relinearization_rounds = 0;
-    GyroBreakReason                m_break_reason           = GyroBreakReason::kNone;
+    std::uint32_t               m_nav_states               = 0;
+    std::uint32_t               m_imu_factors              = 0;
+    std::uint32_t               m_bias_rw_factors          = 0;
+    std::uint32_t               m_visual_factors           = 0;
+    std::uint32_t               m_root_prior_sets          = 0;
+    std::uint32_t               m_integration_steps        = 0;
+    std::int64_t                m_integrated_duration_ns   = 0;
+    std::int64_t                m_visual_coast_duration_ns = 0;
+    Eigen::Vector3d             m_acc_cov_diag             = Eigen::Vector3d::Zero();
+    Eigen::Vector3d             m_gyr_cov_diag             = Eigen::Vector3d::Zero();
+    Eigen::Vector3d             m_integration_cov_diag     = Eigen::Vector3d::Zero();
+    Eigen::Matrix<double, 6, 1> m_bias_rw_sigmas =
+        Eigen::Matrix<double, 6, 1>::Zero();
+    std::optional<std::uint32_t> m_completed_segment_id;
   };
 
   struct UpdateDiagnostics
@@ -159,7 +149,7 @@ namespace phad::estimator
     std::uint32_t num_cheirality           = 0;
     std::uint32_t lm_iterations            = 0;
     std::uint32_t window_size              = 0;
-    std::uint32_t segment_id               = 0;  // increments on re-anchor; 0 is first segment
+    std::uint32_t segment_id               = 0;  // active estimator segment; 0 is first
     std::uint64_t prior_key                = 0;  // Symbol('x', k) index k
     double        reproj_rms_before_px     = 0.0;
     double        reproj_rms_after_px      = 0.0;
@@ -184,7 +174,7 @@ namespace phad::estimator
     double                                        probe_res_max_px  = 0.0;
     LandmarkId                                    probe_res_max_id{};
     bool                                          probe_detail_valid = false;
-    std::optional<GyroDiagnostics>                m_gyro;
+    VioDiagnostics                                m_vio;
   };
 
   struct VioUpdateResult

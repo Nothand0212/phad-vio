@@ -1,4 +1,4 @@
-#include "phad/estimator/stereo_vo_estimator.hpp"
+#include "phad/estimator/vio_estimator.hpp"
 
 #include <gtsam/geometry/Cal3_S2.h>
 #include <gtsam/geometry/Cal3_S2Stereo.h>
@@ -8,6 +8,10 @@
 #include <gtsam/geometry/StereoPoint2.h>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/linear/linearExceptions.h>
+#include <gtsam/navigation/ImuBias.h>
+#include <gtsam/navigation/ImuFactor.h>
+#include <gtsam/navigation/NavState.h>
+#include <gtsam/navigation/PreintegrationParams.h>
 #include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/PriorFactor.h>
@@ -19,7 +23,11 @@
 #include <cmath>
 #include <cstdint>
 #include <deque>
+#include <iostream>
+#include <iterator>
+#include <limits>
 #include <memory>
+#include <numbers>
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core.hpp>
 #include <optional>
@@ -31,9 +39,8 @@
 #include <variant>
 #include <vector>
 
-#include "phad/estimator/internal/gyro_bias_initial_value.hpp"
-#include "phad/estimator/internal/gyro_rotation_factor.hpp"
-#include "phad/estimator/internal/stereo_vo_update_transaction.hpp"
+#include "phad/estimator/internal/imu_interval.hpp"
+#include "phad/estimator/internal/vio_update_transaction.hpp"
 
 namespace phad::estimator
 {
@@ -41,63 +48,52 @@ namespace phad::estimator
   {
 
     // GTSAM 4.3 exports uppercase Symbol helpers (X/L); older docs used x/l.
+    using gtsam::symbol_shorthand::B;
     using gtsam::symbol_shorthand::L;
+    using gtsam::symbol_shorthand::V;
     using gtsam::symbol_shorthand::X;
-    using internal::deriveGyroNoiseScales;
-    using internal::GyroBiasInitialKind;
-    using internal::GyroFrameState;
-    using internal::GyroIntervalError;
-    using internal::GyroNoiseScales;
-    using internal::GyroRotationFactor;
-    using internal::preintegrateGyroInterval;
-    using internal::selectGyroBiasInitialValue;
-    using internal::StereoVoUpdateTransaction;
-    using internal::ValidatedGyroInterval;
-    using internal::validateGyroInterval;
+    using internal::ImuIntervalError;
+    using internal::ImuIntervalResult;
+    using internal::ImuIntervalStep;
+    using internal::NormalizedImuInterval;
+    using internal::normalizeRawImuInterval;
+    using internal::VioUpdateTransaction;
     using internal::WindowFrame;
 
-    constexpr double      kGyroBiasLinearizationDomain = 1e-3;
-    constexpr std::size_t kMaxFixedPimRounds           = 3U;
-
-    [[nodiscard]] gtsam::Key G( std::uint64_t index )
+    struct VioGraphInfo
     {
-      return gtsam::Symbol( 'g', index );
-    }
-
-    struct GyroGraphInfo
-    {
-      std::uint32_t                                      m_rotation_factors = 0;
-      std::uint32_t                                      m_rw_factors       = 0;
-      std::uint32_t                                      m_root_priors      = 0;
-      std::unordered_map<std::uint64_t, Eigen::Vector3d> m_bias_hats;
+      std::uint32_t               m_nav_states             = 0;
+      std::uint32_t               m_imu_factors            = 0;
+      std::uint32_t               m_bias_rw_factors        = 0;
+      std::uint32_t               m_visual_factors         = 0;
+      std::uint32_t               m_root_prior_sets        = 0;
+      std::uint32_t               m_integration_steps      = 0;
+      std::int64_t                m_integrated_duration_ns = 0;
+      Eigen::Matrix<double, 6, 1> m_last_bias_rw_sigmas =
+          Eigen::Matrix<double, 6, 1>::Zero();
     };
 
-    enum class FixedPimSolveErrorCode
+    enum class GraphSolveErrorCode
     {
       kIndeterminant,
       kOptimizer,
-      kGraphBuild,
-      kGyroIntegrity,
-      kRelinearizationLimit,
     };
 
-    struct FixedPimSolveError
+    struct GraphSolveError
     {
-      FixedPimSolveErrorCode m_code;
-      std::string            m_detail;
-      std::uint32_t          m_lm_iterations = 0;
-      std::uint32_t          m_extra_rounds  = 0;
+      GraphSolveErrorCode m_code;
+      std::string         m_detail;
+      std::uint32_t       m_lm_iterations = 0;
     };
 
-    struct FixedPimSolveSuccess
+    struct GraphSolveSuccess
     {
       gtsam::Values m_values;
       std::uint32_t m_lm_iterations = 0;
-      std::uint32_t m_extra_rounds  = 0;
     };
 
-    using FixedPimSolveResult =
-        std::variant<FixedPimSolveSuccess, FixedPimSolveError>;
+    using GraphSolveResult =
+        std::variant<GraphSolveSuccess, GraphSolveError>;
 
     [[nodiscard]] gtsam::Pose3 toPose3( const Eigen::Isometry3d& T_a_b )
     {
@@ -167,6 +163,165 @@ namespace phad::estimator
           options.prior_translation_sigma_m, options.prior_translation_sigma_m,
           options.prior_translation_sigma_m;
       return gtsam::noiseModel::Diagonal::Sigmas( sigmas );
+    }
+
+    [[nodiscard]] gtsam::SharedNoiseModel makeVelocityPriorNoise(
+        const EstimatorOptions& options )
+    {
+      if ( !std::isfinite( options.m_velocity_prior_sigma_mps ) ||
+           options.m_velocity_prior_sigma_mps <= 0.0 )
+      {
+        throw std::invalid_argument(
+            "EstimatorOptions.m_velocity_prior_sigma_mps must be finite and > 0" );
+      }
+      return gtsam::noiseModel::Isotropic::Sigma(
+          3, options.m_velocity_prior_sigma_mps );
+    }
+
+    [[nodiscard]] gtsam::SharedNoiseModel makeBiasPriorNoise(
+        const EstimatorOptions& options )
+    {
+      if ( !std::isfinite( options.m_acc_bias_prior_sigma_mps2 ) ||
+           options.m_acc_bias_prior_sigma_mps2 <= 0.0 ||
+           !std::isfinite( options.m_gyr_bias_prior_sigma_radps ) ||
+           options.m_gyr_bias_prior_sigma_radps <= 0.0 )
+      {
+        throw std::invalid_argument(
+            "EstimatorOptions bias prior sigmas must be finite and > 0" );
+      }
+      gtsam::Vector6 sigmas;
+      sigmas << options.m_acc_bias_prior_sigma_mps2,
+          options.m_acc_bias_prior_sigma_mps2,
+          options.m_acc_bias_prior_sigma_mps2,
+          options.m_gyr_bias_prior_sigma_radps,
+          options.m_gyr_bias_prior_sigma_radps,
+          options.m_gyr_bias_prior_sigma_radps;
+      return gtsam::noiseModel::Diagonal::Sigmas( sigmas );
+    }
+
+    [[nodiscard]] std::shared_ptr<gtsam::PreintegrationParams>
+    makePreintegrationParams( const sensor::ImuParameters& imu,
+                              const EstimatorOptions&      options )
+    {
+      if ( !std::isfinite( options.m_gravity_mps2 ) ||
+           options.m_gravity_mps2 <= 0.0 ||
+           !std::isfinite( options.m_q_int ) || options.m_q_int < 0.0 )
+      {
+        throw std::invalid_argument(
+            "EstimatorOptions gravity/q_int must be finite with gravity > 0 and q_int >= 0" );
+      }
+      auto params =
+          gtsam::PreintegrationParams::MakeSharedU( options.m_gravity_mps2 );
+      params->setAccelerometerCovariance(
+          imu.accNd() * imu.accNd() * Eigen::Matrix3d::Identity() );
+      params->setGyroscopeCovariance(
+          imu.gyrNd() * imu.gyrNd() * Eigen::Matrix3d::Identity() );
+      params->setIntegrationCovariance(
+          options.m_q_int * Eigen::Matrix3d::Identity() );
+      return params;
+    }
+
+    [[nodiscard]] gtsam::imuBias::ConstantBias toGtsamBias(
+        const ImuBias& bias )
+    {
+      return gtsam::imuBias::ConstantBias( bias.m_acc_mps2,
+                                           bias.m_gyr_radps );
+    }
+
+    [[nodiscard]] ImuBias toImuBias(
+        const gtsam::imuBias::ConstantBias& bias )
+    {
+      return ImuBias{ .m_acc_mps2  = bias.accelerometer(),
+                      .m_gyr_radps = bias.gyroscope() };
+    }
+
+    [[nodiscard]] Eigen::Vector3d sampleAcc(
+        const sensor::ImuMeasurement& sample )
+    {
+      return { sample.accel_mps2[ 0 ], sample.accel_mps2[ 1 ],
+               sample.accel_mps2[ 2 ] };
+    }
+
+    [[nodiscard]] Eigen::Vector3d sampleGyr(
+        const sensor::ImuMeasurement& sample )
+    {
+      return { sample.gyro_radps[ 0 ], sample.gyro_radps[ 1 ],
+               sample.gyro_radps[ 2 ] };
+    }
+
+    [[nodiscard]] bool sameImuValue(
+        const sensor::ImuMeasurement& lhs,
+        const sensor::ImuMeasurement& rhs )
+    {
+      return lhs.accel_mps2 == rhs.accel_mps2 &&
+             lhs.gyro_radps == rhs.gyro_radps;
+    }
+
+    [[nodiscard]] std::optional<std::int64_t> checkedPositiveDurationNs(
+        common::Timestamp begin, common::Timestamp end )
+    {
+      const std::int64_t begin_ns = begin.nanoseconds();
+      const std::int64_t end_ns   = end.nanoseconds();
+      if ( begin_ns >= end_ns ||
+           ( begin_ns < 0 &&
+             end_ns > std::numeric_limits<std::int64_t>::max() + begin_ns ) )
+      {
+        return std::nullopt;
+      }
+      return end_ns - begin_ns;
+    }
+
+    struct BootstrapStats
+    {
+      Eigen::Vector3d m_acc_mean = Eigen::Vector3d::Zero();
+      Eigen::Vector3d m_gyr_mean = Eigen::Vector3d::Zero();
+      Eigen::Vector3d m_acc_std  = Eigen::Vector3d::Zero();
+      Eigen::Vector3d m_gyr_std  = Eigen::Vector3d::Zero();
+    };
+
+    [[nodiscard]] BootstrapStats bootstrapStats(
+        const std::vector<sensor::ImuMeasurement>& samples )
+    {
+      BootstrapStats stats;
+      for ( const sensor::ImuMeasurement& sample : samples )
+      {
+        stats.m_acc_mean += sampleAcc( sample );
+        stats.m_gyr_mean += sampleGyr( sample );
+      }
+      const double count = static_cast<double>( samples.size() );
+      stats.m_acc_mean /= count;
+      stats.m_gyr_mean /= count;
+      for ( const sensor::ImuMeasurement& sample : samples )
+      {
+        stats.m_acc_std +=
+            ( sampleAcc( sample ) - stats.m_acc_mean ).array().square().matrix();
+        stats.m_gyr_std +=
+            ( sampleGyr( sample ) - stats.m_gyr_mean ).array().square().matrix();
+      }
+      stats.m_acc_std = ( stats.m_acc_std / count ).array().sqrt().matrix();
+      stats.m_gyr_std = ( stats.m_gyr_std / count ).array().sqrt().matrix();
+      return stats;
+    }
+
+    [[nodiscard]] Eigen::Matrix3d minimalRotationToWorldUp(
+        const Eigen::Vector3d& acc_mean )
+    {
+      const Eigen::Vector3d source             = acc_mean.normalized();
+      const Eigen::Vector3d target             = Eigen::Vector3d::UnitZ();
+      const double          dot                = std::clamp( source.dot( target ), -1.0, 1.0 );
+      constexpr double      kParallelTolerance = 1e-12;
+      if ( dot >= 1.0 - kParallelTolerance )
+      {
+        return Eigen::Matrix3d::Identity();
+      }
+      if ( dot <= -1.0 + kParallelTolerance )
+      {
+        return Eigen::AngleAxisd( std::numbers::pi,
+                                  Eigen::Vector3d::UnitX() )
+            .toRotationMatrix();
+      }
+      const Eigen::Vector3d axis = source.cross( target ).normalized();
+      return Eigen::AngleAxisd( std::acos( dot ), axis ).toRotationMatrix();
     }
 
     [[nodiscard]] double stereoReprojRms(
@@ -399,19 +554,38 @@ namespace phad::estimator
 
   }  // namespace
 
-  struct StereoVoEstimator::Impl
+  struct VioEstimator::Impl
   {
-    camera::RectifiedStereoCalibration             calibration;
-    EstimatorOptions                               options;
-    gtsam::Cal3_S2Stereo::shared_ptr               K;
-    gtsam::Pose3                                   body_P_sensor;
-    gtsam::SharedNoiseModel                        stereo_noise;
-    gtsam::SharedNoiseModel                        prior_noise;
-    std::unique_ptr<internal::StereoVoUpdateState> m_state;
+    camera::RectifiedStereoCalibration           calibration;
+    sensor::ImuParameters                        imu;
+    EstimatorOptions                             options;
+    gtsam::Cal3_S2Stereo::shared_ptr             K;
+    gtsam::Pose3                                 body_P_sensor;
+    gtsam::SharedNoiseModel                      stereo_noise;
+    gtsam::SharedNoiseModel                      prior_noise;
+    gtsam::SharedNoiseModel                      velocity_prior_noise;
+    gtsam::SharedNoiseModel                      bias_prior_noise;
+    std::shared_ptr<gtsam::PreintegrationParams> pim_params;
+    std::unique_ptr<internal::VioUpdateState>    m_state;
 
     explicit Impl( camera::RectifiedStereoCalibration calibration_in,
+                   sensor::ImuParameters              imu_in,
                    EstimatorOptions                   options_in )
-        : calibration( std::move( calibration_in ) ), options( std::move( options_in ) ), K( std::make_shared<gtsam::Cal3_S2Stereo>( calibration.fxPixels(), calibration.fyPixels(), 0.0, calibration.cxPixels(), calibration.cyPixels(), calibration.baselineM() ) ), body_P_sensor( toPose3( toIsometry( calibration.T_B_left_rectified() ) ) ), stereo_noise( makeStereoNoise( options ) ), prior_noise( makePriorNoise( options ) ), m_state( std::make_unique<internal::StereoVoUpdateState>() )
+        : calibration( std::move( calibration_in ) ),
+          imu( std::move( imu_in ) ),
+          options( std::move( options_in ) ),
+          K( std::make_shared<gtsam::Cal3_S2Stereo>(
+              calibration.fxPixels(), calibration.fyPixels(), 0.0,
+              calibration.cxPixels(), calibration.cyPixels(),
+              calibration.baselineM() ) ),
+          body_P_sensor(
+              toPose3( toIsometry( calibration.T_B_left_rectified() ) ) ),
+          stereo_noise( makeStereoNoise( options ) ),
+          prior_noise( makePriorNoise( options ) ),
+          velocity_prior_noise( makeVelocityPriorNoise( options ) ),
+          bias_prior_noise( makeBiasPriorNoise( options ) ),
+          pim_params( makePreintegrationParams( imu, options ) ),
+          m_state( std::make_unique<internal::VioUpdateState>() )
     {
       if ( options.window_size < 1 )
       {
@@ -458,23 +632,39 @@ namespace phad::estimator
         throw std::invalid_argument(
             "EstimatorOptions.max_outlier_reopts must be >= 0" );
       }
-      if ( options.m_gyro_bias.has_value() )
+      if ( options.m_bootstrap_min_duration_ns <= 0 ||
+           options.m_bootstrap_min_samples < 2U ||
+           !std::isfinite( options.m_bootstrap_max_acc_std_mps2 ) ||
+           options.m_bootstrap_max_acc_std_mps2 < 0.0 ||
+           !std::isfinite( options.m_bootstrap_max_gyr_std_radps ) ||
+           options.m_bootstrap_max_gyr_std_radps < 0.0 ||
+           !std::isfinite( options.m_bootstrap_acc_norm_tol_mps2 ) ||
+           options.m_bootstrap_acc_norm_tol_mps2 < 0.0 ||
+           options.m_bootstrap_timeout_ns <
+               options.m_bootstrap_min_duration_ns ||
+           options.m_visual_coast_horizon_ns <= 0 )
       {
-        const GyroBiasOptions& gyro = *options.m_gyro_bias;
-        const double           prior_variance =
-            gyro.m_prior_sigma_radps * gyro.m_prior_sigma_radps;
-        if ( !std::isfinite( gyro.m_gyr_nd ) || gyro.m_gyr_nd <= 0.0 ||
-             !std::isfinite( gyro.m_gyr_rw ) || gyro.m_gyr_rw <= 0.0 ||
-             !gyro.m_prior_mean_radps.allFinite() ||
-             !std::isfinite( gyro.m_prior_sigma_radps ) ||
-             gyro.m_prior_sigma_radps <= 0.0 ||
-             !std::isfinite( prior_variance ) || prior_variance <= 0.0 )
-        {
-          throw std::invalid_argument(
-              "EstimatorOptions.m_gyro_bias must contain finite positive "
-              "noise scales and a finite prior" );
-        }
+        throw std::invalid_argument(
+            "EstimatorOptions bootstrap/coast values are invalid" );
       }
+    }
+
+    [[nodiscard]] std::uint32_t completeActiveSegment(
+        const common::Timestamp next_continuity_anchor )
+    {
+      const std::uint32_t completed_segment = m_state->m_segment_id;
+      m_state->m_window.clear();
+      m_state->m_landmarks_w.clear();
+      m_state->m_track_times.clear();
+      m_state->m_T_W_B_last_stereo.clear();
+      m_state->m_culled_ids.clear();
+      m_state->m_pending_seed_obs.clear();
+      m_state->m_bootstrap_nodes.clear();
+      m_state->m_continuity_anchor        = next_continuity_anchor;
+      m_state->m_visual_coast_duration_ns = 0;
+      m_state->m_initialized              = false;
+      ++m_state->m_segment_id;
+      return completed_segment;
     }
 
     void eraseLandmarkFromWindow( LandmarkId id )
@@ -502,21 +692,25 @@ namespace phad::estimator
     }
 
     // 返回 false 表示 backproject 失败（调用方回滚并 kRejected）
-    bool seedSegment( const Eigen::Isometry3d&   anchor_T_W_B,
-                      const KeyframeMeasurement& measurement,
-                      std::uint32_t&             probe_rejected_block_n,
-                      std::uint32_t&             probe_new_lm_n )
+    bool seedRoot( const Eigen::Isometry3d& anchor_T_W_B,
+                   const Eigen::Vector3d&   v_W_B,
+                   const ImuBias&           bias,
+                   const VioMeasurement&    measurement,
+                   std::uint32_t&           probe_rejected_block_n,
+                   std::uint32_t&           probe_new_lm_n )
     {
       m_state->m_landmarks_w.clear();
 
       WindowFrame candidate;
       candidate.m_frame_index  = m_state->m_next_frame_index;
-      candidate.m_timestamp    = measurement.timestamp;
-      candidate.m_observations = measurement.observations;
+      candidate.m_timestamp    = measurement.m_timestamp;
+      candidate.m_observations = measurement.m_observations;
       candidate.m_T_W_B        = anchor_T_W_B;
-      candidate.m_is_keyframe  = true;  // seed/re-anchor frames are keyframes
+      candidate.m_is_keyframe  = true;
+      candidate.m_v_W_B        = v_W_B;
+      candidate.m_bias         = bias;
 
-      for ( const StereoObservation& observation : measurement.observations )
+      for ( const StereoObservation& observation : measurement.m_observations )
       {
         if ( options.block_culled_rebirth &&
              m_state->m_culled_ids.find( observation.id ) != m_state->m_culled_ids.end() )
@@ -524,7 +718,7 @@ namespace phad::estimator
           ++probe_rejected_block_n;
           continue;
         }
-        // Slice ⑦: seed/re-anchor has no window history — a zero-disparity
+        // A root has no window history, so a zero-disparity
         // observation cannot be backprojected (infinite depth); it is
         // seeded on a later keyframe once the window is rebuilt.
         if ( observation.disparity_px <= 0.0 )
@@ -542,7 +736,8 @@ namespace phad::estimator
           return false;
         }
         m_state->m_landmarks_w[ observation.id ] = point_W;
-        m_state->m_track_times[ observation.id ].push_back( measurement.timestamp );
+        m_state->m_track_times[ observation.id ].push_back(
+            measurement.m_timestamp );
         ++probe_new_lm_n;
       }
 
@@ -555,28 +750,6 @@ namespace phad::estimator
       m_state->m_window.push_back( std::move( candidate ) );
       ++m_state->m_next_frame_index;
       return true;
-    }
-
-    [[nodiscard]] Eigen::Isometry3d poseInitialValue() const
-    {
-      if ( !m_state->m_T_W_B_last_accepted.has_value() )
-      {
-        return Eigen::Isometry3d::Identity();
-      }
-      if ( !options.use_constant_velocity_init ||
-           !m_state->m_T_W_B_prev_accepted.has_value() )
-      {
-        return *m_state->m_T_W_B_last_accepted;
-      }
-      const Eigen::Isometry3d& T_prev     = *m_state->m_T_W_B_last_accepted;
-      const Eigen::Isometry3d& T_prevprev = *m_state->m_T_W_B_prev_accepted;
-      const Eigen::Isometry3d  predicted =
-          T_prev * ( T_prevprev.inverse() * T_prev );
-      if ( !isFinite( predicted ) )
-      {
-        return T_prev;
-      }
-      return predicted;
     }
 
     struct PnpInitResult
@@ -666,18 +839,18 @@ namespace phad::estimator
     // stereo RMS on the PnP inlier set is no more than one observation sigma
     // worse than the existing guess.
     [[nodiscard]] PnpInitResult tryPnpInit(
-        const KeyframeMeasurement& measurement,
-        const Eigen::Isometry3d&   guess_T_W_B ) const
+        const VioMeasurement&    measurement,
+        const Eigen::Isometry3d& guess_T_W_B ) const
     {
       PnpInitResult result;
 
       std::vector<cv::Point3d>              pts3d;
       std::vector<cv::Point2d>              pts2d;
       std::vector<const StereoObservation*> shared_observations;
-      pts3d.reserve( measurement.observations.size() );
-      pts2d.reserve( measurement.observations.size() );
-      shared_observations.reserve( measurement.observations.size() );
-      for ( const StereoObservation& observation : measurement.observations )
+      pts3d.reserve( measurement.m_observations.size() );
+      pts2d.reserve( measurement.m_observations.size() );
+      shared_observations.reserve( measurement.m_observations.size() );
+      for ( const StereoObservation& observation : measurement.m_observations )
       {
         const auto landmark_it = m_state->m_landmarks_w.find( observation.id );
         if ( landmark_it == m_state->m_landmarks_w.end() )
@@ -903,16 +1076,17 @@ namespace phad::estimator
       }
     }
 
-    // Slice ⑦: count only stereo observations in a measurement — those are
-    // the ones that can seed a segment / constrain the BA graph. Zero-disparity
-    // observations must not inflate the init / re-anchor gates (a gate that
+    // Count only stereo observations in a measurement — those are the ones
+    // that can seed a root / constrain the BA graph. Zero-disparity
+    // observations must not inflate the initialization gate (a gate that
     // passes on ~180 no-depth observations but seeds ~18 weak landmarks leaves
     // an almost factor-free graph that drifts freely).
     [[nodiscard]] std::size_t countStereoObservations(
-        const KeyframeMeasurement& measurement ) const
+        const VioMeasurement& measurement ) const
     {
       return static_cast<std::size_t>( std::count_if(
-          measurement.observations.begin(), measurement.observations.end(),
+          measurement.m_observations.begin(),
+          measurement.m_observations.end(),
           []( const StereoObservation& observation ) {
             return observation.disparity_px > 0.0;
           } ) );
@@ -941,13 +1115,8 @@ namespace phad::estimator
       return counts;
     }
 
-    [[nodiscard]] bool resetEvictedGyroLinks()
+    void resetEvictedImuLinks()
     {
-      if ( !options.m_gyro_bias.has_value() )
-      {
-        return false;
-      }
-
       std::unordered_set<std::uint64_t> surviving_frames;
       surviving_frames.reserve( m_state->m_window.size() );
       for ( const WindowFrame& frame : m_state->m_window )
@@ -955,175 +1124,166 @@ namespace phad::estimator
         surviving_frames.insert( frame.m_frame_index );
       }
 
-      bool                                             reset_any = false;
-      std::unordered_map<std::uint64_t, std::uint64_t> component_by_frame;
-      component_by_frame.reserve( m_state->m_window.size() );
       for ( WindowFrame& frame : m_state->m_window )
       {
-        if ( !frame.m_gyro.has_value() )
+        if ( !frame.m_predecessor_frame_index.has_value() )
         {
-          throw std::runtime_error(
-              "gyro-enabled window frame is missing bias state" );
-        }
-        GyroFrameState& gyro = *frame.m_gyro;
-        if ( !gyro.m_predecessor_frame_index.has_value() )
-        {
-          component_by_frame.emplace( frame.m_frame_index,
-                                      gyro.m_component_id );
+          if ( frame.m_imu.has_value() )
+          {
+            throw std::runtime_error(
+                "root navigation state unexpectedly carries an IMU interval" );
+          }
           continue;
         }
-
-        const std::uint64_t predecessor =
-            *gyro.m_predecessor_frame_index;
-        const auto component_it = component_by_frame.find( predecessor );
-        if ( component_it != component_by_frame.end() )
+        if ( surviving_frames.contains( *frame.m_predecessor_frame_index ) )
         {
-          gyro.m_component_id = component_it->second;
-          component_by_frame.emplace( frame.m_frame_index,
-                                      gyro.m_component_id );
+          if ( !frame.m_imu.has_value() )
+          {
+            throw std::runtime_error(
+                "linked navigation state is missing its IMU interval" );
+          }
           continue;
         }
-        if ( surviving_frames.contains( predecessor ) )
-        {
-          throw std::runtime_error(
-              "gyro predecessor does not precede its linked state" );
-        }
-
-        const auto initial = selectGyroBiasInitialValue(
-            GyroBiasInitialKind::kComponentRoot, std::nullopt, std::nullopt,
-            options.m_gyro_bias->m_prior_mean_radps );
-        if ( !std::holds_alternative<Eigen::Vector3d>( initial ) )
-        {
-          throw std::runtime_error(
-              "gyro bias initial value is non-finite" );
-        }
-        gyro.m_bias_radps   = std::get<Eigen::Vector3d>( initial );
-        gyro.m_component_id = m_state->m_next_gyro_component_id++;
-        gyro.m_predecessor_frame_index.reset();
-        gyro.m_interval.reset();
-        component_by_frame.emplace( frame.m_frame_index,
-                                    gyro.m_component_id );
-        reset_any = true;
+        frame.m_predecessor_frame_index.reset();
+        frame.m_imu.reset();
       }
-      return reset_any;
+    }
+
+    [[nodiscard]] gtsam::PreintegratedImuMeasurements preintegrate(
+        const NormalizedImuInterval& interval,
+        const ImuBias&               bias ) const
+    {
+      gtsam::PreintegratedImuMeasurements pim( pim_params,
+                                               toGtsamBias( bias ) );
+      for ( const ImuIntervalStep& step : interval.m_steps )
+      {
+        pim.integrateMeasurement( step.m_acc_mean_mps2,
+                                  step.m_gyr_mean_radps, step.m_dt_s );
+      }
+      return pim;
     }
 
     void buildGraph( gtsam::NonlinearFactorGraph& graph,
                      gtsam::Values&               values,
                      std::uint64_t&               prior_key_out,
                      std::uint32_t&               num_landmarks_out,
-                     const gtsam::Values*         round_start   = nullptr,
-                     GyroGraphInfo*               gyro_info_out = nullptr ) const
+                     const gtsam::Values*         round_start  = nullptr,
+                     VioGraphInfo*                vio_info_out = nullptr ) const
     {
       graph.resize( 0 );
       values.clear();
       num_landmarks_out = 0;
-      GyroGraphInfo gyro_info;
+      VioGraphInfo vio_info;
       if ( m_state->m_window.empty() )
       {
         prior_key_out = 0;
-        if ( gyro_info_out != nullptr )
+        if ( vio_info_out != nullptr )
         {
-          *gyro_info_out = std::move( gyro_info );
+          *vio_info_out = vio_info;
         }
         return;
       }
 
-      const std::uint64_t oldest = m_state->m_window.front().m_frame_index;
-      prior_key_out              = oldest;
+      prior_key_out = m_state->m_window.front().m_frame_index;
       for ( const WindowFrame& frame : m_state->m_window )
       {
-        const gtsam::Key   pose_key = X( frame.m_frame_index );
+        const gtsam::Key   pose_key     = X( frame.m_frame_index );
+        const gtsam::Key   velocity_key = V( frame.m_frame_index );
+        const gtsam::Key   bias_key     = B( frame.m_frame_index );
         const gtsam::Pose3 pose =
             round_start != nullptr && round_start->exists( pose_key )
                 ? round_start->at<gtsam::Pose3>( pose_key )
                 : toPose3( frame.m_T_W_B );
+        const Eigen::Vector3d velocity =
+            round_start != nullptr && round_start->exists( velocity_key )
+                ? round_start->at<gtsam::Vector3>( velocity_key )
+                : frame.m_v_W_B;
+        const gtsam::imuBias::ConstantBias bias =
+            round_start != nullptr && round_start->exists( bias_key )
+                ? round_start->at<gtsam::imuBias::ConstantBias>( bias_key )
+                : toGtsamBias( frame.m_bias );
+        if ( !velocity.allFinite() || !bias.vector().allFinite() )
+        {
+          throw std::runtime_error(
+              "navigation state initial value is non-finite" );
+        }
         values.insert( pose_key, pose );
+        values.insert( velocity_key, velocity );
+        values.insert( bias_key, bias );
+        ++vio_info.m_nav_states;
       }
-      graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
-          X( oldest ), toPose3( m_state->m_window.front().m_T_W_B ), prior_noise );
 
-      if ( options.m_gyro_bias.has_value() )
+      for ( const WindowFrame& frame : m_state->m_window )
       {
-        const GyroBiasOptions& gyro_options = *options.m_gyro_bias;
-        for ( const WindowFrame& frame : m_state->m_window )
+        if ( !frame.m_predecessor_frame_index.has_value() )
         {
-          if ( !frame.m_gyro.has_value() )
-          {
-            throw std::runtime_error(
-                "gyro-enabled window frame is missing bias state" );
-          }
-          const gtsam::Key      bias_key = G( frame.m_frame_index );
-          const Eigen::Vector3d bias =
-              round_start != nullptr && round_start->exists( bias_key )
-                  ? round_start->at<gtsam::Vector3>( bias_key )
-                  : frame.m_gyro->m_bias_radps;
-          if ( !bias.allFinite() )
-          {
-            throw std::runtime_error(
-                "gyro bias initial value is non-finite" );
-          }
-          values.insert( bias_key, bias );
+          graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
+              X( frame.m_frame_index ), toPose3( frame.m_T_W_B ), prior_noise );
+          graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(
+              V( frame.m_frame_index ), frame.m_v_W_B,
+              velocity_prior_noise );
+          graph.emplace_shared<
+              gtsam::PriorFactor<gtsam::imuBias::ConstantBias>>(
+              B( frame.m_frame_index ), toGtsamBias( frame.m_bias ),
+              bias_prior_noise );
+          ++vio_info.m_root_prior_sets;
+          continue;
+        }
+        if ( !frame.m_imu.has_value() )
+        {
+          throw std::runtime_error(
+              "linked navigation state is missing its IMU interval" );
+        }
+        const std::uint64_t predecessor =
+            *frame.m_predecessor_frame_index;
+        const auto predecessor_it = std::find_if(
+            m_state->m_window.begin(), m_state->m_window.end(),
+            [ predecessor ]( const WindowFrame& candidate ) {
+              return candidate.m_frame_index == predecessor;
+            } );
+        if ( predecessor_it == m_state->m_window.end() )
+        {
+          throw std::runtime_error(
+              "linked navigation predecessor is outside the window" );
         }
 
-        for ( const WindowFrame& frame : m_state->m_window )
+        const ImuBias bias_hat = toImuBias(
+            values.at<gtsam::imuBias::ConstantBias>( B( predecessor ) ) );
+        const auto pim = preintegrate( *frame.m_imu, bias_hat );
+        graph.emplace_shared<gtsam::ImuFactor>(
+            X( predecessor ), V( predecessor ), X( frame.m_frame_index ),
+            V( frame.m_frame_index ), B( predecessor ), pim );
+
+        const double dt_s =
+            static_cast<double>( frame.m_imu->m_duration_ns ) * 1e-9;
+        const double   sqrt_dt_s = std::sqrt( dt_s );
+        gtsam::Vector6 rw_sigmas;
+        rw_sigmas << imu.accRw() * sqrt_dt_s,
+            imu.accRw() * sqrt_dt_s, imu.accRw() * sqrt_dt_s,
+            imu.gyrRw() * sqrt_dt_s, imu.gyrRw() * sqrt_dt_s,
+            imu.gyrRw() * sqrt_dt_s;
+        if ( !rw_sigmas.allFinite() || ( rw_sigmas.array() <= 0.0 ).any() )
         {
-          const GyroFrameState& gyro = *frame.m_gyro;
-          if ( !gyro.m_predecessor_frame_index.has_value() )
-          {
-            graph.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(
-                G( frame.m_frame_index ), gyro_options.m_prior_mean_radps,
-                gtsam::noiseModel::Isotropic::Sigma(
-                    3, gyro_options.m_prior_sigma_radps ) );
-            ++gyro_info.m_root_priors;
-            continue;
-          }
-          if ( !gyro.m_interval.has_value() )
-          {
-            throw std::runtime_error(
-                "linked gyro state is missing its validated interval" );
-          }
-
-          const std::uint64_t predecessor =
-              *gyro.m_predecessor_frame_index;
-          const auto predecessor_it = std::find_if(
-              m_state->m_window.begin(), m_state->m_window.end(),
-              [ predecessor ]( const WindowFrame& candidate ) {
-                return candidate.m_frame_index == predecessor;
-              } );
-          if ( predecessor_it == m_state->m_window.end() ||
-               !predecessor_it->m_gyro.has_value() ||
-               predecessor_it->m_gyro->m_component_id != gyro.m_component_id )
-          {
-            throw std::runtime_error(
-                "linked gyro predecessor is not in the current component" );
-          }
-
-          const auto scales_result = deriveGyroNoiseScales(
-              gyro.m_interval->m_duration_ns, gyro_options.m_gyr_nd,
-              gyro_options.m_gyr_rw, gyro_options.m_prior_sigma_radps );
-          if ( !std::holds_alternative<GyroNoiseScales>( scales_result ) )
-          {
-            throw std::invalid_argument(
-                std::get<GyroIntervalError>( scales_result ).m_detail );
-          }
-          const GyroNoiseScales& scales =
-              std::get<GyroNoiseScales>( scales_result );
-          const Eigen::Vector3d bias_hat =
-              values.at<gtsam::Vector3>( G( predecessor ) );
-          const auto pim = preintegrateGyroInterval(
-              *gyro.m_interval, bias_hat, gyro_options.m_gyr_nd );
-          graph.emplace_shared<GyroRotationFactor>(
-              X( predecessor ), X( frame.m_frame_index ), G( predecessor ),
-              pim );
-          graph.emplace_shared<gtsam::BetweenFactor<gtsam::Vector3>>(
-              G( predecessor ), G( frame.m_frame_index ),
-              Eigen::Vector3d::Zero(),
-              gtsam::noiseModel::Isotropic::Sigma( 3, scales.m_rw_sigma ) );
-          ++gyro_info.m_rotation_factors;
-          ++gyro_info.m_rw_factors;
-          gyro_info.m_bias_hats.emplace( predecessor, bias_hat );
+          throw std::runtime_error( "bias random-walk sigma is invalid" );
         }
+        graph.emplace_shared<
+            gtsam::BetweenFactor<gtsam::imuBias::ConstantBias>>(
+            B( predecessor ), B( frame.m_frame_index ),
+            gtsam::imuBias::ConstantBias(),
+            gtsam::noiseModel::Diagonal::Sigmas( rw_sigmas ) );
+        ++vio_info.m_imu_factors;
+        ++vio_info.m_bias_rw_factors;
+        vio_info.m_integration_steps += static_cast<std::uint32_t>(
+            frame.m_imu->m_steps.size() );
+        if ( frame.m_imu->m_duration_ns >
+             std::numeric_limits<std::int64_t>::max() -
+                 vio_info.m_integrated_duration_ns )
+        {
+          throw std::runtime_error(
+              "integrated IMU duration overflows int64 diagnostics" );
+        }
+        vio_info.m_integrated_duration_ns += frame.m_imu->m_duration_ns;
+        vio_info.m_last_bias_rw_sigmas = rw_sigmas;
       }
 
       const auto                     counts = countObservations();
@@ -1166,186 +1326,60 @@ namespace phad::estimator
                 toStereoPoint( observation ), stereo_noise,
                 X( frame.m_frame_index ), L( observation.id ), K,
                 body_P_sensor );
+            ++vio_info.m_visual_factors;
           }
         }
       }
-      if ( gyro_info_out != nullptr )
+      if ( vio_info_out != nullptr )
       {
-        *gyro_info_out = std::move( gyro_info );
+        *vio_info_out = vio_info;
       }
     }
 
-    [[nodiscard]] FixedPimSolveResult solveFixedPimGraph(
-        gtsam::NonlinearFactorGraph& graph, gtsam::Values& values,
-        std::uint64_t& prior_key, std::uint32_t& num_landmarks,
-        GyroGraphInfo& gyro_info ) const
+    [[nodiscard]] GraphSolveResult solveGraph(
+        const gtsam::NonlinearFactorGraph& graph,
+        const gtsam::Values&               values ) const
     {
-      std::uint32_t lm_iterations    = 0U;
-      std::uint32_t extra_rounds     = 0U;
-      std::size_t   completed_rounds = 0U;
-      while ( true )
+      try
       {
-        gtsam::Values optimized;
-        try
-        {
-          gtsam::LevenbergMarquardtOptimizer optimizer( graph, values );
-          optimized = optimizer.optimize();
-          lm_iterations +=
-              static_cast<std::uint32_t>( optimizer.iterations() );
-        }
-        catch ( const gtsam::IndeterminantLinearSystemException& exception )
-        {
-          return FixedPimSolveError{
-              FixedPimSolveErrorCode::kIndeterminant, exception.what(),
-              lm_iterations, extra_rounds };
-        }
-        catch ( const std::exception& exception )
-        {
-          return FixedPimSolveError{ FixedPimSolveErrorCode::kOptimizer,
-                                     exception.what(), lm_iterations,
-                                     extra_rounds };
-        }
-
-        bool relinearization_required = false;
-        if ( options.m_gyro_bias.has_value() )
-        {
-          std::unordered_map<std::uint64_t, Eigen::Vector3d> biases;
-          biases.reserve( m_state->m_window.size() );
-          try
-          {
-            for ( const WindowFrame& frame : m_state->m_window )
-            {
-              const gtsam::Key bias_key = G( frame.m_frame_index );
-              if ( !optimized.exists( bias_key ) )
-              {
-                return FixedPimSolveError{
-                    FixedPimSolveErrorCode::kGyroIntegrity,
-                    "optimized values missing a gyro bias", lm_iterations,
-                    extra_rounds };
-              }
-              const Eigen::Vector3d bias =
-                  optimized.at<gtsam::Vector3>( bias_key );
-              if ( !bias.allFinite() )
-              {
-                return FixedPimSolveError{
-                    FixedPimSolveErrorCode::kGyroIntegrity,
-                    "non-finite optimized gyro bias", lm_iterations,
-                    extra_rounds };
-              }
-              biases.emplace( frame.m_frame_index, bias );
-            }
-          }
-          catch ( const std::exception& exception )
-          {
-            return FixedPimSolveError{
-                FixedPimSolveErrorCode::kGyroIntegrity,
-                std::string( "invalid optimized gyro bias: " ) +
-                    exception.what(),
-                lm_iterations, extra_rounds };
-          }
-
-          for ( const auto& [ frame_index, bias_hat ] :
-                gyro_info.m_bias_hats )
-          {
-            const auto bias_it = biases.find( frame_index );
-            if ( bias_it == biases.end() )
-            {
-              return FixedPimSolveError{
-                  FixedPimSolveErrorCode::kGyroIntegrity,
-                  "optimized values missing a gyro bias", lm_iterations,
-                  extra_rounds };
-            }
-            if ( ( bias_it->second - bias_hat ).cwiseAbs().maxCoeff() >
-                 kGyroBiasLinearizationDomain )
-            {
-              relinearization_required = true;
-              break;
-            }
-          }
-        }
-
-        if ( !relinearization_required )
-        {
-          return FixedPimSolveSuccess{ std::move( optimized ), lm_iterations,
-                                       extra_rounds };
-        }
-
-        ++completed_rounds;
-        if ( completed_rounds >= kMaxFixedPimRounds )
-        {
-          return FixedPimSolveError{
-              FixedPimSolveErrorCode::kRelinearizationLimit,
-              "gyro bias relinearization did not converge", lm_iterations,
-              extra_rounds };
-        }
-
-        const gtsam::Values round_start = optimized;
-        try
-        {
-          buildGraph( graph, values, prior_key, num_landmarks, &round_start,
-                      &gyro_info );
-        }
-        catch ( const std::exception& exception )
-        {
-          return FixedPimSolveError{
-              FixedPimSolveErrorCode::kGraphBuild, exception.what(),
-              lm_iterations, extra_rounds };
-        }
-        ++extra_rounds;
+        gtsam::LevenbergMarquardtOptimizer optimizer( graph, values );
+        gtsam::Values                      optimized = optimizer.optimize();
+        return GraphSolveSuccess{
+            std::move( optimized ),
+            static_cast<std::uint32_t>( optimizer.iterations() ) };
+      }
+      catch ( const gtsam::IndeterminantLinearSystemException& exception )
+      {
+        return GraphSolveError{ GraphSolveErrorCode::kIndeterminant,
+                                exception.what(), 0U };
+      }
+      catch ( const std::exception& exception )
+      {
+        return GraphSolveError{ GraphSolveErrorCode::kOptimizer,
+                                exception.what(), 0U };
       }
     }
 
-    [[nodiscard]] GyroDiagnostics makeGyroDiagnostics(
-        GyroBreakReason break_reason, std::uint32_t extra_rounds ) const
+    [[nodiscard]] VioDiagnostics makeVioDiagnostics(
+        const VioGraphInfo& info ) const
     {
-      GyroDiagnostics diagnostics;
-      diagnostics.m_break_reason           = break_reason;
-      diagnostics.m_relinearization_rounds = extra_rounds;
-      std::unordered_set<std::uint64_t> observed_components;
-      for ( const WindowFrame& frame : m_state->m_window )
-      {
-        if ( !frame.m_gyro.has_value() )
-        {
-          continue;
-        }
-        if ( frame.m_gyro->m_predecessor_frame_index.has_value() )
-        {
-          ++diagnostics.m_rotation_factors;
-          ++diagnostics.m_rw_factors;
-          observed_components.insert( frame.m_gyro->m_component_id );
-        }
-        else
-        {
-          ++diagnostics.m_root_priors;
-        }
-      }
-
-      diagnostics.m_window_biases.reserve( m_state->m_window.size() );
-      for ( const WindowFrame& frame : m_state->m_window )
-      {
-        GyroWindowBias window_bias;
-        window_bias.m_frame_index = frame.m_frame_index;
-        window_bias.m_timestamp   = frame.m_timestamp;
-        if ( frame.m_gyro.has_value() &&
-             observed_components.contains( frame.m_gyro->m_component_id ) )
-        {
-          window_bias.m_bias_radps = frame.m_gyro->m_bias_radps;
-        }
-        diagnostics.m_window_biases.push_back( std::move( window_bias ) );
-      }
-      if ( !diagnostics.m_window_biases.empty() )
-      {
-        diagnostics.m_bias_radps =
-            diagnostics.m_window_biases.back().m_bias_radps;
-      }
-      return diagnostics;
-    }
-
-    [[nodiscard]] GyroDiagnostics materializeHardGyroDiagnostics() const
-    {
-      GyroDiagnostics diagnostics =
-          makeGyroDiagnostics( GyroBreakReason::kNone, 0U );
-      diagnostics.m_bias_radps.reset();
+      VioDiagnostics diagnostics;
+      diagnostics.m_nav_states             = info.m_nav_states;
+      diagnostics.m_imu_factors            = info.m_imu_factors;
+      diagnostics.m_bias_rw_factors        = info.m_bias_rw_factors;
+      diagnostics.m_visual_factors         = info.m_visual_factors;
+      diagnostics.m_root_prior_sets        = info.m_root_prior_sets;
+      diagnostics.m_integration_steps      = info.m_integration_steps;
+      diagnostics.m_integrated_duration_ns = info.m_integrated_duration_ns;
+      diagnostics.m_visual_coast_duration_ns =
+          m_state->m_visual_coast_duration_ns;
+      diagnostics.m_acc_cov_diag =
+          pim_params->accelerometerCovariance.diagonal();
+      diagnostics.m_gyr_cov_diag =
+          pim_params->gyroscopeCovariance.diagonal();
+      diagnostics.m_integration_cov_diag =
+          pim_params->integrationCovariance.diagonal();
+      diagnostics.m_bias_rw_sigmas = info.m_last_bias_rw_sigmas;
       return diagnostics;
     }
 
@@ -1487,23 +1521,24 @@ namespace phad::estimator
     }
   };
 
-  StereoVoEstimator::StereoVoEstimator(
+  VioEstimator::VioEstimator(
       camera::RectifiedStereoCalibration calibration,
+      sensor::ImuParameters              imu,
       EstimatorOptions                   options )
       : m_impl( std::make_unique<Impl>( std::move( calibration ),
+                                        std::move( imu ),
                                         std::move( options ) ) )
   {
   }
 
-  StereoVoEstimator::~StereoVoEstimator() = default;
+  VioEstimator::~VioEstimator() = default;
 
-  StereoVoEstimator::StereoVoEstimator( StereoVoEstimator&& ) noexcept =
+  VioEstimator::VioEstimator( VioEstimator&& ) noexcept =
       default;
 
-  StereoVoEstimator& StereoVoEstimator::operator=(
-      StereoVoEstimator&& ) noexcept = default;
+  VioEstimator& VioEstimator::operator=( VioEstimator&& ) noexcept = default;
 
-  std::vector<common::Timestamp> StereoVoEstimator::observationTimestamps(
+  std::vector<common::Timestamp> VioEstimator::observationTimestamps(
       LandmarkId id ) const
   {
     const auto it = m_impl->m_state->m_track_times.find( id );
@@ -1514,115 +1549,191 @@ namespace phad::estimator
     return it->second;
   }
 
-  VioUpdateResult StereoVoEstimator::update(
-      const KeyframeMeasurement& measurement,
-      const bool                 keyframe )
+  VioUpdateResult VioEstimator::update( const VioMeasurement& measurement,
+                                        const bool            keyframe )
   {
     VioUpdateResult result;
     result.diagnostics.culled_landmark_ids.clear();
     result.diagnostics.num_observations =
-        static_cast<std::uint32_t>( measurement.observations.size() );
+        static_cast<std::uint32_t>( measurement.m_observations.size() );
     result.diagnostics.segment_id = m_impl->m_state->m_segment_id;
+    result.diagnostics.m_vio      = m_impl->makeVioDiagnostics( VioGraphInfo{} );
     const auto finalizePreStagingHardResult =
         [ & ]( UpdateStatus status, std::string message ) -> VioUpdateResult {
       result.status  = status;
       result.message = std::move( message );
-      if ( m_impl->options.m_gyro_bias.has_value() )
-      {
-        result.diagnostics.m_gyro =
-            m_impl->materializeHardGyroDiagnostics();
-      }
       return result;
     };
 
-    if ( measurement.observations.empty() )
+    const std::optional<common::Timestamp> expected_t_begin =
+        m_impl->m_state->m_initialized
+            ? std::optional<common::Timestamp>(
+                  m_impl->m_state->m_window.back().m_timestamp )
+            : m_impl->m_state->m_continuity_anchor;
+
+    if ( std::holds_alternative<sensor::MeasurementDiscontinuity>(
+             measurement.m_imu ) )
     {
-      return finalizePreStagingHardResult( UpdateStatus::kRejected,
-                                           "empty observations" );
+      const sensor::MeasurementDiscontinuity& discontinuity =
+          std::get<sensor::MeasurementDiscontinuity>( measurement.m_imu );
+      if ( discontinuity.m_t_begin >= discontinuity.m_t_end ||
+           discontinuity.m_t_end != measurement.m_timestamp ||
+           ( expected_t_begin.has_value() &&
+             discontinuity.m_t_begin != *expected_t_begin ) )
+      {
+        return finalizePreStagingHardResult(
+            UpdateStatus::kInvalidInput,
+            "measurement discontinuity endpoints do not match the continuity anchor" );
+      }
+
+      VioUpdateTransaction transaction( m_impl->m_state );
+      m_impl->m_state->m_bootstrap_nodes.clear();
+      m_impl->m_state->m_visual_coast_duration_ns = 0;
+      m_impl->m_state->m_continuity_anchor        = discontinuity.m_t_end;
+      if ( !m_impl->m_state->m_initialized )
+      {
+        result.status  = UpdateStatus::kInitializing;
+        result.message = "measurement discontinuity reset bootstrap evidence";
+        transaction.commit();
+        return result;
+      }
+
+      const std::uint32_t completed_segment =
+          m_impl->completeActiveSegment( discontinuity.m_t_end );
+      result.diagnostics.segment_id = m_impl->m_state->m_segment_id;
+      result.diagnostics.m_vio =
+          m_impl->makeVioDiagnostics( VioGraphInfo{} );
+      result.diagnostics.m_vio.m_completed_segment_id = completed_segment;
+      result.status                                   = UpdateStatus::kDiscontinuity;
+      result.message                                  = "measurement discontinuity completed the active segment";
+      transaction.commit();
+      return result;
     }
-    // Slice ⑦: disparity_px == 0 is legal — it marks "stereo failed, no
-    // depth"; negative or non-finite is not.
-    for ( const StereoObservation& observation : measurement.observations )
+
+    const sensor::RawImuInterval& raw =
+        std::get<sensor::RawImuInterval>( measurement.m_imu );
+    ImuIntervalResult normalized_result = normalizeRawImuInterval(
+        raw, expected_t_begin, measurement.m_timestamp );
+    if ( std::holds_alternative<ImuIntervalError>( normalized_result ) )
+    {
+      return finalizePreStagingHardResult(
+          UpdateStatus::kInvalidInput,
+          std::get<ImuIntervalError>( normalized_result ).m_detail );
+    }
+    NormalizedImuInterval normalized_imu =
+        std::get<NormalizedImuInterval>( std::move( normalized_result ) );
+
+    // disparity_px == 0 is legal and represents unavailable stereo depth.
+    for ( const StereoObservation& observation : measurement.m_observations )
     {
       if ( observation.disparity_px < 0.0 ||
            !observation.left_pixel.allFinite() ||
            !std::isfinite( observation.disparity_px ) )
       {
         return finalizePreStagingHardResult(
-            UpdateStatus::kRejected,
+            UpdateStatus::kInvalidInput,
             "non-finite pixel or negative disparity" );
       }
     }
-    if ( m_impl->m_state->m_initialized && !m_impl->m_state->m_window.empty() &&
-         measurement.timestamp <= m_impl->m_state->m_window.back().m_timestamp )
-    {
-      return finalizePreStagingHardResult(
-          UpdateStatus::kRejected, "timestamp not strictly increasing" );
-    }
 
-    std::optional<std::uint64_t>         gyro_predecessor_index;
-    std::optional<common::Timestamp>     gyro_predecessor_timestamp;
-    std::optional<GyroFrameState>        gyro_predecessor_state;
-    std::optional<ValidatedGyroInterval> validated_gyro_interval;
-    bool                                 gyro_interval_missing = false;
-    bool                                 gyro_interval_gap     = false;
-    GyroBreakReason                      gyro_break_reason     = GyroBreakReason::kNone;
-    if ( m_impl->options.m_gyro_bias.has_value() )
+    std::vector<sensor::ImuMeasurement> bootstrap_nodes;
+    BootstrapStats                      bootstrap_stats;
+    Eigen::Isometry3d                   bootstrap_T_W_B =
+        Eigen::Isometry3d::Identity();
+    ImuBias bootstrap_bias;
+    if ( !m_impl->m_state->m_initialized )
     {
-      if ( !m_impl->m_state->m_window.empty() )
+      bootstrap_nodes = m_impl->m_state->m_bootstrap_nodes;
+      for ( const sensor::ImuMeasurement& node : normalized_imu.m_nodes )
       {
-        const WindowFrame& predecessor = m_impl->m_state->m_window.back();
-        gyro_predecessor_index         = predecessor.m_frame_index;
-        gyro_predecessor_timestamp     = predecessor.m_timestamp;
-        gyro_predecessor_state         = predecessor.m_gyro;
-      }
-
-      if ( measurement.m_gyro_interval.has_value() )
-      {
-        const GyroInterval& interval = *measurement.m_gyro_interval;
-        gyro_interval_gap            = interval.m_imu_gap;
-        if ( !gyro_interval_gap )
+        if ( !bootstrap_nodes.empty() &&
+             node.timestamp == bootstrap_nodes.back().timestamp )
         {
-          const auto reduced = validateGyroInterval(
-              interval.m_samples, interval.m_t_prev, measurement.timestamp );
-          if ( !std::holds_alternative<ValidatedGyroInterval>( reduced ) )
+          if ( !sameImuValue( node, bootstrap_nodes.back() ) )
           {
             return finalizePreStagingHardResult(
-                UpdateStatus::kRejected,
-                std::get<GyroIntervalError>( reduced ).m_detail );
+                UpdateStatus::kInvalidInput,
+                "shared bootstrap endpoint has inconsistent IMU values" );
           }
-          validated_gyro_interval =
-              std::get<ValidatedGyroInterval>( reduced );
-          const auto scales = deriveGyroNoiseScales(
-              validated_gyro_interval->m_duration_ns,
-              m_impl->options.m_gyro_bias->m_gyr_nd,
-              m_impl->options.m_gyro_bias->m_gyr_rw,
-              m_impl->options.m_gyro_bias->m_prior_sigma_radps );
-          if ( !std::holds_alternative<GyroNoiseScales>( scales ) )
-          {
-            return finalizePreStagingHardResult(
-                UpdateStatus::kRejected,
-                std::get<GyroIntervalError>( scales ).m_detail );
-          }
+          continue;
         }
+        bootstrap_nodes.push_back( node );
       }
-      else
+
+      const std::optional<std::int64_t> bootstrap_duration_ns =
+          checkedPositiveDurationNs( bootstrap_nodes.front().timestamp,
+                                     bootstrap_nodes.back().timestamp );
+      if ( !bootstrap_duration_ns.has_value() )
       {
-        gyro_interval_missing = true;
+        return finalizePreStagingHardResult(
+            UpdateStatus::kInvalidInput,
+            "static bootstrap timestamp span is not representable" );
+      }
+      bootstrap_stats = bootstrapStats( bootstrap_nodes );
+      const bool stationary =
+          bootstrap_stats.m_acc_std.maxCoeff() <=
+              m_impl->options.m_bootstrap_max_acc_std_mps2 &&
+          bootstrap_stats.m_gyr_std.maxCoeff() <=
+              m_impl->options.m_bootstrap_max_gyr_std_radps &&
+          std::abs( bootstrap_stats.m_acc_mean.norm() -
+                    m_impl->options.m_gravity_mps2 ) <=
+              m_impl->options.m_bootstrap_acc_norm_tol_mps2;
+      const bool ready =
+          *bootstrap_duration_ns >=
+              m_impl->options.m_bootstrap_min_duration_ns &&
+          bootstrap_nodes.size() >=
+              m_impl->options.m_bootstrap_min_samples &&
+          stationary;
+      if ( !ready )
+      {
+        VioUpdateTransaction transaction( m_impl->m_state );
+        m_impl->m_state->m_continuity_anchor = measurement.m_timestamp;
+        if ( *bootstrap_duration_ns >=
+             m_impl->options.m_bootstrap_timeout_ns )
+        {
+          m_impl->m_state->m_bootstrap_nodes.clear();
+          result.status  = UpdateStatus::kFailed;
+          result.message = "static bootstrap timed out";
+        }
+        else
+        {
+          m_impl->m_state->m_bootstrap_nodes = std::move( bootstrap_nodes );
+          result.status                      = UpdateStatus::kInitializing;
+          result.message                     = "collecting static bootstrap evidence";
+        }
+        transaction.commit();
+        return result;
+      }
+
+      bootstrap_bias.m_gyr_radps = bootstrap_stats.m_gyr_mean;
+      bootstrap_T_W_B.linear() =
+          minimalRotationToWorldUp( bootstrap_stats.m_acc_mean );
+      if ( measurement.m_observations.empty() )
+      {
+        VioUpdateTransaction transaction( m_impl->m_state );
+        m_impl->m_state->m_bootstrap_nodes   = std::move( bootstrap_nodes );
+        m_impl->m_state->m_continuity_anchor = measurement.m_timestamp;
+        result.status                        = UpdateStatus::kInitializing;
+        result.message                       = "static bootstrap ready; waiting for visual seed";
+        transaction.commit();
+        return result;
       }
     }
 
-    const auto recordEligibleVisualRejection = [ & ]() {
-      if ( m_impl->options.m_gyro_bias.has_value() )
-      {
-        m_impl->m_state->m_eligible_visual_rejected_timestamp =
-            measurement.timestamp;
-      }
+    const auto retainBootstrapAndReturn =
+        [ & ]( std::string message ) -> VioUpdateResult {
+      VioUpdateTransaction transaction( m_impl->m_state );
+      m_impl->m_state->m_bootstrap_nodes   = bootstrap_nodes;
+      m_impl->m_state->m_continuity_anchor = measurement.m_timestamp;
+      result.status                        = UpdateStatus::kInitializing;
+      result.message                       = std::move( message );
+      transaction.commit();
+      return result;
     };
 
     std::uint32_t num_shared    = 0;
     std::uint32_t num_disparity = 0;
-    for ( const StereoObservation& observation : measurement.observations )
+    for ( const StereoObservation& observation : measurement.m_observations )
     {
       // E3 experiment: zero-disparity observations cannot constrain PnP or
       // BA, so exclude them from the shared-overlap accounting that gates PnP
@@ -1641,74 +1752,62 @@ namespace phad::estimator
     result.diagnostics.num_shared    = num_shared;
     result.diagnostics.num_disparity = num_disparity;
 
-    // pre-M4 round 2: overlap recovered (normal tracking) — the
-    // accumulated-seeding buffer is stale; drop it.
-    if ( num_shared > 0 )
+    const bool visual_supported =
+        !m_impl->m_state->m_initialized ||
+        static_cast<int>( num_shared ) >= m_impl->options.min_pnp_inliers;
+    const bool imu_only_coast =
+        m_impl->m_state->m_initialized && !visual_supported;
+    std::int64_t next_visual_coast_duration_ns = 0;
+
+    if ( m_impl->m_state->m_initialized && visual_supported )
     {
       m_impl->m_state->m_pending_seed_obs.clear();
     }
-
-    const bool overlap_broken = m_impl->m_state->m_initialized && num_shared == 0;
-
-    if ( overlap_broken && !m_impl->options.enable_reanchor )
+    if ( imu_only_coast )
     {
-      recordEligibleVisualRejection();
-      result.diagnostics.window_size =
-          static_cast<std::uint32_t>( m_impl->m_state->m_window.size() );
-      if ( !m_impl->m_state->m_window.empty() )
+      const std::int64_t coast_duration_ns =
+          m_impl->m_state->m_visual_coast_duration_ns;
+      const std::int64_t horizon_ns =
+          m_impl->options.m_visual_coast_horizon_ns;
+      if ( coast_duration_ns < 0 || coast_duration_ns > horizon_ns )
       {
-        result.diagnostics.prior_key = m_impl->m_state->m_window.front().m_frame_index;
+        return finalizePreStagingHardResult(
+            UpdateStatus::kFailed,
+            "visual coast duration violates estimator invariant" );
       }
-      return finalizePreStagingHardResult(
-          UpdateStatus::kRejected, "zero shared landmarks with window" );
-    }
-    // Non-keyframe cannot re-anchor; reject when overlap is broken.
-    if ( overlap_broken && !keyframe )
-    {
-      recordEligibleVisualRejection();
-      result.diagnostics.window_size =
-          static_cast<std::uint32_t>( m_impl->m_state->m_window.size() );
-      if ( !m_impl->m_state->m_window.empty() )
+      if ( normalized_imu.m_duration_ns > horizon_ns - coast_duration_ns )
       {
-        result.diagnostics.prior_key = m_impl->m_state->m_window.front().m_frame_index;
+        VioUpdateTransaction transaction( m_impl->m_state );
+        const std::uint32_t  completed_segment =
+            m_impl->completeActiveSegment( measurement.m_timestamp );
+        result.diagnostics.segment_id  = m_impl->m_state->m_segment_id;
+        result.diagnostics.window_size = 0;
+        result.diagnostics.prior_key   = 0;
+        result.diagnostics.m_vio =
+            m_impl->makeVioDiagnostics( VioGraphInfo{} );
+        result.diagnostics.m_vio.m_completed_segment_id = completed_segment;
+        result.status                                   = UpdateStatus::kVisualOutage;
+        result.message                                  = "visual support outage completed the active segment";
+        transaction.commit();
+        return result;
       }
-      return finalizePreStagingHardResult(
-          UpdateStatus::kRejected, "zero shared landmarks (non-keyframe)" );
+      next_visual_coast_duration_ns =
+          coast_duration_ns + normalized_imu.m_duration_ns;
     }
-    // Non-keyframe cannot initialise the first segment; reject.
+
     if ( !m_impl->m_state->m_initialized && !keyframe )
     {
-      recordEligibleVisualRejection();
-      return finalizePreStagingHardResult(
-          UpdateStatus::kRejected, "not initialised (non-keyframe)" );
+      return retainBootstrapAndReturn(
+          "static bootstrap ready; waiting for a keyframe visual seed" );
     }
-    // Non-keyframe with too few shared landmarks cannot run PnP; a raw CV
-    // guess would pollute the pose chain. Reject (Slice ⑤b gate).
-    if ( !keyframe && static_cast<int>( num_shared ) <
-                          m_impl->options.min_pnp_inliers )
-    {
-      recordEligibleVisualRejection();
-      result.diagnostics.window_size =
-          static_cast<std::uint32_t>( m_impl->m_state->m_window.size() );
-      if ( !m_impl->m_state->m_window.empty() )
-      {
-        result.diagnostics.prior_key = m_impl->m_state->m_window.front().m_frame_index;
-      }
-      return finalizePreStagingHardResult(
-          UpdateStatus::kRejected,
-          "insufficient shared landmarks (non-keyframe)" );
-    }
-    // pre-M4 round 2 残存: 首段跨帧累积播种。enable_accumulated_seed 时,
+    // 首段跨帧累积播种。enable_accumulated_seed 时,
     // 未初始化帧的视差观测跨帧累积进 pending_seed_obs (最新覆盖), 累积到
     // min_seed_observations 个唯一 track 后用合成 measurement 播种 —— 只
     // 用于 Gate F (首段), V2_03 启动段暗帧 1-7 obs/帧饿死的突破手段。
-    // Gate E (re-anchor) 保持 slice-7 原拒绝: 实测放宽 re-anchor 门槛使
-    // V2_03 re-anchor 9 → 32-68、段错位 +2.739 → +3.9~+5.6m、ATE 3.628 →
-    // 5.2-6.7 —— 门槛是质量门, 只放行足以滋养健康段的富帧。
-    KeyframeMeasurement        accumulated_measurement;
-    const KeyframeMeasurement* effective_measurement = &measurement;
-    const auto                 accumulate            = [ & ]() -> bool {
-      for ( const StereoObservation& obs : measurement.observations )
+    VioMeasurement        accumulated_measurement = measurement;
+    const VioMeasurement* effective_measurement   = &measurement;
+    const auto            accumulate              = [ & ]() -> bool {
+      for ( const StereoObservation& obs : measurement.m_observations )
       {
         if ( obs.disparity_px > 0.0 )
         {
@@ -1720,40 +1819,20 @@ namespace phad::estimator
       {
         return false;
       }
-      accumulated_measurement.timestamp = measurement.timestamp;
-      accumulated_measurement.observations.reserve(
+      accumulated_measurement.m_observations.clear();
+      accumulated_measurement.m_observations.reserve(
           m_impl->m_state->m_pending_seed_obs.size() );
       for ( const auto& [ id, obs ] : m_impl->m_state->m_pending_seed_obs )
       {
         (void)id;
-        accumulated_measurement.observations.push_back( obs );
+        accumulated_measurement.m_observations.push_back( obs );
       }
       effective_measurement = &accumulated_measurement;
       return true;
     };
 
-    if ( overlap_broken )
-    {
-      const int stereo_count =
-          static_cast<int>( m_impl->countStereoObservations( measurement ) );
-      if ( stereo_count < m_impl->options.min_seed_observations )
-      {
-        recordEligibleVisualRejection();
-        result.diagnostics.window_size =
-            static_cast<std::uint32_t>( m_impl->m_state->m_window.size() );
-        if ( !m_impl->m_state->m_window.empty() )
-        {
-          result.diagnostics.prior_key = m_impl->m_state->m_window.front().m_frame_index;
-        }
-        return finalizePreStagingHardResult(
-            UpdateStatus::kRejected,
-            "insufficient observations to seed new segment" );
-      }
-      m_impl->m_state->m_pending_seed_obs.clear();
-    }
     result.diagnostics.low_connectivity =
-        m_impl->m_state->m_initialized &&
-        num_shared > 0 &&
+        m_impl->m_state->m_initialized && visual_supported &&
         static_cast<int>( num_shared ) < m_impl->options.min_shared_landmarks;
 
     if ( !m_impl->m_state->m_initialized )
@@ -1768,89 +1847,90 @@ namespace phad::estimator
       {
         if ( !accumulate() )
         {
-          recordEligibleVisualRejection();
-          return finalizePreStagingHardResult(
-              UpdateStatus::kRejected,
+          return retainBootstrapAndReturn(
               "accumulating seed observations (first segment)" );
         }
       }
       else
       {
-        recordEligibleVisualRejection();
-        return finalizePreStagingHardResult(
-            UpdateStatus::kRejected,
+        return retainBootstrapAndReturn(
             "insufficient observations to seed first segment" );
       }
     }
 
     std::vector<LandmarkId> frame_culled;
 
-    // PHAD_M4_ONLINE_BIAS_TRANSACTION_CTOR
-    StereoVoUpdateTransaction transaction( m_impl->m_state );
-    auto                      finalizePostStagingHardResult =
+    VioUpdateTransaction transaction( m_impl->m_state );
+    m_impl->m_state->m_visual_coast_duration_ns =
+        next_visual_coast_duration_ns;
+    auto finalizePostStagingHardResult =
         [ & ]( UpdateStatus status, std::string message ) -> VioUpdateResult {
-      // PHAD_M4_ONLINE_BIAS_ROLLBACK_BEFORE_DIAGNOSTICS
       transaction.rollback();
       result.status                 = status;
       result.message                = std::move( message );
       result.diagnostics.segment_id = m_impl->m_state->m_segment_id;
       result.diagnostics.culled_landmark_ids.clear();
-      if ( m_impl->options.m_gyro_bias.has_value() )
-      {
-        result.diagnostics.m_gyro =
-            m_impl->materializeHardGyroDiagnostics();
-      }
       return result;
     };
-    const auto finalizePostStagingVisualRejection =
-        [ & ]( std::string message ) -> VioUpdateResult {
-      VioUpdateResult rejected = finalizePostStagingHardResult(
-          UpdateStatus::kRejected, std::move( message ) );
-      recordEligibleVisualRejection();
-      return rejected;
-    };
+    Eigen::Isometry3d propagated_T_W_B = bootstrap_T_W_B;
+    Eigen::Vector3d   propagated_v_W_B = Eigen::Vector3d::Zero();
+    ImuBias           propagated_bias  = bootstrap_bias;
+    if ( m_impl->m_state->m_initialized )
+    {
+      const WindowFrame& predecessor = m_impl->m_state->m_window.back();
+      try
+      {
+        const auto            pim       = m_impl->preintegrate( normalized_imu,
+                                                                predecessor.m_bias );
+        const gtsam::NavState predicted = pim.predict(
+            gtsam::NavState( toPose3( predecessor.m_T_W_B ),
+                             predecessor.m_v_W_B ),
+            toGtsamBias( predecessor.m_bias ) );
+        propagated_T_W_B = toIsometry( predicted.pose() );
+        propagated_v_W_B = predicted.v();
+        propagated_bias  = predecessor.m_bias;
+      }
+      catch ( const std::exception& exception )
+      {
+        return finalizePostStagingHardResult(
+            UpdateStatus::kFailed,
+            std::string( "IMU propagation failed: " ) + exception.what() );
+      }
+    }
 
     if ( !m_impl->m_state->m_initialized )
     {
-      if ( !m_impl->seedSegment( Eigen::Isometry3d::Identity(),
-                                 *effective_measurement,
-                                 result.diagnostics.probe_rejected_block_n,
-                                 result.diagnostics.probe_new_lm_n ) )
+      if ( !m_impl->seedRoot( bootstrap_T_W_B, Eigen::Vector3d::Zero(),
+                              bootstrap_bias, *effective_measurement,
+                              result.diagnostics.probe_rejected_block_n,
+                              result.diagnostics.probe_new_lm_n ) )
       {
-        return finalizePostStagingVisualRejection(
+        return finalizePostStagingHardResult(
+            UpdateStatus::kRejected,
             "failed to backproject landmark on first frame" );
       }
       m_impl->m_state->m_pending_seed_obs.clear();
-    }
-    else if ( overlap_broken )
-    {
-      const Eigen::Isometry3d anchor = m_impl->poseInitialValue();
-      if ( !isFinite( anchor ) )
-      {
-        return finalizePostStagingHardResult(
-            UpdateStatus::kFailed, "non-finite pose initial value" );
-      }
-      if ( !m_impl->seedSegment( anchor, *effective_measurement,
-                                 result.diagnostics.probe_rejected_block_n,
-                                 result.diagnostics.probe_new_lm_n ) )
-      {
-        return finalizePostStagingVisualRejection(
-            "failed to backproject landmark on re-anchor frame" );
-      }
-      m_impl->m_state->m_pending_seed_obs.clear();
-      ++m_impl->m_state->m_segment_id;
-      result.diagnostics.segment_id = m_impl->m_state->m_segment_id;
+      m_impl->m_state->m_bootstrap_nodes.clear();
+      m_impl->m_state->m_continuity_anchor.reset();
     }
     else
     {
       WindowFrame candidate;
-      candidate.m_frame_index  = m_impl->m_state->m_next_frame_index;
-      candidate.m_timestamp    = measurement.timestamp;
-      candidate.m_observations = measurement.observations;
-      candidate.m_is_keyframe  = keyframe;  // Slice ⑤c
+      candidate.m_frame_index = m_impl->m_state->m_next_frame_index;
+      candidate.m_timestamp   = measurement.m_timestamp;
+      if ( !imu_only_coast )
+      {
+        candidate.m_observations = measurement.m_observations;
+      }
+      candidate.m_is_keyframe = keyframe;
 
-      const Eigen::Isometry3d guess_T_W_B = m_impl->poseInitialValue();
+      const Eigen::Isometry3d guess_T_W_B = propagated_T_W_B;
       candidate.m_T_W_B                   = guess_T_W_B;
+      candidate.m_v_W_B                   = propagated_v_W_B;
+      candidate.m_bias                    = propagated_bias;
+      candidate.m_predecessor_frame_index =
+          m_impl->m_state->m_window.back().m_frame_index;
+      candidate.m_imu = normalized_imu;
 
       if ( m_impl->options.enable_pnp_init &&
            static_cast<int>( num_shared ) >=
@@ -1868,7 +1948,7 @@ namespace phad::estimator
           std::vector<LandmarkId> shared_ids;
           shared_ids.reserve( static_cast<std::size_t>( num_shared ) );
           for ( const StereoObservation& observation :
-                measurement.observations )
+                measurement.m_observations )
           {
             if ( observation.disparity_px > 0.0 &&
                  m_impl->m_state->m_landmarks_w.find( observation.id ) !=
@@ -1920,12 +2000,16 @@ namespace phad::estimator
         return finalizePostStagingHardResult(
             UpdateStatus::kFailed, "non-finite pose initial value" );
       }
-      // CRITICAL: track_times must see the full measurement (including
-      // shared outliers masked out of candidate.m_observations).
-      for ( const StereoObservation& observation : measurement.observations )
+      if ( !imu_only_coast )
       {
-        m_impl->m_state->m_track_times[ observation.id ].push_back(
-            measurement.timestamp );
+        // track_times sees the full supported measurement, including shared
+        // outliers masked out of candidate.m_observations.
+        for ( const StereoObservation& observation :
+              measurement.m_observations )
+        {
+          m_impl->m_state->m_track_times[ observation.id ].push_back(
+              measurement.m_timestamp );
+        }
       }
       // Slice ⑦ (E12g, final: part of the E13-composed gate): a far-return
       // landmark — one whose last stereo observation left the window while
@@ -2064,158 +2148,24 @@ namespace phad::estimator
       ++m_impl->m_state->m_next_frame_index;
     }
 
-    if ( m_impl->options.m_gyro_bias.has_value() )
+    // Slice ① keeps a bounded contiguous navigation chain by evicting the
+    // oldest state. Keyframe-aware interior eviction and raw-interval
+    // reintegration are delivered by the dedicated eviction slice.
+    while ( static_cast<int>( m_impl->m_state->m_window.size() ) >
+            m_impl->options.window_size )
     {
-      WindowFrame&           current                = m_impl->m_state->m_window.back();
-      const GyroBiasOptions& gyro_options           = *m_impl->options.m_gyro_bias;
-      const bool             starts_first_component = !gyro_predecessor_index.has_value();
-      if ( starts_first_component && validated_gyro_interval.has_value() )
-      {
-        return finalizePostStagingHardResult(
-            UpdateStatus::kRejected,
-            "gyro interval endpoints do not match pose timestamps" );
-      }
-      const bool exact_predecessor =
-          validated_gyro_interval.has_value() &&
-          gyro_predecessor_timestamp.has_value() &&
-          validated_gyro_interval->m_t_prev ==
-              *gyro_predecessor_timestamp;
-      const bool rejected_endpoint =
-          !exact_predecessor && validated_gyro_interval.has_value() &&
-          m_impl->m_state->m_eligible_visual_rejected_timestamp.has_value() &&
-          validated_gyro_interval->m_t_prev ==
-              *m_impl->m_state->m_eligible_visual_rejected_timestamp;
-      const bool starts_new_component =
-          starts_first_component || overlap_broken || gyro_interval_missing ||
-          gyro_interval_gap || rejected_endpoint;
-      if ( starts_new_component )
-      {
-        const auto initial = selectGyroBiasInitialValue(
-            GyroBiasInitialKind::kComponentRoot,
-            gyro_predecessor_state.has_value()
-                ? std::optional<Eigen::Vector3d>(
-                      gyro_predecessor_state->m_bias_radps )
-                : std::nullopt,
-            gyro_predecessor_state.has_value()
-                ? std::optional<Eigen::Vector3d>(
-                      gyro_predecessor_state->m_bias_radps )
-                : std::nullopt,
-            gyro_options.m_prior_mean_radps );
-        if ( !std::holds_alternative<Eigen::Vector3d>( initial ) )
-        {
-          return finalizePostStagingHardResult(
-              UpdateStatus::kFailed,
-              "gyro bias initial value is non-finite" );
-        }
-
-        GyroFrameState gyro;
-        gyro.m_bias_radps   = std::get<Eigen::Vector3d>( initial );
-        gyro.m_segment_id   = m_impl->m_state->m_segment_id;
-        gyro.m_component_id = m_impl->m_state->m_next_gyro_component_id++;
-        current.m_gyro      = std::move( gyro );
-        if ( !starts_first_component )
-        {
-          gyro_break_reason = overlap_broken
-                                  ? GyroBreakReason::kSegmentChange
-                              : gyro_interval_gap
-                                  ? GyroBreakReason::kDeclaredGap
-                              : rejected_endpoint
-                                  ? GyroBreakReason::kRejectedEndpoint
-                                  : GyroBreakReason::kMissingInterval;
-        }
-      }
-      else
-      {
-        if ( !exact_predecessor || !gyro_predecessor_state.has_value() )
-        {
-          return finalizePostStagingHardResult(
-              UpdateStatus::kRejected,
-              "gyro interval endpoints do not match pose timestamps" );
-        }
-
-        const auto initial = selectGyroBiasInitialValue(
-            GyroBiasInitialKind::kExactLink, std::nullopt,
-            gyro_predecessor_state->m_bias_radps,
-            gyro_options.m_prior_mean_radps );
-        if ( !std::holds_alternative<Eigen::Vector3d>( initial ) )
-        {
-          return finalizePostStagingHardResult(
-              UpdateStatus::kFailed,
-              "gyro bias initial value is non-finite" );
-        }
-
-        GyroFrameState gyro;
-        gyro.m_bias_radps              = std::get<Eigen::Vector3d>( initial );
-        gyro.m_segment_id              = m_impl->m_state->m_segment_id;
-        gyro.m_component_id            = gyro_predecessor_state->m_component_id;
-        gyro.m_predecessor_frame_index = *gyro_predecessor_index;
-        gyro.m_interval                = std::move( validated_gyro_interval );
-        current.m_gyro                 = std::move( gyro );
-      }
-      m_impl->m_state->m_eligible_visual_rejected_timestamp.reset();
+      m_impl->m_state->m_window.pop_front();
     }
-
-    // Slice ⑤c: Basalt-style eviction — cap keyframes at 7, then total at
-    // window_size (10), preferring to evict the oldest non-keyframe so the
-    // 3 most recent frames stay as temporal states.
+    try
     {
-      std::size_t keyframe_count = 0;
-      for ( const WindowFrame& frame : m_impl->m_state->m_window )
-      {
-        if ( frame.m_is_keyframe ) ++keyframe_count;
-      }
-      while ( keyframe_count > 7U )
-      {
-        for ( auto it = m_impl->m_state->m_window.begin(); it != m_impl->m_state->m_window.end();
-              ++it )
-        {
-          if ( it->m_is_keyframe )
-          {
-            m_impl->m_state->m_window.erase( it );
-            --keyframe_count;
-            break;
-          }
-        }
-      }
-      while ( static_cast<int>( m_impl->m_state->m_window.size() ) >
-              m_impl->options.window_size )
-      {
-        // Evict the oldest non-keyframe first; fall back to pop_front.
-        bool evicted = false;
-        for ( auto it = m_impl->m_state->m_window.begin(); it != m_impl->m_state->m_window.end();
-              ++it )
-        {
-          if ( !it->m_is_keyframe &&
-               it->m_frame_index != m_impl->m_state->m_window.back().m_frame_index )
-          {
-            m_impl->m_state->m_window.erase( it );
-            evicted = true;
-            break;
-          }
-        }
-        if ( !evicted )
-        {
-          m_impl->m_state->m_window.pop_front();
-        }
-      }
+      m_impl->resetEvictedImuLinks();
     }
-    if ( m_impl->options.m_gyro_bias.has_value() )
+    catch ( const std::exception& exception )
     {
-      try
-      {
-        if ( m_impl->resetEvictedGyroLinks() &&
-             gyro_break_reason == GyroBreakReason::kNone )
-        {
-          gyro_break_reason = GyroBreakReason::kEvictedEndpoint;
-        }
-      }
-      catch ( const std::exception& exception )
-      {
-        return finalizePostStagingHardResult(
-            UpdateStatus::kFailed,
-            std::string( "gyro eviction repair failed: " ) +
-                exception.what() );
-      }
+      return finalizePostStagingHardResult(
+          UpdateStatus::kFailed,
+          std::string( "navigation eviction repair failed: " ) +
+              exception.what() );
     }
     m_impl->pruneLandmarksNotInWindow();
 
@@ -2223,11 +2173,11 @@ namespace phad::estimator
     gtsam::Values               values;
     std::uint64_t               prior_key     = 0;
     std::uint32_t               num_landmarks = 0;
-    GyroGraphInfo               gyro_graph_info;
+    VioGraphInfo                vio_graph_info;
     try
     {
       m_impl->buildGraph( graph, values, prior_key, num_landmarks, nullptr,
-                          &gyro_graph_info );
+                          &vio_graph_info );
     }
     catch ( const std::exception& exception )
     {
@@ -2255,59 +2205,53 @@ namespace phad::estimator
       }
     }
 
-    FixedPimSolveResult solved = m_impl->solveFixedPimGraph(
-        graph, values, prior_key, num_landmarks, gyro_graph_info );
-    if ( std::holds_alternative<FixedPimSolveError>( solved ) )
+    GraphSolveResult solved = m_impl->solveGraph( graph, values );
+    if ( std::holds_alternative<GraphSolveError>( solved ) )
     {
-      const FixedPimSolveError& error =
-          std::get<FixedPimSolveError>( solved );
+      const GraphSolveError& error = std::get<GraphSolveError>( solved );
       result.diagnostics.lm_iterations += error.m_lm_iterations;
       switch ( error.m_code )
       {
-        case FixedPimSolveErrorCode::kIndeterminant:
+        case GraphSolveErrorCode::kIndeterminant:
           return finalizePostStagingHardResult(
               UpdateStatus::kFailed,
               std::string( "indeterminant linear system: " ) +
                   error.m_detail );
-        case FixedPimSolveErrorCode::kOptimizer:
+        case GraphSolveErrorCode::kOptimizer:
           return finalizePostStagingHardResult(
               UpdateStatus::kFailed,
               std::string( "optimizer exception: " ) + error.m_detail );
-        case FixedPimSolveErrorCode::kGraphBuild:
-          return finalizePostStagingHardResult(
-              UpdateStatus::kFailed,
-              std::string( "gyro graph rebuild failed: " ) +
-                  error.m_detail );
-        case FixedPimSolveErrorCode::kGyroIntegrity:
-          return finalizePostStagingHardResult( UpdateStatus::kFailed,
-                                                error.m_detail );
-        case FixedPimSolveErrorCode::kRelinearizationLimit:
-          return finalizePostStagingHardResult( UpdateStatus::kRejected,
-                                                error.m_detail );
       }
       return finalizePostStagingHardResult(
-          UpdateStatus::kFailed, "unknown fixed-PIM solve error" );
+          UpdateStatus::kFailed, "unknown graph solve error" );
     }
-    FixedPimSolveSuccess solve_success =
-        std::get<FixedPimSolveSuccess>( std::move( solved ) );
+    GraphSolveSuccess solve_success =
+        std::get<GraphSolveSuccess>( std::move( solved ) );
     result.diagnostics.lm_iterations += solve_success.m_lm_iterations;
-    std::uint32_t gyro_extra_rounds = solve_success.m_extra_rounds;
-    gtsam::Values optimized         = std::move( solve_success.m_values );
+    gtsam::Values optimized = std::move( solve_success.m_values );
 
     for ( const WindowFrame& frame : m_impl->m_state->m_window )
     {
-      if ( !optimized.exists( X( frame.m_frame_index ) ) )
+      if ( !optimized.exists( X( frame.m_frame_index ) ) ||
+           !optimized.exists( V( frame.m_frame_index ) ) ||
+           !optimized.exists( B( frame.m_frame_index ) ) )
       {
         return finalizePostStagingHardResult(
             UpdateStatus::kFailed,
-            "optimized values missing a window pose" );
+            "optimized values missing a navigation state" );
       }
       const Eigen::Isometry3d T_W_B =
           toIsometry( optimized.at<gtsam::Pose3>( X( frame.m_frame_index ) ) );
-      if ( !isFinite( T_W_B ) )
+      const Eigen::Vector3d v_W_B =
+          optimized.at<gtsam::Vector3>( V( frame.m_frame_index ) );
+      const gtsam::imuBias::ConstantBias bias =
+          optimized.at<gtsam::imuBias::ConstantBias>(
+              B( frame.m_frame_index ) );
+      if ( !isFinite( T_W_B ) || !v_W_B.allFinite() ||
+           !bias.vector().allFinite() )
       {
         return finalizePostStagingHardResult(
-            UpdateStatus::kFailed, "non-finite optimized pose" );
+            UpdateStatus::kFailed, "non-finite optimized navigation state" );
       }
     }
 
@@ -2334,11 +2278,11 @@ namespace phad::estimator
         }
       }
       frame.m_T_W_B = T_W_B;
-      if ( m_impl->options.m_gyro_bias.has_value() )
-      {
-        frame.m_gyro->m_bias_radps =
-            optimized.at<gtsam::Vector3>( G( frame.m_frame_index ) );
-      }
+      frame.m_v_W_B = optimized.at<gtsam::Vector3>(
+          V( frame.m_frame_index ) );
+      frame.m_bias = toImuBias(
+          optimized.at<gtsam::imuBias::ConstantBias>(
+              B( frame.m_frame_index ) ) );
     }
 
     // E13: record the BA-refined pose of every stereo observation of the new
@@ -2387,9 +2331,13 @@ namespace phad::estimator
 
     std::uint32_t outliers_culled        = 0;
     std::uint32_t outliers_culled_unique = 0;
-    std::uint32_t culled_round           = m_impl->runCheiralityAndMeanCull(
-        optimized, graph, frame_culled, outliers_culled, outliers_culled_unique,
-        result.diagnostics.num_cheirality );
+    std::uint32_t culled_round           = 0;
+    if ( !imu_only_coast )
+    {
+      culled_round = m_impl->runCheiralityAndMeanCull(
+          optimized, graph, frame_culled, outliers_culled,
+          outliers_culled_unique, result.diagnostics.num_cheirality );
+    }
 
     // Full-graph RMS on LM₁ graph/values (includes just-culled ids) =
     // pre-cull quality; contract unchanged by multi-round reopt.
@@ -2397,7 +2345,7 @@ namespace phad::estimator
         stereoReprojRms( graph, optimized );
     // Slice ④ after_cull initial value (final when reopt is skipped / fails).
     double after_cull = result.diagnostics.reproj_rms_after_px;
-    if ( m_impl->options.enable_outlier_cull )
+    if ( m_impl->options.enable_outlier_cull && !imu_only_coast )
     {
       after_cull = stereoReprojRmsSkippingMissingLandmarks(
           graph, optimized, m_impl->m_state->m_landmarks_w );
@@ -2405,7 +2353,7 @@ namespace phad::estimator
 
     std::uint32_t rounds               = 0;
     bool          outlier_reopt_failed = false;
-    while ( m_impl->options.enable_outlier_reopt &&
+    while ( !imu_only_coast && m_impl->options.enable_outlier_reopt &&
             rounds <
                 static_cast<std::uint32_t>( m_impl->options.max_outlier_reopts ) &&
             culled_round >= 4U )
@@ -2418,13 +2366,11 @@ namespace phad::estimator
       gtsam::Values               v_r;
       std::uint64_t               prior_key_r = 0;
       std::uint32_t               n_lm_r      = 0;
-      GyroGraphInfo               reopt_gyro_info;
-      const gtsam::Values*        reopt_round_start =
-          m_impl->options.m_gyro_bias.has_value() ? &optimized : nullptr;
+      VioGraphInfo                reopt_vio_info;
       try
       {
         m_impl->buildGraph( g_r, v_r, prior_key_r, n_lm_r,
-                            reopt_round_start, &reopt_gyro_info );
+                            &optimized, &reopt_vio_info );
       }
       catch ( const std::exception& exception )
       {
@@ -2436,52 +2382,41 @@ namespace phad::estimator
       (void)prior_key_r;
       (void)n_lm_r;
 
-      FixedPimSolveResult reopt_solved = m_impl->solveFixedPimGraph(
-          g_r, v_r, prior_key_r, n_lm_r, reopt_gyro_info );
-      if ( std::holds_alternative<FixedPimSolveError>( reopt_solved ) )
+      GraphSolveResult reopt_solved = m_impl->solveGraph( g_r, v_r );
+      if ( std::holds_alternative<GraphSolveError>( reopt_solved ) )
       {
-        const FixedPimSolveError& error =
-            std::get<FixedPimSolveError>( reopt_solved );
-        if ( error.m_code == FixedPimSolveErrorCode::kIndeterminant ||
-             error.m_code == FixedPimSolveErrorCode::kOptimizer )
-        {
-          gyro_extra_rounds += error.m_extra_rounds;
-          m_impl->m_state->m_window      = window_snap;
-          m_impl->m_state->m_landmarks_w = landmarks_snap;
-          outlier_reopt_failed           = true;
-          break;
-        }
-        if ( error.m_code ==
-             FixedPimSolveErrorCode::kRelinearizationLimit )
-        {
-          return finalizePostStagingHardResult( UpdateStatus::kRejected,
-                                                error.m_detail );
-        }
-        const std::string prefix =
-            error.m_code == FixedPimSolveErrorCode::kGraphBuild
-                ? "gyro graph rebuild failed: "
-                : "";
-        return finalizePostStagingHardResult(
-            UpdateStatus::kFailed, prefix + error.m_detail );
+        m_impl->m_state->m_window      = window_snap;
+        m_impl->m_state->m_landmarks_w = landmarks_snap;
+        outlier_reopt_failed           = true;
+        break;
       }
 
-      FixedPimSolveSuccess reopt_success =
-          std::get<FixedPimSolveSuccess>( std::move( reopt_solved ) );
-      gyro_extra_rounds += reopt_success.m_extra_rounds;
+      GraphSolveSuccess reopt_success =
+          std::get<GraphSolveSuccess>( std::move( reopt_solved ) );
       gtsam::Values optimized_r = std::move( reopt_success.m_values );
       try
       {
         for ( const WindowFrame& frame : m_impl->m_state->m_window )
         {
-          if ( !optimized_r.exists( X( frame.m_frame_index ) ) )
+          if ( !optimized_r.exists( X( frame.m_frame_index ) ) ||
+               !optimized_r.exists( V( frame.m_frame_index ) ) ||
+               !optimized_r.exists( B( frame.m_frame_index ) ) )
           {
-            throw std::runtime_error( "optimized values missing a window pose" );
+            throw std::runtime_error(
+                "optimized values missing a navigation state" );
           }
           const Eigen::Isometry3d T_W_B = toIsometry(
               optimized_r.at<gtsam::Pose3>( X( frame.m_frame_index ) ) );
-          if ( !isFinite( T_W_B ) )
+          const Eigen::Vector3d v_W_B =
+              optimized_r.at<gtsam::Vector3>( V( frame.m_frame_index ) );
+          const gtsam::imuBias::ConstantBias bias =
+              optimized_r.at<gtsam::imuBias::ConstantBias>(
+                  B( frame.m_frame_index ) );
+          if ( !isFinite( T_W_B ) || !v_W_B.allFinite() ||
+               !bias.vector().allFinite() )
           {
-            throw std::runtime_error( "non-finite optimized pose" );
+            throw std::runtime_error(
+                "non-finite optimized navigation state" );
           }
         }
 
@@ -2489,11 +2424,11 @@ namespace phad::estimator
         {
           frame.m_T_W_B = toIsometry(
               optimized_r.at<gtsam::Pose3>( X( frame.m_frame_index ) ) );
-          if ( m_impl->options.m_gyro_bias.has_value() )
-          {
-            frame.m_gyro->m_bias_radps =
-                optimized_r.at<gtsam::Vector3>( G( frame.m_frame_index ) );
-          }
+          frame.m_v_W_B = optimized_r.at<gtsam::Vector3>(
+              V( frame.m_frame_index ) );
+          frame.m_bias = toImuBias(
+              optimized_r.at<gtsam::imuBias::ConstantBias>(
+                  B( frame.m_frame_index ) ) );
         }
 
         for ( auto& [ id, point_W ] : m_impl->m_state->m_landmarks_w )
@@ -2513,10 +2448,7 @@ namespace phad::estimator
 
         result.diagnostics.lm_iterations +=
             reopt_success.m_lm_iterations;
-        if ( m_impl->options.m_gyro_bias.has_value() )
-        {
-          optimized = optimized_r;
-        }
+        optimized = optimized_r;
         ++rounds;
         after_cull   = stereoReprojRms( g_r, optimized_r );
         culled_round = m_impl->runCheiralityAndMeanCull(
@@ -2573,21 +2505,17 @@ namespace phad::estimator
                                   result.diagnostics );
     }
 
-    m_impl->m_state->m_initialized         = true;
-    m_impl->m_state->m_T_W_B_prev_accepted = m_impl->m_state->m_T_W_B_last_accepted;
-    m_impl->m_state->m_T_W_B_last_accepted = m_impl->m_state->m_window.back().m_T_W_B;
+    m_impl->m_state->m_initialized = true;
 
-    if ( m_impl->options.m_gyro_bias.has_value() )
-    {
-      result.diagnostics.m_gyro =
-          m_impl->makeGyroDiagnostics( gyro_break_reason,
-                                       gyro_extra_rounds );
-    }
-
-    result.status   = UpdateStatus::kOk;
-    result.estimate = VioEstimate{ measurement.timestamp,
-                                   m_impl->m_state->m_window.back().m_T_W_B };
-    // PHAD_M4_ONLINE_BIAS_TRANSACTION_COMMIT
+    result.status                     = UpdateStatus::kOk;
+    const WindowFrame& estimate_frame = m_impl->m_state->m_window.back();
+    result.estimate                   = VioEstimate{
+                          .timestamp    = measurement.m_timestamp,
+                          .T_W_B        = estimate_frame.m_T_W_B,
+                          .m_v_W_B      = estimate_frame.m_v_W_B,
+                          .m_bias       = estimate_frame.m_bias,
+                          .m_segment_id = m_impl->m_state->m_segment_id };
+    result.diagnostics.m_vio = m_impl->makeVioDiagnostics( vio_graph_info );
     transaction.commit();
     return result;
   }
