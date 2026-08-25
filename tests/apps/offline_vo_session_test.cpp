@@ -181,6 +181,8 @@ namespace
     EXPECT_EQ( counts.outliers_culled, 0U );
     EXPECT_EQ( counts.outliers_culled_unique, 0U );
     EXPECT_EQ( counts.outlier_reopts, 0U );
+    EXPECT_EQ( counts.non_keyframe_evictions, 0U );
+    EXPECT_EQ( counts.imu_reintegrations, 0U );
   }
 
   TEST( OfflineVoSessionTest, SkipDropMinCulledDefaultsFour )

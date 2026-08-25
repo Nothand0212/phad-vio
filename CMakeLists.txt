@@ -482,6 +482,7 @@ if(PHAD_BUILD_TESTS)
     tests/estimator/keyframe_update_test.cpp
     tests/estimator/multiframe_triangulation_test.cpp
     tests/estimator/vio_full_state_test.cpp
+    tests/estimator/vio_eviction_test.cpp
   )
   target_link_libraries(phad_estimator_tests PRIVATE
     phad::estimator gtsam GTest::gtest_main

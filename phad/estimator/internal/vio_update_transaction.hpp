@@ -47,6 +47,9 @@ namespace phad::estimator::internal
     std::vector<sensor::ImuMeasurement>               m_bootstrap_nodes;
     std::optional<common::Timestamp>                  m_continuity_anchor;
     std::int64_t                                      m_visual_coast_duration_ns = 0;
+    std::uint64_t                                     m_non_keyframe_evictions   = 0;
+    std::uint64_t                                     m_imu_reintegrations       = 0;
+    VioDiagnostics                                    m_vio_diagnostics;
   };
 
   class VioUpdateTransaction final

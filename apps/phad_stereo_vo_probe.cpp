@@ -222,6 +222,10 @@ namespace
               << "zombie_age_drops=" << result.counts.zombie_age_drops << '\n'
               << "zombie_age_drop_ids=" << result.counts.zombie_age_drop_ids
               << '\n'
+              << "non_keyframe_evictions="
+              << result.counts.non_keyframe_evictions << '\n'
+              << "imu_reintegrations=" << result.counts.imu_reintegrations
+              << '\n'
               << "reproj_rms_after_median_px=" << result.reproj.median_px
               << '\n'
               << "reproj_rms_after_p95_px=" << result.reproj.p95_px << '\n'

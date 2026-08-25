@@ -57,6 +57,7 @@ namespace phad::estimator
     using internal::ImuIntervalStep;
     using internal::NormalizedImuInterval;
     using internal::normalizeRawImuInterval;
+    using internal::spliceNormalizedImuIntervals;
     using internal::VioUpdateTransaction;
     using internal::WindowFrame;
 
@@ -647,6 +648,7 @@ namespace phad::estimator
         throw std::invalid_argument(
             "EstimatorOptions bootstrap/coast values are invalid" );
       }
+      m_state->m_vio_diagnostics = makeVioDiagnostics( VioGraphInfo{} );
     }
 
     [[nodiscard]] std::uint32_t completeActiveSegment(
@@ -663,6 +665,7 @@ namespace phad::estimator
       m_state->m_continuity_anchor        = next_continuity_anchor;
       m_state->m_visual_coast_duration_ns = 0;
       m_state->m_initialized              = false;
+      m_state->m_vio_diagnostics          = makeVioDiagnostics( VioGraphInfo{} );
       ++m_state->m_segment_id;
       return completed_segment;
     }
@@ -1115,38 +1118,126 @@ namespace phad::estimator
       return counts;
     }
 
-    void resetEvictedImuLinks()
+    void rebaseWindowFront()
     {
-      std::unordered_set<std::uint64_t> surviving_frames;
-      surviving_frames.reserve( m_state->m_window.size() );
-      for ( const WindowFrame& frame : m_state->m_window )
+      if ( m_state->m_window.empty() )
       {
-        surviving_frames.insert( frame.m_frame_index );
+        return;
+      }
+      m_state->m_window.front().m_predecessor_frame_index.reset();
+      m_state->m_window.front().m_imu.reset();
+    }
+
+    void validateNavigationWindow() const
+    {
+      if ( m_state->m_window.empty() )
+      {
+        return;
       }
 
-      for ( WindowFrame& frame : m_state->m_window )
+      const WindowFrame& root = m_state->m_window.front();
+      if ( root.m_predecessor_frame_index.has_value() ||
+           root.m_imu.has_value() )
       {
-        if ( !frame.m_predecessor_frame_index.has_value() )
-        {
-          if ( frame.m_imu.has_value() )
-          {
-            throw std::runtime_error(
-                "root navigation state unexpectedly carries an IMU interval" );
-          }
-          continue;
-        }
-        if ( surviving_frames.contains( *frame.m_predecessor_frame_index ) )
-        {
-          if ( !frame.m_imu.has_value() )
-          {
-            throw std::runtime_error(
-                "linked navigation state is missing its IMU interval" );
-          }
-          continue;
-        }
-        frame.m_predecessor_frame_index.reset();
-        frame.m_imu.reset();
+        throw std::runtime_error(
+            "navigation window root carries a predecessor or IMU interval" );
       }
+
+      for ( std::size_t index = 1U; index < m_state->m_window.size();
+            ++index )
+      {
+        const WindowFrame& predecessor = m_state->m_window[ index - 1U ];
+        const WindowFrame& frame       = m_state->m_window[ index ];
+        if ( !frame.m_predecessor_frame_index.has_value() ||
+             *frame.m_predecessor_frame_index !=
+                 predecessor.m_frame_index ||
+             !frame.m_imu.has_value() )
+        {
+          throw std::runtime_error(
+              "navigation window contains a dangling predecessor link" );
+        }
+        const std::optional<std::int64_t> duration_ns =
+            checkedPositiveDurationNs( predecessor.m_timestamp,
+                                       frame.m_timestamp );
+        if ( predecessor.m_frame_index >= frame.m_frame_index ||
+             !duration_ns.has_value() ||
+             frame.m_imu->m_raw.m_t_begin != predecessor.m_timestamp ||
+             frame.m_imu->m_raw.m_t_end != frame.m_timestamp ||
+             frame.m_imu->m_nodes.empty() ||
+             frame.m_imu->m_nodes.front().timestamp !=
+                 predecessor.m_timestamp ||
+             frame.m_imu->m_nodes.back().timestamp != frame.m_timestamp ||
+             frame.m_imu->m_duration_ns != *duration_ns )
+        {
+          throw std::runtime_error(
+              "navigation window provenance does not match linked states" );
+        }
+      }
+    }
+
+    [[nodiscard]] bool evictOldestNonKeyframe()
+    {
+      if ( m_state->m_window.size() < 3U )
+      {
+        return false;
+      }
+
+      const auto last    = std::prev( m_state->m_window.end() );
+      const auto evicted = std::find_if(
+          std::next( m_state->m_window.begin() ), last,
+          []( const WindowFrame& frame ) { return !frame.m_is_keyframe; } );
+      if ( evicted == last )
+      {
+        return false;
+      }
+
+      const auto predecessor = std::prev( evicted );
+      const auto successor   = std::next( evicted );
+      if ( !evicted->m_predecessor_frame_index.has_value() ||
+           *evicted->m_predecessor_frame_index !=
+               predecessor->m_frame_index ||
+           !evicted->m_imu.has_value() ||
+           !successor->m_predecessor_frame_index.has_value() ||
+           *successor->m_predecessor_frame_index !=
+               evicted->m_frame_index ||
+           !successor->m_imu.has_value() )
+      {
+        throw std::runtime_error(
+            "non-keyframe eviction requires adjacent navigation provenance" );
+      }
+
+      ImuIntervalResult joined = spliceNormalizedImuIntervals(
+          *evicted->m_imu, *successor->m_imu,
+          predecessor->m_timestamp, evicted->m_timestamp,
+          successor->m_timestamp );
+      if ( std::holds_alternative<ImuIntervalError>( joined ) )
+      {
+        throw std::runtime_error(
+            std::get<ImuIntervalError>( std::move( joined ) ).m_detail );
+      }
+
+      successor->m_predecessor_frame_index = predecessor->m_frame_index;
+      successor->m_imu =
+          std::get<NormalizedImuInterval>( std::move( joined ) );
+      m_state->m_window.erase( evicted );
+      ++m_state->m_non_keyframe_evictions;
+      ++m_state->m_imu_reintegrations;
+      return true;
+    }
+
+    void enforceWindowCapacity()
+    {
+      while ( static_cast<int>( m_state->m_window.size() ) >
+              options.window_size )
+      {
+        if ( evictOldestNonKeyframe() )
+        {
+          continue;
+        }
+        m_state->m_window.pop_front();
+        rebaseWindowFront();
+      }
+      validateNavigationWindow();
     }
 
     [[nodiscard]] gtsam::PreintegratedImuMeasurements preintegrate(
@@ -1373,6 +1464,9 @@ namespace phad::estimator
       diagnostics.m_integrated_duration_ns = info.m_integrated_duration_ns;
       diagnostics.m_visual_coast_duration_ns =
           m_state->m_visual_coast_duration_ns;
+      diagnostics.m_non_keyframe_evictions =
+          m_state->m_non_keyframe_evictions;
+      diagnostics.m_imu_reintegrations = m_state->m_imu_reintegrations;
       diagnostics.m_acc_cov_diag =
           pim_params->accelerometerCovariance.diagonal();
       diagnostics.m_gyr_cov_diag =
@@ -1557,7 +1651,13 @@ namespace phad::estimator
     result.diagnostics.num_observations =
         static_cast<std::uint32_t>( measurement.m_observations.size() );
     result.diagnostics.segment_id = m_impl->m_state->m_segment_id;
-    result.diagnostics.m_vio      = m_impl->makeVioDiagnostics( VioGraphInfo{} );
+    result.diagnostics.window_size =
+        static_cast<std::uint32_t>( m_impl->m_state->m_window.size() );
+    result.diagnostics.prior_key = m_impl->m_state->m_window.empty()
+                                       ? 0U
+                                       : m_impl->m_state->m_window.front()
+                                             .m_frame_index;
+    result.diagnostics.m_vio     = m_impl->m_state->m_vio_diagnostics;
     const auto finalizePreStagingHardResult =
         [ & ]( UpdateStatus status, std::string message ) -> VioUpdateResult {
       result.status  = status;
@@ -1600,9 +1700,10 @@ namespace phad::estimator
 
       const std::uint32_t completed_segment =
           m_impl->completeActiveSegment( discontinuity.m_t_end );
-      result.diagnostics.segment_id = m_impl->m_state->m_segment_id;
-      result.diagnostics.m_vio =
-          m_impl->makeVioDiagnostics( VioGraphInfo{} );
+      result.diagnostics.segment_id                   = m_impl->m_state->m_segment_id;
+      result.diagnostics.window_size                  = 0;
+      result.diagnostics.prior_key                    = 0;
+      result.diagnostics.m_vio                        = m_impl->m_state->m_vio_diagnostics;
       result.diagnostics.m_vio.m_completed_segment_id = completed_segment;
       result.status                                   = UpdateStatus::kDiscontinuity;
       result.message                                  = "measurement discontinuity completed the active segment";
@@ -1784,7 +1885,7 @@ namespace phad::estimator
         result.diagnostics.window_size = 0;
         result.diagnostics.prior_key   = 0;
         result.diagnostics.m_vio =
-            m_impl->makeVioDiagnostics( VioGraphInfo{} );
+            m_impl->m_state->m_vio_diagnostics;
         result.diagnostics.m_vio.m_completed_segment_id = completed_segment;
         result.status                                   = UpdateStatus::kVisualOutage;
         result.message                                  = "visual support outage completed the active segment";
@@ -1869,6 +1970,13 @@ namespace phad::estimator
       result.status                 = status;
       result.message                = std::move( message );
       result.diagnostics.segment_id = m_impl->m_state->m_segment_id;
+      result.diagnostics.window_size =
+          static_cast<std::uint32_t>( m_impl->m_state->m_window.size() );
+      result.diagnostics.prior_key = m_impl->m_state->m_window.empty()
+                                         ? 0U
+                                         : m_impl->m_state->m_window.front()
+                                               .m_frame_index;
+      result.diagnostics.m_vio     = m_impl->m_state->m_vio_diagnostics;
       result.diagnostics.culled_landmark_ids.clear();
       return result;
     };
@@ -2148,23 +2256,15 @@ namespace phad::estimator
       ++m_impl->m_state->m_next_frame_index;
     }
 
-    // Slice ① keeps a bounded contiguous navigation chain by evicting the
-    // oldest state. Keyframe-aware interior eviction and raw-interval
-    // reintegration are delivered by the dedicated eviction slice.
-    while ( static_cast<int>( m_impl->m_state->m_window.size() ) >
-            m_impl->options.window_size )
-    {
-      m_impl->m_state->m_window.pop_front();
-    }
     try
     {
-      m_impl->resetEvictedImuLinks();
+      m_impl->enforceWindowCapacity();
     }
     catch ( const std::exception& exception )
     {
       return finalizePostStagingHardResult(
           UpdateStatus::kFailed,
-          std::string( "navigation eviction repair failed: " ) +
+          std::string( "navigation eviction reintegration failed: " ) +
               exception.what() );
     }
     m_impl->pruneLandmarksNotInWindow();
@@ -2515,7 +2615,8 @@ namespace phad::estimator
                           .m_v_W_B      = estimate_frame.m_v_W_B,
                           .m_bias       = estimate_frame.m_bias,
                           .m_segment_id = m_impl->m_state->m_segment_id };
-    result.diagnostics.m_vio = m_impl->makeVioDiagnostics( vio_graph_info );
+    result.diagnostics.m_vio           = m_impl->makeVioDiagnostics( vio_graph_info );
+    m_impl->m_state->m_vio_diagnostics = result.diagnostics.m_vio;
     transaction.commit();
     return result;
   }

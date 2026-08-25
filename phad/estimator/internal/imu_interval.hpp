@@ -25,7 +25,8 @@ namespace phad::estimator::internal
     kTimestampOverflow,
     kNonFiniteInterpolation,
     kInvalidStep,
-    kClosureMismatch
+    kClosureMismatch,
+    kSharedEndpointMismatch
   };
 
   struct ImuIntervalError
@@ -58,5 +59,12 @@ namespace phad::estimator::internal
       const sensor::RawImuInterval&    raw,
       std::optional<common::Timestamp> expected_t_begin,
       common::Timestamp                expected_t_end );
+
+  [[nodiscard]] ImuIntervalResult spliceNormalizedImuIntervals(
+      const NormalizedImuInterval& before,
+      const NormalizedImuInterval& after,
+      common::Timestamp            expected_t_begin,
+      common::Timestamp            shared_endpoint,
+      common::Timestamp            expected_t_end );
 
 }  // namespace phad::estimator::internal

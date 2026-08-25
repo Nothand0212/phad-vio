@@ -1,7 +1,9 @@
 #include "phad/estimator/internal/imu_interval.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
+#include <iterator>
 #include <limits>
 #include <utility>
 
@@ -32,6 +34,28 @@ namespace phad::estimator::internal
       {
         if ( !std::isfinite( sample.accel_mps2[ axis ] ) ||
              !std::isfinite( sample.gyro_radps[ axis ] ) )
+        {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    [[nodiscard]] bool sameBits( const double lhs, const double rhs )
+    {
+      static_assert( sizeof( double ) == sizeof( std::uint64_t ) );
+      return std::bit_cast<std::uint64_t>( lhs ) ==
+             std::bit_cast<std::uint64_t>( rhs );
+    }
+
+    [[nodiscard]] bool sameMeasurementBits(
+        const sensor::ImuMeasurement& lhs,
+        const sensor::ImuMeasurement& rhs )
+    {
+      for ( std::size_t axis = 0U; axis < 3U; ++axis )
+      {
+        if ( !sameBits( lhs.accel_mps2[ axis ], rhs.accel_mps2[ axis ] ) ||
+             !sameBits( lhs.gyro_radps[ axis ], rhs.gyro_radps[ axis ] ) )
         {
           return false;
         }
@@ -225,6 +249,50 @@ namespace phad::estimator::internal
                         "normalized IMU interval does not close exactly" );
     }
     return normalized;
+  }
+
+  ImuIntervalResult spliceNormalizedImuIntervals(
+      const NormalizedImuInterval& before,
+      const NormalizedImuInterval& after,
+      const common::Timestamp      expected_t_begin,
+      const common::Timestamp      shared_endpoint,
+      const common::Timestamp      expected_t_end )
+  {
+    if ( before.m_raw.m_t_begin != expected_t_begin ||
+         before.m_raw.m_t_end != shared_endpoint ||
+         after.m_raw.m_t_begin != shared_endpoint ||
+         after.m_raw.m_t_end != expected_t_end || before.m_nodes.empty() ||
+         after.m_nodes.empty() ||
+         before.m_nodes.front().timestamp != expected_t_begin ||
+         before.m_nodes.back().timestamp != shared_endpoint ||
+         after.m_nodes.front().timestamp != shared_endpoint ||
+         after.m_nodes.back().timestamp != expected_t_end )
+    {
+      return makeError(
+          ImuIntervalErrorCode::kSharedEndpointMismatch,
+          "stored IMU provenance does not match adjacent state timestamps" );
+    }
+
+    if ( !sameMeasurementBits( before.m_nodes.back(),
+                               after.m_nodes.front() ) )
+    {
+      return makeError(
+          ImuIntervalErrorCode::kSharedEndpointMismatch,
+          "shared IMU endpoint has bit-inconsistent accel/gyro values" );
+    }
+
+    sensor::RawImuInterval joined;
+    joined.m_t_begin = expected_t_begin;
+    joined.m_t_end   = expected_t_end;
+    joined.m_samples.reserve( before.m_nodes.size() + after.m_nodes.size() -
+                              1U );
+    joined.m_samples.insert( joined.m_samples.end(), before.m_nodes.begin(),
+                             before.m_nodes.end() );
+    joined.m_samples.insert( joined.m_samples.end(),
+                             std::next( after.m_nodes.begin() ),
+                             after.m_nodes.end() );
+    return normalizeRawImuInterval( joined, expected_t_begin,
+                                    expected_t_end );
   }
 
 }  // namespace phad::estimator::internal

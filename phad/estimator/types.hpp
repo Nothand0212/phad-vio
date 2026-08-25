@@ -132,6 +132,8 @@ namespace phad::estimator
     std::uint32_t               m_integration_steps        = 0;
     std::int64_t                m_integrated_duration_ns   = 0;
     std::int64_t                m_visual_coast_duration_ns = 0;
+    std::uint64_t               m_non_keyframe_evictions   = 0;
+    std::uint64_t               m_imu_reintegrations       = 0;
     Eigen::Vector3d             m_acc_cov_diag             = Eigen::Vector3d::Zero();
     Eigen::Vector3d             m_gyr_cov_diag             = Eigen::Vector3d::Zero();
     Eigen::Vector3d             m_integration_cov_diag     = Eigen::Vector3d::Zero();

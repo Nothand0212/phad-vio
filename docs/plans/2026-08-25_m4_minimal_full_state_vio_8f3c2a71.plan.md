@@ -1,6 +1,6 @@
 ---
 name: M4 minimal full-state VIO
-overview: 单一 VioEstimator 的 packet-to-state 与 visual-outage vertical slices 已完成；eviction reintegration 由下一分片完成。
+overview: 单一 VioEstimator 的 packet-to-state、visual-outage 与 eviction-reintegration vertical slices 已完成。
 todos:
   - id: full-state-packet-to-state
     content: 原子迁移 VioEstimator、tagged IMU payload、静止 bootstrap、X/V/B + ImuFactor + bias-RW，并以 estimator/sync/apps 定向测试验收
@@ -10,7 +10,7 @@ todos:
     status: completed
   - id: eviction-reintegration
     content: 实现 non-keyframe eviction 的 raw interval 拼接、fresh reintegration 与 factor/window 原子替换，并补 bounded-window tests
-    status: pending
+    status: completed
 isProject: false
 ---
 

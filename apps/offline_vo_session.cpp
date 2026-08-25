@@ -802,6 +802,9 @@ namespace phad::apps
       }
 
       const auto& d = update.diagnostics;
+      result.counts.non_keyframe_evictions =
+          d.m_vio.m_non_keyframe_evictions;
+      result.counts.imu_reintegrations = d.m_vio.m_imu_reintegrations;
       result.counts.outliers_culled += d.outliers_culled;
       result.counts.outliers_culled_unique += d.outliers_culled_unique;
       // Slice ④e: accumulate successful reopt *rounds*, not frames-with-reopt.

@@ -152,6 +152,8 @@ namespace phad::apps
     /// Slice ⑤: keyframe counts.
     std::uint64_t total_keyframes         = 0;
     std::uint64_t total_track_only_frames = 0;
+    std::uint64_t non_keyframe_evictions  = 0;
+    std::uint64_t imu_reintegrations      = 0;
   };
 
   struct StageTiming
