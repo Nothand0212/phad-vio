@@ -281,19 +281,22 @@ namespace phad::estimator
     };
 
     [[nodiscard]] BootstrapStats bootstrapStats(
-        const std::vector<sensor::ImuMeasurement>& samples )
+        const std::vector<sensor::ImuMeasurement>& samples,
+        std::size_t                                begin = 0U )
     {
       BootstrapStats stats;
-      for ( const sensor::ImuMeasurement& sample : samples )
+      for ( std::size_t index = begin; index < samples.size(); ++index )
       {
+        const sensor::ImuMeasurement& sample = samples[ index ];
         stats.m_acc_mean += sampleAcc( sample );
         stats.m_gyr_mean += sampleGyr( sample );
       }
-      const double count = static_cast<double>( samples.size() );
+      const double count = static_cast<double>( samples.size() - begin );
       stats.m_acc_mean /= count;
       stats.m_gyr_mean /= count;
-      for ( const sensor::ImuMeasurement& sample : samples )
+      for ( std::size_t index = begin; index < samples.size(); ++index )
       {
+        const sensor::ImuMeasurement& sample = samples[ index ];
         stats.m_acc_std +=
             ( sampleAcc( sample ) - stats.m_acc_mean ).array().square().matrix();
         stats.m_gyr_std +=
@@ -302,6 +305,36 @@ namespace phad::estimator
       stats.m_acc_std = ( stats.m_acc_std / count ).array().sqrt().matrix();
       stats.m_gyr_std = ( stats.m_gyr_std / count ).array().sqrt().matrix();
       return stats;
+    }
+
+    [[nodiscard]] std::optional<std::size_t> recentBootstrapBegin(
+        const std::vector<sensor::ImuMeasurement>& samples,
+        std::int64_t                               min_duration_ns,
+        std::uint32_t                              min_samples )
+    {
+      const std::size_t required_samples =
+          static_cast<std::size_t>( min_samples );
+      if ( samples.size() < required_samples )
+      {
+        return std::nullopt;
+      }
+
+      std::size_t begin = samples.size() - required_samples;
+      while ( true )
+      {
+        const std::optional<std::int64_t> duration_ns =
+            checkedPositiveDurationNs( samples[ begin ].timestamp,
+                                       samples.back().timestamp );
+        if ( duration_ns.has_value() && *duration_ns >= min_duration_ns )
+        {
+          return begin;
+        }
+        if ( begin == 0U )
+        {
+          return std::nullopt;
+        }
+        --begin;
+      }
     }
 
     [[nodiscard]] Eigen::Matrix3d minimalRotationToWorldUp(
@@ -1779,12 +1812,32 @@ namespace phad::estimator
           std::abs( bootstrap_stats.m_acc_mean.norm() -
                     m_impl->options.m_gravity_mps2 ) <=
               m_impl->options.m_bootstrap_acc_norm_tol_mps2;
-      const bool ready =
+      const bool static_ready =
           *bootstrap_duration_ns >=
               m_impl->options.m_bootstrap_min_duration_ns &&
           bootstrap_nodes.size() >=
               m_impl->options.m_bootstrap_min_samples &&
           stationary;
+      bool moving_bootstrap = false;
+      if ( !static_ready &&
+           m_impl->options.m_enable_moving_bootstrap )
+      {
+        const std::optional<std::size_t> recent_begin = recentBootstrapBegin(
+            bootstrap_nodes, m_impl->options.m_bootstrap_min_duration_ns,
+            m_impl->options.m_bootstrap_min_samples );
+        if ( recent_begin.has_value() )
+        {
+          const BootstrapStats recent_stats =
+              bootstrapStats( bootstrap_nodes, *recent_begin );
+          if ( recent_stats.m_acc_mean.norm() >
+               std::numeric_limits<double>::epsilon() )
+          {
+            bootstrap_stats  = recent_stats;
+            moving_bootstrap = true;
+          }
+        }
+      }
+      const bool ready = static_ready || moving_bootstrap;
       if ( !ready )
       {
         VioUpdateTransaction transaction( m_impl->m_state );
@@ -1806,7 +1859,10 @@ namespace phad::estimator
         return result;
       }
 
-      bootstrap_bias.m_gyr_radps = bootstrap_stats.m_gyr_mean;
+      if ( !moving_bootstrap )
+      {
+        bootstrap_bias.m_gyr_radps = bootstrap_stats.m_gyr_mean;
+      }
       bootstrap_T_W_B.linear() =
           minimalRotationToWorldUp( bootstrap_stats.m_acc_mean );
       if ( measurement.m_observations.empty() )

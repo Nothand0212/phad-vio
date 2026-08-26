@@ -435,6 +435,34 @@ namespace
   }
 
   TEST( StereoPairSynchronizerTest,
+        LeadingStereoBeforeFirstImuDoesNotBlockFirstSupportedPacket )
+  {
+    StereoPairSynchronizer sync{ makeOptions() };
+    EXPECT_FALSE( sync.tryPopPacket().has_value() );
+
+    pushPair( sync, 1000, 1 );
+    EXPECT_FALSE( sync.tryPopPacket().has_value() );
+
+    expectImuPushOk( sync, makeImu( 1020, 1.0 ) );
+    expectImuPushOk( sync, makeImu( 1030, 2.0 ) );
+    expectImuPushOk( sync, makeImu( 1040, 3.0 ) );
+    expectImuPushOk( sync, makeImu( 1050, 4.0 ) );
+    pushPair( sync, 1050, 2 );
+
+    const auto packet = sync.tryPopPacket();
+    ASSERT_TRUE( packet.has_value() );
+    EXPECT_EQ( packet->m_frame.timestamp, Timestamp{ 1050 } );
+    const RawImuInterval* raw = rawPayload( *packet );
+    ASSERT_NE( raw, nullptr );
+    EXPECT_EQ( raw->m_t_begin, Timestamp{ 1020 } );
+    EXPECT_EQ( raw->m_t_end, Timestamp{ 1050 } );
+    ASSERT_EQ( raw->m_samples.size(), 4U );
+    EXPECT_EQ( raw->m_samples.front().timestamp, Timestamp{ 1020 } );
+    EXPECT_EQ( raw->m_samples.back().timestamp, Timestamp{ 1050 } );
+    EXPECT_FALSE( sync.tryPopPacket().has_value() );
+  }
+
+  TEST( StereoPairSynchronizerTest,
         ExactBoundarySamplesRemainRawAndIntervalsClose )
   {
     StereoPairSynchronizer sync{ makeOptions() };

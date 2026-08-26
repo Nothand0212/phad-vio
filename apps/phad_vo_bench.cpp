@@ -59,6 +59,7 @@ namespace
       "                     [--far-refresh-px <px>]\n"
       "                     [--tracker-enable-census]\n"
       "                     [--tracker-disable-exposure-norm]\n"
+      "                     [--estimator-enable-moving-bootstrap]\n"
       "                     [--min-seed-observations <n>]\n";
 
 #ifndef PHAD_SOURCE_DIR
@@ -113,6 +114,8 @@ namespace
     // 首段累积播种默认关 (实测否决全量版, 残存首段专用版);
     // --estimator-enable-accumulated-seed 打开 (A/B)。
     bool enable_accumulated_seed = false;
+    // Explicit product option; enters flattenConfig / config_hash.
+    bool enable_moving_bootstrap = false;
   };
 
   [[nodiscard]] bool parseDouble( std::string_view text, double& value )
@@ -217,6 +220,11 @@ namespace
       if ( flag == "--estimator-enable-accumulated-seed" )
       {
         arguments.enable_accumulated_seed = true;
+        continue;
+      }
+      if ( flag == "--estimator-enable-moving-bootstrap" )
+      {
+        arguments.enable_moving_bootstrap = true;
         continue;
       }
       if ( index + 1 >= argc )
@@ -562,6 +570,10 @@ namespace
               estimator.hanging_landmark_gate_m );
     snap.set( "estimator.far_return_refresh_px",
               estimator.far_return_refresh_px );
+    snap.set( "estimator.enable_moving_bootstrap",
+              estimator.m_enable_moving_bootstrap );
+    snap.set( "estimator.velocity_prior_sigma_mps",
+              estimator.m_velocity_prior_sigma_mps );
 
     snap.set( "session.dataset_format", std::string( "euroc" ) );
     snap.set( "session.drop_culled_tracks", session.drop_culled_tracks );
@@ -716,6 +728,8 @@ namespace
         arguments.enable_zero_mean_sad;
     session_options.estimator.enable_accumulated_seed =
         arguments.enable_accumulated_seed;
+    session_options.estimator.m_enable_moving_bootstrap =
+        arguments.enable_moving_bootstrap;
     if ( arguments.min_seed_observations.has_value() )
     {
       session_options.estimator.min_seed_observations =

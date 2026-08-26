@@ -90,10 +90,15 @@ namespace phad::estimator
     double        m_bootstrap_max_gyr_std_radps = 0.005;
     double        m_bootstrap_acc_norm_tol_mps2 = 0.25;
     std::int64_t  m_bootstrap_timeout_ns        = 1'000'000'000;
-    double        m_velocity_prior_sigma_mps    = 1e-3;
-    double        m_acc_bias_prior_sigma_mps2   = 0.1;
-    double        m_gyr_bias_prior_sigma_radps  = 0.01;
-    std::int64_t  m_visual_coast_horizon_ns     = 500'000'000;
+    // Explicit moving-start fallback: use the shortest recent suffix that
+    // satisfies the bootstrap duration/sample floor for gravity direction,
+    // while leaving initial velocity and both biases at zero. Static
+    // bootstrap remains the default and retains gyro-mean bias estimation.
+    bool         m_enable_moving_bootstrap    = false;
+    double       m_velocity_prior_sigma_mps   = 0.1;
+    double       m_acc_bias_prior_sigma_mps2  = 0.1;
+    double       m_gyr_bias_prior_sigma_radps = 0.01;
+    std::int64_t m_visual_coast_horizon_ns    = 500'000'000;
   };
 
   enum class UpdateStatus : std::uint8_t

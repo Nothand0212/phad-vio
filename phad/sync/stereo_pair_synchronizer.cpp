@@ -303,6 +303,14 @@ namespace phad::sync
   {
     while ( !m_paired.empty() )
     {
+      if ( !m_last_emitted_left.has_value() && !m_imu.empty() &&
+           m_imu.front().timestamp >= m_paired.front().timestamp )
+      {
+        // IMU timestamps are strictly increasing, so no future sample can
+        // provide positive-duration support before this leading stereo pair.
+        m_paired.pop_front();
+        continue;
+      }
       std::optional<sensor::StereoImuPacket> packet =
           makePacket( m_paired.front(), source_exhausted );
       if ( !packet.has_value() )
