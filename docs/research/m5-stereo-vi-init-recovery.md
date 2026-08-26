@@ -501,7 +501,7 @@ MH_01/03/04/05 在 `c999f58` 上已是单段、ATE 优于或接近旧 VO。验�
 
 - [`docs/roadmap.md` M5/M6](../roadmap.md)
 - [`docs/benchmark/m4/minimal-full-state-vio_c999f58_0337287b.md`](../benchmark/m4/minimal-full-state-vio_c999f58_0337287b.md)
-- [`docs/research/m4-minimal-full-state-vio-spec.md`](m4-minimal-full-state-vio-spec.md)（单一 `update()` seam、静止 bootstrap 合同）
+- [`docs/spec/m4-minimal-full-state-vio-spec.md`](../spec/m4-minimal-full-state-vio-spec.md)（单一 `update()` seam、静止 bootstrap 合同）
 - [`phad/estimator/types.hpp`](../../phad/estimator/types.hpp)、[`vio_estimator.hpp`](../../phad/estimator/vio_estimator.hpp)
 - OpenVINS docs：<https://docs.openvins.com/>（init 默认值以头文件为准）
 

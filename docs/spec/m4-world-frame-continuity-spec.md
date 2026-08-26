@@ -8,8 +8,8 @@ issue：[#43](https://github.com/Nothand0212/phad-vio/issues/43)（map：[#42](h
 
 control：[M4 checkpoint `c999f58` / `default_0337287b`](../benchmark/m4/minimal-full-state-vio_c999f58_0337287b.md)
 
-证据：[方向分析](m4-next-direction-analysis.md)（§B 分解、§C 机制）、
-[coast 传播漂移探针](m4-coast-propagation-probe-design.md)（预注册 + PASS）
+证据：[方向分析](../research/m4-next-direction-analysis.md)（§B 分解、§C 机制）、
+[coast 传播漂移探针](../research/m4-coast-propagation-probe-design.md)（预注册 + PASS）
 
 ## 1. 目标与证据边界
 

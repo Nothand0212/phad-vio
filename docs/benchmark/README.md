@@ -4,7 +4,7 @@
 
 `docs/benchmark/` 是关键行为 checkpoint 的 benchmark 权威入口。它保存可审查、
 可复现、可比较的结果摘要；算法调研、设计和失败机理分析仍放在
-`docs/research/`，实施步骤仍放在 `docs/plans/`。
+`docs/research/`，已收口合同放在 `docs/spec/`，实施步骤仍放在 `docs/plans/`。
 
 Issue：[#26](https://github.com/Nothand0212/phad-vio/issues/26)。
 
