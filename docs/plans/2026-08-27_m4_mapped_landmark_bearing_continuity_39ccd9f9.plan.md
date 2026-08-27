@@ -1,6 +1,6 @@
 ---
 name: M4 已建图 landmark 左目重投影连续性
-overview: 在既有 VioEstimator::update() seam 内，先补齐 clean Q0 的 core-4/EuRoC-11 并冻结多序列产品 envelope，再按 Q1 Observe、Q4 Constrain、Q5 PnP/support 的证据门，让已建图 landmark 的 left-only bearing 进入诊断、posterior 与连续性反馈；双目继续独占深度、播种与尺度。完成机制回归后运行一次 clean candidate Remote CI，与 Q0 全量对拍并据结果确定下一工作方向。
+overview: 在既有 VioEstimator::update() seam 内，先在同一台本机补齐 clean Q0 的 core-4/EuRoC-11 并冻结多序列产品 envelope，再按 Q1 Observe、Q4 Constrain、Q5 PnP/support 的证据门，让已建图 landmark 的 left-only bearing 进入诊断、posterior 与连续性反馈；双目继续独占深度、播种与尺度。完成机制回归后运行一次 matched clean candidate 本机实验，与 Q0 全量对拍并据结果确定下一工作方向。
 todos:
   - id: isolate-control-and-workspace
     content: '记录 42f99e9、default_0337287b 与现有 dirty paths；在独立 clean worktree 运行 Q0，实施分支只显式暂存 #47 文件'
@@ -9,7 +9,7 @@ todos:
     content: '补跑 clean Q0 的 V1_03→V2_02→V2_03；无 accuracy early-stop，冻结 core-4 identity、meta、逐序列精度、coverage 与段内/段间指标'
     status: completed
   - id: complete-q0-euroc11
-    content: '从 clean 42f99e9 运行 ci-euroc11 control，fetch 并核对 11 条 source/toolchain/config/artifact'
+    content: '在本机从 clean 42f99e9 串行补齐 EuRoC-11 control，并核对 11 条 source/toolchain/config/artifact'
     status: in_progress
   - id: freeze-product-envelope
     content: '在任何 Q1/Q4/Q5 candidate 结果前计算 core-4/EuRoC-11 的 gate 基线，确认并冻结 G_ATE/G_RPE、有效性、tail review 与 continuity 数值规则'
@@ -44,8 +44,8 @@ todos:
   - id: freeze-clean-candidate
     content: '在用户授权下形成带 #47 的分阶段 local commits 和 clean candidate identity；不 push/merge'
     status: pending
-  - id: run-remote-ci-experiment
-    content: '从 clean candidate commit 启动一次 ci-euroc11，等待、fetch，核对身份并与 clean Q0 做 11 条多序列产品判定'
+  - id: run-local-candidate-experiment
+    content: '从 clean candidate commit 在同一台本机运行 EuRoC-11，核对身份并与 matched clean Q0 做 11 条多序列产品判定'
     status: pending
   - id: analyze-next-direction
     content: '按机制生效、suite-level outcome、逐序列 tail、段内/段间误差与 initializing/outage 分布形成结论和下一 vertical slice 建议'
@@ -58,8 +58,9 @@ isProject: false
 ## 状态
 
 **Spec（含多序列产品 gate）与本计划已于 2026-08-27 定稿。短分支、文档提交、
-core-4 clean Q0 与机制归因已经完成；Stage 0 正在等待 Remote CI 服务器恢复以
-补齐 EuRoC-11 control，尚未开始 #47 的生产 C++ 修改或 candidate experiment。**
+core-4 clean Q0 与机制归因已经完成；Stage 0 正在同一台本机从保留的 clean
+worktree 补齐 EuRoC-11 control，尚未开始 #47 的生产 C++ 修改或 candidate
+experiment。**
 
 已完成的 control 事实：clean `42f99e9/default_0337287b` unit 共 `458/458`
 通过（另有 3 个既有 skip）；core-4 全部完成且
@@ -83,8 +84,7 @@ Q5b 最后扩展 support/liveness。每一阶段的前一门必须实际 PASS，
 4. [#47](https://github.com/Nothand0212/phad-vio/issues/47) 与 epic
    [#42](https://github.com/Nothand0212/phad-vio/issues/42)。
 5. [`evidence-gated-integration.md`](../agents/evidence-gated-integration.md)、
-   [`incremental-development.md`](../agents/incremental-development.md)、
-   [`remote-ci.md`](../agents/remote-ci.md) 与仓库测试/命名约定。
+   [`incremental-development.md`](../agents/incremental-development.md) 与仓库测试/命名约定。
 
 | 项 | 值 |
 |---|---|
@@ -94,8 +94,8 @@ Q5b 最后扩展 support/liveness。每一阶段的前一门必须实际 PASS，
 | canonical config | `default_0337287b`，本片不增加 key |
 | 实施分支 | `codex/m4-mapped-landmark-bearing-continuity`（已创建） |
 | issue | `#47`；所有授权 commit subject 带 `(#47)` |
-| dataset root | `/home/lin/Projects/data/thidparty/euroc/native`；CI 为 `/home/lin/data/euroc/native` |
-| artifact root | `/home/lin/Projects/data/phad-bench` 与 `artifacts/remote-ci/runs/<run-id>` |
+| dataset root | `/home/lin/Projects/data/thidparty/euroc/native` |
+| artifact root | `/home/lin/Projects/data/phad-bench` |
 
 当前工作树已有 `scripts/remote_ci.py`、`tests/scripts/test_remote_ci.py` 的独立
 修改。实施不覆盖、不整理、不顺带提交这两个 path。开工时先记录
@@ -105,7 +105,7 @@ Q5b 最后扩展 support/liveness。每一阶段的前一门必须实际 PASS，
    进入 control source manifest。
 2. #47 在当前工作树的短分支上实施，只按显式 pathspec 暂存本计划列出的文件。
 3. 每个需要自然 replay 的阶段，从该阶段授权 commit 建立独立 clean worktree；
-   Remote CI 只从 clean worktree 生成 snapshot。
+   Q0 与 candidate 使用同一台本机、相同 Release toolchain/config/data。
 4. 分支切换或显式暂存若与既有 dirty paths 发生重叠，立即停止，不 stash、reset、
    clean 或改写其内容。
 
@@ -200,9 +200,9 @@ mixed mapped population
    身份或 artifact schema 系统性失效才停止 suite。
 4. 每条冻结 ATE/RPE、completion/coverage、segments/reanchors、段内加权 RMS、
    绝对段间分量、status/cadence 与完整 `meta.json`。
-5. 从同一 clean `42f99e9` 启动一次 `ci-euroc11` Q0 control；等待 11 个任务终态、
-   fetch，并核对 toolchain/image/data/config。profile 的并行与“单任务失败不取消
-   兄弟任务”语义正好用于收集完整多序列分布。
+5. 从同一 clean `42f99e9` worktree 与 Release build 在本机串行补齐 EuRoC-11
+   Q0 control；每条保留独立 artifact，并核对 source/tree、toolchain、data、config。
+   单条 accuracy 或运行失败不取消其余序列，以收集完整多序列分布。
 6. 用 11 条 `summary.json` 计算逐序列 ratio 表的 control 侧输入，补齐
    `mapped-landmark-bearing-q0_42f99e9_0337287b.md`。结合 M4 checkpoint 与绝对
    工程量级提出 `G_ATE`、`G_RPE`、completion/coverage、tail review 与 V2_03
@@ -210,10 +210,10 @@ mixed mapped population
 7. clean Q0 与既有 record-only run 若存在 manifest 不能解释的差异，先解决
    reproducibility；在多序列 envelope 冻结前不进入 Q1。
 
-Q0 的 `ci-euroc11` 是 control 测量；最终仍只运行一次 clean **candidate** Remote
-CI。两次 run 使用相同 profile/toolchain/config/data，使 source commit 成为主要
-实验变量。最终 `core-4` 产品 ratio 也取这两次 Remote CI 中对应四条的子集；本地
-串行 core-4 负责开发前复现与分解，不与远端 candidate 跨环境计算 ratio。
+Q0 的 EuRoC-11 是 control 测量；最终只运行一次 clean **candidate** EuRoC-11。
+两次 run 使用同一台本机、相同 Release toolchain/config/data，使 source commit
+成为主要实验变量。最终 `core-4` 产品 ratio 取两次 matched 本机实验中对应四条
+的子集，不跨机器或工具链计算 ratio。
 
 ### 4.2 授权后的分支与 logical commits
 
@@ -472,14 +472,14 @@ git diff -- <本片显式路径>
 
 最终审计必须确认：
 
-- include/constructor 与本机 GTSAM 4.3、Remote CI 固定 GTSAM commit 一致；
+- include/constructor 与本机实验固定的 GTSAM 4.3 一致；
 - no-double-count、2D/3D noise dimension、extrinsic direction 与 residual 分母；
 - support 在 pre-intake population 上锁定；
 - current factor count 跟随最后一次成功 solve/reopt graph；
 - 失败路径没有 mono drop 后的隐式成功；
 - config hash、frontend output、solver/window/horizon 未改变。
 
-## 11. Natural replay、Remote CI 与产品门
+## 11. Natural replay、本机实验与产品门
 
 ### 11.1 Q1 natural replay
 
@@ -491,24 +491,27 @@ Q1 eligibility 默认在 clean Q1 worktree 的 Release build 上只跑 V2_02/V2_
 - V2_02/V2_03 的 eligible frames/episodes；
 - status/cadence 和旧字段的 Q0 equivalence 报告。
 
-### 11.2 最终一次 candidate Remote CI 实验
+### 11.2 最终一次 matched candidate 本机实验
 
-机制与 local regression 全部通过后，从 clean candidate commit 运行一次：
+机制与 local regression 全部通过后，从 clean candidate commit 建立独立
+worktree，以与 Q0 相同的 Release toolchain/config/data 串行运行 11 条：
 
 ```bash
-python3 scripts/remote_ci.py doctor
-python3 scripts/remote_ci.py start --profile ci-euroc11
-python3 scripts/remote_ci.py wait <run-id>
+./build/phad_vo_bench \
+  /home/lin/Projects/data/thidparty/euroc/native/<sequence> \
+  --out /home/lin/Projects/data/phad-bench/<candidate-run>/<sequence> \
+  --sequence-name <sequence> \
+  --repo <clean-candidate-worktree> \
+  --estimator-enable-moving-bootstrap
 ```
 
-该 run 是用户要求的 candidate 服务器实验。必须核对
-`git_dirty=false`、candidate HEAD/tree、canonical config、toolchain/image ID、unit
-task 和 11 个 sequence task；fetch 后再分析，不从运行中的部分 artifact 下结论。
+必须核对 `git_dirty=false`、candidate HEAD/tree、canonical config、compiler、
+GTSAM/OpenCV identity、unit suite 和 11 个 sequence artifact；全部终态并通过数据
+质量检查后再分析，不从运行中的部分 artifact 下结论。
 
-`ci-euroc11` 在工具层继续生成完整 raw record；#47 在 fetch 后对同 profile 的 clean
-Q0/candidate 结果应用已冻结产品 gate。并行执行不会改变判定，因为结论只在 11 个
-任务全部终态后形成；accuracy tail 与单任务失败均不会取消兄弟任务。无需修改
-`scripts/remote_ci.py` 或其现有测试改动。
+bench 继续生成完整 raw record；#47 对 matched clean Q0/candidate 结果应用已冻结
+产品 gate。结论只在 11 条全部终态后形成；accuracy tail 与单条失败均不会取消
+其余序列。无需修改 `scripts/remote_ci.py` 或其现有测试改动。
 
 ### 11.3 冻结多序列产品门
 
@@ -569,7 +572,7 @@ per-sequence tail，则完成 §12 的归因后给出 `PASS` 或 `REVIEW` 结论
 2. Q1/Q4/Q5 各自的 Red 证据、GREEN tests 与 stop gate 可追溯；
 3. 所有长期测试经 public seam，不新增 GTSAM public Interface；
 4. estimator/apps 完整 suites 和 diff audit 通过；
-5. clean candidate commit 可复现，Remote CI `ci-euroc11` 已完成并 fetch；
+5. clean candidate commit 可复现，matched 本机 EuRoC-11 已完整运行；
 6. 机制计数与 11 序列分析已写入 benchmark/research 记录和 #47；
 7. clean Q0/candidate 的 core-4 与 EuRoC-11 aggregate、tail review、validity 和
    continuity 判定完整；未执行的门不标为 PASS；

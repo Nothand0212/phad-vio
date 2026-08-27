@@ -1,8 +1,8 @@
 # M4 mapped-landmark bearing Q0 control
 
 本文记录 [mapped-landmark bearing continuity spec](../../specs/2026-08-27-m4-mapped-landmark-bearing-continuity.md)
-§13.1 的 clean Q0 control。core-4 已完整运行；EuRoC-11 Remote CI control
-等待服务器恢复后补齐。
+§13.1 的 clean Q0 control。core-4 已完整运行；EuRoC-11 正在同一台本机从保留的
+clean worktree 与 Release build 补齐。
 
 ## 1. 身份与执行范围
 
@@ -70,13 +70,13 @@ G_RPE = 0.3928
 ```
 
 这两个 aggregate 只描述 `42f99e9` 相对 milestone checkpoint 的整体变化；后续
-candidate gate 使用 matched clean Q0 Remote CI 作为 immediate control。
+candidate gate 使用同机 matched clean Q0 作为 immediate control。
 
 ### 2.2 当前产品判定边界
 
 core-4 证明 control 可复现并提供逐序列 tail，但尚不形成 Q0 完整产品 envelope。
-需先取得 matched Remote CI EuRoC-11 control，再冻结 `G_ATE/G_RPE`、有效性、
-tail review 与 continuity 数值规则。
+需先取得 matched 本机 EuRoC-11 control，再冻结 `G_ATE/G_RPE`、有效性、tail
+review 与 continuity 数值规则。
 
 ## 3. 完整 canonical config
 
@@ -168,13 +168,14 @@ tracker.stereo_uniq_ratio=0.5
 
 MH_01 的五个 hash 与首次 Q0 记录逐字一致，证明续跑没有改写已有 artifact。
 
-## 5. EuRoC-11 Remote control 状态
+## 5. EuRoC-11 本机 control 状态
 
-2026-08-27T23:11:13+08:00 从 clean worktree 执行
-`python3 scripts/remote_ci.py doctor`。本机到 `192.168.110.119` 返回
-`Destination Host Unreachable` / `No route to host`，`ssh-keyscan` 未取得 key，
-因此没有建立 SSH 会话、上传 snapshot 或创建 run。服务器恢复后从同一
-`42f99e9` clean worktree 重试。
+沿用 §1 的 clean `42f99e9` worktree、Release build、canonical config、dataset
+root 与 artifact root，在同一台本机串行补跑 core-4 之外的 7 条序列。Q0 完成后
+对 11 条统一进行 identity、schema、数值、时序与 hash 校验，再冻结产品 envelope。
+
+执行环境切换前的连通性检查未建立 SSH 会话、上传 snapshot 或创建 run，不产生
+另一份 control artifact。
 
 首分叉与因果归属见
 [Q0 control diagnosis](../../research/2026-08-27-note-m4-mapped-bearing-q0-control.md)。
