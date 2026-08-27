@@ -1,15 +1,14 @@
 # AGENTS.md
 
-文档地图见 [`docs/README.md`](docs/README.md)。
+本文档描述当前约定，不是绝对约束，会随项目开发修订。
 
-- 不要为了向后兼容而保留旧实现。应移除废弃的代码路径，而不是新增兼容层、兼容兜底或迁移逻辑。
-- 选择能够完整满足当前需求的最简单实现。避免引入投机性的抽象、配置项和间接层。
-- 以分层方式演进系统。先实现端到端可用的最小版本，再在一个已经可工作的产品之上逐步叠加新能力。不要为了尚未完成的复杂性而牺牲一个可工作的产品。
-- 保持组件模块化，并清晰分离关注点。
-- 当成熟且维护良好的库能够降低整体复杂度或提升可靠性时，优先采用它们。没有明确理由时，不要重复实现通用功能。
-- 在自行实现功能或引入新依赖前，优先利用项目中已有的依赖。未经查阅文档与类型定义，不要假定某个库缺少所需能力。
-- 架构决策应着眼长期。不要采用只适用于当下、并且预期日后必须替换的权宜之计。
-- 在设计方案前，先研究成熟产品如何解决同类问题。优先遵循其经过验证的模式与约定，而非从零创造一套方法。
+面向 AI coding agents 的**根索引**。设计正文与流程细则不在此堆叠；权威在链接目标。
+目录职责与命名见 [`docs/README.md`](docs/README.md)。
+
+phad-vio：以学习与验证为目标、从零实现的 GTSAM-based stereo VIO。
+**当前阶段：M4 最小 full-state VIO 已锚定**（`c999f58` / `default_0337287b`）；
+下一步优先世界系连续（[`docs/specs/2026-08-26-m4-world-frame-continuity.md`](docs/specs/2026-08-26-m4-world-frame-continuity.md)），
+M5 正式动态初始化排其后。未授权不得 push。
 
 ## 权威文档
 
@@ -23,53 +22,40 @@
 | 世界系连续合同 | [`docs/specs/2026-08-26-m4-world-frame-continuity.md`](docs/specs/2026-08-26-m4-world-frame-continuity.md) |
 | M4 锚点 checkpoint | [`docs/benchmark/m4/minimal-full-state-vio_c999f58_0337287b.md`](docs/benchmark/m4/minimal-full-state-vio_c999f58_0337287b.md) |
 | 交付流水线 | [`docs/AGENTS.md`](docs/AGENTS.md) |
+| 工作偏好 | [`docs/agents/preferences.md`](docs/agents/preferences.md) |
 | C++ 命名 / 风格 | [`docs/agents/cpp-naming.md`](docs/agents/cpp-naming.md)、[`docs/agents/cpp-style.md`](docs/agents/cpp-style.md) |
+
+## 工程原则
+
+- 移除废弃路径，不为向后兼容保留旧实现或兼容层。
+- 用能满足当前需求的最简单实现；避免投机性抽象、配置项与间接层。
+- 分层演进：先端到端可工作的最小版本，再叠加能力。
+- 组件模块化，清晰分离关注点；优先成熟库，不重复造轮子。
+- 先查项目已有依赖与类型定义，再自行实现或引入新依赖。
+- 架构决策着眼长期；设计前先对照成熟产品的已验证模式。
+
+## 硬约束
+
+- **先确认、后落定**：逐条对齐后再写实现；聊天结论不是唯一真相。见 [`docs/agents/preferences.md`](docs/agents/preferences.md)、[`docs/agents/design-alignment.md`](docs/agents/design-alignment.md)。
+- **短分支 + issue**：vertical slice 开工前建 GitHub issue；commit subject 带 issue 号；合入 `main` 必须 `merge --no-ff`。见 [`docs/agents/git-workflow.md`](docs/agents/git-workflow.md)。
+- **禁止**未授权 `git push`。
 
 ## Agent skills
 
-### Incremental development
+| Skill | 何时读 | 文档 |
+|---|---|---|
+| Incremental development | 开 milestone / vertical slice | [`docs/agents/incremental-development.md`](docs/agents/incremental-development.md) |
+| Evidence-gated integration | 接入会改变既有输出的传感器 / factor / 先验 | [`docs/agents/evidence-gated-integration.md`](docs/agents/evidence-gated-integration.md) |
+| Issue tracker | 建票、评论、关票（`gh`；必要时 `env -u GITHUB_TOKEN`） | [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md) |
+| Triage labels | 贴/改五个 canonical 标签 | [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md) |
+| Domain docs | 探索代码前读 ADR / design / CONTEXT | [`docs/agents/domain.md`](docs/agents/domain.md) |
+| Remote CI | 局域网精确快照、容器隔离、EuRoC 并行实验 | [`docs/agents/remote-ci.md`](docs/agents/remote-ci.md) |
 
-针对当前 milestone，先实现最小可运行的 vertical slice，再根据观测到的需求与失败逐步演进。详见
-`docs/agents/incremental-development.md`。
-
-### Evidence-gated integration
-
-接入会改变既有输出的新传感器、先验、模型、factor 或 optimizer 时，按资格阶梯逐层取得权限。
-详见 `docs/agents/evidence-gated-integration.md`。
-
-### Issue tracker
-
-Issues 与 PRDs 在 GitHub Issues 中跟踪。详见 `docs/agents/issue-tracker.md`。
-
-### Triage labels
-
-使用五个默认的 canonical triage labels。详见 `docs/agents/triage-labels.md`。
-
-### Domain docs
-
-本仓库为 single-context repository。详见 `docs/agents/domain.md`。
-
-### C++ naming
-
-C++ identifiers 遵循项目命名规则。详见 `docs/agents/cpp-naming.md`。
-
-### C++ style
-
-C++ formatting 与 control-flow style 遵循项目规则。详见 `docs/agents/cpp-style.md`。
-
-### Git workflow
-
-短生命周期分支；合入 `main` 必须 `--no-ff` 保留 merge 图。详见
-`docs/agents/git-workflow.md`。
-
-### Remote CI
-
-局域网服务器上的精确源码快照、容器隔离和 EuRoC 并行实验见
-`docs/agents/remote-ci.md`。
+C++ 命名 / 风格与 Git 工作流见上表「权威文档」与「硬约束」，不另开 skill 段。
 
 ## 模块 AGENTS 索引
 
-模块专属约定写在对应目录的 `AGENTS.md`（合同细节仍以各目录 `README.md` 为准）。改某库前先读该目录提示：
+模块专属约定写在对应目录的 `AGENTS.md`（合同细节以各目录 `README.md` 为准）。改某库前先读该目录提示：
 
 | 目录 | 说明 |
 |---|---|
@@ -86,24 +72,21 @@ C++ formatting 与 control-flow style 遵循项目规则。详见 `docs/agents/c
 | [`apps/AGENTS.md`](apps/AGENTS.md) | composition root / session / stream |
 | [`tests/AGENTS.md`](tests/AGENTS.md) | ctest、门控序列、对拍路径 |
 | [`scripts/AGENTS.md`](scripts/AGENTS.md) | 离线绘图与 bench 表、venv |
-| [`docs/AGENTS.md`](docs/AGENTS.md) | 交付流水线；文档地图见 [`docs/README.md`](docs/README.md) |
+| [`docs/AGENTS.md`](docs/AGENTS.md) | 交付流水线 |
 
 ## 已学到的用户偏好（摘要）
 
 权威正文见 [`docs/agents/preferences.md`](docs/agents/preferences.md)。
 
-- 面向 agent 的文档以中文为主；术语与 identifiers 保留英文。
-- 跨库规则在 `docs/agents/`；模块约定在各目录 `AGENTS.md`，勿堆进根文件。
-- 开工前逐项对齐（一次一问、A/B/C + 推荐）；设计稿分段确认后再动手；写 spec/计划前先建 GitHub issue。
+- 文档以中文为主；术语与 identifiers 保留英文。跨库规则在 `docs/agents/`，模块约定在各目录 `AGENTS.md`。
+- 开工前逐项对齐（一次一问、A/B/C + 推荐）；设计稿分段确认后再动手；写 spec/计划前先建 issue。
 - 重大设计先开源一手对照，笔记落 `docs/research/`；不擅自定稿。
-- 短生命周期分支、commit 带 issue 号、合入 `main` 必须 `--no-ff`、默认不 push：见 [`docs/agents/git-workflow.md`](docs/agents/git-workflow.md)。
-- C++ 用 clangd；命名/格式见 `docs/agents/cpp-naming.md` 与 `docs/agents/cpp-style.md`。
 - EuRoC / milestone baseline 须含 `meta.json` 参数快照（与 `config_hash` 同源）；验收不够先诊断再扩序列。
 
-## Learned Workspace Facts
+## 现行工作区事实
 
-- clangd 通过 `.clangd` 配置，`CompilationDatabase: build`；根目录 `compile_commands.json` 是指向 `build/compile_commands.json` 的 symlink（gitignore）；改 CMake 或源文件后用 `cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` 重新生成；仓库只有单一根 `CMakeLists.txt`，开启 `-Wconversion -Wsign-conversion -Wpedantic`。
-- C++ naming / style 权威为 `docs/agents/cpp-naming.md` 与 `docs/agents/cpp-style.md`；格式遵循根 `.clang-format`。依赖细节见各模块 `AGENTS.md`。
-- M4 minimal full-state VIO 锚定基线：`c999f58` / `default_0337287b`（见 [`docs/benchmark/m4/minimal-full-state-vio_c999f58_0337287b.md`](docs/benchmark/m4/minimal-full-state-vio_c999f58_0337287b.md)）；EuRoC 11/11 均值 ATE ≈0.579，段内加权 RMS ≈0.134（相对 ORB-SLAM3 stereo ≈1.6×）；主失败模式是视觉中断后 segment 重启把世界系重置到原点；下一步优先世界系连续（[`docs/specs/2026-08-26-m4-world-frame-continuity.md`](docs/specs/2026-08-26-m4-world-frame-continuity.md)），M5 正式动态初始化排其后；双目尺度已知、body≡IMU、单一 `VioEstimator::update()`、滑窗 10、视觉短时丢失最多 500 ms IMU coast。
-- `LandmarkId` 现为 frontend track 与 estimator map 共用身份；TrackId≠LandmarkId 为已确认的中期债。前端 OpenCV、后端 GTSAM，自研以调库版为对拍 oracle。
-- Issues 在 remote `origin`（`Nothand0212/phad-vio`）；`GITHUB_TOKEN` 指向的 fine-grained PAT 无 Issues 写权限时，用 `env -u GITHUB_TOKEN gh ...` 改走 keyring 凭据。
+- clangd：`.clangd` 中 `CompilationDatabase: build`；根 `compile_commands.json` → `build/compile_commands.json`（gitignore）。改 CMake/源后重新 `cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`。单一根 `CMakeLists.txt`，开启 `-Wconversion -Wsign-conversion -Wpedantic`。
+- 格式：根 `.clang-format`；命名/风格权威见上表。依赖细节见各模块 `AGENTS.md`。
+- M4 锚点：`c999f58` / `default_0337287b`；EuRoC 11/11 均值 ATE ≈0.579，段内加权 RMS ≈0.134（相对 ORB-SLAM3 stereo ≈1.6×）。主失败模式是视觉中断后 segment 重启把世界系重置到原点。产品合同：双目尺度已知、body≡IMU、单一 `VioEstimator::update()`、滑窗 10、视觉短时丢失最多 500 ms IMU coast。
+- `LandmarkId` 现为 frontend track 与 estimator map 共用身份；TrackId≠LandmarkId 为中期债。前端 OpenCV、后端 GTSAM，自研以调库版为对拍 oracle。
+- Issues：`origin` = `Nothand0212/phad-vio`；`GITHUB_TOKEN` 无 Issues 写权限时用 `env -u GITHUB_TOKEN gh ...`。
