@@ -12,5 +12,9 @@
 thirdparty/
 /build*/
 compile_commands.json
-scripts/__pycache__/
+__pycache__/
+*.py[cod]
+/artifacts/remote-ci/
 reasonix.toml
+.env.graphify
+graphify-out/

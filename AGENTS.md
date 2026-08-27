@@ -46,6 +46,11 @@ C++ formatting 与 control-flow style 遵循项目规则。详见 `docs/agents/c
 短生命周期分支；合入 `main` 必须 `--no-ff` 保留 merge 图。详见
 `docs/agents/git-workflow.md`。
 
+### Remote CI
+
+局域网服务器上的精确源码快照、容器隔离和 EuRoC 并行实验见
+`docs/agents/remote-ci.md`。
+
 ## 模块 AGENTS 索引
 
 模块专属约定写在对应目录的 `AGENTS.md`（合同细节仍以各目录 `README.md` 为准）。改某库前先读该目录提示：
