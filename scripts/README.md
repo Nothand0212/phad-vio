@@ -70,3 +70,19 @@ python3 scripts/bench_table.py "$PHAD_BENCH_ROOT" --csv > /tmp/bench.csv
 
 主列：sequence、commit、dirty、config（`label_hash8`）、status、
 ATE/RPE trans RMSE、completion_rate、coverage_rate、rtf、wall_s。
+
+## `remote_ci.py`
+
+将当前 Git worktree 精确快照上传到局域网实验服务器，在隔离容器中
+后台运行 Release unit tests 和 EuRoC 11 序列 record-only benchmark。
+
+```bash
+python3 scripts/remote_ci.py doctor
+python3 scripts/remote_ci.py start --profile ci-euroc11
+python3 scripts/remote_ci.py status <run-id>
+python3 scripts/remote_ci.py wait <run-id>
+python3 scripts/remote_ci.py fetch <run-id>
+```
+
+`wait` 默认每 30 秒读取一次并仅输出状态变化，进入终态后自动拉回结果。
+安全合同、远端目录与恢复流程见 [`docs/agents/remote-ci.md`](../docs/agents/remote-ci.md)。

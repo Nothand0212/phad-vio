@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace
@@ -19,11 +20,20 @@ namespace
   using phad::sensor::Image;
   using phad::sensor::ImageFrameEvent;
   using phad::sensor::ImuMeasurement;
+  using phad::sensor::MeasurementDiscontinuity;
+  using phad::sensor::RawImuInterval;
   using phad::sensor::StereoFrame;
   using phad::sensor::StereoImuPacket;
   using phad::sync::PushStatus;
   using phad::sync::StereoPairSynchronizer;
   using phad::sync::StereoPairSynchronizerOptions;
+
+  [[nodiscard]] StereoPairSynchronizerOptions makeOptions()
+  {
+    StereoPairSynchronizerOptions options;
+    options.imu_continuity_limit_ns = 20'000'000;
+    return options;
+  }
 
   [[nodiscard]] Image makeTinyImage( std::uint8_t tag )
   {
@@ -67,31 +77,38 @@ namespace
   [[nodiscard]] ImuMeasurement makeImu( std::int64_t ns, double ax )
   {
     ImuMeasurement m;
-    m.timestamp         = Timestamp{ ns };
-    m.accel_mps2[ 0 ]   = ax;
-    m.accel_mps2[ 1 ]   = 1.0;
-    m.accel_mps2[ 2 ]   = 2.0;
-    m.gyro_radps[ 0 ]   = 0.5 * ax;
-    m.gyro_radps[ 1 ]   = 3.0;
-    m.gyro_radps[ 2 ]   = 4.0;
+    m.timestamp       = Timestamp{ ns };
+    m.accel_mps2[ 0 ] = ax;
+    m.accel_mps2[ 1 ] = 1.0;
+    m.accel_mps2[ 2 ] = 2.0;
+    m.gyro_radps[ 0 ] = 0.5 * ax;
+    m.gyro_radps[ 1 ] = 3.0;
+    m.gyro_radps[ 2 ] = 4.0;
     return m;
   }
 
-  /// 段内相邻样本时间戳差之和(非 imu_gap 段必须 ≡ 图像间隔)。
-  [[nodiscard]] std::int64_t segmentDt( const StereoImuPacket& packet )
+  [[nodiscard]] const RawImuInterval* rawPayload(
+      const StereoImuPacket& packet )
   {
-    std::int64_t sum = 0;
-    for ( std::size_t i = 1; i < packet.samples.size(); ++i )
-    {
-      sum += packet.samples[ i ].timestamp.nanoseconds() -
-             packet.samples[ i - 1 ].timestamp.nanoseconds();
-    }
-    return sum;
+    return std::get_if<RawImuInterval>( &packet.m_imu );
+  }
+
+  [[nodiscard]] const MeasurementDiscontinuity* discontinuityPayload(
+      const StereoImuPacket& packet )
+  {
+    return std::get_if<MeasurementDiscontinuity>( &packet.m_imu );
+  }
+
+  [[nodiscard]] std::int64_t intervalDuration(
+      const RawImuInterval& interval )
+  {
+    return interval.m_t_end.nanoseconds() -
+           interval.m_t_begin.nanoseconds();
   }
 
   TEST( StereoPairSynchronizerTest, EqualLengthExactPairsAll )
   {
-    StereoPairSynchronizer sync;
+    StereoPairSynchronizer sync{ makeOptions() };
     constexpr int          n = 5;
     for ( int i = 0; i < n; ++i )
     {
@@ -124,7 +141,7 @@ namespace
 
   TEST( StereoPairSynchronizerTest, Mh04StyleLeftLeadingOrphan )
   {
-    StereoPairSynchronizer sync;
+    StereoPairSynchronizer sync{ makeOptions() };
     expectPushOk( sync, makeEvent( CameraId::kLeft, 1, 1 ) );
     expectPushOk( sync, makeEvent( CameraId::kLeft, 2, 2 ) );
     expectPushOk( sync, makeEvent( CameraId::kLeft, 3, 3 ) );
@@ -149,7 +166,7 @@ namespace
 
   TEST( StereoPairSynchronizerTest, V102StyleRightTrailingOrphanNeedsFlush )
   {
-    StereoPairSynchronizer sync;
+    StereoPairSynchronizer sync{ makeOptions() };
     expectPushOk( sync, makeEvent( CameraId::kLeft, 10, 1 ) );
     expectPushOk( sync, makeEvent( CameraId::kLeft, 20, 2 ) );
     expectPushOk( sync, makeEvent( CameraId::kRight, 10, 11 ) );
@@ -173,7 +190,7 @@ namespace
     const std::vector<std::int64_t> left_stamps{ 10, 20, 40 };
     const std::vector<std::int64_t> right_stamps{ 10, 20, 30, 40, 50, 60, 70 };
 
-    StereoPairSynchronizer sync;
+    StereoPairSynchronizer sync{ makeOptions() };
     std::size_t            li = 0;
     std::size_t            ri = 0;
     while ( li < left_stamps.size() || ri < right_stamps.size() )
@@ -220,7 +237,7 @@ namespace
   TEST( StereoPairSynchronizerTest, InterleavedPushOrdersSameEmitSet )
   {
     const auto run = []( const std::string& order ) {
-      StereoPairSynchronizer    sync;
+      StereoPairSynchronizer    sync{ makeOptions() };
       std::vector<std::int64_t> left_ns{ 1, 2 };
       std::vector<std::int64_t> right_ns{ 1, 2 };
       std::size_t               li = 0;
@@ -257,7 +274,7 @@ namespace
 
   TEST( StereoPairSynchronizerTest, ExactTolRejectsOneNanosecondSkew )
   {
-    StereoPairSynchronizer sync;
+    StereoPairSynchronizer sync{ makeOptions() };
     expectPushOk( sync, makeEvent( CameraId::kLeft, 100, 1 ) );
     expectPushOk( sync, makeEvent( CameraId::kRight, 101, 2 ) );
     EXPECT_FALSE( sync.tryPop().has_value() );
@@ -272,8 +289,8 @@ namespace
 
   TEST( StereoPairSynchronizerTest, SoftTolPairsWithinWindowUsesLeftStamp )
   {
-    StereoPairSynchronizerOptions options;
-    options.tol_ns = 3'000'000;  // 3 ms
+    StereoPairSynchronizerOptions options = makeOptions();
+    options.tol_ns                        = 3'000'000;  // 3 ms
     StereoPairSynchronizer sync{ options };
 
     expectPushOk( sync, makeEvent( CameraId::kLeft, 1'000'000, 1 ) );
@@ -291,7 +308,7 @@ namespace
 
   TEST( StereoPairSynchronizerTest, PerCameraOutOfOrderIsSticky )
   {
-    StereoPairSynchronizer sync;
+    StereoPairSynchronizer sync{ makeOptions() };
     expectPushOk( sync, makeEvent( CameraId::kLeft, 10, 1 ) );
     expectPushOk( sync, makeEvent( CameraId::kRight, 10, 2 ) );
     ASSERT_TRUE( sync.tryPop().has_value() );
@@ -306,7 +323,7 @@ namespace
 
   TEST( StereoPairSynchronizerTest, PerCameraDuplicateIsSticky )
   {
-    StereoPairSynchronizer sync;
+    StereoPairSynchronizer sync{ makeOptions() };
     expectPushOk( sync, makeEvent( CameraId::kRight, 5, 1 ) );
     EXPECT_EQ( sync.pushImage( makeEvent( CameraId::kRight, 5, 2 ) ),
                PushStatus::kDuplicate );
@@ -317,7 +334,7 @@ namespace
 
   TEST( StereoPairSynchronizerTest, StickyStillAllowsTryPopOfPriorPairs )
   {
-    StereoPairSynchronizer sync;
+    StereoPairSynchronizer sync{ makeOptions() };
     expectPushOk( sync, makeEvent( CameraId::kLeft, 1, 1 ) );
     expectPushOk( sync, makeEvent( CameraId::kRight, 1, 2 ) );
     EXPECT_EQ( sync.pushImage( makeEvent( CameraId::kLeft, 1, 3 ) ),
@@ -331,8 +348,8 @@ namespace
 
   TEST( StereoPairSynchronizerTest, BoundedQueueDropsOldestOnOverflow )
   {
-    StereoPairSynchronizerOptions options;
-    options.max_queue = 2;
+    StereoPairSynchronizerOptions options = makeOptions();
+    options.max_queue                     = 2;
     StereoPairSynchronizer sync{ options };
 
     expectPushOk( sync, makeEvent( CameraId::kLeft, 1, 1 ) );
@@ -348,7 +365,7 @@ namespace
 
   TEST( StereoPairSynchronizerTest, FlushCountsAllRemainingNotJustFront )
   {
-    StereoPairSynchronizer sync;
+    StereoPairSynchronizer sync{ makeOptions() };
     expectPushOk( sync, makeEvent( CameraId::kLeft, 1, 1 ) );
     expectPushOk( sync, makeEvent( CameraId::kLeft, 2, 2 ) );
     expectPushOk( sync, makeEvent( CameraId::kLeft, 3, 3 ) );
@@ -363,55 +380,93 @@ namespace
 
   TEST( StereoPairSynchronizerTest, RejectsInvalidOptions )
   {
-    StereoPairSynchronizerOptions negative_tol;
-    negative_tol.tol_ns = -1;
+    StereoPairSynchronizerOptions negative_tol = makeOptions();
+    negative_tol.tol_ns                        = -1;
     EXPECT_THROW( StereoPairSynchronizer{ negative_tol },
                   std::invalid_argument );
 
-    StereoPairSynchronizerOptions zero_queue;
-    zero_queue.max_queue = 0;
+    StereoPairSynchronizerOptions zero_queue = makeOptions();
+    zero_queue.max_queue                     = 0;
     EXPECT_THROW( StereoPairSynchronizer{ zero_queue },
+                  std::invalid_argument );
+
+    StereoPairSynchronizerOptions missing_continuity_limit;
+    EXPECT_THROW( StereoPairSynchronizer{ missing_continuity_limit },
                   std::invalid_argument );
   }
 
-  // ---- M4.1: pushImu / StereoImuPacket 矩阵 ----
-
-  TEST( StereoPairSynchronizerTest, FirstPacketIsZeroSegmentAndExpiredImuDropped )
+  TEST( StereoPairSynchronizerTest,
+        FirstPacketUsesEarliestRawSupportThenPreviousImageEndpoint )
   {
-    StereoPairSynchronizer sync;
+    StereoPairSynchronizer sync{ makeOptions() };
     for ( std::int64_t ns = 1000; ns <= 1004; ++ns )
     {
       expectImuPushOk( sync, makeImu( ns, 1.0 ) );
     }
-    expectImuPushOk( sync, makeImu( 1005, 2.0 ) );  // 恰在首帧
+    expectImuPushOk( sync, makeImu( 1005, 2.0 ) );
     expectImuPushOk( sync, makeImu( 2005, 3.0 ) );
     pushPair( sync, 1005, 1 );
     pushPair( sync, 2005, 2 );
 
     const auto first = sync.tryPopPacket();
     ASSERT_TRUE( first.has_value() );
-    EXPECT_EQ( first->t_prev.nanoseconds(), 1005 );  // 零段
-    EXPECT_TRUE( first->samples.empty() );
-    EXPECT_FALSE( first->imu_gap );
+    EXPECT_EQ( first->m_frame.timestamp, Timestamp{ 1005 } );
+    const RawImuInterval* first_raw = rawPayload( *first );
+    ASSERT_NE( first_raw, nullptr );
+    EXPECT_EQ( first_raw->m_t_begin, Timestamp{ 1000 } );
+    EXPECT_EQ( first_raw->m_t_end, Timestamp{ 1005 } );
+    ASSERT_EQ( first_raw->m_samples.size(), 6U );
+    EXPECT_EQ( first_raw->m_samples.front().timestamp, Timestamp{ 1000 } );
+    EXPECT_EQ( first_raw->m_samples.back().timestamp, Timestamp{ 1005 } );
 
     const auto second = sync.tryPopPacket();
     ASSERT_TRUE( second.has_value() );
-    EXPECT_EQ( second->t_prev.nanoseconds(), 1005 );
-    EXPECT_EQ( second->frame.timestamp.nanoseconds(), 2005 );
-    ASSERT_EQ( second->samples.size(), 2U );
-    EXPECT_EQ( second->samples[ 0 ].timestamp.nanoseconds(), 1005 );
-    EXPECT_EQ( second->samples[ 1 ].timestamp.nanoseconds(), 2005 );
-    EXPECT_EQ( segmentDt( *second ), 1000 );
-    EXPECT_FALSE( second->imu_gap );
+    EXPECT_EQ( second->m_frame.timestamp, Timestamp{ 2005 } );
+    const RawImuInterval* second_raw = rawPayload( *second );
+    ASSERT_NE( second_raw, nullptr );
+    EXPECT_EQ( second_raw->m_t_begin, Timestamp{ 1005 } );
+    EXPECT_EQ( second_raw->m_t_end, Timestamp{ 2005 } );
+    ASSERT_EQ( second_raw->m_samples.size(), 2U );
+    EXPECT_EQ( intervalDuration( *second_raw ), 1000 );
 
     EXPECT_EQ( sync.diagnostics().pushed_imu, 7U );
-    EXPECT_EQ( sync.diagnostics().dropped_imu, 5U );  // 1000..1004 越界
-    EXPECT_EQ( sync.diagnostics().imu_gap_count, 0U );
+    EXPECT_EQ( sync.diagnostics().dropped_imu, 6U );
+    EXPECT_EQ( sync.diagnostics().imu_discontinuity_count, 0U );
   }
 
-  TEST( StereoPairSynchronizerTest, ImuSamplesExactlyOnBoundariesKeepSumDtExact )
+  TEST( StereoPairSynchronizerTest,
+        LeadingStereoBeforeFirstImuDoesNotBlockFirstSupportedPacket )
   {
-    StereoPairSynchronizer sync;
+    StereoPairSynchronizer sync{ makeOptions() };
+    EXPECT_FALSE( sync.tryPopPacket().has_value() );
+
+    pushPair( sync, 1000, 1 );
+    EXPECT_FALSE( sync.tryPopPacket().has_value() );
+
+    expectImuPushOk( sync, makeImu( 1020, 1.0 ) );
+    expectImuPushOk( sync, makeImu( 1030, 2.0 ) );
+    expectImuPushOk( sync, makeImu( 1040, 3.0 ) );
+    expectImuPushOk( sync, makeImu( 1050, 4.0 ) );
+    pushPair( sync, 1050, 2 );
+
+    const auto packet = sync.tryPopPacket();
+    ASSERT_TRUE( packet.has_value() );
+    EXPECT_EQ( packet->m_frame.timestamp, Timestamp{ 1050 } );
+    const RawImuInterval* raw = rawPayload( *packet );
+    ASSERT_NE( raw, nullptr );
+    EXPECT_EQ( raw->m_t_begin, Timestamp{ 1020 } );
+    EXPECT_EQ( raw->m_t_end, Timestamp{ 1050 } );
+    ASSERT_EQ( raw->m_samples.size(), 4U );
+    EXPECT_EQ( raw->m_samples.front().timestamp, Timestamp{ 1020 } );
+    EXPECT_EQ( raw->m_samples.back().timestamp, Timestamp{ 1050 } );
+    EXPECT_FALSE( sync.tryPopPacket().has_value() );
+  }
+
+  TEST( StereoPairSynchronizerTest,
+        ExactBoundarySamplesRemainRawAndIntervalsClose )
+  {
+    StereoPairSynchronizer sync{ makeOptions() };
+    expectImuPushOk( sync, makeImu( 500, 0.0 ) );
     expectImuPushOk( sync, makeImu( 1000, 1.0 ) );
     expectImuPushOk( sync, makeImu( 1500, 2.0 ) );
     expectImuPushOk( sync, makeImu( 2000, 3.0 ) );
@@ -420,56 +475,38 @@ namespace
     pushPair( sync, 2000, 2 );
     pushPair( sync, 3000, 3 );
 
-    (void) sync.tryPopPacket();  // 零段
+    const auto first = sync.tryPopPacket();
+    ASSERT_TRUE( first.has_value() );
+    ASSERT_NE( rawPayload( *first ), nullptr );
 
-    const auto mid = sync.tryPopPacket();
-    ASSERT_TRUE( mid.has_value() );
-    ASSERT_EQ( mid->samples.size(), 3U );
-    EXPECT_EQ( mid->samples[ 0 ].timestamp.nanoseconds(), 1000 );
-    EXPECT_EQ( mid->samples[ 1 ].timestamp.nanoseconds(), 1500 );
-    EXPECT_EQ( mid->samples[ 2 ].timestamp.nanoseconds(), 2000 );
-    EXPECT_DOUBLE_EQ( mid->samples[ 0 ].accel_mps2[ 0 ], 1.0 );
-    EXPECT_DOUBLE_EQ( mid->samples[ 2 ].accel_mps2[ 0 ], 3.0 );
-    EXPECT_EQ( segmentDt( *mid ), 1000 );
-    EXPECT_FALSE( mid->imu_gap );
-
-    const auto last = sync.tryPopPacket();
-    ASSERT_TRUE( last.has_value() );
-    ASSERT_EQ( last->samples.size(), 2U );
-    // 左端 = 上段右端原样本(共享边界),无插值。
-    EXPECT_EQ( last->samples[ 0 ].timestamp.nanoseconds(), 2000 );
-    EXPECT_DOUBLE_EQ( last->samples[ 0 ].accel_mps2[ 0 ], 3.0 );
-    EXPECT_EQ( last->samples[ 1 ].timestamp.nanoseconds(), 3000 );
-    EXPECT_EQ( segmentDt( *last ), 1000 );
-    EXPECT_FALSE( last->imu_gap );
-  }
-
-  TEST( StereoPairSynchronizerTest, ImuMissingMiddleSamplesStillExactSegment )
-  {
-    StereoPairSynchronizer sync;
-    expectImuPushOk( sync, makeImu( 1000, 1.0 ) );
-    expectImuPushOk( sync, makeImu( 2000, 3.0 ) );
-    expectImuPushOk( sync, makeImu( 3000, 5.0 ) );
-    pushPair( sync, 1000, 1 );
-    pushPair( sync, 2000, 2 );
-    pushPair( sync, 3000, 3 );
-
-    (void) sync.tryPopPacket();
-    const auto mid = sync.tryPopPacket();
-    ASSERT_TRUE( mid.has_value() );
-    ASSERT_EQ( mid->samples.size(), 2U );  // 无中间样本,但边界成立
-    EXPECT_EQ( segmentDt( *mid ), 1000 );
-    EXPECT_FALSE( mid->imu_gap );
+    const auto middle = sync.tryPopPacket();
+    ASSERT_TRUE( middle.has_value() );
+    const RawImuInterval* middle_raw = rawPayload( *middle );
+    ASSERT_NE( middle_raw, nullptr );
+    EXPECT_EQ( middle_raw->m_t_begin, Timestamp{ 1000 } );
+    EXPECT_EQ( middle_raw->m_t_end, Timestamp{ 2000 } );
+    ASSERT_EQ( middle_raw->m_samples.size(), 3U );
+    EXPECT_EQ( middle_raw->m_samples[ 0 ].timestamp, Timestamp{ 1000 } );
+    EXPECT_EQ( middle_raw->m_samples[ 1 ].timestamp, Timestamp{ 1500 } );
+    EXPECT_EQ( middle_raw->m_samples[ 2 ].timestamp, Timestamp{ 2000 } );
+    EXPECT_DOUBLE_EQ( middle_raw->m_samples[ 0 ].accel_mps2[ 0 ], 1.0 );
+    EXPECT_DOUBLE_EQ( middle_raw->m_samples[ 2 ].accel_mps2[ 0 ], 3.0 );
+    EXPECT_EQ( intervalDuration( *middle_raw ), 1000 );
 
     const auto last = sync.tryPopPacket();
     ASSERT_TRUE( last.has_value() );
-    EXPECT_EQ( segmentDt( *last ), 1000 );
-    EXPECT_FALSE( last->imu_gap );
+    const RawImuInterval* last_raw = rawPayload( *last );
+    ASSERT_NE( last_raw, nullptr );
+    ASSERT_EQ( last_raw->m_samples.size(), 2U );
+    EXPECT_EQ( last_raw->m_samples[ 0 ].timestamp, Timestamp{ 2000 } );
+    EXPECT_EQ( last_raw->m_samples[ 1 ].timestamp, Timestamp{ 3000 } );
+    EXPECT_EQ( intervalDuration( *last_raw ), 1000 );
   }
 
-  TEST( StereoPairSynchronizerTest, InterpolatedRightBoundaryChainsToNextSegment )
+  TEST( StereoPairSynchronizerTest, RawPayloadPreservesEndpointBrackets )
   {
-    StereoPairSynchronizer sync;
+    StereoPairSynchronizer sync{ makeOptions() };
+    expectImuPushOk( sync, makeImu( 500, 0.0 ) );
     expectImuPushOk( sync, makeImu( 1000, 1.0 ) );
     expectImuPushOk( sync, makeImu( 1500, 2.0 ) );
     expectImuPushOk( sync, makeImu( 2500, 4.0 ) );
@@ -478,44 +515,118 @@ namespace
     pushPair( sync, 2000, 2 );
     pushPair( sync, 3000, 3 );
 
-    (void) sync.tryPopPacket();  // 零段
+    ASSERT_TRUE( sync.tryPopPacket().has_value() );
+    const auto middle = sync.tryPopPacket();
+    ASSERT_TRUE( middle.has_value() );
+    const RawImuInterval* middle_raw = rawPayload( *middle );
+    ASSERT_NE( middle_raw, nullptr );
+    EXPECT_EQ( middle_raw->m_t_begin, Timestamp{ 1000 } );
+    EXPECT_EQ( middle_raw->m_t_end, Timestamp{ 2000 } );
+    ASSERT_EQ( middle_raw->m_samples.size(), 3U );
+    EXPECT_EQ( middle_raw->m_samples[ 0 ].timestamp, Timestamp{ 1000 } );
+    EXPECT_EQ( middle_raw->m_samples[ 1 ].timestamp, Timestamp{ 1500 } );
+    EXPECT_EQ( middle_raw->m_samples[ 2 ].timestamp, Timestamp{ 2500 } );
 
-    const auto mid = sync.tryPopPacket();
-    ASSERT_TRUE( mid.has_value() );
-    ASSERT_EQ( mid->samples.size(), 3U );
-    // 右端为 (1500, 2500) 在 t=2000 的插值: ax = 2.0 + 0.5*(4.0-2.0) = 3.0
-    EXPECT_EQ( mid->samples[ 2 ].timestamp.nanoseconds(), 2000 );
-    EXPECT_DOUBLE_EQ( mid->samples[ 2 ].accel_mps2[ 0 ], 3.0 );
-    EXPECT_DOUBLE_EQ( mid->samples[ 2 ].gyro_radps[ 0 ], 1.5 );
-    EXPECT_EQ( segmentDt( *mid ), 1000 );
-    EXPECT_FALSE( mid->imu_gap );
-
-    // 下段左端复用插值样本(链式共享边界)。
     const auto last = sync.tryPopPacket();
     ASSERT_TRUE( last.has_value() );
-    ASSERT_EQ( last->samples.size(), 3U );
-    EXPECT_EQ( last->samples[ 0 ].timestamp.nanoseconds(), 2000 );
-    EXPECT_DOUBLE_EQ( last->samples[ 0 ].accel_mps2[ 0 ], 3.0 );
-    EXPECT_EQ( last->samples[ 1 ].timestamp.nanoseconds(), 2500 );
-    EXPECT_EQ( last->samples[ 2 ].timestamp.nanoseconds(), 3000 );
-    EXPECT_EQ( segmentDt( *last ), 1000 );
-    EXPECT_FALSE( last->imu_gap );
+    const RawImuInterval* last_raw = rawPayload( *last );
+    ASSERT_NE( last_raw, nullptr );
+    EXPECT_EQ( last_raw->m_t_begin, Timestamp{ 2000 } );
+    EXPECT_EQ( last_raw->m_t_end, Timestamp{ 3000 } );
+    ASSERT_EQ( last_raw->m_samples.size(), 3U );
+    EXPECT_EQ( last_raw->m_samples[ 0 ].timestamp, Timestamp{ 1500 } );
+    EXPECT_EQ( last_raw->m_samples[ 1 ].timestamp, Timestamp{ 2500 } );
+    EXPECT_EQ( last_raw->m_samples[ 2 ].timestamp, Timestamp{ 3000 } );
+  }
+
+  TEST( StereoPairSynchronizerTest, ContinuityLimitIsInclusive )
+  {
+    auto options                    = makeOptions();
+    options.imu_continuity_limit_ns = 1000;
+    StereoPairSynchronizer sync{ options };
+    expectImuPushOk( sync, makeImu( 500, 0.0 ) );
+    expectImuPushOk( sync, makeImu( 1000, 1.0 ) );
+    expectImuPushOk( sync, makeImu( 2000, 2.0 ) );
+    pushPair( sync, 1000, 1 );
+    pushPair( sync, 2000, 2 );
+
+    ASSERT_TRUE( sync.tryPopPacket().has_value() );
+    const auto packet = sync.tryPopPacket();
+    ASSERT_TRUE( packet.has_value() );
+    EXPECT_NE( rawPayload( *packet ), nullptr );
+    EXPECT_EQ( discontinuityPayload( *packet ), nullptr );
+  }
+
+  TEST( StereoPairSynchronizerTest, GapProducesMeasurementDiscontinuity )
+  {
+    auto options                    = makeOptions();
+    options.imu_continuity_limit_ns = 200'000'000;
+    StereoPairSynchronizer sync{ options };
+    expectImuPushOk( sync, makeImu( 90'000'000, 0.0 ) );
+    expectImuPushOk( sync, makeImu( 100'000'000, 1.0 ) );
+    expectImuPushOk( sync, makeImu( 105'000'000, 2.0 ) );
+    expectImuPushOk( sync, makeImu( 110'000'000, 3.0 ) );
+    expectImuPushOk( sync, makeImu( 130'000'000, 4.0 ) );
+    expectImuPushOk( sync, makeImu( 350'000'000, 5.0 ) );
+    pushPair( sync, 100'000'000, 1 );
+    pushPair( sync, 110'000'000, 2 );
+    pushPair( sync, 350'000'000, 3 );
+
+    ASSERT_TRUE( sync.tryPopPacket().has_value() );
+    const auto continuous = sync.tryPopPacket();
+    ASSERT_TRUE( continuous.has_value() );
+    EXPECT_NE( rawPayload( *continuous ), nullptr );
+
+    const auto gapped = sync.tryPopPacket();
+    ASSERT_TRUE( gapped.has_value() );
+    const MeasurementDiscontinuity* discontinuity =
+        discontinuityPayload( *gapped );
+    ASSERT_NE( discontinuity, nullptr );
+    EXPECT_EQ( discontinuity->m_t_begin, Timestamp{ 110'000'000 } );
+    EXPECT_EQ( discontinuity->m_t_end, Timestamp{ 350'000'000 } );
+    EXPECT_EQ( sync.diagnostics().imu_discontinuity_count, 1U );
+  }
+
+  TEST( StereoPairSynchronizerTest,
+        SourceExhaustionProducesDiscontinuityForMissingEndpointSupport )
+  {
+    StereoPairSynchronizer sync{ makeOptions() };
+    expectImuPushOk( sync, makeImu( 500, 0.0 ) );
+    expectImuPushOk( sync, makeImu( 1000, 1.0 ) );
+    expectImuPushOk( sync, makeImu( 1500, 2.0 ) );
+    pushPair( sync, 1000, 1 );
+    pushPair( sync, 2000, 2 );
+
+    const auto first = sync.tryPopPacket();
+    ASSERT_TRUE( first.has_value() );
+    EXPECT_NE( rawPayload( *first ), nullptr );
+    EXPECT_FALSE( sync.tryPopPacket().has_value() );
+
+    sync.flush();
+    const auto completed = sync.tryPopPacket();
+    ASSERT_TRUE( completed.has_value() );
+    const MeasurementDiscontinuity* discontinuity =
+        discontinuityPayload( *completed );
+    ASSERT_NE( discontinuity, nullptr );
+    EXPECT_EQ( discontinuity->m_t_begin, Timestamp{ 1000 } );
+    EXPECT_EQ( discontinuity->m_t_end, Timestamp{ 2000 } );
+    EXPECT_EQ( sync.diagnostics().imu_discontinuity_count, 1U );
   }
 
   TEST( StereoPairSynchronizerTest, ImuDuplicateIsStickyOnImuPath )
   {
-    StereoPairSynchronizer sync;
+    StereoPairSynchronizer sync{ makeOptions() };
     expectImuPushOk( sync, makeImu( 1000, 1.0 ) );
     EXPECT_EQ( sync.pushImu( makeImu( 1000, 2.0 ) ),
                PushStatus::kDuplicate );
     EXPECT_EQ( sync.imuStickyError(), PushStatus::kDuplicate );
-    EXPECT_FALSE( sync.stickyError().has_value() );  // 图像路径不受影响
+    EXPECT_FALSE( sync.stickyError().has_value() );
     EXPECT_EQ( sync.diagnostics().pushed_imu, 1U );
   }
 
   TEST( StereoPairSynchronizerTest, ImuOutOfOrderIsStickyOnImuPath )
   {
-    StereoPairSynchronizer sync;
+    StereoPairSynchronizer sync{ makeOptions() };
     expectImuPushOk( sync, makeImu( 1000, 1.0 ) );
     EXPECT_EQ( sync.pushImu( makeImu( 999, 2.0 ) ),
                PushStatus::kOutOfOrder );
@@ -526,29 +637,25 @@ namespace
 
   TEST( StereoPairSynchronizerTest, ImuNonFiniteIsInvalidValue )
   {
-    StereoPairSynchronizer sync;
-    const auto nan = std::numeric_limits<double>::quiet_NaN();
-    ImuMeasurement bad    = makeImu( 1000, 1.0 );
-    bad.accel_mps2[ 1 ]   = nan;
+    StereoPairSynchronizer sync{ makeOptions() };
+    const auto             nan = std::numeric_limits<double>::quiet_NaN();
+    ImuMeasurement         bad = makeImu( 1000, 1.0 );
+    bad.accel_mps2[ 1 ]        = nan;
     EXPECT_EQ( sync.pushImu( bad ), PushStatus::kInvalidValue );
     EXPECT_EQ( sync.imuStickyError(), PushStatus::kInvalidValue );
     EXPECT_EQ( sync.diagnostics().pushed_imu, 0U );
   }
 
-  TEST( StereoPairSynchronizerTest, ImuStickyIsIndependentOfImageSticky )
+  TEST( StereoPairSynchronizerTest, ImuAndImageStickyStatesAreIndependent )
   {
-    StereoPairSynchronizer sync;
-    // IMU 先置 sticky,图像路径照常。
+    StereoPairSynchronizer sync{ makeOptions() };
     expectImuPushOk( sync, makeImu( 1000, 1.0 ) );
     EXPECT_EQ( sync.pushImu( makeImu( 999, 2.0 ) ),
                PushStatus::kOutOfOrder );
     pushPair( sync, 1000, 1 );
-    const auto frame = sync.tryPop();
-    ASSERT_TRUE( frame.has_value() );
-    EXPECT_EQ( frame->timestamp.nanoseconds(), 1000 );
+    ASSERT_TRUE( sync.tryPop().has_value() );
 
-    // 图像置 sticky,IMU 路径照常。
-    StereoPairSynchronizer other;
+    StereoPairSynchronizer other{ makeOptions() };
     pushPair( other, 1000, 1 );
     EXPECT_EQ( other.pushImage( makeEvent( CameraId::kLeft, 1000, 2 ) ),
                PushStatus::kDuplicate );
@@ -557,88 +664,32 @@ namespace
     EXPECT_FALSE( other.imuStickyError().has_value() );
   }
 
-  TEST( StereoPairSynchronizerTest, ImuGapBeyondThresholdMarksPacket )
+  TEST( StereoPairSynchronizerTest, ImuOverflowKeepsBoundedRawSupport )
   {
-    // 帧间隔 10 ms / 240 ms,阈值 200 ms:第二段不 gap,第三段 gap。
-    StereoPairSynchronizerOptions options;
-    options.imu_gap_ns = 200'000'000;
-    StereoPairSynchronizer sync{ options };
-    expectImuPushOk( sync, makeImu( 100'000'000, 1.0 ) );
-    expectImuPushOk( sync, makeImu( 105'000'000, 2.0 ) );
-    expectImuPushOk( sync, makeImu( 110'000'000, 3.0 ) );
-    expectImuPushOk( sync, makeImu( 130'000'000, 4.0 ) );
-    expectImuPushOk( sync, makeImu( 350'000'000, 5.0 ) );
-    pushPair( sync, 100'000'000, 1 );
-    pushPair( sync, 110'000'000, 2 );  // 10 ms < 200 ms
-    pushPair( sync, 350'000'000, 3 );  // 240 ms > 200 ms
-
-    (void) sync.tryPopPacket();  // 零段
-
-    const auto ok = sync.tryPopPacket();
-    ASSERT_TRUE( ok.has_value() );
-    ASSERT_EQ( ok->samples.size(), 3U );
-    EXPECT_EQ( segmentDt( *ok ), 10'000'000 );
-    EXPECT_FALSE( ok->imu_gap );
-
-    const auto gapped = sync.tryPopPacket();
-    ASSERT_TRUE( gapped.has_value() );
-    EXPECT_TRUE( gapped->imu_gap );
-    EXPECT_EQ( sync.diagnostics().imu_gap_count, 1U );
-  }
-
-  TEST( StereoPairSynchronizerTest, ImuGapWhenBoundariesUnconstructible )
-  {
-    StereoPairSynchronizer sync;
-    expectImuPushOk( sync, makeImu( 2500, 4.0 ) );  // 只落在第二段中间
-    expectImuPushOk( sync, makeImu( 3000, 5.0 ) );
-    pushPair( sync, 1000, 1 );
-    pushPair( sync, 2000, 2 );
-    pushPair( sync, 3000, 3 );
-
-    (void) sync.tryPopPacket();  // 零段
-
-    const auto second = sync.tryPopPacket();
-    ASSERT_TRUE( second.has_value() );
-    EXPECT_TRUE( second->samples.empty() );  // 左端右端均无法构造
-    EXPECT_TRUE( second->imu_gap );
-
-    // 第三段从 2500 恢复: 左端缺失(gap),但中间 + 右端成立。
-    const auto third = sync.tryPopPacket();
-    ASSERT_TRUE( third.has_value() );
-    ASSERT_EQ( third->samples.size(), 2U );
-    EXPECT_EQ( third->samples[ 0 ].timestamp.nanoseconds(), 2500 );
-    EXPECT_EQ( third->samples[ 1 ].timestamp.nanoseconds(), 3000 );
-    EXPECT_TRUE( third->imu_gap );
-    EXPECT_EQ( sync.diagnostics().imu_gap_count, 2U );
-  }
-
-  TEST( StereoPairSynchronizerTest, ImuOverflowDropsOldestCounted )
-  {
-    StereoPairSynchronizerOptions options;
+    auto options          = makeOptions();
     options.max_imu_queue = 2;
     StereoPairSynchronizer sync{ options };
     expectImuPushOk( sync, makeImu( 1000, 1.0 ) );
     expectImuPushOk( sync, makeImu( 1001, 2.0 ) );
     expectImuPushOk( sync, makeImu( 1002, 3.0 ) );
 
-    const auto& d = sync.diagnostics();
-    EXPECT_EQ( d.pushed_imu, 3U );
-    EXPECT_EQ( d.dropped_imu_overflow, 1U );
-    EXPECT_EQ( d.max_imu_queue, 2U );
+    EXPECT_EQ( sync.diagnostics().pushed_imu, 3U );
+    EXPECT_EQ( sync.diagnostics().dropped_imu_overflow, 1U );
+    EXPECT_EQ( sync.diagnostics().max_imu_queue, 2U );
 
-    // 被 drop 的最老样本(1000)已不在段内: 左端构造失败 → gap。
-    pushPair( sync, 1001, 1 );
-    pushPair( sync, 1002, 2 );
-    (void) sync.tryPopPacket();  // 零段
+    pushPair( sync, 1002, 1 );
     const auto packet = sync.tryPopPacket();
     ASSERT_TRUE( packet.has_value() );
-    EXPECT_EQ( packet->samples[ 0 ].timestamp.nanoseconds(), 1001 );
-    EXPECT_EQ( packet->samples[ 1 ].timestamp.nanoseconds(), 1002 );
+    const RawImuInterval* raw = rawPayload( *packet );
+    ASSERT_NE( raw, nullptr );
+    ASSERT_EQ( raw->m_samples.size(), 2U );
+    EXPECT_EQ( raw->m_samples[ 0 ].timestamp, Timestamp{ 1001 } );
+    EXPECT_EQ( raw->m_samples[ 1 ].timestamp, Timestamp{ 1002 } );
   }
 
   TEST( StereoPairSynchronizerTest, FlushCountsRemainingImuAsDropped )
   {
-    StereoPairSynchronizer sync;
+    StereoPairSynchronizer sync{ makeOptions() };
     expectImuPushOk( sync, makeImu( 1000, 1.0 ) );
     expectImuPushOk( sync, makeImu( 2000, 2.0 ) );
     sync.flush();

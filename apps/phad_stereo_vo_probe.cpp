@@ -26,18 +26,19 @@ namespace
       "usage: phad_stereo_vo_probe <sequence-root> --tum <path> "
       "[--diag-csv <path>] [--kf-tum <path>] [--probe-b <path>] "
       "[--defer-drop-topk <k>] [--evict-skip-culled] "
-      "[--zombie-drop-age <n>]\n";
+      "[--zombie-drop-age <n>] [--max-frames <n>]\n";
 
   struct Arguments
   {
-    std::filesystem::path sequence_root;
-    std::filesystem::path tum_path;
-    std::filesystem::path diag_csv;
-    std::filesystem::path kf_tum_path;
-    std::filesystem::path probe_b_path;
-    std::optional<int>    defer_drop_topk;
-    bool                  evict_skip_culled = false;
-    std::optional<int>    zombie_drop_age;
+    std::filesystem::path        sequence_root;
+    std::filesystem::path        tum_path;
+    std::filesystem::path        diag_csv;
+    std::filesystem::path        kf_tum_path;
+    std::filesystem::path        probe_b_path;
+    std::optional<int>           defer_drop_topk;
+    bool                         evict_skip_culled = false;
+    std::optional<int>           zombie_drop_age;
+    std::optional<std::uint64_t> max_frames;
   };
 
   [[nodiscard]] bool parseArguments( int argc, char** argv,
@@ -111,6 +112,19 @@ namespace
         }
         arguments.zombie_drop_age = static_cast<int>( parsed );
       }
+      else if ( flag == "--max-frames" )
+      {
+        std::uint64_t parsed = 0;
+        const auto    result = std::from_chars(
+            value.data(), value.data() + value.size(), parsed );
+        if ( result.ec != std::errc{} ||
+             result.ptr != value.data() + value.size() || parsed == 0U )
+        {
+          std::cerr << "--max-frames expects a positive integer\n";
+          return false;
+        }
+        arguments.max_frames = parsed;
+      }
       else
       {
         std::cerr << "unknown flag " << flag << '\n';
@@ -125,6 +139,7 @@ namespace
     phad::apps::OfflineVoSessionOptions options;
     options.sequence_root = arguments.sequence_root;
     options.probe_b_path  = arguments.probe_b_path;
+    options.max_frames    = arguments.max_frames;
     if ( arguments.defer_drop_topk.has_value() )
     {
       options.defer_drop_topk = *arguments.defer_drop_topk;
@@ -137,6 +152,15 @@ namespace
 
     phad::apps::OfflineVoSessionResult result =
         phad::apps::runOfflineVoSession( options );
+    if ( !arguments.diag_csv.empty() )
+    {
+      if ( const auto write_error =
+               phad::apps::writeDiagCsv( arguments.diag_csv, result.diag ) )
+      {
+        std::cerr << write_error->detail << '\n';
+        return 1;
+      }
+    }
     if ( result.error.has_value() )
     {
       std::cerr << result.error->detail << '\n';
@@ -146,16 +170,6 @@ namespace
     {
       std::cerr << "no accepted poses to write\n";
       return 1;
-    }
-
-    if ( !arguments.diag_csv.empty() )
-    {
-      if ( const auto write_error =
-               phad::apps::writeDiagCsv( arguments.diag_csv, result.diag ) )
-      {
-        std::cerr << write_error->detail << '\n';
-        return 1;
-      }
     }
 
     if ( const auto write_error =
@@ -207,6 +221,10 @@ namespace
               << "tracks_evicted=" << result.counts.tracks_evicted << '\n'
               << "zombie_age_drops=" << result.counts.zombie_age_drops << '\n'
               << "zombie_age_drop_ids=" << result.counts.zombie_age_drop_ids
+              << '\n'
+              << "non_keyframe_evictions="
+              << result.counts.non_keyframe_evictions << '\n'
+              << "imu_reintegrations=" << result.counts.imu_reintegrations
               << '\n'
               << "reproj_rms_after_median_px=" << result.reproj.median_px
               << '\n'

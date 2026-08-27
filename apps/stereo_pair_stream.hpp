@@ -35,7 +35,7 @@ namespace phad::apps
   public:
     explicit StereoPairStream(
         io::SensorSource&                   source,
-        sync::StereoPairSynchronizerOptions options = {} );
+        sync::StereoPairSynchronizerOptions options );
 
     [[nodiscard]] StereoPairReadResult next();
     /// M4.1: 与 next() 同源,IMU 进 sync(不再丢弃);session 按需消费。

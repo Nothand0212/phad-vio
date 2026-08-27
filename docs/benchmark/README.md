@@ -4,7 +4,7 @@
 
 `docs/benchmark/` 是关键行为 checkpoint 的 benchmark 权威入口。它保存可审查、
 可复现、可比较的结果摘要；算法调研、设计和失败机理分析仍放在
-`docs/research/`，实施步骤仍放在 `docs/plans/`。
+`docs/research/`，已收口合同放在 `docs/spec/`，实施步骤仍放在 `docs/plans/`。
 
 Issue：[#26](https://github.com/Nothand0212/phad-vio/issues/26)。
 
@@ -59,6 +59,8 @@ Git 外保存：
 ```text
 docs/benchmark/
 ├── README.md
+├── m3.3/
+├── m4/
 └── <milestone>/
     ├── README.md
     └── <checkpoint>_<commit7>_<config8>.md
@@ -116,3 +118,8 @@ V2_01_easy V2_02_medium V2_03_difficult
 所有序列数据只作 record-only，除非 slice 设计另行声明门限。全量表不能替代前置
 诊断门，也不能用低 completion 的 ATE 单独证明改进。
 
+## 7. Milestone checkpoint 索引
+
+- [M3.3 checkpoints](m3.3/README.md)
+- [M4 checkpoints](m4/README.md)；当前全量锚点：
+  [Minimal full-state VIO `c999f58/default_0337287b`](m4/minimal-full-state-vio_c999f58_0337287b.md)

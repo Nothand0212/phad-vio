@@ -9,19 +9,20 @@
 #include <vector>
 
 #include "phad/camera/rectified_stereo_calibration.hpp"
-#include "phad/estimator/stereo_vo_estimator.hpp"
+#include "phad/estimator/vio_estimator.hpp"
 #include "phad/sensor/rigid_transform.hpp"
+#include "tests/estimator/vio_test_utils.hpp"
 
 namespace
 {
 
   using phad::camera::RectifiedStereoCalibration;
   using phad::estimator::EstimatorOptions;
-  using phad::estimator::KeyframeMeasurement;
   using phad::estimator::LandmarkId;
   using phad::estimator::StereoObservation;
-  using phad::estimator::StereoVoEstimator;
   using phad::estimator::UpdateStatus;
+  using phad::estimator::VioEstimator;
+  using phad::estimator::VioMeasurement;
   using phad::sensor::RigidTransform;
 
   RectifiedStereoCalibration makeCalibration()
@@ -53,17 +54,19 @@ namespace
     return StereoObservation{ id, Eigen::Vector2d( u_l, v ), disparity };
   }
 
-  KeyframeMeasurement makeFrame(
+  VioMeasurement makeFrame(
       const RectifiedStereoCalibration& calibration,
       const Eigen::Isometry3d& T_W_B, std::int64_t timestamp_ns,
       const std::vector<Eigen::Vector3d>& landmarks_W,
       const std::vector<LandmarkId>&      ids )
   {
-    KeyframeMeasurement measurement;
-    measurement.timestamp = phad::common::Timestamp{ timestamp_ns };
+    VioMeasurement measurement;
+    measurement.m_timestamp = phad::common::Timestamp{ timestamp_ns };
+    measurement.m_imu       = phad::test_support::stationaryImuPayload(
+        measurement.m_timestamp );
     for ( std::size_t index = 0; index < landmarks_W.size(); ++index )
     {
-      measurement.observations.push_back( projectLandmark(
+      measurement.m_observations.push_back( projectLandmark(
           calibration, T_W_B, ids[ index ], landmarks_W[ index ] ) );
     }
     return measurement;
@@ -94,7 +97,7 @@ namespace
     return ids;
   }
 
-  // Values chosen to keep every landmark well within the frustum (positive
+  // Projection values keep every landmark well within the frustum (positive
   // depth, moderate disparity) across the small translations used below.
   const std::vector<Eigen::Vector3d> kLandmarksA{
       { 0.4, 0.1, 5.0 },
@@ -125,7 +128,7 @@ namespace
   // Runs `frame_count` normal frames on `estimator` using ids_A/kLandmarksA
   // and returns the accepted poses for every frame (index-aligned).
   std::vector<Eigen::Isometry3d> runNormalSegment(
-      StereoVoEstimator& estimator, const RectifiedStereoCalibration& calibration,
+      VioEstimator& estimator, const RectifiedStereoCalibration& calibration,
       const std::vector<Eigen::Isometry3d>& poses,
       const std::vector<LandmarkId>&        ids_a )
   {
@@ -145,7 +148,7 @@ namespace
 
 }  // namespace
 
-TEST( StereoVoReanchor, RecoversAfterLandmarkIdTurnover )
+TEST( VisualOutageLifecycle, LandmarkIdTurnoverCoastsThenRecoversInActiveSegment )
 {
   const auto calibration = makeCalibration();
   const auto ids_a       = sequentialIds( kLandmarksA.size(), 1 );
@@ -153,43 +156,52 @@ TEST( StereoVoReanchor, RecoversAfterLandmarkIdTurnover )
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size          = 5;
-  options.min_shared_landmarks = 3;
+  options.window_size                     = 5;
+  options.min_shared_landmarks            = 3;
   ASSERT_GE( kLandmarksB.size(),
              static_cast<std::size_t>( options.min_seed_observations ) );
 
-  StereoVoEstimator estimator( calibration, options );
-  const auto        poses    = translatingPoses( 4, 0.05 );
-  const auto        accepted = runNormalSegment( estimator, calibration, poses, ids_a );
+  VioEstimator estimator( calibration, phad::test_support::testImuParameters(), options );
+  const auto   poses    = translatingPoses( 4, 0.05 );
+  const auto   accepted = runNormalSegment( estimator, calibration, poses, ids_a );
 
   const Eigen::Isometry3d& T_prev = accepted[ accepted.size() - 2 ];
   const Eigen::Isometry3d& T_last = accepted.back();
   const Eigen::Isometry3d  expected_anchor =
       T_last * ( T_prev.inverse() * T_last );
 
-  // Overlap break: every observed id is brand new. Frame is generated as
-  // seen from the expected anchor pose so the seeded landmarks stay in
-  // front of the camera regardless of the CV extrapolation math.
+  // Every current id is outside the pre-entry map, so this packet remains
+  // low-support while retaining and seeding the new visual chain.
   const auto turnover = estimator.update( makeFrame(
       calibration, expected_anchor, 250'000'000, kLandmarksB, ids_b ) );
   ASSERT_EQ( turnover.status, UpdateStatus::kOk ) << turnover.message;
   ASSERT_TRUE( turnover.estimate.has_value() );
-  EXPECT_EQ( turnover.diagnostics.segment_id, 1U );
+  EXPECT_EQ( turnover.diagnostics.segment_id, 0U );
   EXPECT_EQ( turnover.diagnostics.num_shared, 0U );
-  EXPECT_TRUE( turnover.estimate->T_W_B.matrix().isApprox(
-      expected_anchor.matrix(), 1e-6 ) );
+  EXPECT_EQ( turnover.diagnostics.num_retained_observations,
+             ids_b.size() );
+  EXPECT_EQ( turnover.diagnostics.num_seeded_landmarks, ids_b.size() );
+  EXPECT_EQ( turnover.diagnostics.num_current_visual_factors, 0U );
+  EXPECT_EQ( turnover.diagnostics.m_vio.m_visual_coast_duration_ns,
+             50'000'000 );
+  EXPECT_TRUE( turnover.estimate->T_W_B.matrix().allFinite() );
 
-  // The new segment must keep accepting normal frames afterward.
+  // The next packet sees the committed seeds before intake and recovers in
+  // the same active segment.
   Eigen::Isometry3d next_pose = expected_anchor;
   next_pose.translation() += Eigen::Vector3d( 0.05, 0.0, 0.0 );
   const auto continued = estimator.update(
       makeFrame( calibration, next_pose, 300'000'000, kLandmarksB, ids_b ) );
   EXPECT_EQ( continued.status, UpdateStatus::kOk ) << continued.message;
-  EXPECT_EQ( continued.diagnostics.segment_id, 1U );
-  EXPECT_GT( continued.diagnostics.num_shared, 0U );
+  EXPECT_EQ( continued.diagnostics.segment_id, 0U );
+  EXPECT_EQ( continued.diagnostics.num_shared, ids_b.size() );
+  EXPECT_EQ( continued.diagnostics.num_current_visual_factors,
+             ids_b.size() );
+  EXPECT_EQ( continued.diagnostics.m_vio.m_visual_coast_duration_ns, 0 );
+  EXPECT_EQ( continued.diagnostics.unsupported_span_ns, 0 );
 }
 
-TEST( StereoVoReanchor, SeedGateRejectsWithoutPoisoningState )
+TEST( VisualOutageLifecycle, UnsupportedIdsDoNotPoisonVisualRecovery )
 {
   const auto calibration = makeCalibration();
   const auto ids_a       = sequentialIds( kLandmarksA.size(), 1 );
@@ -197,82 +209,49 @@ TEST( StereoVoReanchor, SeedGateRejectsWithoutPoisoningState )
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size           = 5;
-  options.min_shared_landmarks  = 3;
-  options.min_seed_observations = 10;
+  options.window_size                     = 5;
+  options.min_shared_landmarks            = 3;
+  options.min_seed_observations           = 10;
 
-  StereoVoEstimator estimator( calibration, options );
-  const auto        poses = translatingPoses( 4, 0.05 );
+  VioEstimator estimator( calibration, phad::test_support::testImuParameters(), options );
+  const auto   poses = translatingPoses( 4, 0.05 );
   runNormalSegment( estimator, calibration, poses, ids_a );
 
-  // Too few observations to seed a new segment (< min_seed_observations).
+  // Sparse unmapped observations are retained, but remain below the support
+  // threshold and cannot block recovery on the established map.
   const std::vector<Eigen::Vector3d> sparse_landmarks(
       kLandmarksB.begin(), kLandmarksB.begin() + 3 );
   const std::vector<LandmarkId> sparse_ids( ids_b.begin(), ids_b.begin() + 3 );
   const auto                    starved = estimator.update( makeFrame(
       calibration, Eigen::Isometry3d::Identity(), 250'000'000,
       sparse_landmarks, sparse_ids ) );
-  EXPECT_EQ( starved.status, UpdateStatus::kRejected );
-  EXPECT_FALSE( starved.estimate.has_value() );
+  EXPECT_EQ( starved.status, UpdateStatus::kOk ) << starved.message;
+  EXPECT_TRUE( starved.estimate.has_value() );
   EXPECT_EQ( starved.diagnostics.segment_id, 0U );
-  // pre-M4 round 2 否决后: re-anchor 门 (Gate E) 恢复原拒绝, 累积只用于
-  // 首段 (Gate F)。
-  EXPECT_EQ( starved.message, "insufficient observations to seed new segment" );
+  EXPECT_EQ( starved.diagnostics.m_vio.m_visual_coast_duration_ns,
+             50'000'000 );
 
-  // State must be untouched: a fully-observed break frame right after
-  // still seeds a fresh segment successfully.
-  const auto seeded = estimator.update( makeFrame(
-      calibration, Eigen::Isometry3d::Identity(), 300'000'000, kLandmarksB,
-      ids_b ) );
-  ASSERT_EQ( seeded.status, UpdateStatus::kOk ) << seeded.message;
-  EXPECT_EQ( seeded.diagnostics.segment_id, 1U );
+  const auto recovered = estimator.update( makeFrame(
+      calibration, poses.back(), 300'000'000, kLandmarksA, ids_a ) );
+  ASSERT_EQ( recovered.status, UpdateStatus::kOk ) << recovered.message;
+  EXPECT_EQ( recovered.diagnostics.segment_id, 0U );
+  EXPECT_GT( recovered.diagnostics.num_shared, 0U );
+  EXPECT_EQ( recovered.diagnostics.m_vio.m_visual_coast_duration_ns, 0 );
 }
 
-TEST( StereoVoReanchor, ReanchorDisabledReproducesLegacyReject )
-{
-  const auto calibration = makeCalibration();
-  const auto ids_a       = sequentialIds( kLandmarksA.size(), 1 );
-  const auto ids_b       = sequentialIds( kLandmarksB.size(), 1000 );
-
-  EstimatorOptions options;
-  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size          = 5;
-  options.min_shared_landmarks = 3;
-  options.enable_reanchor      = false;
-
-  StereoVoEstimator estimator( calibration, options );
-  const auto        poses = translatingPoses( 4, 0.05 );
-  runNormalSegment( estimator, calibration, poses, ids_a );
-
-  const auto first_break = estimator.update( makeFrame(
-      calibration, Eigen::Isometry3d::Identity(), 250'000'000, kLandmarksB,
-      ids_b ) );
-  EXPECT_EQ( first_break.status, UpdateStatus::kRejected );
-  EXPECT_FALSE( first_break.estimate.has_value() );
-
-  // Legacy behavior: the break is permanent, even with plenty of shared
-  // observations on subsequent alien frames.
-  const auto second_break = estimator.update( makeFrame(
-      calibration, Eigen::Isometry3d::Identity(), 300'000'000, kLandmarksB,
-      ids_b ) );
-  EXPECT_EQ( second_break.status, UpdateStatus::kRejected );
-  EXPECT_FALSE( second_break.estimate.has_value() );
-  EXPECT_EQ( second_break.diagnostics.segment_id, 0U );
-}
-
-TEST( StereoVoReanchor, FirstSegmentSeedGate )
+TEST( VioInitialization, FirstSegmentSeedGate )
 {
   const auto calibration = makeCalibration();
   const auto ids_a       = sequentialIds( kLandmarksA.size(), 1 );
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size           = 5;
-  options.min_shared_landmarks  = 3;
-  options.min_seed_observations = 10;
-  options.enable_accumulated_seed = true;  // 首段累积 (默认关, 显式开)
+  options.window_size                     = 5;
+  options.min_shared_landmarks            = 3;
+  options.min_seed_observations           = 10;
+  options.enable_accumulated_seed         = true;  // 首段累积 (默认关, 显式开)
 
-  StereoVoEstimator estimator( calibration, options );
+  VioEstimator estimator( calibration, phad::test_support::testImuParameters(), options );
 
   const std::vector<Eigen::Vector3d> sparse_landmarks(
       kLandmarksA.begin(), kLandmarksA.begin() + 3 );
@@ -280,7 +259,7 @@ TEST( StereoVoReanchor, FirstSegmentSeedGate )
   const auto                    starved = estimator.update( makeFrame(
       calibration, Eigen::Isometry3d::Identity(), 50'000'000, sparse_landmarks,
       sparse_ids ) );
-  EXPECT_EQ( starved.status, UpdateStatus::kRejected );
+  EXPECT_EQ( starved.status, UpdateStatus::kInitializing );
   EXPECT_FALSE( starved.estimate.has_value() );
   EXPECT_EQ( starved.message,
              "accumulating seed observations (first segment)" );
@@ -292,24 +271,24 @@ TEST( StereoVoReanchor, FirstSegmentSeedGate )
   EXPECT_EQ( seeded.diagnostics.segment_id, 0U );
 }
 
-TEST( StereoVoReanchor, AccumulatedSeedingSeedsAfterSparseFrames )
+TEST( VioInitialization, AccumulatedSeedingSeedsAfterSparseFrames )
 {
   const auto calibration = makeCalibration();
   const auto ids_a       = sequentialIds( kLandmarksA.size(), 1 );
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size           = 5;
-  options.min_shared_landmarks  = 3;
-  options.min_seed_observations = 10;
-  options.enable_accumulated_seed = true;  // 首段累积 (默认关, 显式开)
+  options.window_size                     = 5;
+  options.min_shared_landmarks            = 3;
+  options.min_seed_observations           = 10;
+  options.enable_accumulated_seed         = true;  // 首段累积 (默认关, 显式开)
 
-  StereoVoEstimator estimator( calibration, options );
+  VioEstimator estimator( calibration, phad::test_support::testImuParameters(), options );
 
   // Three consecutive sparse frames: each contributes 4 stereo observations,
   // none reaches min_seed_observations=10 alone. Across frames the buffer
   // accumulates 10 unique tracks and the third frame seeds from the
-  // accumulated evidence (SVO DepthFilter-style) instead of dying.
+  // accumulated evidence (SVO DepthFilter-style) before accepting the root.
   const auto sparse = [ & ]( std::int64_t t, std::size_t begin,
                              std::size_t count ) {
     std::vector<Eigen::Vector3d> landmarks;
@@ -324,12 +303,12 @@ TEST( StereoVoReanchor, AccumulatedSeedingSeedsAfterSparseFrames )
   };
 
   const auto first = sparse( 50'000'000, 0, 4 );  // ids 1-4
-  EXPECT_EQ( first.status, UpdateStatus::kRejected );
+  EXPECT_EQ( first.status, UpdateStatus::kInitializing );
   EXPECT_EQ( first.message,
              "accumulating seed observations (first segment)" );
 
   const auto second = sparse( 100'000'000, 4, 4 );  // ids 5-8
-  EXPECT_EQ( second.status, UpdateStatus::kRejected );
+  EXPECT_EQ( second.status, UpdateStatus::kInitializing );
   EXPECT_EQ( second.message,
              "accumulating seed observations (first segment)" );
 
@@ -349,60 +328,38 @@ TEST( StereoVoReanchor, AccumulatedSeedingSeedsAfterSparseFrames )
   EXPECT_EQ( continued.status, UpdateStatus::kOk ) << continued.message;
 }
 
-TEST( StereoVoReanchor, AnchorFollowsConstantVelocityOption )
+TEST( VisualOutageLifecycle, CoastUsesImuPropagation )
 {
   const auto calibration = makeCalibration();
   const auto ids_a       = sequentialIds( kLandmarksA.size(), 1 );
   const auto ids_b       = sequentialIds( kLandmarksB.size(), 1000 );
   const auto poses       = translatingPoses( 4, 0.05 );
 
-  auto run_and_break = [ & ]( bool use_cv ) {
-    EstimatorOptions options;
-  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-    options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-    options.window_size                = 5;
-    options.min_shared_landmarks       = 3;
-    options.use_constant_velocity_init = use_cv;
+  EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;
+  options.window_size                     = 5;
+  options.min_shared_landmarks            = 3;
 
-    StereoVoEstimator estimator( calibration, options );
-    const auto        accepted = runNormalSegment( estimator, calibration, poses, ids_a );
+  VioEstimator estimator( calibration, phad::test_support::testImuParameters(), options );
+  runNormalSegment( estimator, calibration, poses, ids_a );
 
-    const Eigen::Isometry3d& T_prev = accepted[ accepted.size() - 2 ];
-    const Eigen::Isometry3d& T_last = accepted.back();
-    const Eigen::Isometry3d  expected_anchor =
-        use_cv ? T_last * ( T_prev.inverse() * T_last ) : T_last;
-
-    const auto turnover = estimator.update( makeFrame(
-        calibration, expected_anchor, 250'000'000, kLandmarksB, ids_b ) );
-    return std::make_pair( turnover, expected_anchor );
-  };
-
-  const auto [ cv_on_result, cv_on_anchor ]   = run_and_break( true );
-  const auto [ cv_off_result, cv_off_anchor ] = run_and_break( false );
-
-  ASSERT_EQ( cv_on_result.status, UpdateStatus::kOk ) << cv_on_result.message;
-  ASSERT_TRUE( cv_on_result.estimate.has_value() );
-  EXPECT_TRUE( cv_on_result.estimate->T_W_B.matrix().isApprox(
-      cv_on_anchor.matrix(), 1e-6 ) );
-
-  ASSERT_EQ( cv_off_result.status, UpdateStatus::kOk ) << cv_off_result.message;
-  ASSERT_TRUE( cv_off_result.estimate.has_value() );
-  EXPECT_TRUE( cv_off_result.estimate->T_W_B.matrix().isApprox(
-      cv_off_anchor.matrix(), 1e-6 ) );
-
-  // The two options must actually disagree here (translation-only motion
-  // makes the CV-off anchor lag one step behind the CV-on anchor).
-  EXPECT_GT( ( cv_on_anchor.translation() - cv_off_anchor.translation() ).norm(),
-             1e-3 );
+  const auto coast = estimator.update( makeFrame(
+      calibration, poses.back(), 250'000'000, kLandmarksB, ids_b ) );
+  ASSERT_EQ( coast.status, UpdateStatus::kOk ) << coast.message;
+  ASSERT_TRUE( coast.estimate.has_value() );
+  EXPECT_TRUE( coast.estimate->T_W_B.matrix().allFinite() );
+  EXPECT_EQ( coast.diagnostics.m_vio.m_imu_factors, 4U );
+  EXPECT_EQ( coast.diagnostics.m_vio.m_bias_rw_factors, 4U );
+  EXPECT_EQ( coast.diagnostics.m_vio.m_visual_coast_duration_ns, 50'000'000 );
 }
 
-TEST( StereoVoReanchor, CtorRejectsMinSeedObservationsBelowOne )
+TEST( VioInitialization, CtorRejectsMinSeedObservationsBelowOne )
 {
   const auto calibration = makeCalibration();
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.min_seed_observations = 0;
-  EXPECT_THROW( StereoVoEstimator( calibration, options ),
+  options.min_seed_observations           = 0;
+  EXPECT_THROW( VioEstimator( calibration, phad::test_support::testImuParameters(), options ),
                 std::invalid_argument );
 }

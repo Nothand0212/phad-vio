@@ -114,6 +114,37 @@ V(k) -> Vector3
 B(k) -> imuBias::ConstantBias
 ```
 
+### 3.1 阶段性 gyro-only 资格 key（ADR-0002）
+
+上表仍是完整 VIO 的唯一 canonical state/key 合同。仅在
+`PHAD-M4-ONLINE-GYRO-BIAS-SYNTHETIC-V1` 的 default-off、无 real caller synthetic
+资格阶段，允许 estimator PIMPL/private implementation 内部使用：
+
+```text
+G(k) = gtsam::Symbol('g', frame_index) -> Vector3  # 仅 b^g，B frame，rad/s
+```
+
+这里的 `k` 是实际 `Pose3` graph state 的 `frame_index`，包含 accepted non-keyframe；每个
+实际 pose graph state 都有且只有一个对应的 `G(k)`。`G(k)` 的 GTSAM key、type 与 ownership
+不得进入 public API；允许按本协议通过不含 GTSAM key/type 的 project-owned POD 公开
+in-memory bias value 与 diagnostics。它们不得成为 config key 或持久 artifact schema，也不得
+形成真实数据或 app caller。
+
+`B(k)` 继续且只用于 `imuBias::ConstantBias`；同一 factor graph 中不得用 `G(k)` 与 `B(k)`
+重复表示同一个 physical gyro bias。full `X/V/B` slice 另行获授权时，必须直接删除 `G(k)`
+state、gyro-only factor 及其 lifecycle 并改用 `B(k)`；不得增加 key alias、compatibility
+adapter、dual-write 或 migration fallback。
+
+本协议只允许 test code 通过 in-memory project-owned POD
+`EstimatorOptions::m_gyro_bias` 激活该阶段性机制；它保持 default-off，且不得接入 CLI/config
+parser、`flattenConfig()`、`config_hash`、persistent artifact schema、apps/session 或 real-data
+caller。该 public value seam 不改变 private ownership：`G(k)` 的 GTSAM key/type、PIM、factor 与
+lifecycle 仍只能存在于 estimator PIMPL/private implementation。
+
+Q3 的 `visual_posterior_aligned_nuisance` 不得用于初始化或约束 `G(k)`；Q3 的
+`HYPOTHESIS_FAIL/STOP` 结论保持不变。完整边界与退役条件见
+[ADR-0002](adr/0002-stage-gated-gyro-only-bias-state.md)。
+
 项目数据结构中的 bias 字段顺序明确写成 accelerometer、gyroscope；
 禁止依靠长度为 6 的裸向量位置约定在模块间传递 bias。
 
@@ -248,4 +279,3 @@ gyroscope 分别做线性插值，再按分段常值测量积分。
 4. stereo 图像是否硬件同步；
 5. 初始静止时间和允许的数据间断阈值；
 6. world 原点与初始 yaw 的具体初始化策略。
-

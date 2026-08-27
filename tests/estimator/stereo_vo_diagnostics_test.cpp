@@ -9,19 +9,20 @@
 #include <vector>
 
 #include "phad/camera/rectified_stereo_calibration.hpp"
-#include "phad/estimator/stereo_vo_estimator.hpp"
+#include "phad/estimator/vio_estimator.hpp"
 #include "phad/sensor/rigid_transform.hpp"
+#include "tests/estimator/vio_test_utils.hpp"
 
 namespace
 {
 
   using phad::camera::RectifiedStereoCalibration;
   using phad::estimator::EstimatorOptions;
-  using phad::estimator::KeyframeMeasurement;
   using phad::estimator::LandmarkId;
   using phad::estimator::StereoObservation;
-  using phad::estimator::StereoVoEstimator;
   using phad::estimator::UpdateStatus;
+  using phad::estimator::VioEstimator;
+  using phad::estimator::VioMeasurement;
   using phad::sensor::RigidTransform;
 
   RectifiedStereoCalibration makeCalibration(
@@ -60,17 +61,19 @@ namespace
     return StereoObservation{ id, Eigen::Vector2d( u_l, v ), disparity };
   }
 
-  KeyframeMeasurement makeFrame(
+  VioMeasurement makeFrame(
       const RectifiedStereoCalibration& calibration,
       const Eigen::Isometry3d& T_W_B, std::int64_t timestamp_ns,
       const std::vector<Eigen::Vector3d>& landmarks_W,
       const std::vector<LandmarkId>&      ids )
   {
-    KeyframeMeasurement measurement;
-    measurement.timestamp = phad::common::Timestamp{ timestamp_ns };
+    VioMeasurement measurement;
+    measurement.m_timestamp = phad::common::Timestamp{ timestamp_ns };
+    measurement.m_imu       = phad::test_support::stationaryImuPayload(
+        measurement.m_timestamp );
     for ( std::size_t index = 0; index < landmarks_W.size(); ++index )
     {
-      measurement.observations.push_back( projectLandmark(
+      measurement.m_observations.push_back( projectLandmark(
           calibration, T_W_B, ids[ index ], landmarks_W[ index ] ) );
     }
     return measurement;
@@ -116,7 +119,7 @@ namespace
 
 }  // namespace
 
-TEST( StereoVoDiagnostics, ZeroSharedRejectsWithoutMutatingWindow )
+TEST( StereoVoDiagnostics, ZeroSharedCommitsContinuousStateAndRecovers )
 {
   const auto calibration = makeCalibration();
   const auto poses       = translatingPoses( 3, 0.05 );
@@ -124,12 +127,10 @@ TEST( StereoVoDiagnostics, ZeroSharedRejectsWithoutMutatingWindow )
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size          = 5;
-  options.min_shared_landmarks = 3;
-  // This test targets the permanent zero-overlap reject, not re-anchoring.
-  options.enable_reanchor = false;
+  options.window_size                     = 5;
+  options.min_shared_landmarks            = 3;
 
-  StereoVoEstimator estimator( calibration, options );
+  VioEstimator estimator( calibration, phad::test_support::testImuParameters(), options );
   ASSERT_EQ( estimator
                  .update( makeFrame( calibration, poses[ 0 ], 50'000'000,
                                      kLandmarks, ids ) )
@@ -142,22 +143,25 @@ TEST( StereoVoDiagnostics, ZeroSharedRejectsWithoutMutatingWindow )
   EXPECT_EQ( before.diagnostics.prior_key, 0U );
 
   const auto alien_ids = sequentialIds( kLandmarks.size(), 1000 );
-  const auto rejected  = estimator.update(
+  const auto coast     = estimator.update(
       makeFrame( calibration, poses[ 2 ], 150'000'000, kLandmarks, alien_ids ) );
-  EXPECT_EQ( rejected.status, UpdateStatus::kRejected );
-  EXPECT_FALSE( rejected.estimate.has_value() );
-  EXPECT_EQ( rejected.diagnostics.num_shared, 0U );
-  EXPECT_EQ( rejected.diagnostics.window_size, 2U );
-  EXPECT_EQ( rejected.diagnostics.prior_key, 0U );
+  ASSERT_EQ( coast.status, UpdateStatus::kOk ) << coast.message;
+  EXPECT_TRUE( coast.estimate.has_value() );
+  EXPECT_EQ( coast.diagnostics.num_shared, 0U );
+  EXPECT_EQ( coast.diagnostics.window_size, 3U );
+  EXPECT_EQ( coast.diagnostics.prior_key, 0U );
+  EXPECT_EQ( coast.diagnostics.m_vio.m_visual_coast_duration_ns, 50'000'000 );
 
-  const auto after = estimator.update(
-      makeFrame( calibration, poses[ 2 ], 200'000'000, kLandmarks, ids ) );
+  auto       after_measurement = makeFrame( calibration, poses[ 2 ], 200'000'000,
+                                            kLandmarks, ids );
+  const auto after             = estimator.update( after_measurement );
   ASSERT_EQ( after.status, UpdateStatus::kOk ) << after.message;
-  EXPECT_EQ( after.diagnostics.window_size, 3U );
+  EXPECT_EQ( after.diagnostics.window_size, 4U );
   EXPECT_EQ( after.diagnostics.prior_key, 0U );
+  EXPECT_EQ( after.diagnostics.m_vio.m_visual_coast_duration_ns, 0 );
 }
 
-TEST( StereoVoDiagnostics, RejectedFrameSkippedByConstantVelocity )
+TEST( StereoVoDiagnostics, VisualCoastPreservesContinuousNavigationCadence )
 {
   const auto calibration = makeCalibration();
   const auto poses       = translatingPoses( 5, 0.05 );
@@ -165,29 +169,10 @@ TEST( StereoVoDiagnostics, RejectedFrameSkippedByConstantVelocity )
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size                = 5;
-  options.min_shared_landmarks       = 3;
-  options.use_constant_velocity_init = true;
-  // This test targets the permanent zero-overlap reject, not re-anchoring.
-  options.enable_reanchor = false;
-
-  auto run_clean = [ & ]() {
-    StereoVoEstimator                           estimator( calibration, options );
-    std::optional<phad::estimator::VioEstimate> last;
-    for ( int index = 0; index < 5; ++index )
-    {
-      const auto result = estimator.update( makeFrame(
-          calibration, poses[ static_cast<std::size_t>( index ) ],
-          static_cast<std::int64_t>( index + 1 ) * 50'000'000, kLandmarks,
-          ids ) );
-      EXPECT_EQ( result.status, UpdateStatus::kOk ) << result.message;
-      last = result.estimate;
-    }
-    return *last;
-  };
-
-  auto run_with_reject = [ & ]() {
-    StereoVoEstimator                           estimator( calibration, options );
+  options.window_size                     = 5;
+  options.min_shared_landmarks            = 3;
+  auto run_with_coast                     = [ & ]() {
+    VioEstimator                                estimator( calibration, phad::test_support::testImuParameters(), options );
     std::optional<phad::estimator::VioEstimate> last;
     for ( int index = 0; index < 3; ++index )
     {
@@ -198,36 +183,48 @@ TEST( StereoVoDiagnostics, RejectedFrameSkippedByConstantVelocity )
       EXPECT_EQ( result.status, UpdateStatus::kOk ) << result.message;
       last = result.estimate;
     }
-    const auto alien_ids = sequentialIds( kLandmarks.size(), 500 );
-    const auto rejected  = estimator.update( makeFrame(
-        calibration, poses[ 3 ], 175'000'000, kLandmarks, alien_ids ) );
-    EXPECT_EQ( rejected.status, UpdateStatus::kRejected );
+    const auto alien_ids         = sequentialIds( kLandmarks.size(), 500 );
+    auto       coast_measurement = makeFrame(
+        calibration, poses[ 3 ], 175'000'000, kLandmarks, alien_ids );
+    coast_measurement.m_imu = phad::test_support::stationaryImuPayload(
+        phad::common::Timestamp{ 150'000'000 },
+        phad::common::Timestamp{ 175'000'000 } );
+    const auto coast = estimator.update( coast_measurement );
+    EXPECT_EQ( coast.status, UpdateStatus::kOk ) << coast.message;
+    EXPECT_EQ( coast.diagnostics.m_vio.m_visual_coast_duration_ns, 25'000'000 );
     for ( int index = 3; index < 5; ++index )
     {
-      const auto result = estimator.update( makeFrame(
+      auto measurement = makeFrame(
           calibration, poses[ static_cast<std::size_t>( index ) ],
           static_cast<std::int64_t>( index + 1 ) * 50'000'000, kLandmarks,
-          ids ) );
+          ids );
+      if ( index == 3 )
+      {
+        measurement.m_imu = phad::test_support::stationaryImuPayload(
+            phad::common::Timestamp{ 175'000'000 },
+            phad::common::Timestamp{ 200'000'000 } );
+      }
+      const auto result = estimator.update( measurement );
       EXPECT_EQ( result.status, UpdateStatus::kOk ) << result.message;
+      EXPECT_EQ( result.diagnostics.m_vio.m_visual_coast_duration_ns, 0 );
       last = result.estimate;
     }
     return *last;
   };
 
-  const auto clean    = run_clean();
-  const auto rejected = run_with_reject();
-  EXPECT_TRUE(
-      clean.T_W_B.matrix().isApprox( rejected.T_W_B.matrix(), 1e-6 ) );
+  const auto final = run_with_coast();
+  EXPECT_TRUE( final.T_W_B.matrix().allFinite() );
+  EXPECT_EQ( final.m_segment_id, 0U );
 }
 
-TEST( StereoVoDiagnostics, BehindCameraCountedAndSequenceContinues )
+TEST( StereoVoDiagnostics, ConflictingNearLandmarkSequenceContinues )
 {
   const auto       calibration = makeCalibration();
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size               = 8;
-  options.min_shared_landmarks      = 2;
-  options.min_landmark_observations = 2;
+  options.window_size                     = 8;
+  options.min_shared_landmarks            = 2;
+  options.min_landmark_observations       = 2;
   // Disable Huber so conflicting near-landmark factors are not ignored.
   options.huber_k_px = 0.0;
 
@@ -246,9 +243,8 @@ TEST( StereoVoDiagnostics, BehindCameraCountedAndSequenceContinues )
   const auto            far_ids = sequentialIds( far_landmarks.size(), 1 );
   const LandmarkId      near_id = 99;
 
-  StereoVoEstimator estimator( calibration, options );
+  VioEstimator      estimator( calibration, phad::test_support::testImuParameters(), options );
   StereoObservation near_at_first{};
-  bool              saw_cheirality = false;
 
   // Frame 0 seeds the near landmark at z=1. Frame 1 jumps to z=2.5 (past it)
   // while still attaching the frame-0 stereo measurement, so the factor is
@@ -259,14 +255,16 @@ TEST( StereoVoDiagnostics, BehindCameraCountedAndSequenceContinues )
     const double      z     = ( index == 0 ) ? 0.0 : 2.5;
     T_W_B.translation()     = Eigen::Vector3d( 0.0, 0.0, z );
 
-    KeyframeMeasurement measurement;
-    measurement.timestamp = phad::common::Timestamp{
+    VioMeasurement measurement;
+    measurement.m_timestamp = phad::common::Timestamp{
         static_cast<std::int64_t>( index + 1 ) * 50'000'000 };
+    measurement.m_imu = phad::test_support::stationaryImuPayload(
+        measurement.m_timestamp, 50'000'000 );
 
     for ( std::size_t landmark_index = 0; landmark_index < far_landmarks.size();
           ++landmark_index )
     {
-      measurement.observations.push_back( projectLandmark(
+      measurement.m_observations.push_back( projectLandmark(
           calibration, T_W_B, far_ids[ landmark_index ],
           far_landmarks[ landmark_index ] ) );
     }
@@ -275,21 +273,18 @@ TEST( StereoVoDiagnostics, BehindCameraCountedAndSequenceContinues )
     {
       near_at_first = projectLandmark(
           calibration, T_W_B, near_id, near_landmark );
-      measurement.observations.push_back( near_at_first );
+      measurement.m_observations.push_back( near_at_first );
     }
     else
     {
-      measurement.observations.push_back( near_at_first );
+      measurement.m_observations.push_back( near_at_first );
     }
 
     const auto result = estimator.update( measurement );
     ASSERT_EQ( result.status, UpdateStatus::kOk ) << result.message;
-    if ( result.diagnostics.num_cheirality > 0 )
-    {
-      saw_cheirality = true;
-    }
+    ASSERT_TRUE( result.estimate.has_value() );
+    EXPECT_TRUE( result.estimate->T_W_B.matrix().allFinite() );
   }
-  EXPECT_TRUE( saw_cheirality );
 }
 
 TEST( StereoVoDiagnostics, ObservationTimestampsAccumulateById )
@@ -300,10 +295,10 @@ TEST( StereoVoDiagnostics, ObservationTimestampsAccumulateById )
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size          = 2;  // force pruning of oldest frame
-  options.min_shared_landmarks = 2;
+  options.window_size                     = 2;  // force pruning of oldest frame
+  options.min_shared_landmarks            = 2;
 
-  StereoVoEstimator estimator( calibration, options );
+  VioEstimator estimator( calibration, phad::test_support::testImuParameters(), options );
   for ( int index = 0; index < 3; ++index )
   {
     ASSERT_EQ( estimator
@@ -330,10 +325,10 @@ TEST( StereoVoDiagnostics, LowConnectivityFlagWhenSharedBelowThreshold )
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size          = 5;
-  options.min_shared_landmarks = 100;  // force flag while still optimizing
+  options.window_size                     = 5;
+  options.min_shared_landmarks            = 100;  // force flag while still optimizing
 
-  StereoVoEstimator estimator( calibration, options );
+  VioEstimator estimator( calibration, phad::test_support::testImuParameters(), options );
   ASSERT_EQ( estimator
                  .update( makeFrame( calibration, poses[ 0 ], 50'000'000,
                                      kLandmarks, ids ) )
@@ -369,10 +364,10 @@ TEST( StereoVoExtrinsics, RecoversBodyPoseNotLeftCamera )
   const auto       ids = sequentialIds( kLandmarks.size() );
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size          = 6;
-  options.min_shared_landmarks = 3;
+  options.window_size                     = 6;
+  options.min_shared_landmarks            = 3;
 
-  StereoVoEstimator estimator( calibration, options );
+  VioEstimator estimator( calibration, phad::test_support::testImuParameters(), options );
   for ( int index = 0; index < static_cast<int>( poses.size() ); ++index )
   {
     const auto result = estimator.update( makeFrame(
@@ -425,11 +420,11 @@ TEST( StereoVoExtrinsics, WrongExtrinsicRaisesResidualNotStatusFailure )
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size          = 5;
-  options.min_shared_landmarks = 3;
+  options.window_size                     = 5;
+  options.min_shared_landmarks            = 3;
 
-  StereoVoEstimator estimator( calib_wrong, options );
-  double            last_err = 0.0;
+  VioEstimator estimator( calib_wrong, phad::test_support::testImuParameters(), options );
+  double       last_err = 0.0;
   for ( int index = 0; index < static_cast<int>( poses.size() ); ++index )
   {
     const auto result = estimator.update( makeFrame(

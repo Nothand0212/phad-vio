@@ -171,8 +171,10 @@ namespace
       tracks_out << "id,first_timestamp_ns,last_timestamp_ns,length\n";
     }
 
-    phad::io::dataset::DatasetReplaySource                     source{ opened.value() };
-    phad::apps::StereoPairStream                               stream{ source };
+    phad::io::dataset::DatasetReplaySource source{ opened.value() };
+    phad::apps::StereoPairStream           stream{
+        source, phad::sync::StereoPairSynchronizerOptions{
+                              .imu_continuity_limit_ns = 20'000'000 } };
     std::unordered_map<phad::frontend::LandmarkId, LiveRecord> live;
 
     std::uint64_t       frame_count      = 0;

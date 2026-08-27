@@ -11,6 +11,7 @@
 #include <opencv2/imgcodecs.hpp>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 namespace
 {
@@ -33,10 +34,11 @@ namespace
     static constexpr std::int64_t kSecondTimestampNs =
         kFirstTimestampNs + 50'000'000LL;
 
-    TinyEurocFixture()
+    explicit TinyEurocFixture( std::string_view suffix )
     {
       m_root = std::filesystem::temp_directory_path() /
-               "phad_offline_vo_session_tiny_seq";
+               ( "phad_offline_vo_session_tiny_seq_" +
+                 std::string{ suffix } );
       std::filesystem::remove_all( m_root );
       for ( const auto* sensor : { "cam0", "cam1", "imu0" } )
       {
@@ -44,7 +46,7 @@ namespace
                                              "data" );
       }
       writeCalibration();
-      writeCsv( "imu0", imuHeader() );
+      writeCsv( "imu0", imuCsv() );
       writeImage( "cam0", "left-a.png" );
       writeImage( "cam0", "left-b.png" );
       writeImage( "cam1", "right-a.png" );
@@ -82,6 +84,20 @@ namespace
       return "#timestamp [ns],w_RS_S_x [rad s^-1],w_RS_S_y [rad s^-1],"
              "w_RS_S_z [rad s^-1],a_RS_S_x [m s^-2],a_RS_S_y [m s^-2],"
              "a_RS_S_z [m s^-2]\n";
+    }
+
+    static std::string imuCsv()
+    {
+      const auto row = []( std::int64_t timestamp_ns ) {
+        return std::to_string( timestamp_ns ) +
+               ",0,0,0,0,0,9.81\n";
+      };
+      return imuHeader() + row( kFirstTimestampNs - 25'000'000LL ) +
+             row( kFirstTimestampNs - 12'500'000LL ) +
+             row( kFirstTimestampNs ) +
+             row( kFirstTimestampNs + 25'000'000LL ) +
+             row( kSecondTimestampNs ) +
+             row( kSecondTimestampNs + 25'000'000LL );
     }
 
     void writeCsv( const std::string& sensor, const std::string& contents )
@@ -165,11 +181,14 @@ namespace
     EXPECT_EQ( counts.outliers_culled, 0U );
     EXPECT_EQ( counts.outliers_culled_unique, 0U );
     EXPECT_EQ( counts.outlier_reopts, 0U );
+    EXPECT_EQ( counts.non_keyframe_evictions, 0U );
+    EXPECT_EQ( counts.imu_reintegrations, 0U );
   }
 
   TEST( OfflineVoSessionTest, SkipDropMinCulledDefaultsFour )
   {
     OfflineVoSessionOptions options;
+    EXPECT_FALSE( options.collect_gyro_observe );
     EXPECT_EQ( options.skip_drop_min_culled, 4 );
     EXPECT_TRUE( options.drop_culled_tracks );
     EXPECT_EQ( options.defer_drop_topk, 0 );
@@ -182,7 +201,7 @@ namespace
   TEST( OfflineVoSessionTest,
         StreamErrorMidLoopFinalizesCountsWithoutSpuriousSummaryWarning )
   {
-    TinyEurocFixture fixture;
+    TinyEurocFixture fixture{ "stream_error" };
     fixture.corruptSecondRightImage();
 
     OfflineVoSessionOptions options;
@@ -191,17 +210,23 @@ namespace
     const auto result = runOfflineVoSession( options );
     ASSERT_TRUE( result.error.has_value() );
     EXPECT_EQ( result.counts.image_frames, 1U );
+    ASSERT_EQ( result.diag.size(), 1U );
+    EXPECT_EQ( result.diag.front().num_retained_observations, 0U );
+    EXPECT_EQ( result.diag.front().num_seeded_landmarks, 0U );
+    EXPECT_EQ( result.diag.front().num_current_visual_factors, 0U );
+    EXPECT_EQ( result.diag.front().unsupported_span_ns, 0 );
 
     // Mid-loop stream errors still run segment finalization, but a run
-    // with no re-anchors and no seed-gate rejections is clean: no
-    // "vo segments summary" warning should be emitted. Cull totals never
+    // With no initialization rejection, no initialization summary warning is
+    // emitted. Cull totals never
     // enter warnings either.
     EXPECT_EQ( result.counts.reanchors, 0U );
     EXPECT_EQ( result.counts.seed_rejected, 0U );
     const bool has_summary_warning =
         std::any_of( result.warnings.begin(), result.warnings.end(),
                      []( const std::string& warning ) {
-                       return warning.rfind( "vo segments summary:", 0 ) == 0;
+                       return warning.rfind( "vo initialization summary:", 0 ) ==
+                              0;
                      } );
     EXPECT_FALSE( has_summary_warning );
     const bool has_cull_warning =
@@ -211,6 +236,30 @@ namespace
                               0;
                      } );
     EXPECT_FALSE( has_cull_warning );
+    EXPECT_TRUE( result.gyro_observe.packets.empty() );
+    EXPECT_TRUE( result.gyro_observe.samples.empty() );
+  }
+
+  TEST( OfflineVoSessionTest, GyroObserveCollectsPacketBeforeLaterStreamError )
+  {
+    TinyEurocFixture fixture{ "gyro_observe_stream_error" };
+    fixture.corruptSecondRightImage();
+
+    OfflineVoSessionOptions options;
+    options.sequence_root        = fixture.root();
+    options.collect_gyro_observe = true;
+
+    const auto result = runOfflineVoSession( options );
+    ASSERT_TRUE( result.error.has_value() );
+    ASSERT_EQ( result.gyro_observe.packets.size(), 1U );
+    EXPECT_EQ( result.gyro_observe.packets.front().status,
+               phad::apps::GyroPacketStatus::kValid );
+    EXPECT_EQ( result.gyro_observe.packets.front().vo_segment_id,
+               result.diag.empty() ? 0U : result.diag.front().segment_id );
+    EXPECT_EQ( result.gyro_observe.samples.size(),
+               result.gyro_observe.packets.front().sample_count );
+    EXPECT_EQ( result.gyro_observe.samples.front().timestamp_ns,
+               TinyEurocFixture::kFirstTimestampNs - 25'000'000LL );
   }
 
   TEST( OfflineVoSessionTest, WriteDiagCsvMatchesProbeContract )
@@ -220,26 +269,41 @@ namespace
     std::filesystem::remove( path );
 
     VoDiagRow row;
-    row.timestamp_ns            = 1403636579763555584LL;
-    row.status                  = "ok";
-    row.num_observations        = 136;
-    row.num_landmarks           = 0;
-    row.num_shared              = 0;
-    row.low_connectivity        = false;
-    row.window_size             = 1;
-    row.prior_key               = 0;
-    row.reproj_rms_before_px    = 0.0;
-    row.reproj_rms_after_px     = 0.0;
-    row.num_cheirality          = 0;
-    row.lm_iterations           = 0;
-    row.max_window_pose_shift_m = 0.0;
-    row.segment_id               = 0;
-    row.pnp_success              = false;
-    row.pnp_inliers              = 0;
-    row.outliers_culled          = 0;
-    row.reproj_rms_after_cull_px = 0.0;
+    row.timestamp_ns               = 1403636579763555584LL;
+    row.status                     = "ok";
+    row.num_observations           = 136;
+    row.num_landmarks              = 0;
+    row.num_shared                 = 0;
+    row.num_disparity              = 91;
+    row.low_connectivity           = false;
+    row.window_size                = 1;
+    row.prior_key                  = 0;
+    row.reproj_rms_before_px       = 0.0;
+    row.reproj_rms_after_px        = 0.0;
+    row.num_cheirality             = 0;
+    row.lm_iterations              = 0;
+    row.max_window_pose_shift_m    = 0.0;
+    row.segment_id                 = 0;
+    row.pnp_success                = false;
+    row.pnp_inliers                = 0;
+    row.outliers_culled            = 0;
+    row.reproj_rms_after_cull_px   = 0.0;
+    row.unsupported_span_ns        = 250'000'000;
+    row.num_retained_observations  = 73;
+    row.num_seeded_landmarks       = 11;
+    row.num_current_visual_factors = 9;
 
-    ASSERT_FALSE( writeDiagCsv( path, { row } ).has_value() );
+    VoDiagRow outage_row;
+    outage_row.timestamp_ns        = row.timestamp_ns + 1;
+    outage_row.status              = "visual_outage";
+    outage_row.unsupported_span_ns = 300'000'000;
+    VoDiagRow discontinuity_row;
+    discontinuity_row.timestamp_ns = row.timestamp_ns + 2;
+    discontinuity_row.status       = "discontinuity";
+
+    ASSERT_FALSE( writeDiagCsv(
+                      path, { row, outage_row, discontinuity_row } )
+                      .has_value() );
 
     std::ifstream in( path );
     ASSERT_TRUE( in );
@@ -248,7 +312,7 @@ namespace
     const std::string text = oss.str();
     EXPECT_NE( text.find( "timestamp_ns,status,num_obs," ), std::string::npos );
     EXPECT_NE( text.find( "pnp_success,pnp_inliers,outliers_culled,"
-                           "reproj_rms_after_cull_px" ),
+                          "reproj_rms_after_cull_px" ),
                std::string::npos );
     // Slice ④e / Probe B keep the 19-column contract; Probe B is a
     // separate jsonl side-channel. outlier_reopt_rounds stay off diag
@@ -256,16 +320,41 @@ namespace
     // (session dropTracks; not a diag column). Slice ⑦'s
     // num_triangulated_seed column was dropped again post-gate (the
     // diagnostic never increments: triangulation seeding is disabled).
-    // pre-M4 小片 (2026-08-07): num_disparity appended after is_keyframe →
-    // 20-column contract.
+    // Slice 1b appends continuity and committed-intake diagnostics after the
+    // existing num_disparity column.
     const auto header_end = text.find( '\n' );
     ASSERT_NE( header_end, std::string::npos );
     const std::string header = text.substr( 0, header_end );
-    EXPECT_EQ( std::count( header.begin(), header.end(), ',' ), 19 );
+    EXPECT_EQ( std::count( header.begin(), header.end(), ',' ), 23 );
+    EXPECT_NE(
+        header.find(
+            "num_disparity,unsupported_span_ns,num_retained_observations,"
+            "num_seeded_landmarks,num_current_visual_factors" ),
+        std::string::npos );
     EXPECT_NE(
         text.find( "1403636579763555584,ok,136,0,0,0,1,0,0.000000,0.000000,0,"
-                   "0,0.000000,0,0,0,0,0.000000,0" ),
+                   "0,0.000000,0,0,0,0,0.000000,0,91,250000000,73,11,9" ),
         std::string::npos );
+    const auto outage_begin = text.find( ",visual_outage," );
+    ASSERT_NE( outage_begin, std::string::npos );
+    const auto outage_end = text.find( '\n', outage_begin );
+    ASSERT_NE( outage_end, std::string::npos );
+    const std::string outage_line =
+        text.substr( outage_begin, outage_end - outage_begin );
+    EXPECT_EQ( std::count( outage_line.begin(), outage_line.end(), ',' ),
+               23 );
+    EXPECT_EQ( outage_line.rfind( ",300000000,0,0,0" ),
+               outage_line.size() - std::string{ ",300000000,0,0,0" }.size() );
+    const auto discontinuity_begin = text.find( ",discontinuity," );
+    ASSERT_NE( discontinuity_begin, std::string::npos );
+    const auto discontinuity_end = text.find( '\n', discontinuity_begin );
+    ASSERT_NE( discontinuity_end, std::string::npos );
+    const std::string discontinuity_line =
+        text.substr( discontinuity_begin,
+                     discontinuity_end - discontinuity_begin );
+    EXPECT_EQ( discontinuity_line.rfind( ",0,0,0,0" ),
+               discontinuity_line.size() -
+                   std::string{ ",0,0,0,0" }.size() );
     std::filesystem::remove( path );
   }
 
@@ -347,7 +436,7 @@ namespace
   TEST( OfflineVoSessionTest, IllegalProbeBParentDirFailsSession )
   {
     // Writer open fails before the frame loop; TinyEuroc is enough.
-    TinyEurocFixture fixture;
+    TinyEurocFixture fixture{ "probe_b_open_error" };
     const auto       probe_path =
         std::filesystem::temp_directory_path() /
         "phad_offline_vo_session_probe_b_missing_parent" / "nested" /
@@ -386,15 +475,15 @@ namespace
     EXPECT_LT( result.first_image_ts, result.last_image_ts );
     EXPECT_GT( result.wall_s, 0.0 );
 
-    // MH_01 is the clean-run reference: no re-anchors, no seed-gate
-    // rejections, so no "vo segments summary" warning is expected.
+    // A clean prefix has no initialization summary warning.
     // Cull counters may be non-zero but must not enter warnings.
     EXPECT_EQ( result.counts.reanchors, 0U );
     EXPECT_EQ( result.counts.seed_rejected, 0U );
     const bool has_summary_warning =
         std::any_of( result.warnings.begin(), result.warnings.end(),
                      []( const std::string& warning ) {
-                       return warning.rfind( "vo segments summary:", 0 ) == 0;
+                       return warning.rfind( "vo initialization summary:", 0 ) ==
+                              0;
                      } );
     EXPECT_FALSE( has_summary_warning );
     const bool has_cull_warning =

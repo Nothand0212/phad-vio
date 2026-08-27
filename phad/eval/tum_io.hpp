@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <string_view>
 
 #include "phad/common/trajectory.hpp"
 #include "phad/eval/eval_error.hpp"
@@ -22,6 +23,9 @@ namespace phad::eval
 
   [[nodiscard]] std::optional<EvalError> writeTum(
       const std::filesystem::path& path, const common::Trajectory& trajectory );
+
+  [[nodiscard]] EvalResult<common::Trajectory> readTumBytes(
+      std::string_view bytes, const std::filesystem::path& source_label );
 
   [[nodiscard]] EvalResult<common::Trajectory> readTum(
       const std::filesystem::path& path );
