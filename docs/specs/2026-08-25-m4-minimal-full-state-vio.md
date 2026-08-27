@@ -19,7 +19,7 @@ wrapper、dual-write 或并行实现。
 
 当前 online-bias replay2 的 verdict 仍为 `HARD_ERROR`，原因是 negative-arm setup 的
 harness/operator wrong-argument invocation；`product_attribution=false`、
-`scientific_attribution=false`、`permission_granted=false`。[result ledger](../research/m4-online-gyro-bias-synthetic-result.md)
+`scientific_attribution=false`、`permission_granted=false`。[result ledger](../research/2026-08-24-note-m4-online-gyro-bias-synthetic-result.md)
 保全 #40 candidate commit `9bdd32df4089774b667db721815bb89a3007a47b`、tree
 `732c8ea3e8a280693b58dac4211646f5a6a0e44a`、positive actual `4/4`、`37/37`、`10/10`、
 `114/114`，以及有效 negative arms `5/19`。replay3 保持 paused；Q3 的唯一历史结论仍是

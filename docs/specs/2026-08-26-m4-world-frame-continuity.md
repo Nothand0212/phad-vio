@@ -8,10 +8,10 @@ issue：[#43](https://github.com/Nothand0212/phad-vio/issues/43)（epic：[#42](
 
 control：[M4 checkpoint `c999f58` / `default_0337287b`](../benchmark/m4/minimal-full-state-vio_c999f58_0337287b.md)
 
-证据：[方向分析](../research/m4-next-direction-analysis.md)、
-[coast 传播漂移探针](../research/m4-coast-propagation-probe-design.md)、
+证据：[方向分析](../research/2026-08-26-note-m4-next-direction-analysis.md)、
+[coast 传播漂移探针](../research/2026-08-26-note-m4-coast-propagation-probe-design.md)、
 [seed-span 补充探针](../research/m4-seed-span-propagation-probe-design.md)、
-[活动局部估计开源对照](../research/m4-local-map-continuity-open-source-comparison.md)与
+[活动局部估计开源对照](../research/2026-08-27-opensource-m4-local-map-continuity.md)与
 [1a 机制及产品门记录](../plans/2026-08-26_m4_world_frame_inheritance_slice1a_c5177d31.plan.md)。
 
 ## 1. 目标与证据边界
