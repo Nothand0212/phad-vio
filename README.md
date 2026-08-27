@@ -3,6 +3,17 @@
 `phad-vio` 是一个以学习和验证为首要目标、从零实现的 GTSAM-based
 stereo visual-inertial odometry 项目。
 
+## 历史证据现场
+
+此 checkout 对应 `diag/m44-vio-causal`，快照起点为
+`7f102cb059ffd87fce5ecd441d3ed26f0fd14c6f`。它保留 M4.4 causal
+诊断、fixed-lag shadow 和候选 pipeline 的工作树证据。该现场未进入
+`main`，且其中的候选实现不构成产品补丁。
+
+当前产品行为与性能以 `main` 为准。这里的材料只可用于追溯问题、假设和候选
+方案；任何复用都须在当前 `VioEstimator` 边界重新提出并独立验证。全仓分支
+定位见 `main:docs/historical-branch-evidence.md`。
+
 项目不复刻任何单一开源实现，而是从 lk-vio、Tassel、OpenVINS、VINS-Fusion、
 ORB-SLAM3 和 Basalt 各取一处经过验证的设计，按可测量的小里程碑实现一条完整的
 VIO pipeline。每个里程碑先固定合同和验收标准，再编写实现，并以真实序列上的

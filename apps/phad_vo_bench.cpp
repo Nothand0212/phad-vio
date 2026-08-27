@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "apps/candidate_artifacts.hpp"
 #include "apps/offline_vo_session.hpp"
 #include "phad/bench/code_identity.hpp"
 #include "phad/bench/config_snapshot.hpp"
@@ -51,9 +52,16 @@ namespace
       "                     [--outlier-avg-reproj-px <v>]\n"
       "                     [--max-outlier-reopts <n>]\n"
       "                     [--probe-b <path>]\n"
+      "                     [--keyframe-shadow-probe <path>]\n"
+      "                     [--vio-state-probe <path>]\n"
+      "                     [--vio-init-probe <path>]\n"
+      "                     [--fixed-lag-shadow-probe <path>]\n"
       "                     [--defer-drop-topk <k>]\n"
       "                     [--evict-skip-culled]\n"
       "                     [--zombie-drop-age <n>]\n"
+      "                     [--candidate]\n"
+      "                     [--tracker-stereo-uniq-ratio <v>]\n"
+      "                     [--tracker-disable-stereo-check-bidir]\n"
       "                     [--hanging-gate-m <meters>]\n"
       "                     [--far-refresh-px <px>]\n"
       "                     [--tracker-enable-census]\n"
@@ -80,8 +88,8 @@ namespace
     double                       min_match_rate = 0.5;
     double                       rpe_delta_s    = 1.0;
     std::optional<std::uint64_t> max_frames;
-    bool                         write_errors_csv   = false;
-    bool                         force              = false;
+    bool                         write_errors_csv      = false;
+    bool                         force                 = false;
     bool                         no_outlier_cull       = false;
     bool                         no_outlier_reopt      = false;
     bool                         allow_culled_rebirth  = false;
@@ -90,6 +98,10 @@ namespace
     std::optional<int>           max_outlier_reopts;
     std::optional<int>           skip_drop_min_culled;
     std::filesystem::path        probe_b_path;
+    std::filesystem::path        keyframe_shadow_probe_path;
+    std::filesystem::path        vio_state_probe_path;
+    std::filesystem::path        vio_init_probe_path;
+    std::filesystem::path        fixed_lag_shadow_probe_path;
     std::optional<int>           defer_drop_topk;
     bool                         evict_skip_culled = false;
     std::optional<int>           zombie_drop_age;
@@ -102,10 +114,12 @@ namespace
     // Attribution A/B overrides (Slice ⑥ frontend mechanisms).
     std::optional<double> tracker_quality_level;
     std::optional<int>    tracker_lk_pyramid_levels;
-    bool                  no_clahe       = false;
-    bool                  no_median_flow = false;
-    bool                  no_fransac     = false;
-    bool                  no_census      = true;  // census 默认关闭(实测否决)
+    std::optional<double> tracker_stereo_uniq_ratio;
+    bool                  tracker_disable_stereo_check_bidir = false;
+    bool                  no_clahe                           = false;
+    bool                  no_median_flow                     = false;
+    bool                  no_fransac                         = false;
+    bool                  no_census                          = true;  // census 默认关闭(实测否决)
     // 曝光归一化默认关 (实测否决, 见 stereoTracker.hpp 注释);
     // --tracker-enable-exposure-norm 打开 (A/B)。
     bool enable_exposure_norm = false;
@@ -126,6 +140,8 @@ namespace
     std::optional<std::uint64_t> dropout_start_frame;
     std::optional<std::uint64_t> dropout_frames;
     std::optional<double>        dropout_keep_ratio;
+    // M4.4 P2a: candidate-owned batch twin (CLI-only, 不进 config_hash)。
+    bool candidate = false;
   };
 
   [[nodiscard]] bool parseDouble( std::string_view text, double& value )
@@ -188,6 +204,16 @@ namespace
       if ( flag == "--evict-skip-culled" )
       {
         arguments.evict_skip_culled = true;
+        continue;
+      }
+      if ( flag == "--candidate" )
+      {
+        arguments.candidate = true;
+        continue;
+      }
+      if ( flag == "--tracker-disable-stereo-check-bidir" )
+      {
+        arguments.tracker_disable_stereo_check_bidir = true;
         continue;
       }
       if ( flag == "--no-clahe" )
@@ -351,6 +377,22 @@ namespace
       {
         arguments.probe_b_path = value;
       }
+      else if ( flag == "--keyframe-shadow-probe" )
+      {
+        arguments.keyframe_shadow_probe_path = value;
+      }
+      else if ( flag == "--vio-state-probe" )
+      {
+        arguments.vio_state_probe_path = value;
+      }
+      else if ( flag == "--vio-init-probe" )
+      {
+        arguments.vio_init_probe_path = value;
+      }
+      else if ( flag == "--fixed-lag-shadow-probe" )
+      {
+        arguments.fixed_lag_shadow_probe_path = value;
+      }
       else if ( flag == "--defer-drop-topk" )
       {
         std::uint64_t parsed = 0;
@@ -460,6 +502,18 @@ namespace
           return false;
         }
         arguments.tracker_lk_pyramid_levels = static_cast<int>( parsed );
+      }
+      else if ( flag == "--tracker-stereo-uniq-ratio" )
+      {
+        double parsed = 0.0;
+        if ( !parseDouble( value, parsed ) || parsed < 0.0 ||
+             parsed > 1.0 )
+        {
+          std::cerr << "--tracker-stereo-uniq-ratio expects a value in "
+                       "[0, 1]\n";
+          return false;
+        }
+        arguments.tracker_stereo_uniq_ratio = parsed;
       }
       else
       {
@@ -629,22 +683,17 @@ namespace
               estimator.hanging_landmark_gate_m );
     snap.set( "estimator.far_return_refresh_px",
               estimator.far_return_refresh_px );
-    // ---- M4.2 IMU 机制 (进 config_hash; CLI: --no-imu) ----
+    // ---- M4.4 gyro-visual fusion (进 config_hash; CLI: --no-imu) ----
     snap.set( "estimator.enable_imu", estimator.enable_imu );
     snap.set( "estimator.imu_gravity", estimator.imu_gravity );
-    snap.set( "estimator.imu_acc_noise_nd", estimator.imu_acc_noise_nd );
     snap.set( "estimator.imu_gyr_noise_nd", estimator.imu_gyr_noise_nd );
-    snap.set( "estimator.imu_acc_rw", estimator.imu_acc_rw );
-    snap.set( "estimator.imu_gyr_rw", estimator.imu_gyr_rw );
     snap.set( "estimator.imu_prior_pose_sigma",
               estimator.imu_prior_pose_sigma );
-    snap.set( "estimator.imu_prior_vel_sigma",
-              estimator.imu_prior_vel_sigma );
     snap.set( "estimator.imu_prior_bias_gyro_sigma",
               estimator.imu_prior_bias_gyro_sigma );
-    snap.set( "estimator.imu_prior_bias_acc_sigma",
-              estimator.imu_prior_bias_acc_sigma );
-    // ---- M4.3 静止初始化 (进 config_hash) ----
+    snap.set( "estimator.imu_gyro_align_window_s",
+              estimator.imu_gyro_align_window_s );
+    // ---- M4.4 non-blocking static gyro audit (进 config_hash) ----
     snap.set( "estimator.imu_init_window_s", estimator.imu_init_window_s );
     snap.set( "estimator.imu_init_gyro_std", estimator.imu_init_gyro_std );
     snap.set( "estimator.imu_init_accel_std", estimator.imu_init_accel_std );
@@ -711,6 +760,58 @@ namespace
     return static_cast<bool>( stream );
   }
 
+  // M4.4 P2a: candidate-owned twin artifacts（CLI-only --candidate）。
+  // 独立目录 <output>/candidate/，I/O 错误升级为 bench error（打印并
+  // 返回 false），不混入 production 主产物或 estimator transaction。
+  // candidate trajectory 可能为空（无 accepted pose）→ 只写 diag/meta。
+  [[nodiscard]] bool writeCandidateArtifacts(
+      const std::filesystem::path&              output_dir,
+      const phad::apps::OfflineVoSessionResult& session )
+  {
+    const std::filesystem::path candidate_dir = output_dir / "candidate";
+    std::error_code             ec;
+    std::filesystem::create_directories( candidate_dir, ec );
+    if ( ec )
+    {
+      std::cerr << "failed to create candidate artifact dir\n";
+      return false;
+    }
+    const phad::apps::CandidateRunResult& run = *session.candidate;
+    if ( run.trajectory.has_value() )
+    {
+      if ( const auto error = phad::eval::writeTum(
+               candidate_dir / "est.tum", *run.trajectory ) )
+      {
+        std::cerr << "write candidate est.tum failed: " << error->describe()
+                  << '\n';
+        return false;
+      }
+    }
+    if ( run.keyframe_trajectory.has_value() )
+    {
+      if ( const auto error = phad::eval::writeTum(
+               candidate_dir / "kf.tum", *run.keyframe_trajectory ) )
+      {
+        std::cerr << "write candidate kf.tum failed: " << error->describe()
+                  << '\n';
+        return false;
+      }
+    }
+    if ( const auto error = phad::apps::writeCandidateDiagCsv(
+             candidate_dir / "diag.csv", run.diagnostics ) )
+    {
+      std::cerr << error->detail << '\n';
+      return false;
+    }
+    if ( const auto error = phad::apps::writeCandidateMeta(
+             candidate_dir / "meta.json", run, session.candidate_wall_s ) )
+    {
+      std::cerr << error->detail << '\n';
+      return false;
+    }
+    return true;
+  }
+
   [[nodiscard]] double coverageRate(
       const phad::apps::OfflineVoSessionResult& session )
   {
@@ -748,6 +849,25 @@ namespace
 
   [[nodiscard]] int run( const Arguments& arguments )
   {
+    if ( arguments.no_imu && !arguments.vio_state_probe_path.empty() )
+    {
+      std::cerr
+          << "--vio-state-probe cannot be used with --no-imu\n";
+      return 2;
+    }
+    if ( arguments.no_imu && !arguments.vio_init_probe_path.empty() )
+    {
+      std::cerr
+          << "--vio-init-probe cannot be used with --no-imu\n";
+      return 2;
+    }
+    if ( arguments.no_imu &&
+         !arguments.fixed_lag_shadow_probe_path.empty() )
+    {
+      std::cerr
+          << "--fixed-lag-shadow-probe cannot be used with --no-imu\n";
+      return 2;
+    }
     const std::string sequence = resolveSequenceName( arguments );
     if ( sequence.empty() || sequence == "mav0" )
     {
@@ -791,6 +911,15 @@ namespace
       session_options.tracker.lk_pyramid_levels =
           *arguments.tracker_lk_pyramid_levels;
     }
+    if ( arguments.tracker_stereo_uniq_ratio.has_value() )
+    {
+      session_options.tracker.stereo_uniq_ratio =
+          *arguments.tracker_stereo_uniq_ratio;
+    }
+    if ( arguments.tracker_disable_stereo_check_bidir )
+    {
+      session_options.tracker.stereo_check_bidir = false;
+    }
     session_options.tracker.enable_clahe       = !arguments.no_clahe;
     session_options.tracker.enable_median_flow = !arguments.no_median_flow;
     session_options.tracker.enable_fransac     = !arguments.no_fransac;
@@ -831,6 +960,16 @@ namespace
     }
     // Probe B path is CLI-only: not in flattenConfig / config_hash.
     session_options.probe_b_path = arguments.probe_b_path;
+    // M4.4 keyframe shadow path is CLI-only: not in config_hash.
+    session_options.keyframe_shadow_probe_path =
+        arguments.keyframe_shadow_probe_path;
+    // M4.4 PIM/posterior state path is CLI-only: not in config_hash.
+    session_options.vio_state_probe_path = arguments.vio_state_probe_path;
+    // M4.4 production init snapshot path is CLI-only: not in config_hash.
+    session_options.vio_init_probe_path = arguments.vio_init_probe_path;
+    // M4.4 fixed-lag shadow path is CLI-only: not in config_hash.
+    session_options.fixed_lag_shadow_probe_path =
+        arguments.fixed_lag_shadow_probe_path;
     // defer-drop-topk is CLI-only probe: not in flattenConfig / config_hash.
     if ( arguments.defer_drop_topk.has_value() )
     {
@@ -838,6 +977,8 @@ namespace
     }
     // evict-skip-culled is CLI-only probe: not in flattenConfig / config_hash.
     session_options.evict_skip_culled = arguments.evict_skip_culled;
+    // M4.4 P2a candidate twin is CLI-only: not in flattenConfig / config_hash.
+    session_options.enable_candidate = arguments.candidate;
     // zombie-drop-age defaults to 5 and enters flattenConfig / config_hash.
     if ( arguments.zombie_drop_age.has_value() )
     {
@@ -958,29 +1099,29 @@ namespace
             ? 0.0
             : static_cast<double>( session.counts.ok ) /
                   static_cast<double>( session.counts.image_frames );
-    summary.trajectory.coverage_rate    = coverageRate( session );
-    summary.trajectory.segments               = session.counts.segments;
-    summary.trajectory.total_keyframes       = session.counts.total_keyframes;
+    summary.trajectory.coverage_rate   = coverageRate( session );
+    summary.trajectory.segments        = session.counts.segments;
+    summary.trajectory.total_keyframes = session.counts.total_keyframes;
     summary.trajectory.total_track_only_frames =
         session.counts.total_track_only_frames;
-    summary.trajectory.init_dropped_frames =
-        session.counts.init_dropped_frames;  // M4.3 C8
+    summary.trajectory.init_pending_frames =
+        session.counts.init_pending_frames;
     summary.robustness.rejected         = session.counts.rejected;
     summary.robustness.failed           = session.counts.failed;
     summary.robustness.low_connectivity = session.counts.low_connectivity;
     summary.robustness.reanchors        = session.counts.reanchors;
-    summary.robustness.pnp_successes          = session.counts.pnp_successes;
-    summary.robustness.pnp_fallbacks          = session.counts.pnp_fallbacks;
-    summary.robustness.outliers_culled        = session.counts.outliers_culled;
+    summary.robustness.pnp_successes    = session.counts.pnp_successes;
+    summary.robustness.pnp_fallbacks    = session.counts.pnp_fallbacks;
+    summary.robustness.outliers_culled  = session.counts.outliers_culled;
     summary.robustness.outliers_culled_unique =
         session.counts.outliers_culled_unique;
-    summary.robustness.outlier_reopts = session.counts.outlier_reopts;
+    summary.robustness.outlier_reopts    = session.counts.outlier_reopts;
     summary.robustness.drops_skipped     = session.counts.drops_skipped;
     summary.robustness.deferred_drops    = session.counts.deferred_drops;
     summary.robustness.deferred_drop_ids = session.counts.deferred_drop_ids;
-    summary.robustness.evictable_marked   = session.counts.evictable_marked;
-    summary.robustness.tracks_evicted     = session.counts.tracks_evicted;
-    summary.robustness.zombie_age_drops   = session.counts.zombie_age_drops;
+    summary.robustness.evictable_marked  = session.counts.evictable_marked;
+    summary.robustness.tracks_evicted    = session.counts.tracks_evicted;
+    summary.robustness.zombie_age_drops  = session.counts.zombie_age_drops;
     summary.robustness.zombie_age_drop_ids =
         session.counts.zombie_age_drop_ids;
     for ( const auto& row : session.diag )
@@ -1119,6 +1260,17 @@ namespace
         std::cerr << "write kf tum failed: " << kf_error->describe() << '\n';
         exit_code = 1;
       }
+    }
+
+    // M4.4 P2a: candidate-owned twin artifacts（CLI-only --candidate）。
+    // candidate terminal/failed 不改变 production exit_code；写入失败仍
+    // 升级为 bench error（设计 §9.3 门 6）。
+    if ( exit_code == 0 && session.candidate.has_value() &&
+         !writeCandidateArtifacts( output_dir, session ) )
+    {
+      summary.status = phad::bench::RunStatus::kFailed;
+      summary.warnings.emplace_back( "failed to write candidate artifacts" );
+      exit_code = 1;
     }
 
     // failed / eval_failed still write summary.json for the regression table.

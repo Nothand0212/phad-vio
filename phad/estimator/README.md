@@ -16,18 +16,20 @@ include 标 SYSTEM）。
 |---|---|
 | 固定窗口 pose / landmark / 窗口内观测 | 关键帧决策（由 apps/session 决定）、feature track 生命周期 |
 | `GenericStereoFactor` + LM、最老帧 Prior gauge | 边缘化、smart factor |
-| M4.2/M4.3：IMU 预积分因子（`CombinedImuFactor` + bias 随机游走 `BetweenFactor`）、静止初始化、`preint.Predict` 初值链（`enable_imu` 开关） | IMU 原始数据消费（由 sync 切段；estimator 只吃帧间段） |
-| 重叠断裂时 re-anchor（`enable_reanchor`）；M4.2 IMU-on 时退役（窗口重建只清 landmark 表） | 分段 TUM / Atlas 式多轨迹 |
+| M4.4：静止检测、visual-gyro bias alignment、pose-only AHRS factors、shared gyro bias 与只读 gyro-state diagnostics（`enable_imu` 开关） | accelerometer / gravity / velocity fusion；IMU 原始数据消费（由 sync 切段） |
+| 重叠断裂时 re-anchor（`enable_reanchor`），gyro-active 时只跨连续窗口边建 factor | 分段 TUM / Atlas 式多轨迹 |
 | 共视 / cheirality / 重投影 / `segment_id` / PnP 诊断 | ATE（`phad::eval`） |
 | 正常路径 `solvePnPRansac` proposal + stereo 一致性仲裁 + 本帧 inlier 掩码 | frontend track 生命周期 |
 | BA 后 mean-reproj / cheirality 剔点 + 拒同 id 复生 | frontend track 生命周期（由 apps 回传 drop） |
 | `body_P_sensor = T_B_left_rectified` | 未校正左目外参 |
+| M4.4 probe helper：用 GTSAM AHRS 预积分 raw gyro 段，返回 body-frame rotation evidence | 关键帧 policy、pixel 聚合与 shadow CSV |
 
 ## 文件布局
 
 | 文件 | 作用 |
 |---|---|
 | `types.hpp` | `StereoObservation`、`KeyframeMeasurement`、`VioUpdateResult` 等合同 |
+| `imu_rotation.hpp` / `.cpp` | 窄 IMU rotation helper；public API 只暴露 Eigen/POD，GTSAM 留在实现 |
 | `stereo_vo_estimator.hpp` / `.cpp` | `StereoVoEstimator`（PIMPL 藏 GTSAM） |
 
 ## 数据流
@@ -40,7 +42,7 @@ apps/stereo_vo_glue.hpp  ──► KeyframeMeasurement + imu_samples / t_prev / 
                                                       │
                                                       ▼
                                             StereoVoEstimator::update
-                           (M4.3 init → pending 拼接段 → 窗口 → 即时重建预积分)
+                   (static gate → visual alignment → pending → AHRS + stereo BA)
                                                       │
                                                       ▼
                                                VioUpdateResult
@@ -51,33 +53,33 @@ apps/stereo_vo_glue.hpp  ──► KeyframeMeasurement + imu_samples / t_prev / 
                     → probe / phad_vo_bench
 ```
 
-## IMU 机制（M4.2–M4.3）
+## Gyro-visual 机制（M4.4）
 
 `enable_imu`（默认 true，进 config_hash；CLI `--no-imu` 关闭）打开后，
-estimator 在固定窗口 batch BA 上叠加 IMU 因子与 V/B 变量；关闭时完整走原
-M3.3 链（V/B 完全不进 graph，IMU-off 字节回归保证）。
+estimator 先用纯视觉相对旋转估计一个 shared gyro bias，再在固定窗口 stereo BA
+上叠加 pose-only AHRS factors。production graph 不创建 velocity 或 full IMU bias
+变量，也不消费 accelerometer；关闭时完整走纯视觉链。
 
-### 静止初始化（M4.3）
+### Non-blocking static gyro audit（M4.4）
 
-IMU-on 不再直接用 M4.2 的 `V=0/B=0/g=9.81007` 伪初始化。estimator 先进入
-init 相位并在被拒视觉帧的连续 IMU 段上滑动检测：尾部窗口跨度至少 `0.5 s`，
+estimator 在纯视觉估计旁路累计连续 IMU 段并滑动检测：尾部窗口跨度至少 `0.5 s`，
 gyro/accel 逐轴 std 分别小于 `1e-2 rad/s` / `2e-1 m/s²` 才视为静止；
 `imu_gap` 清空缓冲后重试，累计超过 `30 s` 仍未通过则返回带原因的
 `kFailed`，session 将其升级为 `SessionError`，不静默回退伪初始化。
+audit pending 期间视觉帧仍按 VO 合同 seed/update，`init_pending=true` 只用于诊断；
+因此 gyro factor 激活前的 accepted pose 与 keyframe feedback 时间轴不被初始化改变。
 
 检测通过后：
 
-- `t0` 是通过检测的静止窗口起点；建立无视觉观测的虚拟状态帧
-  `X(t0)=R_W_I0`、`V(t0)=0`、`B(t0)=bias0`；
-- `R_W_I0` 把 `normalize(a_mean)` 对齐世界 `+Z`，只确定 roll/pitch，yaw
-  保持 gauge；gyro bias 取 `gyro_mean`；
-- 预积分重力幅值优先使用 `|a_mean|`，非有限时回退 `imu_gravity`；acc bias
-  则必须用标称重力计算
-  `a_mean - imu_gravity * normalize(a_mean)`，不能用
-  `a_mean - |a_mean| * normalize(a_mean)` 这个恒为 0 的表达式；
-- 检测窗口保留并转入 `pending_imu`，第一张接受视觉帧的首条预积分覆盖
-  `[t0, t_cur]`，检测用样本不会被丢掉；初始化等待帧计入
-  `summary.json.trajectory.init_dropped_frames`。
+- `t0` 是静止窗口起点；`R_W_B0` 把 `normalize(a_mean)` 对齐世界 `+Z`，但只写入
+  audit，不回写生产 pose；首个视觉 pose 保持 VO identity gauge；
+- `bg_seed = gyro_mean`；acc mean/std、gravity magnitude 与
+  `a_mean - imu_gravity * normalize(a_mean)` 只进入一次性 `imu_init` 审计，
+  不进入 production graph；
+- 不创建无视觉观测的虚拟 `NavState`，也不从 accelerometer 预测 translation；
+- raw interval 仍按每个接受 pose pair 进入 alignment evidence；ready 只允许
+  alignment/activation 继续，不重播或重锚视觉窗口；
+- pending 帧数计入 `summary.json.trajectory.init_pending_frames`，不是丢帧数。
 
 当前 EuRoC checkpoint 的门控值与已知 acc bias 的 scale/tilt 混淆见
 [`docs/benchmark/m4.3/README.md`](../../docs/benchmark/m4.3/README.md)。
@@ -88,8 +90,8 @@ gyro/accel 逐轴 std 分别小于 `1e-2 rad/s` / `2e-1 m/s²` 才视为静止�
   `[t_prev, timestamp]`（`StereoImuPacket` 切段语义）：样本 `i` 覆盖区间
   `[t_i, t_{i+1}]`，右端样本不积分，段内 ΣΔt ≡ 图像间隔；相邻段共享右端
   样本（右端 = 下段左端）。
-- 无 IMU 数据源时段恒空且 `imu_gap = true` → estimator 走 IMU-off 路径
-  （PnP/恒速初值、无 V/B 因子）。
+- 无 IMU 数据源时段恒空且 `imu_gap = true`；该边不建 AHRS factor，视觉
+  PnP/恒速链仍可工作。
 
 ### pending 拼接（D9）
 
@@ -100,37 +102,79 @@ gyro/accel 逐轴 std 分别小于 `1e-2 rad/s` / `2e-1 m/s²` 才视为静止�
 - 成功帧：`candidate.imu_samples = pending`（含本帧段），帧入窗口后 pending
   清空。
 
-### 因子图（buildGraph）
+### Staged activation 与 shared gyro bias
 
-- 最老帧 = 段头锚：X prior（`imu_prior_pose_sigma`）+
-  `PriorFactor<Velocity>(window.front().velocity_W)` +
-  `PriorFactor<ConstantBias>(window.front().bias)`；V/B prior 的目标跟随窗口
-  头状态，避免窗口滑动时把整条链重新压向 Zero；
-- 相邻非 gap 帧对：从 j 帧原始样本即时重建预积分
-  （`PreintegratedCombinedMeasurements(params, biasHat)`，biasHat = i 帧 bias
-  当前值，C3）→ `CombinedImuFactor(X_i, V_i, X_j, V_j, B_i, B_j, preint)` +
-  `BetweenFactor<ConstantBias>(B_i, B_j, Δbias=0, σ = rw·√dt)`；
-- gap 帧（`imu_gap` 或段样本 < 2）：不建 V/B 变量、跳过其 IMU 因子（视觉
-  照常）；gap 后第一帧（无入链）加 V/B weak prior 防 indeterminant LM；
-- 噪声换算（设计稿 §2.3）：协方差 = 密度平方（acc/gyr 白噪声 + bias 随机
-  游走 4 参数进 config）。
+静止 `bg_seed` 不直接驱动 production factors。接受帧从首个 visual pose 起运行
+纯视觉图，并累计 last accepted → current 的视觉相对旋转与原始 IMU 段；static
+audit ready 是 activation 的独立前置条件。累计
+`imu_gyro_align_window_s`（默认 `100 s`）连续 support 后，一次性最小二乘求 shared
+gyro bias 与 visual-vs-gyro rotation residual RMS：
 
-### 初值链（D8 / C4 / C5）
+- alignment 所在 update 仍报告 `vision_only` 且 gyro factor count 为 0；
+- 只保留当前窗口最长的连续 IMU suffix，并把其首帧改为新 anchor；
+- 下一 update 起进入 `gyro_visual`，避免同一张图同时产生 calibration evidence 又
+  消费 calibration；
+- gap / re-anchor 不贡献 alignment evidence；alignment 失败事务回滚并返回
+  `kFailed`。
 
-- IMU-on 且段可积分 → 位姿初值 = `preint.Predict(last_X, last_V, last_B)`
-  （V/B 初值 = Predict 输出 / 上一帧 bias）；
-- PnP 与恒速保留为 `imu_gap` / IMU-off 的兜底链；
-- M4.2 的 `V=0/B=0/g=9.81007` 伪初始化只保留为历史机制说明；当前正常
-  IMU-on 路径必须先完成上述静止初始化。
+### 因子图与初值链
 
-### re-anchor 退役与回滚（D12 / D9）
+- warm-up graph 与 IMU-off graph 都只有 `X/L`、stereo factors 和既有 pose prior；
+- gyro-active graph 额外创建一个 `Vector3 W(0)` shared gyro bias，目标是 alignment
+  结果，prior sigma 为 `imu_prior_bias_gyro_sigma`；
+- 每个连续非 gap 窗口边从 `cur.imu_samples` 即时重建
+  `PreintegratedAhrsMeasurements`，再建立
+  `PoseAhrsFactor(X_i,X_j,W(0))`；factor 只读取 Pose3 rotation，translation
+  Jacobian 为零；
+- factor covariance = PIM rotation covariance +
+  `I * alignment_residual_rms_rad² / 3`，把实测的相关 visual/gyro mismatch 纳入
+  权重，不新增调参键；
+- gyro-active 且段可积分时，rotation 初值为
+  `R_W_Bi * deltaRij(bg)`；translation 仍取视觉恒速 guess，PnP 始终可参与仲裁；
+- optimizer 回写 `X/L/W(0)`，所有窗口帧同步同一个 gyro bias。窗口只从 front
+  驱逐，保持 frame pair 与 IMU segment 一一对应。
 
-- IMU-on 时 `overlap_broken` 不再 seedSegment：清一次 `landmarks_W`
-  （`imu_window_rebuilt` 标记），候选帧照常进窗口（Predict 初值），
-  `segment_id` 不增（segments/reanchors 恒 1/0）；观测不足不拒帧（图 = 仅
-  IMU 因子 + priors 亦有解）；
-- 事务回滚：IMU-on 时 `restore()` 不回滚 `last_accepted/prev` 与 pending
-  段（失败帧的段已在入口挂入 pending），只回滚 landmark/观测/窗口结构。
+### Gyro prediction / posterior 只读诊断
+
+成功的 IMU-on update 在 `UpdateDiagnostics::gyro_state` 暴露 Eigen/POD snapshot：
+state key、实际积分区间、pre-LM predicted pose 与 gyro bias。posterior pose/bg 分别
+取同一个 `VioEstimate` 与 `UpdateDiagnostics::bias_gyro`；GTSAM 类型不越过 PIMPL。
+
+- `gyro_state` 只在 `status=kOk && enable_imu` 时存在；rejected/failed 与 IMU-off
+  不伪造状态；
+- warm-up / gap 可用 `prediction_valid=false` 表达，不进入 prediction 指标；
+- `fusion_mode`、`gyro_factor_count` 与
+  `gyro_alignment_residual_rms_rad` 描述实际优化图；
+- CLI-only `--vio-state-probe` sidecar 为 69 列，只记录 pose/bg/interval/fusion
+  证据，不回写 graph、keyframe selector 或 config hash。
+
+### Fixed-lag read-only shadow（M4.4 P1）
+
+`EstimatorOptions::enable_fixed_lag_shadow` 仅由
+`--fixed-lag-shadow-probe <path>` 打开，默认不构造 smoother。它在每次实际
+`gyro_visual` 成功 update 的 post-cull window 上维护持久
+`IncrementalFixedLagSmoother`：pose set 必须与 production active window 精确一致，
+shared `W(0)` 只刷新 timestamp，landmark 使用独立递增的 `q` generation key，所有
+caller factor 通过 `newFactorsIndices` 维护 slot ledger。
+
+- dynamic lag 使用 `current_frame_index - window.front().frame_index`；依赖 GTSAM
+  cutoff 严格 `<` 的合同保留 front pose；
+- 已提交的 landmark factor 不事后追删；cull/消失只退休 generation 并停止刷新，
+  旧信息自然到期。因此 shadow 不等价于 production 的 post-cull batch rebuild；
+- 每次更新先复制完整 smoother+ledger，在 candidate 上完成 update、slot/orphan、
+  pose-set 与 finite 检查后才 swap；异常令 production update 显式失败；
+- re-anchor 是唯一允许的显式 `segment` reset；首次 gyro graph 报 `bootstrap`；
+- diagnostics/CSV 只读，不参与 prediction、PnP、cull、selector 或下一帧初值，
+  不能用 shadow pose 计算“候选 ATE”并宣称 production 精度收益。
+
+### re-anchor 与回滚
+
+- zero-overlap keyframe 仍走既有 re-anchor 质量门；active 时 anchor rotation 可用
+  pending gyro 外推，translation 使用视觉恒速 guess；新段首帧不跨边建 factor；
+- zero-overlap non-keyframe、empty observations 与 translation support 不足的
+  non-keyframe 显式 `kRejected`，不把 gyro-only pose 冒充成功；
+- LM1 与每轮 cull reopt 都重建同一 AHRS graph；失败恢复 window/landmarks/shared
+  bias，pending IMU 仍保留给下一候选。
 
 ## 段生命周期（M3.3）
 
@@ -171,15 +215,15 @@ VioUpdateResult update(const KeyframeMeasurement& measurement,
 | 校验 | 共享 | 共享 |
 | reanchor/首帧 | 可 | **不可**（非关键帧 `shared=0` → `kRejected`） |
 | PnP + 仲裁 | 正常 | 正常（复用同一 `tryPnpInit` + stereo RMS 仲裁） |
-| landmark backproject | 是 | **不** |
-| 窗口 push/pop | 是 | **不** |
-| buildGraph + LM | 是 | **不** |
-| cull + reopt | 是 | **不** |
-| 位姿输出 | `estimate` 字段有值 → 写 `est.tum` | `estimate` 为 `nullopt` → **不**写轨迹 |
-| last/prev_accepted | LM 后更新 | PnP 后更新（保持恒速预测链） |
+| landmark backproject | 是 | **不**（只消费既有 landmark） |
+| 窗口 push/pop | 是 | 是 |
+| buildGraph + LM | 是 | 是 |
+| cull + reopt | 是 | 是 |
+| 位姿输出 | 接受时 `estimate` 有值 | 接受时 `estimate` 有值 |
+| last/prev_accepted | LM 后更新 | LM 后更新 |
 
-非关键帧 `shared < min_pnp_inliers` 时返回 `kRejected`（不更新 last/prev）。
-snapshot 回退备份仅在 `keyframe=true` 时执行。
+非关键帧 `shared < min_pnp_inliers` 时返回 `kRejected`（不更新 last/prev）。所有进入
+graph 的候选都使用同一事务 snapshot；失败不残留窗口或 landmark 修改。
 
 关键帧选择逻辑（`isKeyframe()`）在 apps/session 层，不在 estimator。
 
@@ -294,11 +338,13 @@ bias_acc_x,bias_acc_y,bias_acc_z
 `outliers_culled,reproj_rms_after_cull_px` → 18；Slice ⑤ 再追加
 `is_keyframe` → 19；pre-M4 诊断追加 `num_disparity` → 20；M4.3 追加 gyro/
 acc bias 六列 → 26；均为有意的契约变更）。`num_disparity` 是本帧
-`disparity_px > 0` 的观测数，不查 landmark 表。IMU-off 时六个 bias 列恒 0。
+`disparity_px > 0` 的观测数，不查 landmark 表。IMU-off 时六个 bias 列恒 0；
+gyro-visual 时 gyro 三列为 shared posterior，acc 三列恒 0（static audit 不写主
+diag）。
 `pnp_success` 为 `0/1` 整数，`is_keyframe` 为 `0/1` 整数。`status` 为
-`ok` / `rejected` / `failed`。非关键帧的优化相关列
-（`reproj_rms_before/after`、`num_cheirality`、`lm_iterations`、`outliers_culled`
-等）填 0。stdout summary 增加 `total_keyframes` / `total_track_only_frames`。
+`ok` / `rejected` / `failed`。接受的非关键帧同样进入窗口和 BA，因此其优化相关
+列是真实 graph 结果。stdout summary 增加 `total_keyframes` /
+`total_track_only_frames`。
 
 ## 相关入口
 

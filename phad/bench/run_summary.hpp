@@ -36,19 +36,19 @@ namespace phad::bench
 
   struct TrajectorySummary
   {
-    std::uint64_t image_frames          = 0;
-    std::uint64_t poses_written         = 0;
-    std::uint64_t ok                    = 0;
-    std::uint64_t rejected              = 0;
-    std::uint64_t failed                = 0;
-    double        completion_rate       = 0.0;
-    double        coverage_rate         = 0.0;
-    std::uint64_t segments              = 0;
+    std::uint64_t image_frames    = 0;
+    std::uint64_t poses_written   = 0;
+    std::uint64_t ok              = 0;
+    std::uint64_t rejected        = 0;
+    std::uint64_t failed          = 0;
+    double        completion_rate = 0.0;
+    double        coverage_rate   = 0.0;
+    std::uint64_t segments        = 0;
     // Slice ⑤: keyframe counts.
-    std::uint64_t total_keyframes       = 0;
+    std::uint64_t total_keyframes         = 0;
     std::uint64_t total_track_only_frames = 0;
-    // M4.3 C8: init 期被拒帧数 (session FrameCounts 透传; 不进 config_hash)。
-    std::uint64_t init_dropped_frames = 0;
+    // M4.4: static gyro audit pending 帧数；视觉帧不因此丢弃。
+    std::uint64_t init_pending_frames = 0;
   };
 
   struct SyncSummary
@@ -78,11 +78,11 @@ namespace phad::bench
     /// Cumulative successful reopt *rounds* (times), not frames-with-reopt.
     std::uint64_t outlier_reopts = 0;
     /// Frames where dropTracks was skipped because outliers_culled >= N.
-    std::uint64_t drops_skipped = 0;
-    std::uint64_t deferred_drops    = 0;  // 冲刷次数
-    std::uint64_t deferred_drop_ids = 0;  // 累计 drop 的 id 个数
-    std::uint64_t evictable_marked  = 0;  // skip 帧标记次数
-    std::uint64_t tracks_evicted    = 0;  // frontend 懒腾槽累计
+    std::uint64_t drops_skipped       = 0;
+    std::uint64_t deferred_drops      = 0;  // 冲刷次数
+    std::uint64_t deferred_drop_ids   = 0;  // 累计 drop 的 id 个数
+    std::uint64_t evictable_marked    = 0;  // skip 帧标记次数
+    std::uint64_t tracks_evicted      = 0;  // frontend 懒腾槽累计
     std::uint64_t zombie_age_drops    = 0;  // zombie 龄 drop 冲刷次数
     std::uint64_t zombie_age_drop_ids = 0;  // zombie 龄 drop 累计 id
   };

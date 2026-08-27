@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "apps/candidate_pipeline.hpp"
 #include "phad/common/timestamp.hpp"
 #include "phad/common/trajectory.hpp"
 #include "phad/estimator/types.hpp"
@@ -44,6 +45,21 @@ namespace phad::apps
     int skip_drop_min_culled = 4;
     /// MH_05 Probe B jsonl path; empty → writer not constructed (default off).
     std::filesystem::path probe_b_path{};
+    /// M4.4 fixed-production-epoch keyframe shadow CSV path. Empty disables
+    /// the CLI-only probe; not part of config_hash.
+    std::filesystem::path keyframe_shadow_probe_path{};
+    /// M4.4 one-step gyro prediction / posterior pose+bg CSV. Empty disables
+    /// the CLI-only probe; requires estimator.enable_imu and does not enter
+    /// config_hash.
+    std::filesystem::path vio_state_probe_path{};
+    /// M4.4 one-time production static-initialization snapshot CSV. Empty
+    /// disables the CLI-only probe; requires estimator.enable_imu and does
+    /// not enter config_hash.
+    std::filesystem::path vio_init_probe_path{};
+    /// M4.4 persistent fixed-lag read-only shadow CSV. Empty disables the
+    /// CLI-only probe; requires estimator.enable_imu and does not enter
+    /// config_hash.
+    std::filesystem::path fixed_lag_shadow_probe_path{};
     /// Probe: after skip-drop, defer dropTracks of the first K culled ids
     /// (sorted by LandmarkId) until next tracker.process. Default 0 = ④f
     /// (skip and never defer-drop). CLI-only; not in config_hash.
@@ -55,6 +71,10 @@ namespace phad::apps
     /// FrameTracks. Default 5 (M3.3 candidate B productized). 0 = off.
     /// In flattenConfig / config_hash; CLI --zombie-drop-age may override.
     int zombie_drop_age = 5;
+    /// M4.4 P2a: run a candidate-owned batch twin after each production
+    /// frame. CLI-only; not in flattenConfig / config_hash. Candidate
+    /// terminal failure stops only the candidate, never production.
+    bool enable_candidate = false;
     // ---- M4.3 dropout 注入 (plan 定案 G; CLI-only, 不进 config_hash) ----
     // 帧号 ∈ [start, start+frames) 时对观测做无放回子采样 (keep_ratio 0 =
     // 全清; 0.3 = 保留 ~30%) 后再传 estimator。前端 tracker 照跑不注入。
@@ -68,18 +88,18 @@ namespace phad::apps
   {
     std::int64_t  timestamp_ns = 0;
     std::string   status;
-    std::uint32_t num_observations        = 0;
-    std::uint32_t num_landmarks           = 0;
-    std::uint32_t num_shared              = 0;
-    std::uint32_t num_disparity           = 0;  // Slice: obs with disparity_px > 0
-    bool          low_connectivity        = false;
-    std::uint32_t window_size             = 0;
-    std::uint64_t prior_key               = 0;
-    double        reproj_rms_before_px    = 0.0;
-    double        reproj_rms_after_px     = 0.0;
-    std::uint32_t num_cheirality          = 0;
-    std::uint32_t lm_iterations           = 0;
-    double        max_window_pose_shift_m = 0.0;
+    std::uint32_t num_observations         = 0;
+    std::uint32_t num_landmarks            = 0;
+    std::uint32_t num_shared               = 0;
+    std::uint32_t num_disparity            = 0;  // Slice: obs with disparity_px > 0
+    bool          low_connectivity         = false;
+    std::uint32_t window_size              = 0;
+    std::uint64_t prior_key                = 0;
+    double        reproj_rms_before_px     = 0.0;
+    double        reproj_rms_after_px      = 0.0;
+    std::uint32_t num_cheirality           = 0;
+    std::uint32_t lm_iterations            = 0;
+    double        max_window_pose_shift_m  = 0.0;
     std::uint32_t segment_id               = 0;
     bool          pnp_success              = false;
     std::uint32_t pnp_inliers              = 0;
@@ -115,7 +135,7 @@ namespace phad::apps
     /// Cumulative successful reopt *rounds* (sum of outlier_reopt_rounds).
     std::uint64_t outlier_reopts = 0;
     /// Frames where dropTracks was skipped because outliers_culled >= N.
-    std::uint64_t drops_skipped = 0;
+    std::uint64_t drops_skipped     = 0;
     std::uint64_t deferred_drops    = 0;  // 冲刷次数
     std::uint64_t deferred_drop_ids = 0;  // 累计 drop 的 id 个数
     /// Frames where skip marked culled ids evictable (probe).
@@ -127,11 +147,11 @@ namespace phad::apps
     /// Cumulative ids dropped by zombie-age probe.
     std::uint64_t zombie_age_drop_ids = 0;
     /// Slice ⑤: keyframe counts.
-    std::uint64_t total_keyframes       = 0;
+    std::uint64_t total_keyframes         = 0;
     std::uint64_t total_track_only_frames = 0;
-    /// M4.3 C8: init 未完成期间被拒帧数 (init_pending 计数; 进 summary.json,
-    /// 不进 config_hash)。IMU-off 恒 0。
-    std::uint64_t init_dropped_frames = 0;
+    /// M4.4: static gyro audit 未 ready 的输入帧数；视觉仍可正常接受。
+    /// 进 summary.json，不进 config_hash；IMU-off 恒 0。
+    std::uint64_t init_pending_frames = 0;
   };
 
   struct StageTiming
@@ -157,7 +177,7 @@ namespace phad::apps
 
   struct OfflineVoSessionResult
   {
-    std::optional<common::Trajectory> trajectory;   // all accepted frames (est.tum)
+    std::optional<common::Trajectory> trajectory;     // all accepted frames (est.tum)
     std::optional<common::Trajectory> kf_trajectory;  // keyframes only (kf.tum)
     std::vector<VoDiagRow>            diag;
     FrameCounts                       counts;
@@ -168,7 +188,13 @@ namespace phad::apps
     double                            wall_s = 0.0;
     StageTimings                      timings;
     ReprojSummary                     reproj;
-    std::optional<SessionError>       error;
+    /// M4.4 P2a: candidate-owned twin result; present iff enable_candidate.
+    /// Candidate failure never fails the session.
+    std::optional<CandidateRunResult> candidate;
+    /// M4.4 P2a: candidate process 累计 wall time（独立计时，不混入
+    /// production rectify/frontend/estimator stage timing）。
+    double                      candidate_wall_s = 0.0;
+    std::optional<SessionError> error;
   };
 
   [[nodiscard]] OfflineVoSessionResult runOfflineVoSession(

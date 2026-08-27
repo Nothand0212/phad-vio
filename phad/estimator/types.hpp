@@ -20,30 +20,29 @@ namespace phad::estimator
   struct StereoObservation
   {
     LandmarkId      id;
-    Eigen::Vector2d left_pixel;    // rectified left
+    Eigen::Vector2d left_pixel;  // rectified left
     // > 0: stereo disparity (depth via backproject); == 0: stereo failed —
     // no depth, kept in the window until stereo returns (Slice ⑦). < 0 is
     // invalid.
-    double          disparity_px;
+    double disparity_px;
   };
 
   struct KeyframeMeasurement
   {
     common::Timestamp              timestamp;
     std::vector<StereoObservation> observations;
-    // M4.2: 本帧与上一帧之间的 IMU 段 [t_prev, timestamp]（sync 切段语义，
-    // 见 StereoImuPacket）。IMU-off 时恒空且 imu_gap=true；IMU-on 且
-    // enable_imu=false 时 estimator 直接忽略。段含两端插值样本，相邻段共享
-    // 右端样本——estimator 按需在 buildGraph 时即时重建预积分（C3）。
+    // 本帧与上一帧之间的 IMU 段 [t_prev, timestamp]（sync 切段语义，见
+    // StereoImuPacket）。enable_imu=false 时 estimator 直接忽略；段含两端
+    // 插值样本，相邻段共享右端样本，estimator 按需重建 AHRS 预积分。
     std::vector<sensor::ImuMeasurement> imu_samples;
-    common::Timestamp                  t_prev{ 0 };
-    bool                               imu_gap = false;
+    common::Timestamp                   t_prev{ 0 };
+    bool                                imu_gap = false;
   };
 
   struct EstimatorOptions
   {
-    int    window_size                = 10;
-    int    min_landmark_observations  = 2;
+    int window_size               = 10;
+    int min_landmark_observations = 2;
     // init and re-anchor. 10 为 slice-7 原值。pre-M4 round 2 实测否决
     // (2026-08-07): 阈值 5 与跨帧累积使 V2_03 re-anchor 9 → 32-68, 每段
     // 只带自身观测、锚误差无法修正 → 段错位贡献 +2.739 → +3.9~+5.6m,
@@ -54,17 +53,17 @@ namespace phad::estimator
     // seeding (single-frame disparity can be a SAD mismatch). 1 restores
     // the pre-⑥b behavior (tests use 1).
     int    min_track_observations_for_seed = 1;
-    int    min_shared_landmarks       = 10;
-    double stereo_sigma_px            = 1.0;
-    double huber_k_px                 = 3.0;  // <= 0 disables Robust wrapper
-    double prior_rotation_sigma_rad   = 1e-4;
-    double prior_translation_sigma_m  = 1e-4;
-    bool   use_constant_velocity_init = true;
-    bool   enable_reanchor            = true;  // false reproduces M3.2 permanent reject
-    bool   enable_pnp_init            = true;
-    double pnp_reproj_px              = 2.0;
-    double pnp_confidence             = 0.99;
-    int    min_pnp_inliers            = 10;
+    int    min_shared_landmarks            = 10;
+    double stereo_sigma_px                 = 1.0;
+    double huber_k_px                      = 3.0;  // <= 0 disables Robust wrapper
+    double prior_rotation_sigma_rad        = 1e-4;
+    double prior_translation_sigma_m       = 1e-4;
+    bool   use_constant_velocity_init      = true;
+    bool   enable_reanchor                 = true;  // false reproduces M3.2 permanent reject
+    bool   enable_pnp_init                 = true;
+    double pnp_reproj_px                   = 2.0;
+    double pnp_confidence                  = 0.99;
+    int    min_pnp_inliers                 = 10;
     // enable_outlier_cull only gates mean-reproj cull; cheirality always
     // clears window observations for dropped landmarks.
     bool   enable_outlier_cull   = true;
@@ -97,65 +96,47 @@ namespace phad::estimator
     bool enable_accumulated_seed = false;
     // Session sets true when probe_b_path non-empty; NOT in flattenConfig.
     bool enable_probe_b = false;
-    // ---- M4.2 IMU 机制（默认开，进 config_hash）----
-    // enable_imu=false 完全走原 M3.3 链（不建 V/B 变量、无 IMU 因子）→
-    // IMU-off 字节回归保证。CLI: --no-imu。
+    // Session sets true when vio_state_probe_path is non-empty. This only
+    // enables read-only graph objective snapshots and is not in flattenConfig.
+    bool enable_vio_state_probe = false;
+    // Session sets true when fixed_lag_shadow_probe_path is non-empty. The
+    // shadow never supplies production state and is not in flattenConfig.
+    bool enable_fixed_lag_shadow = false;
+    // ---- M4.4 gyro-visual fusion（默认开，进 config_hash）----
+    // enable_imu=false 完全走纯视觉链；不初始化 IMU、不做 gyro alignment，
+    // 也不建 AHRS factor。CLI: --no-imu。
     bool enable_imu = true;
-    // 伪初始化重力（C4/C5）：EuRoC g = 9.81007，Z-up（MakeSharedU）。
+    // 静止初始化用于 gravity-direction / accelerometer-bias 审计的模型值。
     double imu_gravity = 9.81007;
-    // 噪声密度（implicit smart 无重积分情况下的 white noise 模型；按设计稿
-    // §2.3：协方差 = 密度平方）。EuRoC 默认：acc_nd 2.0e-3 m/s²/√Hz、
-    // gyr_nd 1.6968e-4 rad/s/√Hz、acc_rw 3.0e-3 m/s²/√Hz、
-    // gyr_rw 1.9393e-5 rad/s²/√Hz。
-    // M4.3d 门① 调参 (2026-08-09): ×30 放松位置/速度项。收紧重验
-    // (6e-3 → 0.12721 劣于 6e-2 → 0.1223): 紧 preint 把链更硬地钉在错误
-    // acc-bias 上 (z 偏移 −0.0732 更大)。标称 2e-3 仅在 ba≡0 恒等式 bug
-    // 时期测过 (全部 failed, ate=null), 修复树未再实测 —— 紧侧证据由
-    // 6e-3 补齐 (benchmark m4.3 checkpoint §门① knob 矩阵)。
-    double imu_acc_noise_nd = 6.0e-2;
+    // Gyroscope white-noise density；AHRS preintegration 使用 density²。
     double imu_gyr_noise_nd = 1.6968e-4;
-    double imu_acc_rw       = 3.0e-3;
-    double imu_gyr_rw       = 1.9393e-5;
-    // 最老帧 / gap 恢复帧 priors（C11/C15）：V prior σ=1.0 m/s；
-    // B prior σ=gyro 1e-1 rad/s / acc 3e-2 m/s²。最老帧 prior 目标为
-    // 当前 V/B，gap 恢复帧 B prior 目标为 0（具体语义见 buildGraph）。
-    // C15: acc 原 1e-2 过紧 (EuRoC ~2e-2-5e-2, KnownBias 注入 0.3 无法
-    // 被图吸收 → 泄漏进速度 → 位姿漂移) → 1e-1。
-    // M4.3d: gyro 原 1e-3 有同样问题且更严重 —— prior 信息量 (1/σ²=1e6)
-    // 远大于短链上 IMU 因子的局部 bias 信息 (0.5s 悬停段实测 ≈324),
-    // 首帧 LM 一步把正确的 init bias (EuRoC 实测 z 轴 0.080 rad/s) 压回 0,
-    // 之后预积分以错误 bias 重建 → 航向按 (b_true−b_est)·t 累积漂移
-    // (MH_01 转误差 ±30°, ATE 0.458 vs 视觉门 0.100)。1e-1 后 bias prior
-    // 信息量 100 已可被因子链吸收; 首图 yaw gauge (无视觉因子, 因子对
-    // z-gyro-bias 的观测信息 ≈100 与 prior 同量级) 由 buildGraph 的 B0
-    // prior 重定向单独关闭 (M4.3d: 首图目标 = init bias), 之后 bias 由
-    // init 初值 + 因子链观测性决定。
-    // M4.3d 门①调参: 1e-2 → 1e-4 收紧重验无收益 (roll-datum 对 X prior
-    // 不敏感), 保持 1e-4 对齐门① run config。
-    double imu_prior_pose_sigma        = 1e-4;
-    double imu_prior_vel_sigma         = 1.0;
-    double imu_prior_bias_gyro_sigma   = 1e-1;
-    // M4.3d 门① 调参 (2026-08-09): acc prior 由 1e-1 收紧到 3e-2 ——
-    // 全通道 1e-1 → 0.1443 (z 偏移改善但 y 走偏 +0.2345), 各向异性
-    // z 1e-1 → 0.1305 (z 通道放松验证门① 20-40s 刚性 z 偏移: init 悬停
-    // 倾斜污染, 首段 preint 注入 ½·δba·Δt² = 0.053), 均劣于 3e-2 →
-    // 0.1223。bias 自由度上的任何放松都以链内 walk 失真偿还, 保持收紧。
-    double imu_prior_bias_acc_sigma    = 3e-2;
-    // ---- M4.3 静止初始化（进 config_hash）----
+    // Gyro-active graph 的窗口锚 pose prior。
+    double imu_prior_pose_sigma = 1e-4;
+    // M4.4 gyro-first staged activation: pure visual rotations first estimate
+    // one shared gyro bias, then this tight prior freezes that calibrated value
+    // while the pose-only AHRS factors are evaluated.  This is intentionally a
+    // diagnostic vertical slice; the MH_01 VIO<VO gate decides whether it may
+    // graduate to a production prior.
+    double imu_prior_bias_gyro_sigma = 1e-6;
+    // Pure-visual accepted-pose support required before gyro factors activate.
+    // The activation update itself remains vision-only; fusion starts on the
+    // next update so one graph never mixes calibration and consumption.
+    double imu_gyro_align_window_s = 100.0;
+    // ---- M4.4 non-blocking static gyro audit（进 config_hash）----
     // 检测窗口（累积缓冲尾部的连续 IMU 样本跨度）与方差阈值：窗口内
     // gyro/accel 逐轴 std 全部低于阈值 → 静止（设计稿 §5.1）。
     // M4.3d 门①调参 (2026-08-09): 2.0s 重验 → 0.1263 劣于 0.5s →
     // 0.1223 (init 估计逐位不变: a_mean 污染是稳态的 scale/tilt 混淆,
     // 非瞬态修正; 长窗另损 0.7% coverage)。保持 0.5s。
-    double imu_init_window_s     = 0.5;
-    double imu_init_gyro_std     = 1e-2;  // rad/s
-    double imu_init_accel_std    = 2e-1;  // m/s²
+    double imu_init_window_s  = 0.5;
+    double imu_init_gyro_std  = 1e-2;  // rad/s
+    double imu_init_accel_std = 2e-1;  // m/s²
     // 超时自首帧起算（init 缓冲从首帧样本累积），需覆盖首个静止期出现的
     // 最晚时刻；EuRoC 全序列扫描（11 seq, 0.5s 滑窗）：MH_01/02 首个
     // 悬停分别在 t≈21.7s/26.4s，其余序列 ≤11s 或起飞前地面静止。30s
     // 给 MH_02 的 26.9s 检测终点留 ~3s 裕量；超时 → init 失败返回原因
     // （C9，不静默用伪初始化冒充成功）。
-    double imu_init_timeout_s    = 30.0;
+    double imu_init_timeout_s = 30.0;
     // accel 方差阈值 2e-1 依据 EuRoC 数据（C15 式扫参替代, plan 风险行
     // "滑动重试 + 超时（宽容）"）：旋翼振动底噪使真实静止窗口
     // (gt 速度 <0.01 m/s) 的 accel std 达 0.08-0.19 —— 原 2e-2 在
@@ -174,10 +155,127 @@ namespace phad::estimator
     kFailed   = 2
   };
 
+  enum class FusionMode : std::uint8_t
+  {
+    kVisionOnly = 0,
+    kGyroVisual = 1
+  };
+
   struct VioEstimate
   {
     common::Timestamp timestamp;
     Eigen::Isometry3d T_W_B;
+  };
+
+  // One-time snapshot of the exact static IMU window and state committed by
+  // the production initializer.  It deliberately exposes Eigen/POD values
+  // only; GTSAM types remain behind StereoVoEstimator's PIMPL boundary.
+  struct ImuInitDiagnostics
+  {
+    std::uint32_t     imu_sample_count        = 0;
+    std::int64_t      imu_t_i_ns              = 0;
+    std::int64_t      imu_t_j_ns              = 0;
+    double            imu_dt_s                = 0.0;
+    Eigen::Vector3d   gyro_mean               = Eigen::Vector3d::Zero();
+    Eigen::Vector3d   gyro_std                = Eigen::Vector3d::Zero();
+    Eigen::Vector3d   acc_mean                = Eigen::Vector3d::Zero();
+    Eigen::Vector3d   acc_std                 = Eigen::Vector3d::Zero();
+    Eigen::Isometry3d T_W_B0                  = Eigen::Isometry3d::Identity();
+    Eigen::Vector3d   velocity_W              = Eigen::Vector3d::Zero();
+    Eigen::Vector3d   bias_gyro               = Eigen::Vector3d::Zero();
+    Eigen::Vector3d   bias_acc                = Eigen::Vector3d::Zero();
+    double            acc_mean_norm           = 0.0;
+    double            gravity_model_magnitude = 0.0;
+    double            gyro_std_limit          = 0.0;
+    double            acc_std_limit           = 0.0;
+  };
+
+  // Read-only snapshot of the gyro prediction used to initialise an accepted
+  // pose. This interface intentionally exposes only Eigen/POD values; GTSAM
+  // AHRS preintegration remains private to StereoVoEstimator.
+  struct GyroStateDiagnostics
+  {
+    std::uint64_t     state_key            = 0;
+    std::uint32_t     imu_sample_count     = 0;
+    std::int64_t      imu_t_i_ns           = 0;
+    std::int64_t      imu_t_j_ns           = 0;
+    double            imu_dt_s             = 0.0;
+    bool              prediction_valid     = false;
+    Eigen::Isometry3d predicted_T_W_B      = Eigen::Isometry3d::Identity();
+    Eigen::Vector3d   prediction_bias_gyro = Eigen::Vector3d::Zero();
+    // Pose actually inserted into the graph after optional PnP, before LM.
+    // This separates gyro prediction/PnP initialization from factor effects.
+    Eigen::Isometry3d graph_initial_T_W_B = Eigen::Isometry3d::Identity();
+  };
+
+  // Read-only objective decomposition for the gyro-visual graph actually
+  // committed by an update. Boundary is the AHRS edge leaving the anchored
+  // oldest pose; newest is the edge entering the current pose. Whitened norms
+  // use the factor's Gaussian model and are dimensionless.
+  struct GyroGraphCostDiagnostics
+  {
+    std::uint32_t gyro_factor_count                     = 0;
+    std::uint32_t interior_factor_count                 = 0;
+    std::uint32_t stereo_factor_count                   = 0;
+    double        total_initial_cost                    = 0.0;
+    double        total_posterior_cost                  = 0.0;
+    double        gyro_initial_cost                     = 0.0;
+    double        gyro_posterior_cost                   = 0.0;
+    double        boundary_initial_cost                 = 0.0;
+    double        boundary_posterior_cost               = 0.0;
+    double        boundary_initial_residual_norm_rad    = 0.0;
+    double        boundary_posterior_residual_norm_rad  = 0.0;
+    double        boundary_initial_whitened_norm        = 0.0;
+    double        boundary_posterior_whitened_norm      = 0.0;
+    double        interior_initial_cost                 = 0.0;
+    double        interior_posterior_cost               = 0.0;
+    double        newest_initial_cost                   = 0.0;
+    double        newest_posterior_cost                 = 0.0;
+    double        newest_initial_residual_norm_rad      = 0.0;
+    double        newest_posterior_residual_norm_rad    = 0.0;
+    double        newest_initial_whitened_norm          = 0.0;
+    double        newest_posterior_whitened_norm        = 0.0;
+    double        stereo_initial_cost                   = 0.0;
+    double        stereo_posterior_cost                 = 0.0;
+    double        pose_prior_posterior_rotation_norm    = 0.0;
+    double        pose_prior_posterior_translation_norm = 0.0;
+    double        pose_prior_posterior_cost             = 0.0;
+    double        bias_prior_posterior_norm             = 0.0;
+    double        bias_prior_posterior_cost             = 0.0;
+  };
+
+  enum class FixedLagShadowReset : std::uint8_t
+  {
+    kNone      = 0,
+    kBootstrap = 1,
+    kSegment   = 2
+  };
+
+  // CLI-only read-only fixed-lag shadow snapshot. GTSAM state, factor slots
+  // and timestamps remain behind StereoVoEstimator's PIMPL boundary.
+  struct FixedLagShadowDiagnostics
+  {
+    bool                active                        = false;
+    bool                update_ok                     = true;
+    bool                reset                         = false;
+    FixedLagShadowReset reset_reason                  = FixedLagShadowReset::kNone;
+    std::uint64_t       current_epoch                 = 0;
+    std::uint64_t       cutoff_epoch                  = 0;
+    std::uint32_t       batch_window_size             = 0;
+    std::uint32_t       smoother_pose_count           = 0;
+    std::uint32_t       smoother_landmark_count       = 0;
+    bool                bias_present                  = false;
+    bool                bias_fixed                    = false;
+    double              bias_delta_norm               = 0.0;
+    std::uint32_t       user_factor_count             = 0;
+    std::uint32_t       missing_owned_slot_count      = 0;
+    std::uint32_t       timestamp_without_value_count = 0;
+    std::uint32_t       marginalized_pose_count       = 0;
+    std::uint32_t       retired_landmark_count        = 0;
+    std::uint32_t       new_landmark_generation_count = 0;
+    Eigen::Isometry3d   newest_T_W_B                  = Eigen::Isometry3d::Identity();
+    double              newest_rotation_delta_rad     = 0.0;
+    double              newest_translation_delta_m    = 0.0;
   };
 
   struct UpdateDiagnostics
@@ -208,17 +306,39 @@ namespace phad::estimator
     // Probe B 旁路字段；不进 diag.csv
     std::uint32_t probe_rejected_block_n = 0;
     std::uint32_t probe_new_lm_n         = 0;
-    // ---- M4.3 静止初始化 ----
-    // init 未完成时每帧为 true（session 计数 init_dropped_frames，C8）；
-    // init 失败 sticky 为 true（C9，session → SessionError → kFailed）。
+    // ---- M4.4 non-blocking static gyro audit ----
+    // audit 未完成时为 true，但不决定 update status；session 单独计数
+    // init_pending_frames。超时失败 sticky（session → SessionError）。
     // IMU-off 恒 false。
-    bool          init_pending = false;
-    bool          init_failed  = false;
-    std::string   init_failure_reason;
-    // 本帧优化后的 bias（接受帧 = LM 回写值；被拒帧 = 上一接受值）。
-    // IMU-off 恒 0。进 diag.csv（Q3/C12：IMU-off 填 0 保证原列回归）。
+    bool        init_pending = false;
+    bool        init_failed  = false;
+    std::string init_failure_reason;
+    // The graph mode actually used for this update. Gyro alignment commits at
+    // the end of an update; gyro factors start on the next update.
+    FusionMode    fusion_mode       = FusionMode::kVisionOnly;
+    std::uint32_t gyro_factor_count = 0;
+    // RMS norm of the post-alignment visual-vs-gyro rotation residual used to
+    // calibrate gyro factor covariance. Zero until fusion is active.
+    double gyro_alignment_residual_rms_rad = 0.0;
+    // Shared gyro bias: accepted frames report the optimizer posterior;
+    // rejected frames keep the last accepted value. bias_acc remains zero in
+    // the established diag.csv schema because gyro-only has no acc-bias state.
     Eigen::Vector3d bias_gyro = Eigen::Vector3d::Zero();
     Eigen::Vector3d bias_acc  = Eigen::Vector3d::Zero();
+    // Present only for accepted gyro-visual rows when the CLI-only state
+    // probe is enabled. Production state never consumes it.
+    std::optional<GyroGraphCostDiagnostics> gyro_graph_cost;
+    // Present on accepted IMU-on rows only when the CLI-only fixed-lag shadow
+    // is enabled. Production prediction, graph and returned estimate never
+    // consume this snapshot.
+    std::optional<FixedLagShadowDiagnostics> fixed_lag_shadow;
+    // Present exactly once, on the update that commits static IMU init.
+    // The update may still be rejected later by visual seeding.
+    std::optional<ImuInitDiagnostics> imu_init;
+    // Present only for accepted IMU-on states. prediction_valid=false keeps
+    // accepted gap/warm-up states observable without pretending zeroes are a
+    // gyro prediction.
+    std::optional<GyroStateDiagnostics> gyro_state;
     // 仅当 enable_probe_b 时填充；默认保持 0/空
     std::vector<std::pair<std::uint64_t, double>> probe_shift_top;  // key, |Δt|
     double                                        probe_res_mean_px = 0.0;
