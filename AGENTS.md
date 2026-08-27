@@ -16,6 +16,11 @@
 针对当前 milestone，先实现最小可运行的 vertical slice，再根据观测到的需求与失败逐步演进。详见
 `docs/agents/incremental-development.md`。
 
+### Evidence-gated integration
+
+接入新传感器、先验、模型、factor、optimizer 或其他会改变既有 posterior / 闭环的信息源时，
+按资格阶梯逐级授权。详见 `docs/agents/evidence-gated-integration.md`。
+
 ### Issue tracker
 
 Issues 与 PRDs 在 GitHub Issues 中跟踪。详见 `docs/agents/issue-tracker.md`。
@@ -40,6 +45,22 @@ C++ formatting 与 control-flow style 遵循项目规则。详见 `docs/agents/c
 
 短生命周期分支；合入 `main` 必须 `--no-ff` 保留 merge 图。详见
 `docs/agents/git-workflow.md`。
+
+## Sub-agent 调度
+
+当任务可委派为边界清晰的独立工作流，且独立上下文或并行执行有明显收益时，优先使用
+`.codex/agents/` 中的项目角色：
+
+- `vio_mapper`：设计、实施或排障前梳理代码路径、模块边界与测试证据。
+- `vio_researcher`：新信息源接入或重大设计决策前对照官方资料与成熟 VIO/SLAM 实现。
+- `vio_implementer`：在设计、范围与验收条件固定后实现一个 vertical slice 或 bug fix。
+- `vio_reviewer`：在审查范围固定后检查正确性、合同、GTSAM lifecycle、回归风险与测试缺口。
+- `vio_verifier`：在实现快照稳定后执行定向编译、CTest、CLI、EuRoC 或 benchmark 验证。
+
+主 agent 负责需求对齐、设计决策、写入权分配与结果综合。委派时给出问题、范围、fixed point、
+输出格式与完成标准；等待全部被委派角色返回后再综合。实现可委派给 `vio_implementer`，
+但同一时刻只由主 agent 或一个 `vio_implementer` 修改 tracked 源码/文档。并行阶段优先使用只读角色；
+`vio_verifier` 只在实现快照稳定后启动。
 
 ## 模块 AGENTS 索引
 

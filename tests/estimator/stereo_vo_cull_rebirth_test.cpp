@@ -4,6 +4,7 @@
 #include <Eigen/Geometry>
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "phad/camera/rectified_stereo_calibration.hpp"
@@ -133,14 +134,14 @@ namespace
   EstimatorOptions defaultCullOptions()
   {
     EstimatorOptions options;
-  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-    options.window_size           = 8;
-    options.min_shared_landmarks  = 3;
-    options.min_seed_observations = 10;
-    options.enable_pnp_init       = false;
-    options.enable_outlier_cull   = true;
-    options.outlier_avg_reproj_px = 3.0;
+    options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
+    options.window_size                     = 8;
+    options.min_shared_landmarks            = 3;
+    options.min_seed_observations           = 10;
+    options.enable_pnp_init                 = false;
+    options.enable_outlier_cull             = true;
+    options.outlier_avg_reproj_px           = 3.0;
     return options;
   }
 
@@ -174,9 +175,9 @@ TEST( StereoVoCullRebirthTest, CulledIdNotRebackprojectedWhenBlocked )
   const LandmarkId poison_id   = 1;
 
   auto run = [ & ]( bool block_rebirth ) -> std::uint32_t {
-    EstimatorOptions options      = defaultCullOptions();
-    options.block_culled_rebirth  = block_rebirth;
-    StereoVoEstimator estimator( calibration, options );
+    EstimatorOptions options     = defaultCullOptions();
+    options.block_culled_rebirth = block_rebirth;
+    StereoVoEstimator estimator( calibration, std::nullopt, options );
 
     int cull_frame = -1;
     for ( std::size_t index = 0; index < poses.size(); ++index )
@@ -218,7 +219,7 @@ TEST( StereoVoCullRebirthTest, CulledIdNotRebackprojectedWhenBlocked )
     }
 
     // Next frame: shared count reveals whether poison_id was reborn.
-    const std::size_t probe = rebirth + 1;
+    const std::size_t  probe = rebirth + 1;
     const std::int64_t ts_ns =
         static_cast<std::int64_t>( probe + 1 ) * 50'000'000;
     const auto probe_result = estimator.update(
@@ -239,13 +240,13 @@ TEST( StereoVoCullRebirthTest, CheiralityIdsAppearInCulledLandmarkIds )
   const auto       calibration = makeCalibration();
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size                = 8;
-  options.min_shared_landmarks       = 2;
-  options.min_landmark_observations  = 2;
-  options.huber_k_px                 = 0.0;
-  options.enable_outlier_cull        = false;
-  options.enable_pnp_init            = false;
-  options.use_constant_velocity_init = true;
+  options.window_size                     = 8;
+  options.min_shared_landmarks            = 2;
+  options.min_landmark_observations       = 2;
+  options.huber_k_px                      = 0.0;
+  options.enable_outlier_cull             = false;
+  options.enable_pnp_init                 = false;
+  options.use_constant_velocity_init      = true;
 
   const std::vector<Eigen::Vector3d> far_landmarks{
       { 0.4, 0.1, 8.0 },
@@ -264,7 +265,7 @@ TEST( StereoVoCullRebirthTest, CheiralityIdsAppearInCulledLandmarkIds )
   // z = 0.0, 0.7, 1.4 (in front), then 2.8 with CV predict ≈ 2.1 (past near).
   const std::vector<double> zs{ 0.0, 0.7, 1.4, 2.8 };
 
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
   StereoObservation near_locked{};
   bool              saw_list = false;
 

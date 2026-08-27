@@ -3,6 +3,7 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -135,14 +136,14 @@ namespace
   EstimatorOptions defaultCullOptions()
   {
     EstimatorOptions options;
-  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-    options.window_size           = 8;
-    options.min_shared_landmarks  = 3;
-    options.min_seed_observations = 10;
-    options.enable_pnp_init       = false;  // keep poisoned obs in the window
-    options.enable_outlier_cull   = true;
-    options.outlier_avg_reproj_px = 3.0;
+    options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
+    options.window_size                     = 8;
+    options.min_shared_landmarks            = 3;
+    options.min_seed_observations           = 10;
+    options.enable_pnp_init                 = false;  // keep poisoned obs in the window
+    options.enable_outlier_cull             = true;
+    options.outlier_avg_reproj_px           = 3.0;
     return options;
   }
 
@@ -169,9 +170,10 @@ TEST( StereoVoOutlierCullTest, RejectsNonPositiveOutlierAvgReproj )
 {
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.outlier_avg_reproj_px = 0.0;
-  EXPECT_THROW( ( StereoVoEstimator{ makeCalibration(), options } ),
-                std::invalid_argument );
+  options.outlier_avg_reproj_px           = 0.0;
+  EXPECT_THROW(
+      ( StereoVoEstimator{ makeCalibration(), std::nullopt, options } ),
+      std::invalid_argument );
 }
 
 TEST( StereoVoOutlierCullTest, CullsPersistentHighReprojLandmark )
@@ -181,7 +183,8 @@ TEST( StereoVoOutlierCullTest, CullsPersistentHighReprojLandmark )
   const auto       poses       = translatingPoses( 10, 0.05 );
   const LandmarkId poison_id   = 1;
 
-  StereoVoEstimator estimator( calibration, defaultCullOptions() );
+  StereoVoEstimator estimator( calibration, std::nullopt,
+                               defaultCullOptions() );
   std::uint32_t     culled_on_frame = 0;
   int               cull_frame      = -1;
 
@@ -230,7 +233,8 @@ TEST( StereoVoOutlierCullTest, SkipsLandmarksWithFewerThanFourObs )
   const LandmarkId      late_id     = 99;
   const Eigen::Vector3d late_point{ 0.2, 0.05, 5.1 };
 
-  StereoVoEstimator estimator( calibration, defaultCullOptions() );
+  StereoVoEstimator estimator( calibration, std::nullopt,
+                               defaultCullOptions() );
 
   for ( std::size_t index = 0; index < poses.size(); ++index )
   {
@@ -258,7 +262,8 @@ TEST( StereoVoOutlierCullTest, KeepsInliersUnderThreshold )
   const auto ids         = sequentialIds( kLandmarks.size(), 1 );
   const auto poses       = translatingPoses( 6, 0.05 );
 
-  StereoVoEstimator estimator( calibration, defaultCullOptions() );
+  StereoVoEstimator estimator( calibration, std::nullopt,
+                               defaultCullOptions() );
   for ( std::size_t index = 0; index < poses.size(); ++index )
   {
     const std::int64_t ts_ns =
@@ -280,9 +285,9 @@ TEST( StereoVoOutlierCullTest, DisabledSkipsMeanReprojCull )
   const auto       poses       = translatingPoses( 10, 0.05 );
   const LandmarkId poison_id   = 1;
 
-  EstimatorOptions options      = defaultCullOptions();
+  EstimatorOptions options    = defaultCullOptions();
   options.enable_outlier_cull = false;
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
 
   for ( std::size_t index = 0; index < poses.size(); ++index )
   {
@@ -314,8 +319,8 @@ TEST( StereoVoOutlierCullTest, PoseEqualsFirstLmWithoutReopt )
   EstimatorOptions options_off    = defaultCullOptions();
   options_off.enable_outlier_cull = false;
 
-  StereoVoEstimator est_cull( calibration, options_cull );
-  StereoVoEstimator est_off( calibration, options_off );
+  StereoVoEstimator est_cull( calibration, std::nullopt, options_cull );
+  StereoVoEstimator est_off( calibration, std::nullopt, options_off );
 
   bool compared = false;
   for ( std::size_t index = 0; index < poses.size(); ++index )
@@ -356,7 +361,7 @@ TEST( StereoVoOutlierCullTest, RepeatCullIncrementsTotalNotUnique )
   // Requires rebirth of the same LandmarkId after mean-cull (Slice ④ semantics).
   EstimatorOptions options     = defaultCullOptions();
   options.block_culled_rebirth = false;
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
 
   std::uint32_t total_culled      = 0;
   std::uint32_t total_unique      = 0;
@@ -410,11 +415,11 @@ TEST( StereoVoOutlierCullTest, CheiralityClearsWindowObservations )
   const auto       calibration = makeCalibration();
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size               = 8;
-  options.min_shared_landmarks      = 2;
-  options.min_landmark_observations = 2;
-  options.huber_k_px                = 0.0;
-  options.enable_outlier_cull       = false;
+  options.window_size                     = 8;
+  options.min_shared_landmarks            = 2;
+  options.min_landmark_observations       = 2;
+  options.huber_k_px                      = 0.0;
+  options.enable_outlier_cull             = false;
 
   const std::vector<Eigen::Vector3d> far_landmarks{
       { 0.4, 0.1, 5.0 },
@@ -431,7 +436,7 @@ TEST( StereoVoOutlierCullTest, CheiralityClearsWindowObservations )
   const auto            far_ids = sequentialIds( far_landmarks.size(), 1 );
   const LandmarkId      near_id = 99;
 
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
   StereoObservation near_at_first{};
   bool              saw_cheirality = false;
 

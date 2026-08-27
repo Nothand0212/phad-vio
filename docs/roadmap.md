@@ -606,6 +606,20 @@ PnP stereo 一致性仲裁：[#25](https://github.com/Nothand0212/phad-vio/issue
 
 ## M4：接入 IMU
 
+**最小 gyro-aided VO 验证（#36，2026-08-12）已按计划结束，结论为负。**
+在 production `StereoVoEstimator` 上完成 `off` / `shadow` / `fused` 三模式：off
+三主产物通过 clean control 字节门，shadow 的 segment、shared absolute bias 与
+fixed-bias pose-only AHRS factor 机制通过；但 MH_01 natural fused 的 exact-common
+translation ATE `0.080964 → 0.090807 m`、1 s RPE `0.017781 → 0.018096 m`，
+两项严格改善门均失败。默认保持 off；依计划未调 noise/权重、未跑 MH_05 或
+EuRoC 11/11。结果见
+[`m4-minimal-gyro-mh01-result.md`](research/m4-minimal-gyro-mh01-result.md)，
+实施计划见
+[`2026-08-12_m4_minimal_gyro_slice_c4e62b35.plan.md`](plans/2026-08-12_m4_minimal_gyro_slice_c4e62b35.plan.md)。
+
+下列 full inertial `X/V/B + gravity` 路线是原 M4 后续设想，**不属于本次最小 gyro
+计划，尚未因上述负结果自动获准实施**：
+
 M3.3 出口已由 pre-M4 小片（两轮全否决，见上）锁定：纯 VO 内覆盖率的
 代价是 re-anchor 对齐税且无法在匹配/播种层消除 —— re-anchor 锚必须
 来自 IMU 预积分外推（消除 CV 锚错位），段间错位税结构性消失。这是

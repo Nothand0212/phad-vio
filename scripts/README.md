@@ -70,3 +70,27 @@ python3 scripts/bench_table.py "$PHAD_BENCH_ROOT" --csv > /tmp/bench.csv
 
 主列：sequence、commit、dirty、config（`label_hash8`）、status、
 ATE/RPE trans RMSE、completion_rate、coverage_rate、rtf、wall_s。
+
+## `vio_vo_common_support.py`
+
+在 off/fused 两条 TUM trajectory 的**精确 timestamp 交集**上做一次共同 GT
+关联，再用完全相同的 pose / RPE pair 支持集计算 fixed-scale SE3 ATE、1 s RPE、
+p50/p95/max、相邻 pose jump、KF schedule 首次分叉点与 gyro factor coverage。
+同时从两个 `summary.json` 审计失败数、pose 数、completion 与 coverage；只有两项
+translation RMSE 都严格改善且其余门不退化时，`gate.core_pass` 才为 true。
+
+```bash
+.venv/bin/python scripts/vio_vo_common_support.py \
+  /path/to/off_run /path/to/fused_run /path/to/MH_01_easy \
+  --output /path/to/fused_run/exact_common_report.json
+```
+
+默认 GT 关联门为 `2.5 ms`，RPE delta 为 `1.0 s`，RPE 终点容差为
+`25 ms`；可分别用 `--max-dt-ms`、`--rpe-delta-s`、
+`--rpe-tolerance-ms` 覆盖。脚本依赖 numpy，按本页环境说明从 venv 运行。
+
+合成合同测试：
+
+```bash
+.venv/bin/python -m unittest tests/scripts/vio_vo_common_support_test.py -v
+```

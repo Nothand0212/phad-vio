@@ -210,7 +210,8 @@ namespace
     }
     const auto&                        rectified_cal = rectifier.value().calibration();
     phad::frontend::StereoTracker      tracker( rectified_cal );
-    phad::estimator::StereoVoEstimator estimator( rectified_cal );
+    phad::estimator::StereoVoEstimator estimator(
+        rectified_cal, opened.value().calibration().imu() );
 
     phad::io::dataset::DatasetReplaySource replay_source{ opened.value() };
     phad::io::SensorSource&                source = replay_source;

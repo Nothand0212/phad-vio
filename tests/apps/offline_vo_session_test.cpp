@@ -16,10 +16,20 @@ namespace
 {
 
   using phad::apps::FrameCounts;
+  using phad::apps::GyroStateRow;
   using phad::apps::OfflineVoSessionOptions;
   using phad::apps::runOfflineVoSession;
   using phad::apps::VoDiagRow;
   using phad::apps::writeDiagCsv;
+  using phad::apps::writeGyroStateCsv;
+
+  [[nodiscard]] std::string readFile( const std::filesystem::path& path )
+  {
+    std::ifstream      in( path );
+    std::ostringstream contents;
+    contents << in.rdbuf();
+    return contents.str();
+  }
 
   // Minimal two-frame EuRoC-shaped sequence used to drive
   // runOfflineVoSession() past the dataset-open step and into its per-frame
@@ -35,8 +45,12 @@ namespace
 
     TinyEurocFixture()
     {
+      const ::testing::TestInfo* test_info =
+          ::testing::UnitTest::GetInstance()->current_test_info();
+      const std::string test_name =
+          test_info == nullptr ? "unknown" : test_info->name();
       m_root = std::filesystem::temp_directory_path() /
-               "phad_offline_vo_session_tiny_seq";
+               ( "phad_offline_vo_session_tiny_seq_" + test_name );
       std::filesystem::remove_all( m_root );
       for ( const auto* sensor : { "cam0", "cam1", "imu0" } )
       {
@@ -220,19 +234,19 @@ namespace
     std::filesystem::remove( path );
 
     VoDiagRow row;
-    row.timestamp_ns            = 1403636579763555584LL;
-    row.status                  = "ok";
-    row.num_observations        = 136;
-    row.num_landmarks           = 0;
-    row.num_shared              = 0;
-    row.low_connectivity        = false;
-    row.window_size             = 1;
-    row.prior_key               = 0;
-    row.reproj_rms_before_px    = 0.0;
-    row.reproj_rms_after_px     = 0.0;
-    row.num_cheirality          = 0;
-    row.lm_iterations           = 0;
-    row.max_window_pose_shift_m = 0.0;
+    row.timestamp_ns             = 1403636579763555584LL;
+    row.status                   = "ok";
+    row.num_observations         = 136;
+    row.num_landmarks            = 0;
+    row.num_shared               = 0;
+    row.low_connectivity         = false;
+    row.window_size              = 1;
+    row.prior_key                = 0;
+    row.reproj_rms_before_px     = 0.0;
+    row.reproj_rms_after_px      = 0.0;
+    row.num_cheirality           = 0;
+    row.lm_iterations            = 0;
+    row.max_window_pose_shift_m  = 0.0;
     row.segment_id               = 0;
     row.pnp_success              = false;
     row.pnp_inliers              = 0;
@@ -248,7 +262,7 @@ namespace
     const std::string text = oss.str();
     EXPECT_NE( text.find( "timestamp_ns,status,num_obs," ), std::string::npos );
     EXPECT_NE( text.find( "pnp_success,pnp_inliers,outliers_culled,"
-                           "reproj_rms_after_cull_px" ),
+                          "reproj_rms_after_cull_px" ),
                std::string::npos );
     // Slice ④e / Probe B keep the 19-column contract; Probe B is a
     // separate jsonl side-channel. outlier_reopt_rounds stay off diag
@@ -267,6 +281,114 @@ namespace
                    "0,0.000000,0,0,0,0,0.000000,0" ),
         std::string::npos );
     std::filesystem::remove( path );
+  }
+
+  TEST( OfflineVoSessionTest, WriteGyroStateCsvUsesValidityFlagsAndWxyz )
+  {
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "phad_gyro_state.csv";
+    std::filesystem::remove( path );
+
+    GyroStateRow row;
+    row.timestamp_ns           = TinyEurocFixture::kFirstTimestampNs;
+    row.status                 = "ok";
+    row.segment_id             = 2;
+    row.gyro.mode              = phad::estimator::GyroMode::kShadow;
+    row.gyro.t_i_ns            = TinyEurocFixture::kFirstTimestampNs - 5'000'000;
+    row.gyro.t_j_ns            = TinyEurocFixture::kFirstTimestampNs;
+    row.gyro.visual_post_T_W_B = Eigen::Isometry3d::Identity();
+    row.gyro.pim_delta_q_Bi_Bj =
+        Eigen::Quaterniond( Eigen::AngleAxisd( 0.2, Eigen::Vector3d::UnitZ() ) );
+    row.gyro.gyro_factor_count = 3;
+    row.gyro.visual_cost       = 1.25;
+
+    ASSERT_FALSE( writeGyroStateCsv( path, { row } ).has_value() );
+    const std::string text = readFile( path );
+    EXPECT_NE( text.find( "ts_ns,mode,status,segment_id," ),
+               std::string::npos );
+    EXPECT_NE( text.find( "visual_post_valid,visual_post_tx," ),
+               std::string::npos );
+    EXPECT_NE( text.find( "visual_post_qw,visual_post_qx," ),
+               std::string::npos );
+    EXPECT_NE( text.find( "pim_delta_valid,pim_delta_qw," ),
+               std::string::npos );
+    EXPECT_NE( text.find( "gyro_cost_valid,gyro_cost" ),
+               std::string::npos );
+    EXPECT_NE( text.find( ",shadow,ok,2," ), std::string::npos );
+    const auto split = []( const std::string& line ) {
+      std::vector<std::string> fields;
+      std::istringstream       stream( line );
+      std::string              field;
+      while ( std::getline( stream, field, ',' ) )
+      {
+        fields.push_back( field );
+      }
+      if ( !line.empty() && line.back() == ',' )
+      {
+        fields.emplace_back();
+      }
+      return fields;
+    };
+    std::istringstream lines( text );
+    std::string        header_line;
+    std::string        data_line;
+    ASSERT_TRUE( std::getline( lines, header_line ) );
+    ASSERT_TRUE( std::getline( lines, data_line ) );
+    const auto header = split( header_line );
+    const auto data   = split( data_line );
+    ASSERT_EQ( header.size(), data.size() );
+    const auto value = [ &header, &data ]( const std::string& name )
+        -> const std::string& {
+      const auto it = std::find( header.begin(), header.end(), name );
+      EXPECT_NE( it, header.end() );
+      return data[ static_cast<std::size_t>( it - header.begin() ) ];
+    };
+    EXPECT_EQ( value( "visual_init_valid" ), "0" );
+    EXPECT_TRUE( value( "visual_init_tx" ).empty() );
+    EXPECT_EQ( value( "visual_post_valid" ), "1" );
+    EXPECT_EQ( value( "visual_post_qw" ), "1" );
+    EXPECT_EQ( value( "pim_delta_valid" ), "1" );
+    EXPECT_FALSE( value( "pim_delta_qw" ).empty() );
+    EXPECT_EQ( value( "gyro_post_valid" ), "0" );
+    EXPECT_TRUE( value( "gyro_post_tx" ).empty() );
+    EXPECT_EQ( value( "visual_cost_valid" ), "1" );
+    EXPECT_EQ( value( "gyro_cost_valid" ), "0" );
+    std::filesystem::remove( path );
+  }
+
+  TEST( OfflineVoSessionTest, OffDoesNotCollectGyroRows )
+  {
+    TinyEurocFixture        fixture;
+    OfflineVoSessionOptions options;
+    options.sequence_root = fixture.root();
+    options.max_frames    = 2;
+
+    const auto result = runOfflineVoSession( options );
+    EXPECT_TRUE( result.gyro_state.empty() );
+  }
+
+  TEST( OfflineVoSessionTest, ShadowCollectsOneGyroRowPerDiagRow )
+  {
+    TinyEurocFixture        fixture;
+    OfflineVoSessionOptions options;
+    options.sequence_root       = fixture.root();
+    options.max_frames          = 2;
+    options.estimator.gyro_mode = phad::estimator::GyroMode::kShadow;
+
+    const auto result = runOfflineVoSession( options );
+    ASSERT_EQ( result.gyro_state.size(), result.diag.size() );
+    ASSERT_FALSE( result.gyro_state.empty() );
+    for ( std::size_t index = 0; index < result.diag.size(); ++index )
+    {
+      EXPECT_EQ( result.gyro_state[ index ].timestamp_ns,
+                 result.diag[ index ].timestamp_ns );
+      EXPECT_EQ( result.gyro_state[ index ].status,
+                 result.diag[ index ].status );
+      EXPECT_EQ( result.gyro_state[ index ].segment_id,
+                 result.diag[ index ].segment_id );
+      EXPECT_EQ( result.gyro_state[ index ].gyro.mode,
+                 phad::estimator::GyroMode::kShadow );
+    }
   }
 
   TEST( OfflineVoSessionTest, EmptyProbeBPathDoesNotCreateFile )

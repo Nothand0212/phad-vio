@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -145,15 +146,15 @@ namespace
   EstimatorOptions defaultReoptOptions()
   {
     EstimatorOptions options;
-  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-    options.window_size           = 8;
-    options.min_shared_landmarks  = 3;
-    options.min_seed_observations = 10;
-    options.enable_pnp_init       = false;
-    options.enable_outlier_cull   = true;
-    options.enable_outlier_reopt  = true;
-    options.outlier_avg_reproj_px = 3.0;
+    options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
+    options.window_size                     = 8;
+    options.min_shared_landmarks            = 3;
+    options.min_seed_observations           = 10;
+    options.enable_pnp_init                 = false;
+    options.enable_outlier_cull             = true;
+    options.enable_outlier_reopt            = true;
+    options.outlier_avg_reproj_px           = 3.0;
     // Reopt fixtures poison several ids across frames; allow rebirth so a
     // single frame can still mean-cull >= 4 (Slice ④ pseudo-permanent).
     options.block_culled_rebirth = false;
@@ -198,9 +199,10 @@ TEST( StereoVoOutlierReoptTest, RejectsNegativeMaxOutlierReopts )
 {
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.max_outlier_reopts = -1;
-  EXPECT_THROW( StereoVoEstimator( makeCalibration(), options ),
-                std::invalid_argument );
+  options.max_outlier_reopts              = -1;
+  EXPECT_THROW(
+      StereoVoEstimator( makeCalibration(), std::nullopt, options ),
+      std::invalid_argument );
 }
 
 TEST( StereoVoOutlierReoptTest, ReoptsWhenAtLeastFourCulled )
@@ -217,8 +219,8 @@ TEST( StereoVoOutlierReoptTest, ReoptsWhenAtLeastFourCulled )
   EstimatorOptions options_off     = options_on;
   options_off.enable_outlier_reopt = false;
 
-  StereoVoEstimator est_on( calibration, options_on );
-  StereoVoEstimator est_off( calibration, options_off );
+  StereoVoEstimator est_on( calibration, std::nullopt, options_on );
+  StereoVoEstimator est_off( calibration, std::nullopt, options_off );
 
   bool saw = false;
   for ( std::size_t index = 0; index < poses.size(); ++index )
@@ -259,11 +261,11 @@ TEST( StereoVoOutlierReoptTest, MaxZeroSkipsReopt )
   const auto                    poses       = translatingPoses( 12, 0.05 );
   const std::vector<LandmarkId> poison_ids{ 1, 2, 3, 4 };
 
-  EstimatorOptions options    = defaultReoptOptions();
-  options.huber_k_px          = 0.0;
-  options.max_outlier_reopts  = 0;
+  EstimatorOptions options     = defaultReoptOptions();
+  options.huber_k_px           = 0.0;
+  options.max_outlier_reopts   = 0;
   options.enable_outlier_reopt = true;
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
 
   bool saw = false;
   for ( std::size_t index = 0; index < poses.size(); ++index )
@@ -300,7 +302,7 @@ TEST( StereoVoOutlierReoptTest, MaxOneCapsReoptRounds )
   EstimatorOptions options   = defaultReoptOptions();
   options.huber_k_px         = 0.0;
   options.max_outlier_reopts = 1;
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
 
   bool saw = false;
   for ( std::size_t index = 0; index < poses.size(); ++index )
@@ -338,8 +340,8 @@ TEST( StereoVoOutlierReoptTest, SkipsReoptWhenCulledOneToThree )
   EstimatorOptions options_off     = defaultReoptOptions();
   options_off.enable_outlier_reopt = false;
 
-  StereoVoEstimator est_on( calibration, options_on );
-  StereoVoEstimator est_off( calibration, options_off );
+  StereoVoEstimator est_on( calibration, std::nullopt, options_on );
+  StereoVoEstimator est_off( calibration, std::nullopt, options_off );
 
   bool saw = false;
   for ( std::size_t index = 0; index < poses.size(); ++index )
@@ -382,7 +384,7 @@ TEST( StereoVoOutlierReoptTest, DisabledSkipsReopt )
   EstimatorOptions options     = defaultReoptOptions();
   options.enable_outlier_reopt = false;
   options.huber_k_px           = 0.0;
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
 
   bool saw = false;
   for ( std::size_t index = 0; index < poses.size(); ++index )
@@ -418,8 +420,8 @@ TEST( StereoVoOutlierReoptTest, NoCullSkipsReopt )
   EstimatorOptions options_off     = defaultReoptOptions();
   options_off.enable_outlier_reopt = false;
 
-  StereoVoEstimator est_on( calibration, options_on );
-  StereoVoEstimator est_off( calibration, options_off );
+  StereoVoEstimator est_on( calibration, std::nullopt, options_on );
+  StereoVoEstimator est_off( calibration, std::nullopt, options_off );
 
   for ( std::size_t index = 0; index < poses.size(); ++index )
   {
@@ -461,7 +463,7 @@ TEST( StereoVoOutlierReoptTest, CheiralityOnlySkipsReopt )
   const auto            far_ids = sequentialIds( far_landmarks.size(), 1 );
   const LandmarkId      near_id = 99;
 
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
   StereoObservation near_at_first{};
   bool              saw_cheirality = false;
 
@@ -528,8 +530,8 @@ TEST( StereoVoOutlierReoptTest, Lm2FailureFallsBackToLm1Cull )
   EstimatorOptions options_off     = options_on;
   options_off.enable_outlier_reopt = false;
 
-  StereoVoEstimator est_on( calibration, options_on );
-  StereoVoEstimator est_off( calibration, options_off );
+  StereoVoEstimator est_on( calibration, std::nullopt, options_on );
+  StereoVoEstimator est_off( calibration, std::nullopt, options_off );
 
   bool          saw        = false;
   std::uint32_t max_culled = 0;
@@ -592,8 +594,8 @@ TEST( StereoVoOutlierReoptTest, CullsAfterReoptLm )
   EstimatorOptions options_off     = options_on;
   options_off.enable_outlier_reopt = false;
 
-  StereoVoEstimator est_on( calibration, options_on );
-  StereoVoEstimator est_off( calibration, options_off );
+  StereoVoEstimator est_on( calibration, std::nullopt, options_on );
+  StereoVoEstimator est_off( calibration, std::nullopt, options_off );
 
   bool saw = false;
   for ( std::size_t index = 0; index < poses.size(); ++index )

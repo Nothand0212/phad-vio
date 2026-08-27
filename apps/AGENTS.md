@@ -7,8 +7,15 @@
 - 编排与落盘放在 app / 薄静态库，不反向注入 `frontend` / `estimator`
 - `OfflineVoSession`（target `phad_offline_vo_session`）只跑 pipeline，不算 ATE/RPE、不落盘；不链接 `phad_eval`
 - `StereoPairStream` 组合 `SensorSource` + `phad::sync`；`io` 与 `sync` 互不依赖
-- `FrameTracks` → `KeyframeMeasurement` 经 `stereo_vo_glue.hpp` 组装
+- `FrameTracks` + `StereoImuPacket` → `KeyframeMeasurement` 经
+  `stereo_vo_glue.hpp` 组装；glue 只附调用期 IMU segment view，不做积分或校验
 - `phad_stereo_vo_probe` 与 `phad_vo_bench` 共用 session，保证 diag 列合同一致
+- `phad_vo_bench --gyro-mode off|shadow|fused` 控制最小 gyro 路径，默认 `off`；
+  `estimator.gyro_mode` 与固定的 `estimator.gyro_align_window_s=100` 进入
+  `flattenConfig` / `config_hash`
+- `gyro_state.csv` 是 shadow/fused 专属 sidecar；off 不生成。它逐帧记录 segment、
+  alignment、PIM、visual/gyro posterior 与 factor/cost；四元数按 `qw,qx,qy,qz`，
+  pose 为 `T_W_B`，无状态用 valid=false + 空字段。现有 20 列 `diag.csv` 不变
 - Slice ④c：`estimator.update` 返回后若
   `!diagnostics.culled_landmark_ids.empty()` 且
   `session.drop_culled_tracks`（默认 `true`），session 调用

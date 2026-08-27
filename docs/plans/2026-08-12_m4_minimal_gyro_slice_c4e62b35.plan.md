@@ -7,40 +7,40 @@ todos:
     status: completed
   - id: mode-and-input-red
     content: 先补 GyroMode、IMU segment 输入、IMU 标定和非法配置的失败测试；测试必须在生产修改前失败
-    status: pending
+    status: completed
   - id: packet-off-green
     content: OfflineVoSession 改用 StereoImuPacket 并贯通 estimator 输入；gyro=off 完全不读取 IMU 内容，三主产物与冻结控制组 byte-identical
-    status: pending
+    status: completed
   - id: segment-ledger
     content: 在 estimator PIMPL 内实现 accepted-pose edge 的 segment 校验、rejected-frame 累积、gap/re-anchor 截断和 window 生命周期，覆盖无状态污染测试
-    status: pending
+    status: completed
   - id: visual-gyro-alignment
     content: 用 accepted visual posterior rotation 和连续 gyro edge 估计并冻结一个 shared absolute gyro bias，记录 rank、support、residual；不引入 bias prior/RW
-    status: pending
+    status: completed
   - id: fixed-bias-factor
     content: 实现 estimator-private FixedBiasAhrsFactor，使用 gyr_nd² 与 alignment residual covariance，验证方向、bias correction、Pose3 Jacobian 和零 translation residual
-    status: pending
+    status: completed
   - id: shadow-graph
     content: 从同一最终 visual graph/posterior 构造非写回 gyro shadow solve，并新增独立 gyro_state.csv；不得改变视觉状态、KF/lifecycle 或现有 diag.csv
-    status: pending
+    status: completed
   - id: shadow-mh01-gate
     content: MH_01 跑 off/shadow；三主产物逐字节相同，sidecar 合同、alignment 与 factor activation 全部成立后才允许进入 fused
-    status: pending
+    status: completed
   - id: fused-path
     content: 将同一 gyro correction solve 作为 fused 最终 posterior，保持当前帧 visual PnP/cull/reopt 决策顺序；失败不得提交部分视觉或 gyro 状态
-    status: pending
+    status: completed
   - id: fused-mh01-gate
     content: MH_01 自然闭环跑 off/fused，以 exact-common support 比较 ATE/RPE/coverage；两项精度均严格改善且无完成率回归才判定本片成功
-    status: pending
+    status: completed
   - id: docs-and-decision
     content: 更新 estimator/apps/scripts 合同和 M4 研究记录；无论正负结果都固化 config、日志与指标，默认仍保持 off，另行评审是否推广和扩 EuRoC
-    status: pending
+    status: completed
 isProject: false
 ---
 
 # M4 最小 gyro-aided VO 详细实施计划
 
-状态：**已审阅通过；实施中**
+状态：**实施结束；机制成立，Fused MH_01 硬门失败，默认保持 off**
 
 计划 ID：`c4e62b35`
 

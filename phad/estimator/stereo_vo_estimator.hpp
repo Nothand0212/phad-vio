@@ -1,11 +1,13 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "phad/camera/rectified_stereo_calibration.hpp"
 #include "phad/common/timestamp.hpp"
 #include "phad/estimator/types.hpp"
+#include "phad/sensor/imu_parameters.hpp"
 
 namespace phad::estimator
 {
@@ -13,8 +15,9 @@ namespace phad::estimator
   class StereoVoEstimator
   {
   public:
-    explicit StereoVoEstimator( camera::RectifiedStereoCalibration calibration,
-                                EstimatorOptions                   options = {} );
+    explicit StereoVoEstimator( camera::RectifiedStereoCalibration   calibration,
+                                std::optional<sensor::ImuParameters> imu,
+                                EstimatorOptions                     options = {} );
     ~StereoVoEstimator();
 
     StereoVoEstimator( const StereoVoEstimator& )            = delete;
@@ -32,6 +35,9 @@ namespace phad::estimator
         LandmarkId id ) const;
 
   private:
+    [[nodiscard]] VioUpdateResult updateVisual(
+        const KeyframeMeasurement& measurement, bool keyframe );
+
     struct Impl;
     std::unique_ptr<Impl> m_impl;
   };

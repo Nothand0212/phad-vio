@@ -3,6 +3,7 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "phad/camera/rectified_stereo_calibration.hpp"
@@ -14,56 +15,56 @@
 
 namespace
 {
-using phad::camera::RectifiedStereoCalibration;
-using phad::common::LandmarkId;
-using phad::common::Timestamp;
-using phad::estimator::EstimatorOptions;
-using phad::estimator::KeyframeMeasurement;
-using phad::estimator::StereoObservation;
-using phad::estimator::StereoVoEstimator;
-using phad::estimator::UpdateStatus;
-using phad::sensor::RigidTransform;
+  using phad::camera::RectifiedStereoCalibration;
+  using phad::common::LandmarkId;
+  using phad::common::Timestamp;
+  using phad::estimator::EstimatorOptions;
+  using phad::estimator::KeyframeMeasurement;
+  using phad::estimator::StereoObservation;
+  using phad::estimator::StereoVoEstimator;
+  using phad::estimator::UpdateStatus;
+  using phad::sensor::RigidTransform;
 
-RectifiedStereoCalibration makeCalibration()
-{
-  auto rigid =
-      RigidTransform::create( Eigen::Isometry3d::Identity().matrix() ).value();
-  return RectifiedStereoCalibration::create(
-             400.0, 400.0, 320.0, 240.0, 0.12, 640, 480, std::move( rigid ) )
-      .value();
-}
-
-KeyframeMeasurement makeMeasurement(
-    std::int64_t ts_ns, const std::vector<LandmarkId>& ids )
-{
-  KeyframeMeasurement m;
-  m.timestamp = Timestamp{ ts_ns };
-  for ( const auto& id : ids )
+  RectifiedStereoCalibration makeCalibration()
   {
-    StereoObservation obs;
-    obs.id           = id;
-    obs.left_pixel   = { 320.0, 240.0 };
-    obs.disparity_px = 5.0;
-    m.observations.push_back( obs );
+    auto rigid =
+        RigidTransform::create( Eigen::Isometry3d::Identity().matrix() ).value();
+    return RectifiedStereoCalibration::create(
+               400.0, 400.0, 320.0, 240.0, 0.12, 640, 480, std::move( rigid ) )
+        .value();
   }
-  return m;
-}
+
+  KeyframeMeasurement makeMeasurement(
+      std::int64_t ts_ns, const std::vector<LandmarkId>& ids )
+  {
+    KeyframeMeasurement m;
+    m.timestamp = Timestamp{ ts_ns };
+    for ( const auto& id : ids )
+    {
+      StereoObservation obs;
+      obs.id           = id;
+      obs.left_pixel   = { 320.0, 240.0 };
+      obs.disparity_px = 5.0;
+      m.observations.push_back( obs );
+    }
+    return m;
+  }
 
 }  // namespace
 
 TEST( KeyframeUpdateTest, NonKeyframeEntersWindow )
 {
   // Slice ⑤c: non-keyframes enter the window and participate in BA.
-  auto calib = makeCalibration();
-  StereoVoEstimator estimator( calib );
-  EstimatorOptions opts;
-  auto ids0 = std::vector<LandmarkId>{ LandmarkId{ 0 }, LandmarkId{ 1 },
-                                       LandmarkId{ 2 }, LandmarkId{ 3 },
-                                       LandmarkId{ 4 }, LandmarkId{ 5 },
-                                       LandmarkId{ 6 }, LandmarkId{ 7 },
-                                       LandmarkId{ 8 }, LandmarkId{ 9 } };
-  auto m0 = makeMeasurement( 100'000'000, ids0 );
-  auto r0 = estimator.update( m0, true );
+  auto              calib = makeCalibration();
+  StereoVoEstimator estimator( calib, std::nullopt );
+  EstimatorOptions  opts;
+  auto              ids0 = std::vector<LandmarkId>{ LandmarkId{ 0 }, LandmarkId{ 1 },
+                                                    LandmarkId{ 2 }, LandmarkId{ 3 },
+                                                    LandmarkId{ 4 }, LandmarkId{ 5 },
+                                                    LandmarkId{ 6 }, LandmarkId{ 7 },
+                                                    LandmarkId{ 8 }, LandmarkId{ 9 } };
+  auto              m0   = makeMeasurement( 100'000'000, ids0 );
+  auto              r0   = estimator.update( m0, true );
   EXPECT_EQ( r0.status, UpdateStatus::kOk );
 
   auto ids1 = ids0;
@@ -85,15 +86,15 @@ TEST( KeyframeUpdateTest, NonKeyframeAllNewIdsRejected )
 {
   // Slice ⑤c: non-keyframe with all-new IDs -> shared = 0 -> rejected
   // (overlap broken); seeding is only for keyframes.
-  auto calib = makeCalibration();
-  StereoVoEstimator estimator( calib );
-  auto ids0 = std::vector<LandmarkId>{ LandmarkId{ 0 }, LandmarkId{ 1 },
-                                       LandmarkId{ 2 }, LandmarkId{ 3 },
-                                       LandmarkId{ 4 }, LandmarkId{ 5 },
-                                       LandmarkId{ 6 }, LandmarkId{ 7 },
-                                       LandmarkId{ 8 }, LandmarkId{ 9 } };
-  auto m0 = makeMeasurement( 100'000'000, ids0 );
-  auto r0 = estimator.update( m0, true );
+  auto              calib = makeCalibration();
+  StereoVoEstimator estimator( calib, std::nullopt );
+  auto              ids0 = std::vector<LandmarkId>{ LandmarkId{ 0 }, LandmarkId{ 1 },
+                                                    LandmarkId{ 2 }, LandmarkId{ 3 },
+                                                    LandmarkId{ 4 }, LandmarkId{ 5 },
+                                                    LandmarkId{ 6 }, LandmarkId{ 7 },
+                                                    LandmarkId{ 8 }, LandmarkId{ 9 } };
+  auto              m0   = makeMeasurement( 100'000'000, ids0 );
+  auto              r0   = estimator.update( m0, true );
   EXPECT_EQ( r0.status, UpdateStatus::kOk );
 
   auto m1 = makeMeasurement( 200'000'000, ids0 );
@@ -112,8 +113,8 @@ TEST( KeyframeUpdateTest, NonKeyframeAllNewIdsRejected )
 
 TEST( KeyframeUpdateTest, NonKeyframeRejectedOnLowShared )
 {
-  auto calib = makeCalibration();
-  StereoVoEstimator estimator( calib );
+  auto              calib = makeCalibration();
+  StereoVoEstimator estimator( calib, std::nullopt );
 
   // Initialise with 20 IDs (above min_pnp_inliers = 10).
   std::vector<LandmarkId> ids;
@@ -143,8 +144,8 @@ TEST( KeyframeUpdateTest, NonKeyframeRejectedOnLowShared )
 
 TEST( KeyframeUpdateTest, NonKeyframeRejectedOnNoShared )
 {
-  auto calib = makeCalibration();
-  StereoVoEstimator estimator( calib );
+  auto              calib = makeCalibration();
+  StereoVoEstimator estimator( calib, std::nullopt );
 
   auto ids0 = std::vector<LandmarkId>{
       LandmarkId{ 0 }, LandmarkId{ 1 }, LandmarkId{ 2 }, LandmarkId{ 3 },
@@ -170,8 +171,8 @@ TEST( KeyframeUpdateTest, NonKeyframeRejectedOnNoShared )
 
 TEST( KeyframeUpdateTest, NonKeyframePreservesPoseChain )
 {
-  auto calib = makeCalibration();
-  StereoVoEstimator estimator( calib );
+  auto              calib = makeCalibration();
+  StereoVoEstimator estimator( calib, std::nullopt );
 
   auto ids = std::vector<LandmarkId>{
       LandmarkId{ 0 }, LandmarkId{ 1 }, LandmarkId{ 2 }, LandmarkId{ 3 },
@@ -203,8 +204,8 @@ TEST( KeyframeUpdateTest, NonKeyframePreservesPoseChain )
 
 TEST( KeyframeUpdateTest, NonKeyframeBeforeInitRejected )
 {
-  auto calib = makeCalibration();
-  StereoVoEstimator estimator( calib );
+  auto              calib = makeCalibration();
+  StereoVoEstimator estimator( calib, std::nullopt );
 
   auto ids = std::vector<LandmarkId>{
       LandmarkId{ 0 }, LandmarkId{ 1 }, LandmarkId{ 2 }, LandmarkId{ 3 },
@@ -219,8 +220,8 @@ TEST( KeyframeUpdateTest, WindowCapsAtTenWithTemporalEviction )
 {
   // Slice ⑤c Basalt eviction: window holds up to window_size frames;
   // non-keyframes are evicted first when full.
-  auto calib = makeCalibration();
-  StereoVoEstimator estimator( calib );
+  auto              calib = makeCalibration();
+  StereoVoEstimator estimator( calib, std::nullopt );
 
   std::vector<LandmarkId> ids;
   for ( int i = 0; i < 20; ++i )
@@ -245,4 +246,3 @@ TEST( KeyframeUpdateTest, WindowCapsAtTenWithTemporalEviction )
   // 2 keyframes + 12 non-keyframes, but window caps at 10 (config default).
   EXPECT_EQ( last_win, 10U );
 }
-

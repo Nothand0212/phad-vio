@@ -124,12 +124,12 @@ TEST( StereoVoDiagnostics, ZeroSharedRejectsWithoutMutatingWindow )
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size          = 5;
-  options.min_shared_landmarks = 3;
+  options.window_size                     = 5;
+  options.min_shared_landmarks            = 3;
   // This test targets the permanent zero-overlap reject, not re-anchoring.
   options.enable_reanchor = false;
 
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
   ASSERT_EQ( estimator
                  .update( makeFrame( calibration, poses[ 0 ], 50'000'000,
                                      kLandmarks, ids ) )
@@ -165,14 +165,14 @@ TEST( StereoVoDiagnostics, RejectedFrameSkippedByConstantVelocity )
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size                = 5;
-  options.min_shared_landmarks       = 3;
-  options.use_constant_velocity_init = true;
+  options.window_size                     = 5;
+  options.min_shared_landmarks            = 3;
+  options.use_constant_velocity_init      = true;
   // This test targets the permanent zero-overlap reject, not re-anchoring.
   options.enable_reanchor = false;
 
   auto run_clean = [ & ]() {
-    StereoVoEstimator                           estimator( calibration, options );
+    StereoVoEstimator                           estimator( calibration, std::nullopt, options );
     std::optional<phad::estimator::VioEstimate> last;
     for ( int index = 0; index < 5; ++index )
     {
@@ -187,7 +187,7 @@ TEST( StereoVoDiagnostics, RejectedFrameSkippedByConstantVelocity )
   };
 
   auto run_with_reject = [ & ]() {
-    StereoVoEstimator                           estimator( calibration, options );
+    StereoVoEstimator                           estimator( calibration, std::nullopt, options );
     std::optional<phad::estimator::VioEstimate> last;
     for ( int index = 0; index < 3; ++index )
     {
@@ -225,9 +225,9 @@ TEST( StereoVoDiagnostics, BehindCameraCountedAndSequenceContinues )
   const auto       calibration = makeCalibration();
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size               = 8;
-  options.min_shared_landmarks      = 2;
-  options.min_landmark_observations = 2;
+  options.window_size                     = 8;
+  options.min_shared_landmarks            = 2;
+  options.min_landmark_observations       = 2;
   // Disable Huber so conflicting near-landmark factors are not ignored.
   options.huber_k_px = 0.0;
 
@@ -246,7 +246,7 @@ TEST( StereoVoDiagnostics, BehindCameraCountedAndSequenceContinues )
   const auto            far_ids = sequentialIds( far_landmarks.size(), 1 );
   const LandmarkId      near_id = 99;
 
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
   StereoObservation near_at_first{};
   bool              saw_cheirality = false;
 
@@ -300,10 +300,10 @@ TEST( StereoVoDiagnostics, ObservationTimestampsAccumulateById )
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size          = 2;  // force pruning of oldest frame
-  options.min_shared_landmarks = 2;
+  options.window_size                     = 2;  // force pruning of oldest frame
+  options.min_shared_landmarks            = 2;
 
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
   for ( int index = 0; index < 3; ++index )
   {
     ASSERT_EQ( estimator
@@ -330,10 +330,10 @@ TEST( StereoVoDiagnostics, LowConnectivityFlagWhenSharedBelowThreshold )
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size          = 5;
-  options.min_shared_landmarks = 100;  // force flag while still optimizing
+  options.window_size                     = 5;
+  options.min_shared_landmarks            = 100;  // force flag while still optimizing
 
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
   ASSERT_EQ( estimator
                  .update( makeFrame( calibration, poses[ 0 ], 50'000'000,
                                      kLandmarks, ids ) )
@@ -369,10 +369,10 @@ TEST( StereoVoExtrinsics, RecoversBodyPoseNotLeftCamera )
   const auto       ids = sequentialIds( kLandmarks.size() );
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size          = 6;
-  options.min_shared_landmarks = 3;
+  options.window_size                     = 6;
+  options.min_shared_landmarks            = 3;
 
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
   for ( int index = 0; index < static_cast<int>( poses.size() ); ++index )
   {
     const auto result = estimator.update( makeFrame(
@@ -425,10 +425,10 @@ TEST( StereoVoExtrinsics, WrongExtrinsicRaisesResidualNotStatusFailure )
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size          = 5;
-  options.min_shared_landmarks = 3;
+  options.window_size                     = 5;
+  options.min_shared_landmarks            = 3;
 
-  StereoVoEstimator estimator( calib_wrong, options );
+  StereoVoEstimator estimator( calib_wrong, std::nullopt, options );
   double            last_err = 0.0;
   for ( int index = 0; index < static_cast<int>( poses.size() ); ++index )
   {

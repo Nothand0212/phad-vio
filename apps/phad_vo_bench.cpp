@@ -11,6 +11,7 @@
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -54,6 +55,7 @@ namespace
       "                     [--defer-drop-topk <k>]\n"
       "                     [--evict-skip-culled]\n"
       "                     [--zombie-drop-age <n>]\n"
+      "                     [--gyro-mode off|shadow|fused]\n"
       "                     [--hanging-gate-m <meters>]\n"
       "                     [--far-refresh-px <px>]\n"
       "                     [--tracker-enable-census]\n"
@@ -77,8 +79,8 @@ namespace
     double                       min_match_rate = 0.5;
     double                       rpe_delta_s    = 1.0;
     std::optional<std::uint64_t> max_frames;
-    bool                         write_errors_csv   = false;
-    bool                         force              = false;
+    bool                         write_errors_csv      = false;
+    bool                         force                 = false;
     bool                         no_outlier_cull       = false;
     bool                         no_outlier_reopt      = false;
     bool                         allow_culled_rebirth  = false;
@@ -90,8 +92,10 @@ namespace
     std::optional<int>           defer_drop_topk;
     bool                         evict_skip_culled = false;
     std::optional<int>           zombie_drop_age;
-    std::optional<double>        hanging_gate_m;
-    std::optional<double>        far_refresh_px;
+    phad::estimator::GyroMode    gyro_mode =
+        phad::estimator::GyroMode::kOff;
+    std::optional<double> hanging_gate_m;
+    std::optional<double> far_refresh_px;
     // pre-M4 round 2: 首段/re-anchor 播种阈值(默认 5, 含跨帧累积);
     // 进 flattenConfig → config_hash。
     std::optional<int> min_seed_observations;
@@ -131,6 +135,21 @@ namespace
         std::from_chars( text.data(), text.data() + text.size(), value );
     return parsed.ec == std::errc{} &&
            parsed.ptr == text.data() + text.size();
+  }
+
+  [[nodiscard]] std::string gyroModeName(
+      phad::estimator::GyroMode mode )
+  {
+    switch ( mode )
+    {
+      case phad::estimator::GyroMode::kOff:
+        return "off";
+      case phad::estimator::GyroMode::kShadow:
+        return "shadow";
+      case phad::estimator::GyroMode::kFused:
+        return "fused";
+    }
+    throw std::invalid_argument( "unknown gyro mode" );
   }
 
   [[nodiscard]] bool parseArguments( int argc, char** argv,
@@ -361,6 +380,26 @@ namespace
         }
         arguments.zombie_drop_age = static_cast<int>( parsed );
       }
+      else if ( flag == "--gyro-mode" )
+      {
+        if ( value == "off" )
+        {
+          arguments.gyro_mode = phad::estimator::GyroMode::kOff;
+        }
+        else if ( value == "shadow" )
+        {
+          arguments.gyro_mode = phad::estimator::GyroMode::kShadow;
+        }
+        else if ( value == "fused" )
+        {
+          arguments.gyro_mode = phad::estimator::GyroMode::kFused;
+        }
+        else
+        {
+          std::cerr << "--gyro-mode expects off, shadow, or fused\n";
+          return false;
+        }
+      }
       else if ( flag == "--hanging-gate-m" )
       {
         double parsed = 0.0;
@@ -567,6 +606,9 @@ namespace
               estimator.hanging_landmark_gate_m );
     snap.set( "estimator.far_return_refresh_px",
               estimator.far_return_refresh_px );
+    snap.set( "estimator.gyro_mode", gyroModeName( estimator.gyro_mode ) );
+    snap.set( "estimator.gyro_align_window_s",
+              estimator.gyro_align_window_s );
 
     snap.set( "session.dataset_format", std::string( "euroc" ) );
     snap.set( "session.drop_culled_tracks", session.drop_culled_tracks );
@@ -674,8 +716,9 @@ namespace
     }
 
     phad::apps::OfflineVoSessionOptions session_options;
-    session_options.sequence_root = arguments.sequence_root;
-    session_options.max_frames    = arguments.max_frames;
+    session_options.sequence_root       = arguments.sequence_root;
+    session_options.max_frames          = arguments.max_frames;
+    session_options.estimator.gyro_mode = arguments.gyro_mode;
     if ( arguments.no_outlier_cull )
     {
       session_options.estimator.enable_outlier_cull = false;
@@ -867,27 +910,27 @@ namespace
             ? 0.0
             : static_cast<double>( session.counts.ok ) /
                   static_cast<double>( session.counts.image_frames );
-    summary.trajectory.coverage_rate    = coverageRate( session );
-    summary.trajectory.segments               = session.counts.segments;
-    summary.trajectory.total_keyframes       = session.counts.total_keyframes;
+    summary.trajectory.coverage_rate   = coverageRate( session );
+    summary.trajectory.segments        = session.counts.segments;
+    summary.trajectory.total_keyframes = session.counts.total_keyframes;
     summary.trajectory.total_track_only_frames =
         session.counts.total_track_only_frames;
     summary.robustness.rejected         = session.counts.rejected;
     summary.robustness.failed           = session.counts.failed;
     summary.robustness.low_connectivity = session.counts.low_connectivity;
     summary.robustness.reanchors        = session.counts.reanchors;
-    summary.robustness.pnp_successes          = session.counts.pnp_successes;
-    summary.robustness.pnp_fallbacks          = session.counts.pnp_fallbacks;
-    summary.robustness.outliers_culled        = session.counts.outliers_culled;
+    summary.robustness.pnp_successes    = session.counts.pnp_successes;
+    summary.robustness.pnp_fallbacks    = session.counts.pnp_fallbacks;
+    summary.robustness.outliers_culled  = session.counts.outliers_culled;
     summary.robustness.outliers_culled_unique =
         session.counts.outliers_culled_unique;
-    summary.robustness.outlier_reopts = session.counts.outlier_reopts;
+    summary.robustness.outlier_reopts    = session.counts.outlier_reopts;
     summary.robustness.drops_skipped     = session.counts.drops_skipped;
     summary.robustness.deferred_drops    = session.counts.deferred_drops;
     summary.robustness.deferred_drop_ids = session.counts.deferred_drop_ids;
-    summary.robustness.evictable_marked   = session.counts.evictable_marked;
-    summary.robustness.tracks_evicted     = session.counts.tracks_evicted;
-    summary.robustness.zombie_age_drops   = session.counts.zombie_age_drops;
+    summary.robustness.evictable_marked  = session.counts.evictable_marked;
+    summary.robustness.tracks_evicted    = session.counts.tracks_evicted;
+    summary.robustness.zombie_age_drops  = session.counts.zombie_age_drops;
     summary.robustness.zombie_age_drop_ids =
         session.counts.zombie_age_drop_ids;
     for ( const auto& row : session.diag )
@@ -932,6 +975,18 @@ namespace
         summary.status = phad::bench::RunStatus::kFailed;
         summary.warnings.push_back( diag_error->detail );
         std::cerr << diag_error->detail << '\n';
+        exit_code = 1;
+      }
+      else if ( const auto gyro_error =
+                    arguments.gyro_mode == phad::estimator::GyroMode::kOff
+                        ? std::optional<phad::apps::SessionError>{}
+                        : phad::apps::writeGyroStateCsv(
+                              output_dir / "gyro_state.csv",
+                              session.gyro_state ) )
+      {
+        summary.status = phad::bench::RunStatus::kFailed;
+        summary.warnings.push_back( gyro_error->detail );
+        std::cerr << gyro_error->detail << '\n';
         exit_code = 1;
       }
       else

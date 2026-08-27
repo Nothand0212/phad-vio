@@ -61,24 +61,32 @@ namespace phad::apps
   {
     std::int64_t  timestamp_ns = 0;
     std::string   status;
-    std::uint32_t num_observations        = 0;
-    std::uint32_t num_landmarks           = 0;
-    std::uint32_t num_shared              = 0;
-    std::uint32_t num_disparity           = 0;  // Slice: obs with disparity_px > 0
-    bool          low_connectivity        = false;
-    std::uint32_t window_size             = 0;
-    std::uint64_t prior_key               = 0;
-    double        reproj_rms_before_px    = 0.0;
-    double        reproj_rms_after_px     = 0.0;
-    std::uint32_t num_cheirality          = 0;
-    std::uint32_t lm_iterations           = 0;
-    double        max_window_pose_shift_m = 0.0;
+    std::uint32_t num_observations         = 0;
+    std::uint32_t num_landmarks            = 0;
+    std::uint32_t num_shared               = 0;
+    std::uint32_t num_disparity            = 0;  // Slice: obs with disparity_px > 0
+    bool          low_connectivity         = false;
+    std::uint32_t window_size              = 0;
+    std::uint64_t prior_key                = 0;
+    double        reproj_rms_before_px     = 0.0;
+    double        reproj_rms_after_px      = 0.0;
+    std::uint32_t num_cheirality           = 0;
+    std::uint32_t lm_iterations            = 0;
+    double        max_window_pose_shift_m  = 0.0;
     std::uint32_t segment_id               = 0;
     bool          pnp_success              = false;
     std::uint32_t pnp_inliers              = 0;
     std::uint32_t outliers_culled          = 0;
     double        reproj_rms_after_cull_px = 0.0;
     bool          is_keyframe              = false;  // Slice ⑤
+  };
+
+  struct GyroStateRow
+  {
+    std::int64_t                     timestamp_ns = 0;
+    std::string                      status;
+    std::uint32_t                    segment_id = 0;
+    estimator::GyroUpdateDiagnostics gyro;
   };
 
   struct FrameCounts
@@ -98,7 +106,7 @@ namespace phad::apps
     /// Cumulative successful reopt *rounds* (sum of outlier_reopt_rounds).
     std::uint64_t outlier_reopts = 0;
     /// Frames where dropTracks was skipped because outliers_culled >= N.
-    std::uint64_t drops_skipped = 0;
+    std::uint64_t drops_skipped     = 0;
     std::uint64_t deferred_drops    = 0;  // 冲刷次数
     std::uint64_t deferred_drop_ids = 0;  // 累计 drop 的 id 个数
     /// Frames where skip marked culled ids evictable (probe).
@@ -110,7 +118,7 @@ namespace phad::apps
     /// Cumulative ids dropped by zombie-age probe.
     std::uint64_t zombie_age_drop_ids = 0;
     /// Slice ⑤: keyframe counts.
-    std::uint64_t total_keyframes       = 0;
+    std::uint64_t total_keyframes         = 0;
     std::uint64_t total_track_only_frames = 0;
   };
 
@@ -137,9 +145,10 @@ namespace phad::apps
 
   struct OfflineVoSessionResult
   {
-    std::optional<common::Trajectory> trajectory;   // all accepted frames (est.tum)
+    std::optional<common::Trajectory> trajectory;     // all accepted frames (est.tum)
     std::optional<common::Trajectory> kf_trajectory;  // keyframes only (kf.tum)
     std::vector<VoDiagRow>            diag;
+    std::vector<GyroStateRow>         gyro_state;
     FrameCounts                       counts;
     sync::StereoPairDiagnostics       sync;
     std::vector<std::string>          warnings;
@@ -157,5 +166,9 @@ namespace phad::apps
   /// probe 与 bench 共用，保证 diag.csv 逐字节一致。
   [[nodiscard]] std::optional<SessionError> writeDiagCsv(
       const std::filesystem::path& path, const std::vector<VoDiagRow>& rows );
+
+  [[nodiscard]] std::optional<SessionError> writeGyroStateCsv(
+      const std::filesystem::path&     path,
+      const std::vector<GyroStateRow>& rows );
 
 }  // namespace phad::apps

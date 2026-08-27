@@ -6,6 +6,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #ifdef __linux__
 #include <sys/wait.h>
@@ -20,13 +21,13 @@ namespace
 
   [[nodiscard]] std::string readFile( const std::filesystem::path& path )
   {
-    std::ifstream in( path );
+    std::ifstream      in( path );
     std::ostringstream oss;
     oss << in.rdbuf();
     return oss.str();
   }
 
-  [[nodiscard]] int runBench( std::string_view args,
+  [[nodiscard]] int runBench( std::string_view             args,
                               const std::filesystem::path& stdout_path,
                               const std::filesystem::path& stderr_path )
   {
@@ -82,6 +83,82 @@ namespace
     EXPECT_NE( err.find( "--defer-drop-topk" ), std::string::npos );
     EXPECT_NE( err.find( "--evict-skip-culled" ), std::string::npos );
     EXPECT_NE( err.find( "--zombie-drop-age" ), std::string::npos );
+    EXPECT_NE( err.find( "--gyro-mode off|shadow|fused" ),
+               std::string::npos );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, RejectsUnknownGyroMode )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_reject_gyro_mode";
+    std::filesystem::remove_all( root );
+    std::filesystem::create_directories( root );
+    const auto stdout_path = root / "stdout.txt";
+    const auto stderr_path = root / "stderr.txt";
+
+    const int exit_code = runBench(
+        "/nonexistent/sequence --out \"" + ( root / "out" ).string() +
+            "\" --sequence-name cli_reject --gyro-mode invalid",
+        stdout_path, stderr_path );
+
+    EXPECT_NE( exit_code, 0 );
+    const std::string err = readFile( stderr_path );
+    EXPECT_NE( err.find( "--gyro-mode expects off, shadow, or fused" ),
+               std::string::npos );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, GyroModeAndAlignmentWindowEnterConfigIdentity )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_gyro_config";
+    std::filesystem::remove_all( root );
+    std::filesystem::create_directories( root );
+
+    const auto run_mode = [ &root ]( std::string_view label,
+                                     std::string_view mode ) {
+      const auto  out         = root / std::string( label );
+      const auto  stdout_path = root / ( std::string( label ) + "_stdout.txt" );
+      const auto  stderr_path = root / ( std::string( label ) + "_stderr.txt" );
+      std::string args        = "/nonexistent/sequence --out \"" + out.string() +
+                         "\" --sequence-name gyro_config --force";
+      if ( !mode.empty() )
+      {
+        args += " --gyro-mode ";
+        args += mode;
+      }
+      (void)runBench( args, stdout_path, stderr_path );
+      const std::string hash = extractConfigHash( readFile( stdout_path ) );
+      EXPECT_FALSE( hash.empty() ) << readFile( stderr_path );
+      return std::pair{ hash, readFile( out / "meta.json" ) };
+    };
+
+    const auto [ default_hash, default_meta ] = run_mode( "default", "" );
+    const auto [ off_hash, off_meta ]         = run_mode( "off", "off" );
+    const auto [ shadow_hash, shadow_meta ]   = run_mode( "shadow", "shadow" );
+    const auto [ fused_hash, fused_meta ]     = run_mode( "fused", "fused" );
+
+    EXPECT_EQ( default_hash, off_hash );
+    EXPECT_NE( off_hash, shadow_hash );
+    EXPECT_NE( off_hash, fused_hash );
+    EXPECT_NE( shadow_hash, fused_hash );
+    EXPECT_NE( default_meta.find( "estimator.gyro_mode=off" ),
+               std::string::npos );
+    EXPECT_NE( default_meta.find( "estimator.gyro_align_window_s=100" ),
+               std::string::npos );
+    EXPECT_NE( off_meta.find( "estimator.gyro_mode=off" ),
+               std::string::npos );
+    EXPECT_NE( shadow_meta.find( "estimator.gyro_mode=shadow" ),
+               std::string::npos );
+    EXPECT_NE( fused_meta.find( "estimator.gyro_mode=fused" ),
+               std::string::npos );
 
     std::filesystem::remove_all( root );
   }

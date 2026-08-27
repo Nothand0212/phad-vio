@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -60,7 +61,7 @@ namespace phad::apps
     struct KeyframeSelectorState
     {
       std::unordered_map<common::LandmarkId, Eigen::Vector2d>
-                         last_kf_pixels;
+                        last_kf_pixels;
       common::Timestamp last_kf_timestamp{ 0 };
       std::uint32_t     total_keyframes = 0;
       // Rotation compensation (Slice ⑤b): rotation of the last accepted
@@ -73,9 +74,9 @@ namespace phad::apps
     };
 
     [[nodiscard]] bool isKeyframeImpl(
-        const frontend::FrameTracks& tracks,
-        const common::Timestamp      current_ts,
-        KeyframeSelectorState&       state,
+        const frontend::FrameTracks&              tracks,
+        const common::Timestamp                   current_ts,
+        KeyframeSelectorState&                    state,
         const camera::RectifiedStereoCalibration& calibration )
     {
       // Rule 0: empty observations never become keyframes (Slice ⑤b; the
@@ -123,12 +124,12 @@ namespace phad::apps
       // Normalized-coordinate projection of the rotation-compensated ray:
       // pixel -> normalized ray, rotate, back to pixel. This avoids the
       // degenerate z~0 blow-up of rotating raw pixel coordinates.
-      const double fx = calibration.fxPixels();
-      const double fy = calibration.fyPixels();
-      const double cx = calibration.cxPixels();
-      const double cy = calibration.cyPixels();
-      double      parallax_sum   = 0.0;
-      std::size_t parallax_count = 0;
+      const double fx             = calibration.fxPixels();
+      const double fy             = calibration.fyPixels();
+      const double cx             = calibration.cxPixels();
+      const double cy             = calibration.cyPixels();
+      double       parallax_sum   = 0.0;
+      std::size_t  parallax_count = 0;
       for ( const auto& obs : tracks.observations )
       {
         auto it = state.last_kf_pixels.find( obs.id );
@@ -211,6 +212,99 @@ namespace phad::apps
       return timing;
     }
 
+    [[nodiscard]] const char* gyroModeName( const estimator::GyroMode mode )
+    {
+      switch ( mode )
+      {
+        case estimator::GyroMode::kOff:
+          return "off";
+        case estimator::GyroMode::kShadow:
+          return "shadow";
+        case estimator::GyroMode::kFused:
+          return "fused";
+      }
+      throw std::invalid_argument( "unknown gyro mode" );
+    }
+
+    template <typename Value>
+    void writeCsvField( std::ostream& out, bool& first, const Value& value )
+    {
+      if ( !first )
+      {
+        out << ',';
+      }
+      first = false;
+      out << value;
+    }
+
+    void writeEmptyCsvField( std::ostream& out, bool& first )
+    {
+      if ( !first )
+      {
+        out << ',';
+      }
+      first = false;
+    }
+
+    template <typename Value>
+    void writeOptionalCsvField( std::ostream& out, bool& first,
+                                const std::optional<Value>& value )
+    {
+      if ( value.has_value() )
+      {
+        writeCsvField( out, first, *value );
+      }
+      else
+      {
+        writeEmptyCsvField( out, first );
+      }
+    }
+
+    void writePoseCsvFields(
+        std::ostream& out, bool& first,
+        const std::optional<Eigen::Isometry3d>& T_W_B )
+    {
+      writeCsvField( out, first, T_W_B.has_value() ? 1 : 0 );
+      if ( !T_W_B.has_value() )
+      {
+        for ( int index = 0; index < 7; ++index )
+        {
+          writeEmptyCsvField( out, first );
+        }
+        return;
+      }
+      Eigen::Quaterniond q( T_W_B->linear() );
+      q.normalize();
+      writeCsvField( out, first, T_W_B->translation().x() );
+      writeCsvField( out, first, T_W_B->translation().y() );
+      writeCsvField( out, first, T_W_B->translation().z() );
+      writeCsvField( out, first, q.w() );
+      writeCsvField( out, first, q.x() );
+      writeCsvField( out, first, q.y() );
+      writeCsvField( out, first, q.z() );
+    }
+
+    void writeQuaternionCsvFields(
+        std::ostream& out, bool& first,
+        const std::optional<Eigen::Quaterniond>& quaternion )
+    {
+      writeCsvField( out, first, quaternion.has_value() ? 1 : 0 );
+      if ( !quaternion.has_value() )
+      {
+        for ( int index = 0; index < 4; ++index )
+        {
+          writeEmptyCsvField( out, first );
+        }
+        return;
+      }
+      Eigen::Quaterniond q = *quaternion;
+      q.normalize();
+      writeCsvField( out, first, q.w() );
+      writeCsvField( out, first, q.x() );
+      writeCsvField( out, first, q.y() );
+      writeCsvField( out, first, q.z() );
+    }
+
   }  // namespace
 
   OfflineVoSessionResult runOfflineVoSession(
@@ -238,9 +332,9 @@ namespace phad::apps
     frontend::StereoTracker tracker( rectified_cal, options.tracker );
 
     // Probe B: CLI path only. Enable estimator side-channel when writing.
-    std::unique_ptr<ProbeBWriter>              probe_b_writer;
-    std::unordered_set<common::LandmarkId>     lifetime_culled;
-    estimator::EstimatorOptions                estimator_options = options.estimator;
+    std::unique_ptr<ProbeBWriter>          probe_b_writer;
+    std::unordered_set<common::LandmarkId> lifetime_culled;
+    estimator::EstimatorOptions            estimator_options = options.estimator;
     if ( !options.probe_b_path.empty() )
     {
       try
@@ -255,7 +349,8 @@ namespace phad::apps
       }
       estimator_options.enable_probe_b = true;
     }
-    estimator::StereoVoEstimator estimator( rectified_cal, estimator_options );
+    estimator::StereoVoEstimator estimator(
+        rectified_cal, opened.value().calibration().imu(), estimator_options );
 
     // Probe: optional deferred top-K drop after skip (see defer_drop_topk).
     std::unordered_set<common::LandmarkId> pending_drop;
@@ -375,7 +470,7 @@ namespace phad::apps
         break;
       }
 
-      auto loaded = stream.next();
+      auto loaded = stream.nextPacket();
       if ( std::holds_alternative<io::EndOfStream>( loaded ) )
       {
         break;
@@ -390,7 +485,8 @@ namespace phad::apps
       }
 
       const auto  frame_begin = std::chrono::steady_clock::now();
-      const auto& raw         = std::get<sensor::StereoFrame>( loaded );
+      const auto& packet      = std::get<sensor::StereoImuPacket>( loaded );
+      const auto& raw         = packet.frame;
 
       const auto rectify_begin = std::chrono::steady_clock::now();
       auto       rectified     = rectifier.value().rectify( raw );
@@ -452,7 +548,7 @@ namespace phad::apps
       const auto estimator_begin =
           std::chrono::steady_clock::now();
       const estimator::KeyframeMeasurement measurement =
-          toKeyframeMeasurement( tracks );
+          toKeyframeMeasurement( tracks, packet );
       const estimator::VioUpdateResult update =
           estimator.update( measurement, is_kf );
       const auto estimator_end = std::chrono::steady_clock::now();
@@ -471,7 +567,7 @@ namespace phad::apps
         kf_state.last_accepted_rotation =
             update.estimate->T_W_B.linear();
       }
-      const auto frame_end     = estimator_end;
+      const auto frame_end = estimator_end;
 
       // Composition-root feedback: drop frontend tracks for ids the
       // estimator permanently removed this frame. Default on (④c); two-level
@@ -564,13 +660,13 @@ namespace phad::apps
         {
           probe_frame.culled_ids = std::vector<std::uint64_t>(
               d.culled_landmark_ids.begin(), d.culled_landmark_ids.end() );
-          probe_frame.zombie_track_n    = zombie_track_n;
-          probe_frame.rejected_block_n  = d.probe_rejected_block_n;
-          probe_frame.new_lm            = d.probe_new_lm_n;
-          probe_frame.shared            = d.num_shared;
-          probe_frame.num_obs           = d.num_observations;
-          probe_frame.lm_iterations     = d.lm_iterations;
-          probe_frame.shift_m           = d.max_window_pose_shift_m;
+          probe_frame.zombie_track_n   = zombie_track_n;
+          probe_frame.rejected_block_n = d.probe_rejected_block_n;
+          probe_frame.new_lm           = d.probe_new_lm_n;
+          probe_frame.shared           = d.num_shared;
+          probe_frame.num_obs          = d.num_observations;
+          probe_frame.lm_iterations    = d.lm_iterations;
+          probe_frame.shift_m          = d.max_window_pose_shift_m;
           std::vector<ProbeBShiftTop> shift_top;
           shift_top.reserve( d.probe_shift_top.size() );
           for ( const auto& entry : d.probe_shift_top )
@@ -721,6 +817,24 @@ namespace phad::apps
           .reproj_rms_after_cull_px = d.reproj_rms_after_cull_px,
           .is_keyframe              = is_kf,
       } );
+      if ( options.estimator.gyro_mode != estimator::GyroMode::kOff )
+      {
+        if ( !d.gyro.has_value() )
+        {
+          result.error = SessionError{
+              "gyro diagnostics missing in non-off mode" };
+          result.sync = stream.diagnostics();
+          flushPendingDrop();
+          finalizeSegmentsAndWarnings();
+          return result;
+        }
+        result.gyro_state.push_back( GyroStateRow{
+            .timestamp_ns = tracks.timestamp.nanoseconds(),
+            .status       = updateStatusName( update.status ),
+            .segment_id   = d.segment_id,
+            .gyro         = *d.gyro,
+        } );
+      }
 
       if ( options.collect_timing )
       {
@@ -820,6 +934,90 @@ namespace phad::apps
     if ( !out )
     {
       return SessionError{ "failed to write diag csv: " + path.string() };
+    }
+    return std::nullopt;
+  }
+
+  std::optional<SessionError> writeGyroStateCsv(
+      const std::filesystem::path&     path,
+      const std::vector<GyroStateRow>& rows )
+  {
+    std::ofstream out( path );
+    if ( !out )
+    {
+      return SessionError{ "failed to open gyro state csv: " +
+                           path.string() };
+    }
+
+    out << "ts_ns,mode,status,segment_id,t_i_ns,t_j_ns,imu_samples,"
+           "imu_dt_s,imu_gap,edge_valid,factor_eligible,align_support_s,"
+           "align_edges,align_rank,align_ready,bg_x,bg_y,bg_z,"
+           "align_rms_rad,align_condition,"
+           "visual_init_valid,visual_init_tx,visual_init_ty,visual_init_tz,"
+           "visual_init_qw,visual_init_qx,visual_init_qy,visual_init_qz,"
+           "visual_post_valid,visual_post_tx,visual_post_ty,visual_post_tz,"
+           "visual_post_qw,visual_post_qx,visual_post_qy,visual_post_qz,"
+           "pim_dt_valid,pim_dt_s,pim_delta_valid,pim_delta_qw,"
+           "pim_delta_qx,pim_delta_qy,pim_delta_qz,pim_predict_valid,"
+           "pim_predict_qw,pim_predict_qx,pim_predict_qy,pim_predict_qz,"
+           "gyro_post_valid,gyro_post_tx,gyro_post_ty,gyro_post_tz,"
+           "gyro_post_qw,gyro_post_qx,gyro_post_qy,gyro_post_qz,"
+           "gyro_factor_count,visual_cost_valid,visual_cost,"
+           "gyro_cost_valid,gyro_cost\n";
+    out << std::setprecision( std::numeric_limits<double>::max_digits10 );
+
+    for ( const GyroStateRow& row : rows )
+    {
+      bool        first = true;
+      const auto& gyro  = row.gyro;
+      writeCsvField( out, first, row.timestamp_ns );
+      writeCsvField( out, first, gyroModeName( gyro.mode ) );
+      writeCsvField( out, first, row.status );
+      writeCsvField( out, first, row.segment_id );
+      writeOptionalCsvField( out, first, gyro.t_i_ns );
+      writeOptionalCsvField( out, first, gyro.t_j_ns );
+      writeOptionalCsvField( out, first, gyro.imu_samples );
+      writeOptionalCsvField( out, first, gyro.imu_dt_s );
+      writeCsvField( out, first, gyro.imu_gap ? 1 : 0 );
+      writeCsvField( out, first, gyro.edge_valid ? 1 : 0 );
+      writeCsvField( out, first, gyro.factor_eligible ? 1 : 0 );
+      writeCsvField( out, first, gyro.align_support_s );
+      writeCsvField( out, first, gyro.align_edges );
+      writeOptionalCsvField( out, first, gyro.align_rank );
+      writeCsvField( out, first, gyro.align_ready ? 1 : 0 );
+      if ( gyro.bias_radps.has_value() )
+      {
+        writeCsvField( out, first, gyro.bias_radps->x() );
+        writeCsvField( out, first, gyro.bias_radps->y() );
+        writeCsvField( out, first, gyro.bias_radps->z() );
+      }
+      else
+      {
+        writeEmptyCsvField( out, first );
+        writeEmptyCsvField( out, first );
+        writeEmptyCsvField( out, first );
+      }
+      writeOptionalCsvField( out, first, gyro.align_rms_rad );
+      writeOptionalCsvField( out, first, gyro.align_condition );
+      writePoseCsvFields( out, first, gyro.visual_init_T_W_B );
+      writePoseCsvFields( out, first, gyro.visual_post_T_W_B );
+      writeCsvField( out, first, gyro.pim_dt_s.has_value() ? 1 : 0 );
+      writeOptionalCsvField( out, first, gyro.pim_dt_s );
+      writeQuaternionCsvFields( out, first, gyro.pim_delta_q_Bi_Bj );
+      writeQuaternionCsvFields( out, first, gyro.pim_predict_q_W_Bj );
+      writePoseCsvFields( out, first, gyro.gyro_post_T_W_B );
+      writeCsvField( out, first, gyro.gyro_factor_count );
+      writeCsvField( out, first, gyro.visual_cost.has_value() ? 1 : 0 );
+      writeOptionalCsvField( out, first, gyro.visual_cost );
+      writeCsvField( out, first, gyro.gyro_cost.has_value() ? 1 : 0 );
+      writeOptionalCsvField( out, first, gyro.gyro_cost );
+      out << '\n';
+    }
+
+    if ( !out )
+    {
+      return SessionError{ "failed to write gyro state csv: " +
+                           path.string() };
     }
     return std::nullopt;
   }

@@ -3,11 +3,12 @@
 本文档描述当前约定，不是绝对约束，会随项目开发修订。
 
 本目录持有固定窗口 batch BA：消费 `KeyframeMeasurement`，输出 `T_W_B` 与
-诊断。M2.3 为纯双目 VO（`StereoVoEstimator`）；不读图像、不做关键帧决策、
-不依赖 `phad::frontend`。
+诊断。`StereoVoEstimator` 的 production 默认仍是纯双目 VO；可选的最小 gyro
+模式只加入 fixed-bias rotation constraint，不扩展为 full `X/V/B` VIO。本模块
+不读图像、不做关键帧决策、不依赖 `phad::frontend`。
 
 CMake target：`phad_estimator`（alias `phad::estimator`），公开依赖
-`phad::common`、`phad::camera`；GTSAM 为 PRIVATE（PIMPL 藏图与 Values，
+`phad::common`、`phad::camera`、`phad::sensor`；GTSAM 为 PRIVATE（PIMPL 藏图与 Values，
 include 标 SYSTEM）。
 
 ## 职责边界
@@ -15,7 +16,8 @@ include 标 SYSTEM）。
 | 做 | 不做 |
 |---|---|
 | 固定窗口 pose / landmark / 窗口内观测 | 关键帧决策（由 apps/session 决定）、feature track 生命周期 |
-| `GenericStereoFactor` + LM、最老帧 Prior gauge | 边缘化、smart factor、IMU |
+| `GenericStereoFactor` + LM、最老帧 Prior gauge | 边缘化、smart factor、full inertial `X/V/B` |
+| 可选 fixed-bias pose-only AHRS rotation factor | accelerometer、gravity、velocity、bias RW |
 | 重叠断裂时 re-anchor（`enable_reanchor`） | 分段 TUM / Atlas 式多轨迹 |
 | 共视 / cheirality / 重投影 / `segment_id` / PnP 诊断 | ATE（`phad::eval`） |
 | 正常路径 `solvePnPRansac` proposal + stereo 一致性仲裁 + 本帧 inlier 掩码 | frontend track 生命周期 |
@@ -28,14 +30,16 @@ include 标 SYSTEM）。
 |---|---|
 | `types.hpp` | `StereoObservation`、`KeyframeMeasurement`、`VioUpdateResult` 等合同 |
 | `stereo_vo_estimator.hpp` / `.cpp` | `StereoVoEstimator`（PIMPL 藏 GTSAM） |
+| `internal/fixed_bias_ahrs_factor.hpp` / `.cpp` | estimator-private 两 pose gyro rotation factor |
 
 ## 数据流
 
 ```text
-FrameTracks (frontend)
-        │
-        ▼
-apps/stereo_vo_glue.hpp  ── filter kValid ──► KeyframeMeasurement
+FrameTracks (frontend) ── filter kValid ─┐
+StereoImuPacket (sensor) ─ segment view ─┴─► apps/stereo_vo_glue.hpp
+                                                      │
+                                                      ▼
+                                             KeyframeMeasurement
                                                       │
                                                       ▼
                                             StereoVoEstimator::update
@@ -48,6 +52,37 @@ apps/stereo_vo_glue.hpp  ── filter kValid ──► KeyframeMeasurement
                     dropTracks(culled ids)                 估计轨迹叠加
                     → probe / phad_vo_bench
 ```
+
+## 最小 gyro 模式（M4 / #36）
+
+构造函数显式接收 rectified stereo calibration、可选 `sensor::ImuParameters` 与
+`EstimatorOptions`。运行模式是互斥枚举：
+
+| `GyroMode` | 行为 |
+|---|---|
+| `kOff`（默认） | 入口直接走原 visual-only 路径；不校验、不积分、不读取 IMU 数值 |
+| `kShadow` | visual posterior 是 authoritative state；额外求 gyro posterior 后丢弃 |
+| `kFused` | visual lifecycle 完成后求同一 gyro posterior，并原子写回窗口状态 |
+
+`kShadow` / `kFused` 缺 IMU calibration 会在构造时失败；`gyro_align_window_s`
+必须 finite 且大于 0。`KeyframeMeasurement::imu` 是只在 `update()` 调用期有效的
+`ImuSegmentView`；estimator 只复制后续需要的 interval，不保留 `span`。
+
+非 gap 段要求样本时间戳严格递增、端点精确覆盖 accepted-pose interval、整数纳秒
+`Σdt` 精确相等且 gyro finite。rejected visual frame 的合法 interval 会累计到下一
+accepted pose；gap 只阻断包含它的一条 edge，re-anchor 不跨 segment 建 factor。
+合同违反以 `gyro segment:` 前缀显式失败，并回滚新模式的完整状态。
+
+alignment 使用 accepted visual posterior rotation 与 GTSAM
+`PreintegratedAhrsMeasurements`，估计一个 shared absolute gyro bias；只用
+`gyr_nd² I`，达到支持窗后检查 rank=3 并冻结 bias 与 residual covariance。不创建
+bias graph key、prior 或 random walk。使 alignment ready 的 edge 不追溯激活；下一条
+accepted edge 才能加入 `FixedBiasAhrsFactor`。该 factor 仅产生 3 维 rotation residual，
+`Pose3` translation Jacobian 列恒为零。
+
+MH_01 结果是：off 字节门与 shadow 机制门通过，但 fused exact-common ATE/RPE 均
+恶化，故计划以负结果停止，默认保持 `kOff`。完整证据见
+[`docs/research/m4-minimal-gyro-mh01-result.md`](../../docs/research/m4-minimal-gyro-mh01-result.md)。
 
 ## 段生命周期（M3.3）
 

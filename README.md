@@ -3,27 +3,40 @@
 `phad-vio` 是一个以学习和验证为首要目标、从零实现的 GTSAM-based
 stereo visual-inertial odometry 项目。
 
+## 历史证据现场
+
+此 checkout 对应 `m4-minimal-gyro-slice`。其已提交起点
+`a8e892fcccbe061c5b69d7dabb150026ff19b341` 已进入后续产品历史；当前
+dirty 内容保留最小 gyro-aided VO 的诊断、因子与测试续作。该路线的 natural
+fused MH_01 结果曾出现 ATE/RPE 回退，因而这里的内容仅用于追溯问题、假设和
+候选方案，不能直接迁入当前产品。
+
+当前产品实现以 `main` 的 full-state `VioEstimator` 为准。任何后续复用须在
+该边界重新实现并以当前门控重新验证。全仓分支定位见
+`main:docs/historical-branch-evidence.md`。
+
 项目不复刻任何单一开源实现，而是从 lk-vio、Tassel、OpenVINS、VINS-Fusion、
 ORB-SLAM3 和 Basalt 各取一处经过验证的设计，按可测量的小里程碑实现一条完整的
 VIO pipeline。每个里程碑先固定合同和验收标准，再编写实现，并以真实序列上的
 ATE 作为出口条件。
 
-## 当前状态（M3.3：VO 加固）
+## 当前状态（M4：最小 gyro 验证已收口）
 
-M1（数据加载）、M2（双目 VO 最小闭环）、M3.1（回归 benchmark）和 M3.2（双目
-配对同步器）已完成。当前处于 M3.3 VO 加固阶段——已消除 `num_shared==0` 永久拒帧
+M1（数据加载）、M2（双目 VO 最小闭环）、M3.1（回归 benchmark）、M3.2（双目
+配对同步器）和 M3.3（VO 加固）已完成。M3.3 已消除 `num_shared==0` 永久拒帧
 的吸收态，补齐 PnP 初值、外点剔除、多轮重优、skip-drop 和 zombie-age 生命周期
-管理。
+管理；当前最新工作是下述 M4 最小 gyro 验证。
 
-**最新片：Slice ⑤ 关键帧策略**。estimator 滑窗只包含关键帧（组合标准：平均视差
-> 30 px / track 存活率 < 60% / 时间 > 0.5s），非关键帧仅做 PnP 位姿估计。
-MH_01 ATE 从基线 0.099 m 降至 **0.054 m**（−46%），MH_05 从 0.472 m 降至
-**0.360 m**（−24%）。
+**最新片：M4 最小 gyro-aided VO（#36）**。已在 production estimator 上实现
+`off` / `shadow` / `fused`：off 与原 VO 三主产物逐字节一致，shadow 的 segment、
+shared gyro bias 和 pose-only AHRS factor 机制成立；但 MH_01 natural fused 的
+exact-common ATE 从 `0.080964 m` 恶化为 `0.090807 m`，1 s RPE 从
+`0.017781 m` 恶化为 `0.018096 m`。因此本片以负结果停止，默认保持 `off`，
+未扩跑 MH_05 或 EuRoC 11/11。
 
-当前默认 config hash：`773ea011`（42 键）。EuRoC 11 序列全量 benchmark
-checkpoint 已持久化到 `docs/benchmark/m3.3/`。
-
-**下一步**：M4 接入 IMU（静止初始化 + GTSAM preintegration + 状态 X→X/V/B）。
+下一步不是自动继续实现：是否进入 full inertial `X/V/B + gravity` 需要另行评审。
+结果与停止依据见
+[`docs/research/m4-minimal-gyro-mh01-result.md`](docs/research/m4-minimal-gyro-mh01-result.md)。
 
 详细进展见 [`docs/roadmap.md`](docs/roadmap.md)。
 

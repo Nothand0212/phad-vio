@@ -153,12 +153,12 @@ TEST( StereoVoReanchor, RecoversAfterLandmarkIdTurnover )
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size          = 5;
-  options.min_shared_landmarks = 3;
+  options.window_size                     = 5;
+  options.min_shared_landmarks            = 3;
   ASSERT_GE( kLandmarksB.size(),
              static_cast<std::size_t>( options.min_seed_observations ) );
 
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
   const auto        poses    = translatingPoses( 4, 0.05 );
   const auto        accepted = runNormalSegment( estimator, calibration, poses, ids_a );
 
@@ -197,11 +197,11 @@ TEST( StereoVoReanchor, SeedGateRejectsWithoutPoisoningState )
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size           = 5;
-  options.min_shared_landmarks  = 3;
-  options.min_seed_observations = 10;
+  options.window_size                     = 5;
+  options.min_shared_landmarks            = 3;
+  options.min_seed_observations           = 10;
 
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
   const auto        poses = translatingPoses( 4, 0.05 );
   runNormalSegment( estimator, calibration, poses, ids_a );
 
@@ -236,11 +236,11 @@ TEST( StereoVoReanchor, ReanchorDisabledReproducesLegacyReject )
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size          = 5;
-  options.min_shared_landmarks = 3;
-  options.enable_reanchor      = false;
+  options.window_size                     = 5;
+  options.min_shared_landmarks            = 3;
+  options.enable_reanchor                 = false;
 
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
   const auto        poses = translatingPoses( 4, 0.05 );
   runNormalSegment( estimator, calibration, poses, ids_a );
 
@@ -267,12 +267,12 @@ TEST( StereoVoReanchor, FirstSegmentSeedGate )
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size           = 5;
-  options.min_shared_landmarks  = 3;
-  options.min_seed_observations = 10;
-  options.enable_accumulated_seed = true;  // 首段累积 (默认关, 显式开)
+  options.window_size                     = 5;
+  options.min_shared_landmarks            = 3;
+  options.min_seed_observations           = 10;
+  options.enable_accumulated_seed         = true;  // 首段累积 (默认关, 显式开)
 
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
 
   const std::vector<Eigen::Vector3d> sparse_landmarks(
       kLandmarksA.begin(), kLandmarksA.begin() + 3 );
@@ -299,12 +299,12 @@ TEST( StereoVoReanchor, AccumulatedSeedingSeedsAfterSparseFrames )
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.window_size           = 5;
-  options.min_shared_landmarks  = 3;
-  options.min_seed_observations = 10;
-  options.enable_accumulated_seed = true;  // 首段累积 (默认关, 显式开)
+  options.window_size                     = 5;
+  options.min_shared_landmarks            = 3;
+  options.min_seed_observations           = 10;
+  options.enable_accumulated_seed         = true;  // 首段累积 (默认关, 显式开)
 
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
 
   // Three consecutive sparse frames: each contributes 4 stereo observations,
   // none reaches min_seed_observations=10 alone. Across frames the buffer
@@ -358,13 +358,13 @@ TEST( StereoVoReanchor, AnchorFollowsConstantVelocityOption )
 
   auto run_and_break = [ & ]( bool use_cv ) {
     EstimatorOptions options;
-  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-    options.window_size                = 5;
-    options.min_shared_landmarks       = 3;
-    options.use_constant_velocity_init = use_cv;
+    options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
+    options.window_size                     = 5;
+    options.min_shared_landmarks            = 3;
+    options.use_constant_velocity_init      = use_cv;
 
-    StereoVoEstimator estimator( calibration, options );
+    StereoVoEstimator estimator( calibration, std::nullopt, options );
     const auto        accepted = runNormalSegment( estimator, calibration, poses, ids_a );
 
     const Eigen::Isometry3d& T_prev = accepted[ accepted.size() - 2 ];
@@ -402,7 +402,7 @@ TEST( StereoVoReanchor, CtorRejectsMinSeedObservationsBelowOne )
 
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.min_seed_observations = 0;
-  EXPECT_THROW( StereoVoEstimator( calibration, options ),
+  options.min_seed_observations           = 0;
+  EXPECT_THROW( StereoVoEstimator( calibration, std::nullopt, options ),
                 std::invalid_argument );
 }

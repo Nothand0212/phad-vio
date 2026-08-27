@@ -3,6 +3,7 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "phad/camera/rectified_stereo_calibration.hpp"
@@ -40,9 +41,9 @@ namespace
       const Eigen::Isometry3d&          T_W_B,
       const Eigen::Vector3d&            point_W )
   {
-    Eigen::Isometry3d T_B_C = Eigen::Isometry3d::Identity();
-    T_B_C.linear()          = calibration.T_B_left_rectified().rotation();
-    T_B_C.translation()     = calibration.T_B_left_rectified().translation();
+    Eigen::Isometry3d T_B_C          = Eigen::Isometry3d::Identity();
+    T_B_C.linear()                   = calibration.T_B_left_rectified().rotation();
+    T_B_C.translation()              = calibration.T_B_left_rectified().translation();
     const Eigen::Vector3d point_left = ( T_W_B * T_B_C ).inverse() * point_W;
     const double          z          = point_left.z();
     EXPECT_GT( z, 0.0 );
@@ -56,9 +57,9 @@ namespace
       const Eigen::Isometry3d&          T_W_B,
       const Eigen::Vector3d&            point_W )
   {
-    Eigen::Isometry3d T_B_C = Eigen::Isometry3d::Identity();
-    T_B_C.linear()          = calibration.T_B_left_rectified().rotation();
-    T_B_C.translation()     = calibration.T_B_left_rectified().translation();
+    Eigen::Isometry3d T_B_C          = Eigen::Isometry3d::Identity();
+    T_B_C.linear()                   = calibration.T_B_left_rectified().rotation();
+    T_B_C.translation()              = calibration.T_B_left_rectified().translation();
     const Eigen::Vector3d point_left = ( T_W_B * T_B_C ).inverse() * point_W;
     return calibration.fxPixels() * calibration.baselineM() / point_left.z();
   }
@@ -68,12 +69,12 @@ namespace
   // (glue channel; the landmark is seeded when its stereo match returns).
   struct Scene
   {
-    RectifiedStereoCalibration    calibration = makeCalibration();
-    std::vector<LandmarkId>       stable_ids;
-    std::vector<Eigen::Vector3d>  stable_W;
-    LandmarkId                    target_id{ 100 };
-    Eigen::Vector3d               target_W{ 0.3, 0.0, 5.0 };
-    const std::int64_t            ts_step_ns = 100'000'000;
+    RectifiedStereoCalibration   calibration = makeCalibration();
+    std::vector<LandmarkId>      stable_ids;
+    std::vector<Eigen::Vector3d> stable_W;
+    LandmarkId                   target_id{ 100 };
+    Eigen::Vector3d              target_W{ 0.3, 0.0, 5.0 };
+    const std::int64_t           ts_step_ns = 100'000'000;
 
     Scene()
     {
@@ -144,11 +145,11 @@ TEST( MultiFrameTriangulationTest, BuildGraphSkipsZeroDisparity )
   // min_landmark_observations: the landmark enters the BA graph only once it
   // has two real stereo observations (frame 4), never earlier.
   Scene             scene;
-  StereoVoEstimator estimator( scene.calibration );
+  StereoVoEstimator estimator( scene.calibration, std::nullopt );
 
   auto r0 = estimator.update( scene.frame( translated( 0.0 ), 0,
-                              /*include_stereo_target=*/false,
-                              /*include_target=*/false ),
+                                           /*include_stereo_target=*/false,
+                                           /*include_target=*/false ),
                               /*keyframe=*/true );
   EXPECT_EQ( r0.status, UpdateStatus::kOk );
 

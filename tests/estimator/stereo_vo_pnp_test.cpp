@@ -4,6 +4,7 @@
 #include <Eigen/Geometry>
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -162,12 +163,12 @@ namespace
   EstimatorOptions defaultPnpOptions()
   {
     EstimatorOptions options;
-  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
     options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-    options.window_size          = 5;
-    options.min_shared_landmarks = 3;
-    options.min_pnp_inliers      = 10;
-    options.enable_pnp_init      = true;
+    options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
+    options.window_size                     = 5;
+    options.min_shared_landmarks            = 3;
+    options.min_pnp_inliers                 = 10;
+    options.enable_pnp_init                 = true;
     return options;
   }
 
@@ -177,27 +178,30 @@ TEST( StereoVoPnpTest, RejectsNonPositivePnpReproj )
 {
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.pnp_reproj_px = 0.0;
-  EXPECT_THROW( ( StereoVoEstimator{ makeCalibration(), options } ),
-                std::invalid_argument );
+  options.pnp_reproj_px                   = 0.0;
+  EXPECT_THROW(
+      ( StereoVoEstimator{ makeCalibration(), std::nullopt, options } ),
+      std::invalid_argument );
 }
 
 TEST( StereoVoPnpTest, RejectsInvalidPnpConfidence )
 {
   EstimatorOptions options;
-  options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.pnp_confidence = 1.0;  // 要求 ∈ (0, 1)
-  EXPECT_THROW( ( StereoVoEstimator{ makeCalibration(), options } ),
-                std::invalid_argument );
+  options.min_track_observations_for_seed = 1;    // tests seed at 2 frames
+  options.pnp_confidence                  = 1.0;  // 要求 ∈ (0, 1)
+  EXPECT_THROW(
+      ( StereoVoEstimator{ makeCalibration(), std::nullopt, options } ),
+      std::invalid_argument );
 }
 
 TEST( StereoVoPnpTest, RejectsMinPnpInliersBelowFour )
 {
   EstimatorOptions options;
   options.min_track_observations_for_seed = 1;  // tests seed at 2 frames
-  options.min_pnp_inliers = 3;
-  EXPECT_THROW( ( StereoVoEstimator{ makeCalibration(), options } ),
-                std::invalid_argument );
+  options.min_pnp_inliers                 = 3;
+  EXPECT_THROW(
+      ( StereoVoEstimator{ makeCalibration(), std::nullopt, options } ),
+      std::invalid_argument );
 }
 
 TEST( StereoVoPnpTest, PnpSucceedsOnCleanMotion )
@@ -206,12 +210,12 @@ TEST( StereoVoPnpTest, PnpSucceedsOnCleanMotion )
   const auto ids         = sequentialIds( kLandmarksA.size(), 1 );
   const auto poses       = translatingPoses( 6, 0.05 );
 
-  EstimatorOptions options_pnp = defaultPnpOptions();
-  StereoVoEstimator estimator_pnp( calibration, options_pnp );
+  EstimatorOptions  options_pnp = defaultPnpOptions();
+  StereoVoEstimator estimator_pnp( calibration, std::nullopt, options_pnp );
 
   EstimatorOptions options_cv = defaultPnpOptions();
   options_cv.enable_pnp_init  = false;
-  StereoVoEstimator estimator_cv( calibration, options_cv );
+  StereoVoEstimator estimator_cv( calibration, std::nullopt, options_cv );
 
   for ( std::size_t index = 0; index < poses.size(); ++index )
   {
@@ -256,7 +260,7 @@ TEST( StereoVoPnpTest, PnpMasksSharedOutliers )
   const auto poses       = translatingPoses( 4, 0.05 );
 
   EstimatorOptions  options = defaultPnpOptions();
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
 
   // Need shared > min_pnp_inliers so one outlier still leaves enough inliers.
   // Public surface has no window / landmarks_W accessors: prove mask via graph
@@ -311,7 +315,7 @@ TEST( StereoVoPnpTest, FallsBackWhenPnpStereoRmsIsWorseThanGuess )
   EstimatorOptions options     = defaultPnpOptions();
   options.enable_outlier_cull  = false;
   options.enable_outlier_reopt = false;
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
 
   const Eigen::Isometry3d stationary = Eigen::Isometry3d::Identity();
   for ( std::int64_t frame = 1; frame <= 2; ++frame )
@@ -364,7 +368,7 @@ TEST( StereoVoPnpTest, AcceptsPnpWithinStereoNoise )
   const auto ids         = sequentialIds( kNearAxisLandmarks.size(), 1 );
 
   EstimatorOptions  options = defaultPnpOptions();
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
 
   const Eigen::Isometry3d stationary = Eigen::Isometry3d::Identity();
   for ( std::int64_t frame = 1; frame <= 2; ++frame )
@@ -404,7 +408,7 @@ TEST( StereoVoPnpTest, FallsBackWhenTooFewShared )
 
   EstimatorOptions options = defaultPnpOptions();
   options.min_pnp_inliers  = 20;  // > available shared (10)
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
 
   for ( std::size_t index = 0; index < 2; ++index )
   {
@@ -449,7 +453,7 @@ TEST( StereoVoPnpTest, FallsBackWhenInliersBelowMin )
 
   EstimatorOptions options = defaultPnpOptions();
   options.min_pnp_inliers  = 10;
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
 
   for ( std::size_t index = 0; index < 2; ++index )
   {
@@ -478,7 +482,7 @@ TEST( StereoVoPnpTest, FallsBackWhenInliersBelowMin )
   {
     offsetLeftPixel( corrupted, ids[ index ],
                      Eigen::Vector2d( 40.0 + 5.0 * static_cast<double>( index ),
-                                     0.0 ) );
+                                      0.0 ) );
   }
   offsetLeftPixel( corrupted, probe_id, Eigen::Vector2d( 40.0, 0.0 ) );
 
@@ -498,7 +502,7 @@ TEST( StereoVoPnpTest, DisabledMatchesConstantVelocity )
 
   EstimatorOptions options = defaultPnpOptions();
   options.enable_pnp_init  = false;
-  StereoVoEstimator estimator( calibration, options );
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
 
   for ( std::size_t index = 0; index < poses.size(); ++index )
   {
@@ -518,10 +522,10 @@ TEST( StereoVoPnpTest, SeedAndReanchorSkipPnp )
   const auto ids_a       = sequentialIds( kLandmarksA.size(), 1 );
   const auto ids_b       = sequentialIds( kLandmarksB.size(), 1000 );
 
-  EstimatorOptions options = defaultPnpOptions();
-  StereoVoEstimator estimator( calibration, options );
+  EstimatorOptions  options = defaultPnpOptions();
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
 
-  const auto poses = translatingPoses( 4, 0.05 );
+  const auto                     poses = translatingPoses( 4, 0.05 );
   std::vector<Eigen::Isometry3d> accepted;
   for ( std::size_t index = 0; index < poses.size(); ++index )
   {
@@ -557,8 +561,8 @@ TEST( StereoVoPnpTest, MaskedObsKeepsTrackTimesButMayDropFromGraph )
   const auto ids         = sequentialIds( kLandmarksA.size(), 1 );
   const auto poses       = translatingPoses( 5, 0.05 );
 
-  EstimatorOptions options = defaultPnpOptions();
-  StereoVoEstimator estimator( calibration, options );
+  EstimatorOptions  options = defaultPnpOptions();
+  StereoVoEstimator estimator( calibration, std::nullopt, options );
 
   ASSERT_EQ( estimator
                  .update( makeFrame( calibration, poses[ 0 ], 50'000'000,

@@ -21,6 +21,14 @@ TEST( EstimatorTypes, OutlierAvgReprojDefault )
   EXPECT_TRUE( options.block_culled_rebirth );
 }
 
+TEST( EstimatorTypes, GyroDefaultsToOff )
+{
+  const phad::estimator::EstimatorOptions options;
+
+  EXPECT_EQ( options.gyro_mode, phad::estimator::GyroMode::kOff );
+  EXPECT_DOUBLE_EQ( options.gyro_align_window_s, 100.0 );
+}
+
 TEST( EstimatorTypes, KeyframeMeasurementConstructs )
 {
   phad::estimator::KeyframeMeasurement measurement;
@@ -34,6 +42,8 @@ TEST( EstimatorTypes, KeyframeMeasurementConstructs )
   ASSERT_EQ( measurement.observations.size(), 1U );
   EXPECT_EQ( measurement.observations.front().id, 7U );
   EXPECT_DOUBLE_EQ( measurement.observations.front().disparity_px, 12.0 );
+  EXPECT_TRUE( measurement.imu.samples.empty() );
+  EXPECT_TRUE( measurement.imu.gap );
 
   phad::estimator::VioUpdateResult result;
   result.status   = phad::estimator::UpdateStatus::kOk;

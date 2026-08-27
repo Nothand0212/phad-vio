@@ -2,6 +2,7 @@
 
 #include "phad/estimator/types.hpp"
 #include "phad/frontend/stereo_tracks.hpp"
+#include "phad/sensor/stereo_imu_packet.hpp"
 
 namespace phad::apps
 {
@@ -42,6 +43,21 @@ namespace phad::apps
         } );
       }
     }
+    return measurement;
+  }
+
+  /// Attach the packet's call-lifetime IMU segment without taking ownership.
+  [[nodiscard]] inline estimator::KeyframeMeasurement toKeyframeMeasurement(
+      const frontend::FrameTracks&   tracks,
+      const sensor::StereoImuPacket& packet )
+  {
+    estimator::KeyframeMeasurement measurement =
+        toKeyframeMeasurement( tracks );
+    measurement.imu = estimator::ImuSegmentView{
+        .t_prev  = packet.t_prev,
+        .samples = packet.samples,
+        .gap     = packet.imu_gap,
+    };
     return measurement;
   }
 
