@@ -86,6 +86,7 @@ build/phad_vo_bench /path/to/euroc/MH_01_easy --bench-root /tmp/bench --sequence
 | [`docs/plans/`](docs/plans/) | 实施计划（YAML frontmatter + 可执行步骤） |
 | [`docs/benchmark/`](docs/benchmark/) | 关键 checkpoint 的全量 EuRoC 快照与对比 |
 | [`docs/adr/`](docs/adr/) | 架构决策记录 |
+| [`docs/historical-branch-evidence.md`](docs/historical-branch-evidence.md) | 历史分支与 evidence snapshot 的定位、边界和入口 |
 
 ### Agent 约定
 
