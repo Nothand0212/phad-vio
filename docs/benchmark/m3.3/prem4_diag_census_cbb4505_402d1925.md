@@ -10,7 +10,7 @@ SAD-only（`enable_census=false`）与 slice-7 官方 run 逐项一致（MH_01
 相关：
 
 - issue [#27](https://github.com/Nothand0212/phad-vio/issues/27)
-- 诊断：[m3.3-remaining-failure-debt.md](../research/m3.3-remaining-failure-debt.md)（§0.1 实测否决 + §4.2 更新）
+- 诊断：[2026-08-05-note-m3-3-remaining-failure-debt.md](../research/2026-08-05-note-m3-3-remaining-failure-debt.md)（§0.1 实测否决 + §4.2 更新）
 - 计划：[pre-M4 小片计划](../../plans/synchronous-wiggling-star.md)
 - predecessor：Slice ⑦（`e77ee5d` / `402d1925`）
 

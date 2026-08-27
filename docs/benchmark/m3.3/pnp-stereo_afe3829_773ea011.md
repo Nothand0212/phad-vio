@@ -12,9 +12,9 @@ MH_03 出现已知回归；当前 estimator 默认
 - issue [#26](https://github.com/Nothand0212/phad-vio/issues/26)、
   [#25](https://github.com/Nothand0212/phad-vio/issues/25)
 - predecessor：[zombie-age=5](../../benchmark/m3.3/zombie-age_4cf55ca_773ea011.md)
-- 设计：[PnP stereo 一致性](../../research/m3.3-pnp-stereo-consistency-design.md)
-- 根因诊断：[MH_02 divergence](../../research/m3.3-mh02-divergence-diagnosis.md)
-- 提交前 dirty 验证：[arbitration results](../../research/m3.3-pnp-stereo-arbitration-results.md)
+- 设计：[PnP stereo 一致性](../../research/2026-08-04-note-m3-3-pnp-stereo-consistency-design.md)
+- 根因诊断：[MH_02 divergence](../../research/2026-08-04-note-m3-3-mh02-divergence-diagnosis.md)
+- 提交前 dirty 验证：[arbitration results](../../research/2026-08-04-note-m3-3-pnp-stereo-arbitration-results.md)
 
 ## 1. 身份与执行
 

@@ -34,11 +34,11 @@ original frozen-plan RED exact-record conformance NOT MET；只授权 Q3 plan/de
 
 权威输入：
 
-- [Q2 known-bias deterministic predict 设计](../research/m4-minimal-gyro-q2-known-bias-predict-design.md)
-- [Q2 known-bias deterministic predict 资格结果](../research/m4-minimal-gyro-q2-known-bias-predict-result.md)
+- [Q2 known-bias deterministic predict 设计](../research/2026-08-12-note-m4-minimal-gyro-q2-known-bias-predict-design.md)
+- [Q2 known-bias deterministic predict 资格结果](../research/2026-08-13-note-m4-minimal-gyro-q2-known-bias-predict-result.md)
 - [Q1 Observe 实施计划](2026-08-12_m4_gyro_q1_observe_7d3a91e6.plan.md)
 - [证据门控的信息接入](../agents/evidence-gated-integration.md)
-- [M4 路线](../roadmap.md)
+- [M4 路线](../design/roadmap.md)
 
 本计划的代码 base 是 `c0e214a04f8521dcf7f1c2769ebf10bf7ca06051`（短 hash
 `c0e214a`）；Q1 executable evidence 是
@@ -85,7 +85,7 @@ docs/plans/2026-08-12_m4_gyro_q2_predict_3f69becc.plan.md
 ```
 
 上述六路径是 `a5e1a04` 原始 prereg 的 production implementation allowlist；原 §2 不含
-`docs/research/m4-minimal-gyro-q2-known-bias-predict-design.md`。reachability review 后，
+`docs/research/2026-08-12-note-m4-minimal-gyro-q2-known-bias-predict-design.md`。reachability review 后，
 coordinator 于 `2026-08-12T15:18:26Z` 创建、于 `15:18:40Z` dispatch Orca task
 `task_76375610b1d9`，在实际返修与 `0f51eaa` commit 前对该 research 单一路径授予 narrow waiver，
 仅允许 reviewer-requested natural-defensive evidence correction 与 provisional/status 同步。
@@ -93,8 +93,8 @@ coordinator 于 `2026-08-12T15:18:26Z` 创建、于 `15:18:40Z` dispatch Orca ta
 waiver；这不是原 §2 已有的第七路径，也不是 `222c5a3` 的事后追授。
 
 除上述路径外不得修改 implementation 文件；不需要某个文件时不改。资格结果文档只预定为
-`docs/research/m4-minimal-gyro-q2-known-bias-predict-result.md`，用于完成后记录证据，**不进入
-implementation allowlist**。本次 plan preregistration 对 `docs/roadmap.md` 的链接更新也不是
+`docs/research/2026-08-13-note-m4-minimal-gyro-q2-known-bias-predict-result.md`，用于完成后记录证据，**不进入
+implementation allowlist**。本次 plan preregistration 对 `docs/design/roadmap.md` 的链接更新也不是
 Q2 implementation 差异。
 
 CMake 只把新 `.cpp` 加入既有 `phad_estimator`，把新 test 加入既有
@@ -472,7 +472,7 @@ SO(3) 检查没有被绕过。
 
 ```bash
 rg -n 'integrateGyroRotation|GyroRotationPrediction' . \
-  -g '!docs/research/m4-minimal-gyro-q2-known-bias-predict-design.md' \
+  -g '!docs/research/2026-08-12-note-m4-minimal-gyro-q2-known-bias-predict-design.md' \
   -g '!docs/plans/2026-08-12_m4_gyro_q2_predict_3f69becc.plan.md'
 git diff --name-only c0e214a -- CMakeLists.txt phad tests docs
 git diff --check
@@ -490,7 +490,7 @@ deterministic unit gate，结果文档必须明确列为未执行。
 ## 9. `record-q2-stop-go`
 
 结果只记录到预定的
-`docs/research/m4-minimal-gyro-q2-known-bias-predict-result.md`，必须包含 source/build/compiler/
+`docs/research/2026-08-13-note-m4-minimal-gyro-q2-known-bias-predict-result.md`，必须包含 source/build/compiler/
 GTSAM/oracle identity、RED 与 GREEN exact commands/exit codes、oracle SHA、逐门 actual、范围审计、
 deletion test、未执行项与剩余风险。
 
@@ -537,7 +537,7 @@ git diff --check
 git status --short
 git diff --name-only a5e1a04..HEAD
 git diff -- CMakeLists.txt phad/estimator tests/estimator docs/plans \
-  docs/research/m4-minimal-gyro-q2-known-bias-predict-design.md
+  docs/research/2026-08-12-note-m4-minimal-gyro-q2-known-bias-predict-design.md
 ```
 
 实施者记录（2026-08-12）：已在 `a5e1a04` 上完成 fixed point/contract 冻结，先仅接入最终
@@ -569,7 +569,7 @@ PASS/FAIL/INCONCLUSIVE verdict**。该 attempt 报告的 10/10、77/77、probe�
 natural defensive、unused-accel、shared endpoint、deletion、scope 与格式门全部 PASS。
 
 最终账本见
-[Q2 known-bias deterministic predict 资格结果](../research/m4-minimal-gyro-q2-known-bias-predict-result.md)；
+[Q2 known-bias deterministic predict 资格结果](../research/2026-08-13-note-m4-minimal-gyro-q2-known-bias-predict-result.md)；
 verifier report SHA-256 为
 `574a946fd08a6006de9b5477766443fed9fe5fd92b6079b93c772630a30b9ed1`，oracle script/output
 SHA-256 分别为 `e513d13f97f9abd6a5f79a154bf484b5dc9f6f6e658ef87e5831c11029a4d5b8` /

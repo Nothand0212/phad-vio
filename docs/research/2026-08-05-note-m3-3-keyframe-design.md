@@ -1,0 +1,254 @@
+# M3.3 关键帧策略设计(⑤ 实施后修订 + M4 预积分帧边界)
+
+日期: 2026-08-07(修订)
+初版: 2026-08-05(slice ⑤ 实施前设计,已按实施结果修订)
+状态: 设计定案(选择器逻辑保持 402d1925 不动;本次代码改动仅注释清理)
+关联: issue [#27](https://github.com/Nothand0212/phad-vio/issues/27)、[#23](https://github.com/Nothand0212/phad-vio/issues/23)
+总图: [2026-08-05_post-m3.3-arbitration_work-plan_cb338da4.plan.md](../plans/2026-08-05_post-m3.3-arbitration_work-plan_cb338da4.plan.md) Phase 3
+归因证据: [2026-08-07-note-m3-3-v102-regression-attribution.md](2026-08-07-note-m3-3-v102-regression-attribution.md)
+开源对照: [2026-08-05-opensource-m3-3-keyframe.md](2026-08-05-opensource-m3-3-keyframe.md) + 本地 `~/Projects/lin_ws/slam_ws/basalt`
+相关: 前端 [AGENTS](../../phad/frontend/AGENTS.md)、estimator [AGENTS](../../phad/estimator/AGENTS.md)
+
+## 0. 修订说明(2026-08-07)
+
+初版(2026-08-05)描述 slice ⑤ 的初始设计,其中**部分决策在实施中
+被修改**,且 V1_02 归因(2026-08-07)提供了新的机制证据。本次修订:
+
+| 初版决策 | 实施后的实际状态 |
+|---|---|
+| 非关键帧 track-only(PnP,不进 BA) | **⑤c 改为全帧 BA**: 7KF+3temporal 全部进窗口优化,差异只在驱逐优先级(⑤b 的 track-only 被取代) |
+| 窗口只含关键帧 | 窗口 = 7 KF + 3 temporal(Basalt 同款),非 KF 也进 BA |
+| 关键帧 = IMU 预积分边界 | 修订为**预积分绑定连续帧对**(见 §4),KF 决定锚定/驱逐而非预积分边界 |
+
+归因(`2026-08-07-note-m3-3-v102-regression-attribution.md`)引入的三条硬约束:
+
+1. **旋转段 KF 是 track 衰减的结果,不是主动选择**: 旋转补偿视差≈0,
+   Rule 4 从不触发;KF 洪峰(141 帧)由 Rule 1b/3 驱动。
+2. **KF 失败回滚 → seed 阻塞 → 自持环**: 失败帧的新 ID 无法入图(seed
+   仅 KF,estimator:1487)→ overlap 衰减 → 更多强制 KF → 图更病态。
+3. **glue 悬挂改变 Rule 3 语义**: 悬挂 track 保持 ID 存活 → survive 不崩
+   → Rule 3 触发率下降。KF 设计必须把"存活语义"当输入,不是纯几何规则。
+
+**定案摘要**(Phase 3):
+
+| 决策点 | 定案 | 代码改动 |
+|---|---|---|
+| D1 视差阈值 | **保持 30px**,修注释(残留的 "15px VGGT-Motion" 从未存在) | 注释 ✓ |
+| D2 KF/非 KF landmark 处理 | 全帧 BA(7KF+3temporal)+ seed 仅 KF 保持 | 无 |
+| D3 IMU 预积分帧边界 | 预积分绑定**连续帧对**;KF 只决定锚定/驱逐 | 无(M4.2 落地) |
+| D4 窗口交互 | 7KF+3temporal 保持;**Basalt 的 KF 冷却(`min_frames_after_kf=5`)我们缺失**,列入 M4 评估 | 无 |
+
+**pre-M4 round 2 追加证据**(2026-08-07,
+[prem4-round2](../benchmark/m3.3/prem4_round2_8906684_402d1925.md)):
+7 变体（② 累积播种 / ③ 曝光归一化 / 零均值 SAD / no-CV 锚 / seed 门
+20 / 首段累积）在 V2_03 全灭 —— 匹配/播种层不是瓶颈,ATE 损失 100%
+来自 re-anchor 对齐税,且对齐税与 re-anchor 数量/门槛无单调关系。
+直接推论: **D3 的 IMU 预积分锚不是"顺带的精度提升",而是 M4 的第一
+动机**;§10.3 的失败帧 seed 变体（锚质量门方向）在纯 VO 内被证伪
+（seed 门 20 实验: 只是把 re-anchor 换成了更晚更远的锚）。
+
+---
+
+## 1. 现状(实施后)
+
+### 1.1 选择器规则(`apps/offline_vo_session.cpp:73-157`)
+
+| 规则 | 条件 | 出处 |
+|---|---|---|
+| Rule 0 | 空 obs 不成 KF | slice ⑤b |
+| Rule 1 | 前 2 帧强制 KF | VINS `frame_count < 2` |
+| Rule 1b | obs < 10 强制 KF | VINS `last_track_num < 20`(量级不同: 10 vs 20) |
+| Rule 2 | 距上 KF > 0.5s 强制 KF | ORB-SLAM3 c1a/c1b 同族 |
+| Rule 3 | survive 比 < 60% 强制 KF | **Basalt `connected0/total < 0.7` 同族**(60% vs 70%) |
+| Rule 4 | 旋转补偿平均视差 > 30px | VINS `compensatedParallax2 ≥ 10` 同族 |
+
+Rule 4 的旋转补偿来源: **BA/PnP 精化后的 last accepted 位姿**
+(VINS/Basalt 用 IMU 预积分;我们无 IMU,用位姿差作替代)。
+
+### 1.2 窗口与驱逐(`phad/estimator/stereo_vo_estimator.cpp:1553-1590`)
+
+- 结构: 7 KF + 3 temporal = 10 帧(Basalt `vio_max_kfs=7` +
+  `vio_max_states=3`,逐一对应)
+- 驱逐顺序: KF 数 > 7 → 直接顶掉**最老的 KF**;size > 10 → 优先驱逐
+  **最老的非 KF**,无非 KF 时 pop_front
+- 后果: 失败段(141 帧全 KF)时窗口是"滚动 KF 队列",每帧顶掉最老 KF,
+  窗口里全是最近衰减中的帧
+- seed: **仅关键帧 seed 新 landmark**(estimator:1487-1492)
+
+### 1.3 归因的机制证据(修订依据)
+
+见 §0 三条硬约束。完整链条见归因文档 §1.5: 快旋转段(>1.0 rad/s)→
+⑤c 前端 track ID 轮换 → 关键帧 BA kFailed(回滚)→ 新 ID 无法入图 →
+overlap 110→1 → 失败自持 141 帧 → re-anchor 锚陈旧 → 永久偏移。
+
+---
+
+## 2. 开源对照
+
+### 2.1 对照表
+
+| 系统 | KF 判定 | 旋转补偿 | 窗口/驱逐 | 冷却 |
+|---|---|---|---|---|
+| **VINS-Mono** | ① 前 2 帧 ② `last_track_num < 20` ③ 无公共特征(`parallax_num==0`)④ 平均旋转补偿视差 ≥ **10px** | IMU 预积分 | marg 最老帧(KF)/丢次新帧(非 KF) | 无 |
+| **Kimera-VIO** | ① `min_number_features`(追踪数过低 → KF)[issue #251] | IMU | 后端固定窗口 + marg | 无 |
+| **Basalt** | ① **地图连接率** `connected0/total < 0.7`(无视差阈值) | IMU(flow 预测) | 7 KF + 3 temporal;KF 超限 marg 最老 KF | **`vio_min_frames_after_kf = 5`** |
+| **ORB-SLAM3** | ① 时间: `mMaxFrames` 间隔 / `mMinFrames`+LM idle ② 追踪弱: inliers < 25% 参考帧或 close 点欠追踪 ③ 追踪退化: < 90% 参考帧 | 运动模型 + 全局地图 | covisibility 图(非滑窗) | `mMinFrames`(隐式) |
+
+Basalt 源码(本地 `~/Projects/lin_ws/slam_ws/basalt`):
+`src/vi_estimator/sqrt_keypoint_vio.cpp:370-373`(连接率判定)、
+`src/utils/vio_config.cpp:62-64`(7 KF / 5 冷却 / 0.7 阈值)。
+
+### 2.2 逐条映射到我们的规则
+
+- VINS `last_track_num < 20` → 我们的 Rule 1b(阈值 10,对齐
+  `min_pnp_inliers`,更激进)
+- VINS 旋转补偿视差 ≥ 10px → 我们的 Rule 4(30px,阈值 3×,且补偿来源
+  为 BA 位姿而非 IMU)
+- Basalt 连接率 < 0.7 → 我们的 Rule 3(survive < 0.6,同族更紧)
+- Basalt `min_frames_after_kf=5` → **我们缺失**(见 D4)
+- ORB-SLAM3 时间规则 → 我们的 Rule 2(0.5s);弱追踪规则 → Rule 1b
+- Kimera `min_number_features` → Rule 1b 同族(特征数家族)
+  (Kimera 的 parallax 规则未在公开资料确认,对照表仅列确认项)
+
+### 2.3 我们的独有项
+
+1. **glue 零视差悬挂**(slice-7): 开源均无对应。它把"track 存活"从
+   纯前端问题变成有状态机制——悬挂 track 保持 ID,直接影响 Rule 3 的
+   survive 计算。
+2. **旋转补偿用 BA 位姿**(无 IMU 替代方案): VINS/Basalt 的补偿来自
+   IMU 预积分;我们用 last/prev accepted 位姿差。M4 后应升级为 IMU
+   预积分(与 VINS 一致)。
+3. **KF 强制触发即入 BA**: Basalt 强制 KF 后仍有 5 帧冷却缓冲;
+   我们强制 KF 立即进入 KF 队列参与驱逐,无缓冲(见 D4)。
+
+---
+
+## 3. 决策点定案
+
+### D1 视差阈值: 保持 30px(已修注释)
+
+- **历史**: 30px(7f08c01,⑤ 初始)→ 10px(f07cb93,VINS 值)→ ⑤d 动态
+  阈值 Θ_max=5°(87c9f6a,DKB-SLAM)→ revert 回 30px(9015ae7)。
+  注释里 "15px (VGGT-Motion)" 从未出现在常量中,是 ⑤b 时期草稿残留,
+  已修正为准确历史(本次唯一代码改动)。
+- **依据**: ① 旋转段由 Rule 1b/3 决定,视差阈值只影响平移段 KF 密度;
+  ② 当前密度经 MH_01 gate 验证(0.081);③ 10px 与动态阈值均被实测
+  revert,无证据表明更密 KF 对平移段精度有益(窗口成本却上升)。
+- **M4 后**: 旋转段姿态由 IMU 承载,Rule 1b/3 降级为兜底,视差规则
+  的语义更纯——届时可重新评估 30px,但不在纯 stereo 阶段动。
+
+### D2 KF/非 KF landmark 处理: 全帧 BA + seed 仅 KF 保持
+
+- 非 KF 只走 PnP(归因: pnp 失败仅 15 帧 0.9%,非主因);KF 走 BA。
+  全帧 BA(7KF+3temporal)与 Basalt 一致,保持。
+- **回滚语义变体**(归因 §6-4,低优先级): "失败帧仍允许 seed 新
+  landmark(不推进 pose)"——直接切断自持环,但 ⑦ 已从另一端绕开
+  (glue 保住存活),且实现侵入 estimator 事务边界,不列入本次改动。
+- **不做的理由**: 归因显示失败帧全为 KF 且发生在 BA 阶段,调整
+  KF/非 KF 的 landmark 处理差异不触及自持环的根(回滚 → seed 阻塞)。
+
+### D3 IMU 预积分帧边界(M4 耦合点)
+
+**定案**: 预积分绑定**连续帧对**(KF→非 KF→KF 全链),因子图节点 =
+全部帧 pose,IMU 边只加在相邻帧之间;KF 决定锚定与驱逐,不决定预积分
+边界。**修订初版"关键帧 = 预积分边界"的决策**。理由:
+
+- Kimera/VINS 均为连续帧对模式(每帧间预积分因子,与 KF 选择解耦);
+  VINS-Fusion 的"非关键帧 IMU merge 进上段"是窗口驱逐时的**合并操作**,
+  不是预积分的构造边界——两者不矛盾,初版混淆了这两个概念;
+- M4.2 只需加因子类型,不重定义帧结构,与 M4.1 synchronizer
+  (StereoImuPacket)正交;
+- KF 选择器在 M4 后的唯一语义变化: Rule 4 的旋转补偿来源从 BA 位姿
+  升级为 IMU 预积分(与 VINS 完全一致),Rule 1b/3 从"防守性强制"降级
+  为兜底。
+
+### D4 窗口交互: 7KF+3temporal 保持 + 冷却缺失记录
+
+- 窗口结构保持(Basalt 同款)。但**记录一个结构性缺口**: 我们缺失
+  Basalt 的 `vio_min_frames_after_kf=5` 冷却——强制 KF 后 5 帧内不
+  再强制。失败段 141 帧全 KF 涌入队列、窗口滚动顶掉最老 KF、BA 图
+  病态的链条,在 Basalt 下有 5 帧节流,我们无。
+- **为什么现在不加**: ① 归因显示自持环的根是"KF 失败回滚 → seed
+  阻塞",冷却只减少 KF 数量,不切断环;② glue + ⑥ 前端已让触发率
+  实际归零(0.522, 0 fail);③ 加冷却改变了当前 gate 已验证的行为,
+  需要全表重测。
+- **M4 集成评估项**: 冷却机制对旋转段 KF 洪峰的贡献,在 IMU 存在时
+  与预积分链的交互(冷却强制非 KF 帧 → 更长预积分链)。
+
+---
+
+## 4. M4 接口边界
+
+| M4 子片 | 与 KF 设计的关系 |
+|---|---|
+| M4.1 synchronizer | 新增 `StereoImuPacket`,图像边界 IMU 线性插值;KF 选择器输入不变(每帧调用一次) |
+| M4.2 preintegration | 连续帧对预积分(见 D3);`PreintegratedCombinedMeasurements` 因子加到相邻帧之间,与 KF 标志无关 |
+| M4.3 初始化 | 起始静止初始化(gyro bias → 重力 → roll/pitch);与 KF 无交互 |
+| M4.4 集成 | 旋转段姿态由 IMU 承载后,评估: Rule 1b/3 触发率、KF 冷却需求、视差阈值 30px 是否可再调 |
+
+**KF 语义变化清单**(M4 落地时检查):
+1. Rule 4 补偿来源: BA 位姿 → IMU 预积分
+2. Rule 1b/3 从"防守性强制"降级为兜底(旋转段不再靠它们维持位姿)
+3. 失败自持环的 IMU 路径: IMU 预积分提供旋转先验,BA 病态窗口的
+   鲁棒性提升,但前端 track 存活(CLAHE/glue)仍是独立需求
+
+---
+
+## 5. 与 ⑥ 前端 / glue 的耦合(设计前提)
+
+KF 选择器的三个输入机制(缺一不可,归因 §5):
+
+| 机制 | 作用 | 对 KF 的影响 |
+|---|---|---|
+| ⑥ 前端(CLAHE 等) | 保 track **可见性**(剧烈旋转段 LK 不丢) | Rule 1b/3 触发率↓ |
+| glue 悬挂 | 保 track **存活性**(零视差仍挂起) | Rule 3 survive 不崩 |
+| 质量规则(Rule 1b/3) | 兜底: 观测不足时强制 KF | 旋转段的实际 KF 驱动 |
+
+归因数据: 前端无 glue(⑥)= 2.026,glue 无前端(E0)= 1.498,两者都有
+= 0.522。KF 设计的任何改动都必须以这三个机制为输入——**不能假设
+旋转段视差规则能兜底**。
+
+---
+
+## 6. 模块边界(初版 §3 保持有效)
+
+- 关键帧选择逻辑在 **apps/session 层**(`offline_vo_session`),不在
+  estimator——选择器需要像素级 track 信息,estimator 只有
+  `KeyframeMeasurement`;VINS/ORB 均在 tracking 层决策。
+- estimator `update()` 增加 `bool keyframe` 参数(slice ⑤ 已实施)。
+- 前端不变: 每帧产生 `FrameTracks`。
+
+## 7. 诊断与输出(初版 §7 已实施)
+
+- diag.csv `is_keyframe` 列 ✓(归因脚本依赖它区分 KF/非 KF)
+- est.tum 逐帧 + kf.tum 关键帧双轨输出 ✓
+- summary.json `total_keyframes` / `total_track_only_frames` ✓
+
+## 8. 测试与门控
+
+| 门控 | 状态 |
+|---|---|
+| MH_01 硬门 ATE ≤ 0.098784 | **PASS(0.081,e13comp 全序列验证)** |
+| MH_05 软门 | 保持(未重测,选择器逻辑未动) |
+| 全表 11 序列 | record-only(slice-7 已产出) |
+| 编译零警告 | 保持 |
+
+## 9. 不做
+
+- 不改选择器逻辑(MH_01 gate 已过;归因无紧迫缺陷)
+- 不重开动态阈值(DKB-SLAM Θ_max 已被 ⑤d 实测 revert)
+- 不调 Rule 1b/3 阈值(10/0.6 与 Basalt 0.7 同族,无数据驱动改动)
+- 不做"失败帧 seed"变体(低优先级,见 D2)
+- 不实现 IMU 预积分代码;不改变 `phad::eval`(总图约束)
+- 不做关键帧剔除(keyframe culling)——那是 M6 边缘化后才考虑的
+
+## 10. 开放问题
+
+1. **KF 冷却(`min_frames_after_kf=5`)**: 是否在 M4 集成时加入(见 D4),
+   需 IMU 存在时的实验数据。
+2. **Kimera 的 parallax 规则**: 公开资料仅确认 `min_number_features`;
+   其视差判定未证实,对照表按确认项列出。
+3. **失败帧 seed 变体**: 归因 §6-4 的备选修复,在 M4 后是否需要重新
+   评估(IMU 先验可能让它无必要)。
+4. **30px 在 M4 后的复评**: 旋转段由 IMU 承载后,视差阈值成为纯平移段
+   参数,届时用全表重测决定是否对齐 VINS 10px。

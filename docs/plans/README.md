@@ -2,7 +2,7 @@
 
 本目录存放可入库的实施计划（implementation plan）。Cursor 侧 `.cursor/plans/`
 是编辑与执行时的工作副本；稳定后按本约定落到 `docs/plans/`，便于版本管理与
-跨会话复用。
+跨会话复用。文档地图与其它目录分工见 [`docs/README.md`](../README.md)。
 
 ## 文件命名
 

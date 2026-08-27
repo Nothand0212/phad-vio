@@ -12,7 +12,7 @@
  * EuRoC 把真值放在 mav0/state_groundtruth_estimate0 下，位姿为 T_W_S，
  * 其中 S 由同目录 sensor.yaml 的 T_BS 关联到 body frame。本 adapter 在
  * T_BS 为 identity 时才接受该序列，从而保证产出的轨迹就是 T_W_B，
- * 与 docs/conventions.md 的状态定义一致。
+ * 与 docs/design/conventions.md 的状态定义一致。
  */
 
 namespace phad::io::dataset::euroc

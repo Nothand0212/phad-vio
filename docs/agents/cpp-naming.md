@@ -58,7 +58,7 @@ RigidTransform m_T_B_right_camera;
   `left_camera` 等描述性 frame token 使用 snake_case。
 - 局部变量、参数和 accessor 可直接使用该记号；成员变量只在前面增加
   `m_`。
-- target/source 顺序必须遵循 `docs/conventions.md`，不得使用
+- target/source 顺序必须遵循 `docs/design/conventions.md`，不得使用
   `extrinsics`、`camera_transform`、`T_camera` 等无法从名称确定方向的写法。
 - 该例外只适用于坐标变换记号；其他函数和变量仍遵循本文件的一般规则。
 

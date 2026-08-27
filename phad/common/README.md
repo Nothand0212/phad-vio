@@ -32,7 +32,7 @@ CMake target：`phad_common`（alias `phad::common`），公开依赖 Eigen。
 ### `Trajectory`
 
 - 位姿为 `Eigen::Isometry3d` 的 `T_W_B`（body → world），见
-  [`docs/conventions.md`](../../docs/conventions.md)。
+  [`docs/design/conventions.md`](../../docs/design/conventions.md)。
 - **只能**通过 `Trajectory::create` 构造：非空、时间戳严格递增、平移有限、
   旋转在容差内正交。消费方（关联、ATE、RPE）可依赖这些前提，不必再校一次。
 - 失败返回 `TrajectoryError`（空、非有限、坏旋转、重复/乱序时间戳），带出错下标。

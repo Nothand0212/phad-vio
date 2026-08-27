@@ -1,6 +1,6 @@
 # `phad::bench` — agent 提示
 
-模块合同见同目录 `README.md`（若有）与 `docs/research/m3.1-vo-regression-benchmark-design.md`。
+模块合同见同目录 `README.md`（若有）与 `docs/research/2026-07-31-note-m3-1-vo-regression-benchmark-design.md`。
 
 ## 约定
 

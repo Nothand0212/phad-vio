@@ -41,14 +41,14 @@ isProject: false
 跟踪 issue：[#40](https://github.com/Nothand0212/phad-vio/issues/40)。
 
 Post-verdict evidence：
-[result ledger](../research/m4-online-gyro-bias-synthetic-result.md)；冻结 receipt：
+[result ledger](../research/2026-08-24-note-m4-online-gyro-bias-synthetic-result.md)；冻结 receipt：
 `/home/lin/orca/evidence/phad-m4-online-bias-v1-replay2-634c4ec/replay2-hard-error-receipt.json`
 （mode `0444`，SHA-256
 `bf4dc238eef9751042c7077a2713c9d0fed64fa3c189bf00b48e86179b89716a`）。
 
 ## 0. 唯一 authority、目标与权限边界
 
-[online gyro bias synthetic design](../research/m4-online-gyro-bias-synthetic-design.md)
+[online gyro bias synthetic design](../research/2026-08-19-note-m4-online-gyro-bias-synthetic-design.md)
 是本计划唯一 normative executable authority。开工前冻结身份为：
 
 ```text
@@ -65,14 +65,14 @@ truth、fixture、公式、阈值、错误语义和 verdict。开工 preflight �
 
 - [ADR-0002](../adr/0002-stage-gated-gyro-only-bias-state.md) 只授权 synthetic、default-off、
   no-real-caller 的 estimator-private `G(k)` 窄例外；
-- [conventions](../conventions.md) 保持完整 VIO 的 canonical bias key 为
+- [conventions](../design/conventions.md) 保持完整 VIO 的 canonical bias key 为
   `B(k): imuBias::ConstantBias`；同一 graph 禁止 `G/B` 双写或 alias；
-- [roadmap](../roadmap.md) 记录 Q3 结束与本片入口；
-- [Q3 result](../research/m4-minimal-gyro-q3-offline-bias-alignment-result.md) 的唯一
+- [roadmap](../design/roadmap.md) 记录 Q3 结束与本片入口；
+- [Q3 result](../research/2026-08-18-note-m4-minimal-gyro-q3-offline-bias-alignment-result.md) 的唯一
   qualification 结论继续是 `HYPOTHESIS_FAIL / HALF_STABILITY / STOP`；本计划不重跑、补考、
   调门或推翻 Q3；
-- [Q1 result](../research/m4-minimal-gyro-q1-observe-result.md) 与
-  [Q2 result](../research/m4-minimal-gyro-q2-known-bias-predict-result.md) 只提供既有 provenance；
+- [Q1 result](../research/2026-08-12-note-m4-minimal-gyro-q1-observe-result.md) 与
+  [Q2 result](../research/2026-08-13-note-m4-minimal-gyro-q2-known-bias-predict-result.md) 只提供既有 provenance；
   Q2 known-bias public contract 必须保持；
 - 资格阶梯服从 [evidence-gated integration](../agents/evidence-gated-integration.md)。
 
@@ -93,10 +93,10 @@ schema、default-on、bounded online 长窗口、完整 `X/V/B`、旧 Q4 或“V
 production RED 前只允许以下六个文件处于同一个 authority commit/tree：
 
 ```text
-docs/research/m4-online-gyro-bias-synthetic-design.md
+docs/research/2026-08-19-note-m4-online-gyro-bias-synthetic-design.md
 docs/adr/0002-stage-gated-gyro-only-bias-state.md
-docs/conventions.md
-docs/roadmap.md
+docs/design/conventions.md
+docs/design/roadmap.md
 docs/plans/2026-08-18_m4_online_gyro_bias_synthetic_1e3569b4.plan.md
 phad/estimator/README.md
 ```
@@ -115,10 +115,10 @@ task/profile identity、authority commit/tree、六文件 blob/SHA-256、命令�
 set -euo pipefail
 mode="${1:?usage: authority-check.sh staged|committed}"
 authority_paths=(
-  docs/research/m4-online-gyro-bias-synthetic-design.md
+  docs/research/2026-08-19-note-m4-online-gyro-bias-synthetic-design.md
   docs/adr/0002-stage-gated-gyro-only-bias-state.md
-  docs/conventions.md
-  docs/roadmap.md
+  docs/design/conventions.md
+  docs/design/roadmap.md
   docs/plans/2026-08-18_m4_online_gyro_bias_synthetic_1e3569b4.plan.md
   phad/estimator/README.md
 )
@@ -289,9 +289,9 @@ real、GT、ATE、RPE、Q3 或 full-unit qualification。
 只有 independent verifier 已形成 §9 verdict，才另开不含 product code 的 transaction：
 
 ```text
-docs/research/m4-online-gyro-bias-synthetic-result.md
+docs/research/2026-08-24-note-m4-online-gyro-bias-synthetic-result.md
 docs/plans/2026-08-18_m4_online_gyro_bias_synthetic_1e3569b4.plan.md
-docs/roadmap.md
+docs/design/roadmap.md
 ```
 
 result 新建并完整保留 receipt；本计划只更新 todo 状态与 evidence link；roadmap 只写 verdict 与下一

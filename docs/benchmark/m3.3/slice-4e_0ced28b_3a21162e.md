@@ -9,8 +9,8 @@
 相关：
 
 - issue [#26](https://github.com/Nothand0212/phad-vio/issues/26)
-- predecessor：[Slice ④d 原始记录](../../research/m3.3-slice4-baseline.md#9-slice-④d-mean-cull-阈值outlier_avg_reproj_px)
-- 设计：[Slice ④e 多轮 cull↔LM](../../research/m3.3-slice4e-multiround-reopt-design.md)
+- predecessor：[Slice ④d 原始记录](../../research/2026-08-01-note-m3-3-slice4-baseline.md#9-slice-④d-mean-cull-阈值outlier_avg_reproj_px)
+- 设计：[Slice ④e 多轮 cull↔LM](../../research/2026-08-02-note-m3-3-slice4e-multiround-reopt-design.md)
 
 ## 1. 身份与执行
 

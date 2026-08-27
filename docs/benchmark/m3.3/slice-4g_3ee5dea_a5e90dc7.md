@@ -11,8 +11,8 @@
 
 - issue [#26](https://github.com/Nothand0212/phad-vio/issues/26)
 - predecessor：[Slice ④f](../../benchmark/m3.3/slice-4f_c446ac5_a5e90dc7.md)
-- 设计：[Slice ④g zombie-drop](../../research/m3.3-slice4g-zombie-drop-design.md)
-- 事后诊断：[postmortem（deferred drop ≡ ④e）](../../research/m3.3-slice4g-postmortem.md)
+- 设计：[Slice ④g zombie-drop](../../research/2026-08-02-note-m3-3-slice4g-zombie-drop-design.md)
+- 事后诊断：[postmortem（deferred drop ≡ ④e）](../../research/2026-08-02-note-m3-3-slice4g-postmortem.md)
 
 ## 1. 身份与执行
 

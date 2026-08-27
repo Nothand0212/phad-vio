@@ -1,0 +1,800 @@
+# 实现里程碑与验收标准
+
+本路线以「先跑通端到端可观察行为，再按指标演进」为原则：先用成熟库把
+一条最短的双目 VO 闭环打通并测出 ATE，再逐层加入 IMU、初始化、边缘化
+和回环。里程碑完成指实现、定向测试和本文档中的出口条件全部满足，不以
+「代码已写」代替完成。
+
+## 总原则
+
+1. **每个里程碑以一个可填进表格的数字，或一条在 viewer 中可见的行为
+   收尾。** 无法被外部观察的内部机制不单独构成里程碑。
+2. **评估先于估计。** ATE/RPE 与轨迹导出在第一条估计轨迹之前就绪，
+   否则「这次改动让系统变好还是变坏」无法回答。
+3. **合成数据只作为测试资产，不作为里程碑。** 预积分与投影的解析验证
+   写成单元测试，不占据独立阶段。
+4. **调库优先。** 前端用 OpenCV，后端用 GTSAM。调库版本随后成为手写
+   版本的对拍基准：任何自研替换的验收标准是「同一序列上 ATE 与调库版本
+   在容差内一致，且 track 数、内点率、重投影误差分布可比」。
+5. **前端风险最先出清。** 决定 VIO 能否工作的是特征跟踪与初始化，
+   不是后端公式；因此 LK frontend 属于第二个里程碑而非最后一个。
+6. **后端从第一天就是 GTSAM 因子图。** VO 阶段建立的 stereo projection
+   factor 与 landmark 生命周期在接入 IMU 时完全不动，加入 IMU 只是新增
+   `V(k)`、`B(k)` 变量与 `ImuFactor`、`BetweenFactor<ConstantBias>`。
+
+## 参考项目的定位
+
+各参考项目回答本路线中的一个具体问题，不做整体复刻：
+
+| 项目 | 借鉴内容 |
+|---|---|
+| [lk-vio](https://github.com/Nothand0212/lk-vio) | 最小可行形态：GFTT + LK 前端、滑窗后端、DBoW 回环；先 VO 后 IMU 的顺序 |
+| [Tassel](https://github.com/Ju-yzp/Tassel) | 回环彻底解耦的事务式架构；选择性边缘化；早期就建独立 viewer 模块 |
+| [OpenVINS](https://github.com/rpng/open_vins) | 把轨迹仿真器与评估工具当作长期测试资产，而非一次性阶段 |
+| [VINS-Fusion](https://github.com/HKUST-Aerial-Robotics/VINS-Fusion) | 视觉 SfM → 惯性对齐的初始化；在线 time offset 与外参估计 |
+| [ORB-SLAM3](https://github.com/UZ-SLAMLab/ORB_SLAM3) | 初始化作为独立里程碑；MAP-based inertial-only 初始化 |
+| [Basalt](https://github.com/VladyslavUsenko/basalt-mirror) | 边缘化的零空间处理；VIO 与 mapping 分离并各自独立评估 |
+
+明确不借鉴：OpenVINS 的 MSCKF 滤波架构（与 ADR-0001 冲突）、ORB-SLAM3
+的 ATLAS 多地图、Basalt 的完整 non-linear factor recovery 建图、Tassel
+的单目初始化路径。
+
+## M1：离线 Stereo-IMU 数据加载（已完成）
+
+范围：
+
+- CMake 骨架与 GoogleTest 框架；
+- `phad::sensor` 的 timestamp、IMU measurement、camera parameters、
+  IMU parameters、rigid transform 与 stereo-IMU calibration 类型；
+- `phad::camera` 的运行时 camera model（`project` / `backProject`）；
+- `phad::io::dataset` 下的 `StereoImuDataset` 值类型，以及 EuRoC、
+  TUM VI 两个 adapter；
+- 整数纳秒时间戳、cam0/cam1 exact join、全清单校验、uint8/uint16
+  惰性解码；
+- 来源无关的 pull-based `SensorSource` seam 与 `DatasetReplaySource`；
+- `phad_euroc_inspect` 数据集摘要工具。
+
+出口（已满足）：
+
+- 从原生 `MH_01_easy` 与 TUM VI `corridor1_512_16` 确定性取得标定、
+  已审计 summary 与独立顺序 reader；
+- adapter 之外不存在 EuRoC/TUM VI 路径、标定字段、坐标或单位转换；
+- 常驻内存不随已遍历图像总数线性增长。
+
+详细设计与证据见
+[EuRoC 数据集加载器设计调研](research/2026-07-28-note-euroc-dataset-loader-design.md)。
+
+## M2：双目 VO 最小闭环
+
+本里程碑的目标是拿到**第一个真实 ATE 数字**，不追求精度。拆为三个各自
+产出可观察行为的小步。
+
+### M2.1 评估与可视化底座（已完成）
+
+范围：
+
+- EuRoC `state_groundtruth_estimate0/data.csv` 真值轨迹加载，含
+  timestamp 单位与外参方向的显式处理；
+- TUM 格式（`timestamp tx ty tz qx qy qz qw`）轨迹导出；
+- 估计轨迹与真值的时间关联（最近邻 + 最大时间差阈值）；
+- SE3 对齐（Umeyama，双目尺度已知故不估 scale）与 ATE RMSE；
+- 固定时间间隔的 RPE（默认 1 s）；距离间隔 RPE 有意不做，后续按需再加；
+- OpenCV highgui 实时 2D 面板：俯视 x-y 轨迹叠加真值、图像窗口；
+- Python 离线脚本：3D 轨迹、误差随时间曲线。
+
+测试：
+
+- **真值自比**：把真值当作估计输入，ATE 必须为 0（数值容差内）；
+- 已知刚体扰动：对真值施加固定 SE3 后，对齐结果应恢复该变换且 ATE
+  回到 0；
+- 时间关联失败路径：估计时间戳超出真值范围、间隔过大、数量为零；
+- 与 `evo` 的交叉验证（离线，非 CI）：同一对轨迹的 ATE RMSE 一致。
+
+出口（已满足）：
+
+- 真值自比 ATE 为 0；
+- 轨迹文件可被 `evo` 直接读取；
+- 实时面板可在回放 `MH_01_easy` 时显示真值轨迹与当前图像。
+
+实施计划见
+[M2.1 评估可视化底座](plans/2026-07-30_m2.1_eval_visualization_baseline_d818d653.plan.md)。
+
+### M2.2 双目前端（已完成）
+
+范围：
+
+- 前置整幅立体校正（`StereoRectifier` + `RectifiedStereoCalibration`）；
+- `goodFeaturesToTrack` 特征检测与按 track 长度涂 mask 补点；
+- 左目时序 `calcOpticalFlowPyrLK` 与右目每帧重匹配；
+- 前后向光流一致性与几何门限（行差 / 视差 / 深度）；
+- 稳定且不复用的 `LandmarkId`；
+- track 叠加可视化与无窗口 probe CSV。
+
+指标与测试：
+
+- track 数量随时间曲线，全序列不出现归零；
+- track 长度分布（`--tracks-csv` 生命表）；
+- 左右目匹配的 epipolar error 分布；
+- 前后向一致性剔除率；
+- `LandmarkId` 不复用；
+- 低纹理与快速旋转片段的行为被记录，而不是被静默处理。
+
+出口（已满足）：
+
+- `MH_01_easy` 全序列跟踪不中断（门控 `phad_frontend_mh01_test`）；
+- 上述指标可从 `phad_stereo_frontend_probe` 输出中直接读出；
+- 尚不产出位姿。
+
+实施计划见
+[M2.2 双目前端](plans/2026-07-31_m2.2_stereo_frontend_38ddaa97.plan.md)。
+
+### M2.3 VO 后端（已完成）
+
+范围：
+
+- GTSAM `Cal3_S2Stereo` 与 `GenericStereoFactor`；
+- `StereoCamera::backproject` 建立 landmark 初值（单帧立体等价路径）；
+- 显式 landmark 的固定窗口 batch BA，`LevenbergMarquardtOptimizer`；
+- 窗口滑出的状态与 landmark 直接丢弃，不做边缘化；
+- 单一明确的 gauge-fixing prior（最老帧 `PriorFactor<Pose3>`）。
+
+测试：
+
+- 合成轨迹与 landmark：扰动初值后恢复 pose 与 landmark；
+- 优化后重投影 error 下降；
+- behind-camera landmark 显式报告 cheirality；
+- 错误外参用例产生显著位姿误差（仍为 `kOk`，不升格 `kFailed`）；
+- 按 landmark id 可汇总完整 feature track。
+
+出口（已满足）：
+
+- `MH_01_easy` 跑完不崩，`phad_stereo_vo_probe` 写出完整 TUM（3682 / 3682
+  `kOk`）；
+- ATE translation RMSE **0.150 m**（`< 5 m` 米级门控）；RPE(1 s) translation
+  RMSE 0.022 m；
+- 拒帧比例 **0**；`low_connectivity` 帧数 **0**；重投影 RMS after 中位数
+  **0.387 px**、p95 **1.091 px**；
+- 轨迹形状需在 `phad_euroc_runner` 上人工确认（agent 不擅自弹窗）。
+
+该组数字为后续里程碑的对比基线。设计见
+[M2.3 VO 后端设计](research/2026-07-31-note-m2-3-vo-backend-design.md)，开源对照见
+[M2.3 VO backend open source references](research/2026-07-31-opensource-m2-3-vo-backend.md)。
+实施计划见
+[M2.3 VO 后端](plans/2026-07-31_m2.3_vo_backend_dcdbfc71.plan.md)。
+
+## M3：让 VO 变稳
+
+M3 拆成三步：**先有可复现对照表，再修数据入口，最后谈加固**。没有
+benchmark，无法判断后续改动是优化还是退化；而 11 条 EuRoC 序列里有 3 条
+在 `open()` 阶段就打不开，多序列对照表也无从谈起。因此 M3.1 阻塞 M3.2，
+M3.2 阻塞 M3.3。
+
+### M3.1 回归 Benchmark（已完成）
+
+范围：
+
+- 纯逻辑库 `phad::bench`（run 身份、config 快照与 hash、路径模板、
+  summary schema），零 `phad::*` 依赖；
+- `apps/offline_vo_session` 静态库（只跑 pipeline，不算 ATE/RPE、不落盘）；
+- `phad_stereo_vo_probe` 与 `phad_vo_bench` 共用 session；
+- `phad_vo_bench` 作为 composition root：session + `phad::eval` + 落盘；
+- run 身份：运行时 git（dirty 只看 tracked）+ 完整 `config` 快照 +
+  `config_hash`（FNV-1a 64 前 8 hex）；
+- 路径模板：
+  `<bench_root>/<sequence>/<commit_short>[_dirty]/<config_label>_<hash8>/`；
+- `summary.json`：ATE / RPE(1 s) trans RMSE、completion_rate、coverage_rate、
+  wall-clock / RTF；附带拒帧与阶段 timing；
+- `scripts/bench_table.py` 把多个 `summary.json` 拼成 Markdown/CSV 对比表。
+
+出口（MH_01_easy 复跑）：
+
+- probe 迁移前后 `est.tum` / `diag.csv` 逐字节相同；
+- `phad_vo_bench` ATE translation RMSE ≈ **0.150155 m**（与 M2.3 基线
+  ≈ 0.150 m 一致；`phad_traj_eval` 交叉验证同值）；
+- `completion_rate = 1.0`，`coverage_rate = 1.0`；
+- clean 树无 `--force` 拒绝覆盖（exit 3）；dirty 树覆盖并警告。
+
+v1 **只钉 MH_01**、只支持 EuRoC；多序列矩阵拆给 M3.2（先让 11 条都能打开）
+与 M3.3（序列 × 版本质量对比）。设计见
+[M3.1 VO 回归 Benchmark 设计](research/2026-07-31-note-m3-1-vo-regression-benchmark-design.md)，
+实施计划见
+[M3.1 VO 回归 Benchmark](plans/2026-07-31_m3.1_vo_regression_benchmark_7c4e91a2.plan.md)。
+Issue：[#21](https://github.com/Nothand0212/phad-vio/issues/21)。
+
+### M3.2 双目配对同步器（已完成）
+
+M3.1 的全序列 bench 只有 8/11 可跑：`MH_04_difficult`、`V1_02_medium`、
+`V2_03_difficult` 在 `open()` 阶段即失败。已核实这不是本地数据损坏，而是
+官方 ASL 与 rosbag 的左右清单本身不对称，而旧 `joinStereo` 要求「等长 +
+下标 exact」，比任何开源实现都严。修法不是放松 loader，而是把左右配对从
+adapter 移到独立的同步器——那里同时是 M4 的 IMU 包络与未来 ROS 输入的落点，
+避免日后出现第二套配对策略。
+
+范围：
+
+- 新库 `phad::sync` 的 `StereoPairSynchronizer`（StereoOnly）：左右两队列
+  比较 front，`|tL - tR| <= tol_ns` 则配对，否则丢弃偏早一侧并计数；默认
+  `tol_ns = 0`（exact），soft 容差仅显式配置；输出用 left stamp；只提供
+  `tryPop()`，不提供回调；有界队列与 drop-oldest 溢出显式计数；
+- `phad::sensor` 新增 `CameraId` 与 `ImageFrameEvent`；`io::SensorEvent`
+  的 `StereoFrame` 换成 `ImageFrameEvent`；
+- dataset 改左右分路清单与 per-camera reader API
+  （`peekImageTimestamp` / `takeImage`），`summary` 由 `stereo` 拆成
+  `left` / `right`；`joinStereo` 与 `kStereoTimestampMismatch` 删除；
+- `DatasetReplaySource` 按时间归并单路事件（同 stamp 顺序 IMU → Left →
+  Right）；
+- `apps/StereoPairStream`（source + sync 薄组合）供 `OfflineVoSession`、
+  两个 probe、GUI runner 与真序列测试复用；`io` 与 `sync` 互不依赖。
+
+不做：`pushImu`、IMU 边界插值与 `StereoImuPacket`（M4）；ROS adapter；
+默认开启 soft 容差；frontend/estimator 算法改动。
+
+测试：
+
+- 纯内存单测：等长 exact 全配对；左首 orphan、右尾 orphan、大量右多余
+  三型（断言配对集合等于时间戳交集，无下标错配）；交错 push 顺序；
+  `tol_ns = 0` 拒绝 1 ns 差；单相机逆序/重复 → sticky error；有界队列
+  溢出计数；`flush()` 把两侧全部剩余计入丢弃；
+- adapter 回归：合成不等长序列 `open` 成功；单路非法（逆序、重复、缺
+  PNG、坏 CSV/YAML）仍硬失败；TUM VI 等长路径不变；
+- 诊断：`pushed_*`、`emitted_stereo`、`dropped_*`、`dropped_*_overflow`、
+  `max_*_queue`，结束一条 summary，首次丢弃与首次溢出各 warning 一次。
+
+出口（commit `4780660` 复跑）：
+
+- `MH_01_easy` 的 `est.tum` 与 `diag.csv` 相对 M3.1 基线
+  （`2b28616/default_0885385a`）**逐字节相同**，ATE 仍 ≈ 0.150155 m；
+- 三条原失败序列 `open` 成功并产出 `summary.json`，`summary.sync` 精确匹配：
+  `MH_04` emit 2032 / drop_left 1；`V1_02` emit 1710 / drop_right 1；
+  `V2_03` emit 1921 / drop_left 1 / drop_right 415；
+- 11 条 EuRoC 序列全部产出 `summary.json`（`scripts/bench_table.py` 可刷
+  序列 × 版本表）；表中 VO 质量差（如 `V2_03` completion ≈ 0.03、
+  `MH_02` / `V1_03` / `V2_02` 低 completion）归 M3.3。
+- 全序列数字快照见
+  [M3.2 EuRoC 全序列基线](research/2026-07-31-note-m3-2-euroc-baseline.md)（钉 `4780660`）。
+
+设计见
+[Stereo Pair Synchronizer 设计](research/2026-07-31-note-stereo-pair-synchronizer-design.md)，
+根因诊断见
+[EuRoC 双目 manifest 不等长 handoff](research/2026-07-31-note-euroc-stereo-manifest-asymmetry-handoff.md)，
+开源对照见
+[EuRoC stereo manifest asymmetry open source refs](research/2026-07-31-opensource-euroc-stereo-manifest-asymmetry.md)。
+实施计划见
+[M3.2 双目配对同步器](plans/2026-07-31_m3.2_stereo_pair_synchronizer_5b7d1c93.plan.md)。
+Issue：[#22](https://github.com/Nothand0212/phad-vio/issues/22)。
+
+### M3.3 VO 加固（依赖 M3.2；Slice ①②③④d 已完成；④f + zombie age=5 为当前默认且全序列 baseline 已建立；PnP stereo 一致性仲裁已验证；④g 证伪并回退编排；④e 部分完成；④/④b 不够；④c 部分；⑤ 已实现 → ⑤b 已实施（V2_02 灾难消除）→ ⑤c 已实施（非 KF 进窗口 BA）→ 阈值冲突待解；pre-M4 小片两轮全否决（Census + round 2 七变体，默认回退 slice-7）→ M4 前零剩余 VO 候选）
+
+M3.2 全序列基线暴露的主导失败不是精度，而是一个**吸收态**：估计器一旦因
+`num_shared == 0` 拒帧，事务回滚会冻结窗口与 landmark 表，而前端跟踪断裂后
+重新检测会发放全新 `LandmarkId`，此后交集恒为空、永久拒帧。V1_03 上一帧异常
+废掉了随后 1906 帧。因此本阶段按失败驱动排序，恢复先于精度。
+
+范围（五片 + ④ 续片；Slice ①②③④d 已落地；④f skip-drop +
+`session.zombie_drop_age=5` 为**当前默认**；④g 曾编码但 MH_05 软门失败且 ≡④e →
+**编排已回退**；④e 编码完成但 MH_05 不够；④/④b 不够；④c 机制落地但曾硬门不够，
+由 ④d 阈值收口；⑤ MH_01 门控已满足，MH_05 当前锚≈2.456 m，且 EuRoC 11/11
+record-only baseline 已建立 → **先对齐再开** ⑤）：
+
+- **① 恢复（已完成）**：去掉 `num_shared == 0` 拒帧门，重叠断裂即以新 id 重建窗口，
+  prior 打在最后一个被接受的位姿上（anchor 复用现有恒速位姿初值规则）；
+  新增 `min_seed_observations`（初始化与 re-anchor 共用）与 `enable_reanchor`；
+  `segment_id` 进 `diag.csv`，`reanchors` / `segments` 进 `summary.json`；
+- **② 右目一维 SAD（已完成，放宽门控）**：`matchRight` 改为沿 epipolar 行 +
+  显式视差区间的 SAD + 亚像素 + 同行反向一致性；删除 `last_disp_px`；选项
+  `stereo_sad_half_win_px` / `stereo_row_tol_px` / `stereo_bidir_px` /
+  `stereo_uniq_ratio` / `stereo_check_bidir` 进 `config_hash`；
+- **③ PnP 初值（已完成）**：正常路径 `solvePnPRansac` 位姿初值 + 本帧 shared
+  RANSAC 外点掩码；失败回退恒速/上一帧且不 cull；选项与诊断进 `config_hash` /
+  `diag.csv`（16 列）/ `summary.json`；
+- **④ 外点剔除（不够）**：VINS 型平均重投影永久删点、不重优已编码；MH_05
+  诊断门判定 **不够**（ATE 43.3 m）→ 停止全序列；
+- **④b 剔点后二次 LM（不够 / 停止）**：`outliers_culled >= 4` 时 rebuild + LM₂
+  已编码；MH_05 诊断门仍 **不够**（ATE **3.45** m，未 &lt;1 m；reopt 有效：
+  大剔后 RMS 0.18/0.26 px）→ **不**跑其余 10 条；需多轮或其它手段；
+  设计见 [Slice ④b](research/2026-08-01-note-m3-3-slice4b-outlier-reopt-design.md)；
+- **④c cull-track-drop（部分完成）**：`block_culled_rebirth` 默认 `true` +
+  session `dropTracks` 已编码；MH_01 健康恢复但 ATE 曾 **0.120** &gt; 锚 →
+  硬门不够；由 ④d 收口。设计见
+  [Slice ④c](research/2026-08-02-note-m3-3-slice4c-cull-track-drop-design.md)；
+- **④d mean-cull 阈值（已完成）**：扫参选定默认 `outlier_avg_reproj_px=4.0`
+  （`79505f8` / `default_85c97158`）；MH_01 ATE **0.098784** ≤ 0.099263；
+  MH_05 与 ④c 持平（**4.565**）→ 全序列只记录；设计见
+  [Slice ④d](research/2026-08-02-note-m3-3-slice4d-cull-threshold-design.md)；
+- **④e 多轮 cull↔LM（部分完成）**：`max_outlier_reopts=3` 已编码
+  （`0ced28b` / `default_3a21162e`）；MH_01 不回归（ATE **0.0987839**）；
+  MH_05 与 ④d **持平**（**4.565**，无软改善）→ **停全序列**；多轮预算未动用；
+  设计见 [Slice ④e](research/2026-08-02-note-m3-3-slice4e-multiround-reopt-design.md)；
+- **④f 大剔跳过 dropTracks（已完成）**：`session.skip_drop_min_culled=4` 已编码
+  （`c446ac5` / `default_a5e90dc7`）；MH_01 硬门 **PASS**（ATE **0.0987839**；
+  `drops_skipped=0`）；MH_05 软门 **PASS**（ATE **3.057** vs ④e **4.565**；
+  `drops_skipped=1`）；纯 ④f 当时未扩全序列，2026-08-04 已补跑 clean 11/11
+  （checkpoint 见 [benchmark/m3.3/slice-4f](benchmark/m3.3/slice-4f_c446ac5_a5e90dc7.md)）；
+  设计见
+  [Slice ④f](research/2026-08-02-note-m3-3-slice4f-skip-drop-design.md)；
+- **④g skip-drop 后延后 drop zombie（证伪 / 编排已回退）**：曾编码并门控失败
+  （ATE **4.565**=④e；zombie 归零）；事后诊断 ④g≡④e bit-identical（2026-08-04
+  补跑 clean 11/11，全序列 est.tum 均 ≡ ④e；checkpoint 见
+  [benchmark/m3.3/slice-4g](benchmark/m3.3/slice-4g_3ee5dea_a5e90dc7.md)）→
+  删除 `pending_drop`，默认恢复 ④f；`deferred_*` 合同保留；见
+  [Slice ④g](research/2026-08-02-note-m3-3-slice4g-zombie-drop-design.md)、
+  [postmortem](research/2026-08-02-note-m3-3-slice4g-postmortem.md)；
+- **④g 后候选 B：多帧 zombie 龄 drop（已产品化 / 当前默认）**：
+  `session.zombie_drop_age=5`，相对 ④f 新增该唯一 config 键；默认 hash
+  `773ea011`。MH_01 ATE **0.0987839** 硬门 PASS；MH_05 ATE
+  **2.455726**（相对 ④f 改善 19.67%）软门 PASS。`4cf55ca` 已完成 EuRoC
+  11/11 正式 baseline（checkpoint 见
+  [benchmark/m3.3/zombie-age](benchmark/m3.3/zombie-age_4cf55ca_773ea011.md)）；
+  全序列只记录、不作硬门，见
+  [全序列 baseline](research/2026-08-03-note-m3-3-full-suite-baseline-773ea011.md)；
+- **⑤** 关键帧策略（视差、跟踪数、时间间隔）— 已实现（`7f08c01` 起）；
+  MH_01/MH_05 门控通过但**全序列 5 改善 / 6 恶化**（V2_02 +5400% 灾难）；
+  根因与非 KF 位姿质量、CV 链污染、关键帧选择对旋转不敏感相关；
+  est.tum 改为逐帧（含非 KF PnP 位姿）+ kf.tum 关键帧双轨输出；
+  与 M4 IMU 预积分边界耦合。→ **⑤b 已实施**（pose-only 精修 + 旋转补偿
+  视差 + 门控，V2_02 灾难消除）→ **⑤c 已实施**（非关键帧进窗口 BA +
+  Basalt 7KF+3temporal，MH_05 改善至 0.306）→ **⑤d 动态阈值已尝试并回退**（量纲不匹配 + MH_03 临界带相位敏感——KF 位置
+  对 T 微变交错，滞回无效；见 [调研](research/2026-08-06-note-m3-3-slice5-dynamic-threshold-refs.md)）→
+  **回退 ⑤c(30px) 收尾**（`9015ae7`：门控全过，MH_03/MH_05 最优；V1_01 0.514
+  记账为已知债，留给 M4 IMU）。→ **⑥ 已实施**（立体右目 SAD 瓶颈定位 + 硬门
+  baseline，checkpoint `167478e`，[slice-6](benchmark/m3.3/slice-6_167478e_773ea011.md)）
+  → **⑦ 已结案**（零视差通道 + 悬挂机制；多帧三角化实现后门控禁用；逐步证伪
+  后**最终采用 E13 composed g1**：悬挂距离门 1m + 投影一致性刷新 6px。
+  vs ⑥ checkpoint：V2_01 -15.3%、V2_02 -39.3% 两增益，MH_01 -1.1% 门限内，
+  MH_03 +35.7%、V2_03 +25.4% 两回归（全变体最小）；机制与完整数字见
+  [Slice ⑦ 设计 §8](research/2026-08-06-note-m3-3-slice7-multiframe-triangulation-design.md)，
+  checkpoint 见 [slice-7](benchmark/m3.3/slice-7_e77ee5d_402d1925.md)）。
+
+Slice ① 出口（commit `0b0cd34` / `default_030a0197`，对照 `4780660`）：
+
+- `MH_01_easy`：`segments=1`、`reanchors=0`；`est.tum` 相对
+  `4780660/default_0885385a` **逐字节相同**；ATE 仍 ≈ 0.150155 m；
+- completion 显著恢复：`MH_02` 0.131→0.997、`V1_03` 0.113→0.993、
+  `V2_02` 0.113→0.980、`V2_01` 保持 0.952；`V2_03` 0.032→0.485（不门控）；
+- `V1_02` completion 由 1.000 降至 0.946：新增的首段 seed 门限（默认
+  `min_seed_observations=10`）拒掉了前 93 帧观测不足的帧；这是有意的
+  门限行为，不是回归。真正对齐 M3.2 的 A/B 需要**同时**设
+  `enable_reanchor=false` **与** `min_seed_observations=1`（只关
+  `enable_reanchor` 不够，因为首段初始化也共用该门限）；
+- ATE **只记录不门控**；跨 coverage 不可直接比较（如 V1_03 / V2_02）；
+- 全序列数字快照见
+  [M3.3 Slice ① 基线](research/2026-08-01-note-m3-3-slice1-baseline.md)。
+
+Slice ② 出口（commit `764d3b2` / `default_a962bc8b`，对照 `0b0cd34`；
+**硬门控仅 MH_01**，其余只记录）：
+
+- 裸 SAD（`d8a0521`）曾把 MH_01 ATE 打到 0.262、`reproj_after`≈2.8；加固后恢复；
+- MH_01 ATE **0.1073** m（≤0.150155），`segments=1` / `reanchors=0`，
+  `reproj_after` mean≈0.50；
+- 改善侧：MH_02 ATE 0.559→0.089、`reanchors` 1→0；V1_01 ATE 0.680→0.375；
+  V2_02 re 7→3；V2_03 re 26→10（不门控）；
+- 已知债（只记录）：MH_03/04/05 ATE 上升（MH_04≈3.36）；V1_03 re 8→14；
+  V2_01 re 0→1；留给后续片；
+- 全序列数字见
+  [M3.3 Slice ② 基线](research/2026-08-01-note-m3-3-slice2-baseline.md)。
+
+Slice ③ 出口（commit `b712c91` / `default_8a9236e0`，对照 `764d3b2`；
+**硬门控 MH_01 + 全序列 reanchors 不增**，其余只记录）：
+
+- MH_01 ATE **0.099263** m（≤0.1073），`segments=1` / `reanchors=0`，
+  `pnp_successes=3681` / `pnp_fallbacks=0`，`reproj_after` mean≈0.37；
+- 全序列 `reanchors` 相对 Slice ② **无一增加**；
+- 改善侧：MH_04 ATE 3.36→0.27；V1_01 0.375→0.157；V1_02 / V1_03 / V2_02 /
+  V2_03 ATE 下降；
+- 已知债（只记录）：MH_02/03 ATE 上升；**MH_05 发散**（ATE≈3.3e4，
+  `cheirality=2055`）；V2_01 ATE 略升；留给 Slice ④+；
+- 全序列数字见
+  [M3.3 Slice ③ 基线](research/2026-08-01-note-m3-3-slice3-baseline.md)。
+
+Slice ④ MH_05 诊断门（commit `b6fbcb6` / `default_bc8b10e2`，对照 `b712c91`）：
+
+- ATE 33179→**43.29** m，`cheirality` 2055→**151**，`culled/unique=70/70=1.0`，
+  `reanchors=2` / `segments=3`（豁免）；
+- 判定 **不够**：ATE 未回到 &lt;1 m；大剔后 `reproj_rms_after_cull_px` 仍可
+  60–337 px，随后长 failed 簇（completion 0.884）——「只删不重优」不足；
+- **停止**其余 10 条；基线见
+  [M3.3 Slice ④ 基线](research/2026-08-01-note-m3-3-slice4-baseline.md)。
+
+Slice ④b MH_05 诊断门（commit `3855395` / `default_65273570`，对照 `b6fbcb6`）：
+
+- ATE 43.29→**3.45** m（仍 ≥1 m → **不够**）；`cheirality` 151→**47**；
+  `outlier_reopts=2`；大剔后 LM₂ `after_cull` **0.18 / 0.26** px（对照 60/154/337）；
+  failed 257→**0**，completion 0.884→**0.998**，`reanchors=0`；
+- reopt **有效**但 ATE 硬门槛未过 → **停止**其余 10 条；需多轮或其它手段；
+- 数字见 [M3.3 Slice ④ / ④b 基线](research/2026-08-01-note-m3-3-slice4-baseline.md) §6。
+
+Slice ④c 出口（编码至 `de32bd7` / `default_9da4ccd2`；docs `d5118e0`/`625f688`；
+**部分完成** → 由 ④d 收口 MH_01）：
+
+- MH_01：健康恢复（seg/re=**1/0**、failed=**0**）但 ATE **0.120247** &gt; 锚
+  **0.099263** → 硬门 **不够**（见基线 §7）；
+- MH_05：ATE **4.565** vs ④b **3.449** → 软判定恶化 → 当时 **停全序列**；
+- 设计 / 计划 / 数字见
+  [Slice ④c 设计](research/2026-08-02-note-m3-3-slice4c-cull-track-drop-design.md)、
+  [Slice ④c 计划](plans/2026-08-02_m3.3_slice4c_cull_track_drop_5a3a4e09.plan.md)、
+  [基线](research/2026-08-01-note-m3-3-slice4-baseline.md) §7–§8。
+
+Slice ④d 出口（commit `79505f8` / `default_85c97158`；扫参 `9feb6d4`；
+**MH_01 硬门通过**）：
+
+- 网格 `{3.0,3.5,4.0,5.0,6.0}`：仅 **4.0 / 5.0** 过门；取最紧 **`T*=4.0`**；
+- MH_01 ATE **0.098784** ≤ 0.099263，`seg/re=1/0`；MH_05 ATE **4.565**
+  （与 ④c 持平）→ 全序列只记录；
+- 已知债：MH_02 / V1_02 / V1_03 发散；多序列 reanchors 上升；
+- 设计 / 计划 / 数字见
+  [Slice ④d 设计](research/2026-08-02-note-m3-3-slice4d-cull-threshold-design.md)、
+  [Slice ④d 计划](plans/2026-08-02_m3.3_slice4d_cull_threshold_ecdd49d4.plan.md)、
+  [基线](research/2026-08-01-note-m3-3-slice4-baseline.md) §9。
+
+Slice ④e 出口（commit `0ced28b` / `default_3a21162e`；
+**部分完成** — MH_01 不回归；MH_05 无效/持平 → 停全序列）：
+
+- 增量键：`estimator.max_outlier_reopts=3`（相对 ④d `85c97158`）；
+- MH_01 ATE **0.0987839** ≤ 0.098784，`seg/re/failed=1/0/0`，culled 3/3，
+  `outlier_reopts=0`；
+- MH_05 ATE **4.565065** == ④d（bit-identical metrics）→ **无软改善**；
+  `outlier_reopts=1`（次数语义；无 `rounds>1` 帧 → 多轮预算未动用）；
+- **未跑**其余 EuRoC（2026-08-04 已补跑 clean 11/11；checkpoint 见
+  [benchmark/m3.3/slice-4e](benchmark/m3.3/slice-4e_0ced28b_3a21162e.md)）；
+- 设计 / 计划 / 数字见
+  [Slice ④e 设计](research/2026-08-02-note-m3-3-slice4e-multiround-reopt-design.md)、
+  [Slice ④e 计划](plans/2026-08-02_m3.3_slice4e_multiround_reopt_e0517b9a.plan.md)、
+  [基线](research/2026-08-01-note-m3-3-slice4-baseline.md) §10。
+
+Slice ④f 出口（commit `c446ac5` / `default_a5e90dc7`；
+**已完成** — MH_01 硬门 + MH_05 软门通过；本配置当时未跑全序列，后续当前
+`default_773ea011` 已跑 11/11）：
+
+- 增量键：`session.drop_culled_tracks=true`；`session.skip_drop_min_culled=4`
+  （相对 ④e `3a21162e`）；
+- MH_01 ATE **0.0987839** ≤ 0.098784，`seg/re/failed=1/0/0`，`drops_skipped=0`，
+  culled 3/3；
+- MH_05 ATE **3.056878** vs ④e **4.565065**（Δ≈−1.51）；优于 no_drop A/B
+  **3.972**；`drops_skipped=1`；`seg/re/failed=1/0/0`；completion ≈0.998；
+- 纯 ④f 当时**未跑**其余 EuRoC；2026-08-04 已补跑 clean 11/11（checkpoint 见
+  [benchmark/m3.3/slice-4f](benchmark/m3.3/slice-4f_c446ac5_a5e90dc7.md)）；
+  当前默认全序列数字见
+  [`default_773ea011` baseline](research/2026-08-03-note-m3-3-full-suite-baseline-773ea011.md)；
+- 设计 / 数字见
+  [Slice ④f 设计](research/2026-08-02-note-m3-3-slice4f-skip-drop-design.md)、
+  [基线](research/2026-08-01-note-m3-3-slice4-baseline.md) §11。
+
+Slice ④g 出口（commit `3ee5dea` / `default_a5e90dc7`；
+**门控不够** — 后经 postmortem 回退编排，默认再回 ④f）：
+
+- 门控当时：MH_01 PASS；MH_05 ATE **4.565065**=④e；zombie 归零；shared 未收窄；
+- 事后：④g `diag`/`est` ≡ ④e bit-identical → **删除 pending_drop**；
+  `deferred_*` 合同保留（恒 0）；
+- 设计 / 数字 / 诊断见
+  [Slice ④g 设计](research/2026-08-02-note-m3-3-slice4g-zombie-drop-design.md)、
+  [基线](research/2026-08-01-note-m3-3-slice4-baseline.md) §12、
+  [postmortem](research/2026-08-02-note-m3-3-slice4g-postmortem.md)。
+
+当前默认全序列出口（commit `4cf55ca` / `default_773ea011`；
+**正式 baseline 已建立**，全序列 record-only）：
+
+- 相对 ④f `a5e90dc7` 新增唯一键：`session.zombie_drop_age=5`；保留
+  `session.skip_drop_min_culled=4`；未开启 CLI-only 探针；
+- MH_01 ATE **0.0987839**、`segments/reanchors=1/0`，硬门 PASS；MH_05 ATE
+  **2.455726** vs ④f **3.056878**，软门 PASS；
+- EuRoC 11/11 `summary.json` 齐全且 hash 一致。全序列未设硬门；记录到
+  MH_02 ATE≈`5.30e5` / completion≈0.522，以及 V1_02 / V1_03 / V2_01 /
+  V2_02 / V2_03 的 4.38–9.79 m ATE 风险，后续须以全表而非单序列优化；
+- 完整 config snapshot、质量表与 robustness 计数见
+  [M3.3 EuRoC 全序列正式 baseline](research/2026-08-03-note-m3-3-full-suite-baseline-773ea011.md)。
+- **MH_02 首次发散诊断与 PnP stereo 一致性仲裁已完成**：根因是“左目 inlier
+  数即采用 PnP proposal → LM₁ 中间位姿授权不可逆 cheirality 删除 → 后续零度
+  pose”。仲裁在同一 PnP inlier 集上比较 proposal/guess 的完整 stereo RMS，
+  通过后才授权 pose 与 mask（clean 11/11 见
+  [benchmark/m3.3/pnp-stereo](benchmark/m3.3/pnp-stereo_afe3829_773ea011.md)）；见
+  [诊断](research/2026-08-04-note-m3-3-mh02-divergence-diagnosis.md)、
+  [设计](research/2026-08-04-note-m3-3-pnp-stereo-consistency-design.md)与
+  [dirty 验证结果](research/2026-08-04-note-m3-3-pnp-stereo-arbitration-results.md)。
+
+PnP stereo 一致性仲裁出口（实现已提交；提交前验证产物为
+`4e42517_dirty/default_773ea011`，**非正式 baseline**；对照
+`4cf55ca/default_773ea011`；2026-08-04 已在 clean `afe3829` 上补跑正式 11/11，
+checkpoint 见
+[benchmark/m3.3/pnp-stereo](benchmark/m3.3/pnp-stereo_afe3829_773ea011.md)）：
+
+- estimator tests 58/58；MH_02 390 帧因果门 PASS；
+- MH_01 ATE **0.0987839 m**，`est.tum` 与正式基线逐字节一致，硬门 PASS；
+- MH_05 ATE **2.455726→0.472225 m**，软门 PASS；
+- 完整 MH_02 ATE **5.30e5→0.092417 m**，completion **0.522→1.0**，
+  segments/reanchors/failed **7/6/1453→1/0/0**；
+- EuRoC 11/11 dirty record-only 产物齐全；V1_02、V1_03、V2_01、V2_02、V2_03
+  均改善，但 MH_03 ATE/RPE **1.120766/0.196499→1.336250/0.278380 m**，为
+  后续选片前必须保留的回归证据；
+- 配置无增量，继续为 42 键 `default_773ea011`；完整表、snapshot 与短诊断见
+  [验证结果](research/2026-08-04-note-m3-3-pnp-stereo-arbitration-results.md)。
+
+后续切片出口：
+
+- 每次改动用 `phad_vo_bench` 产出前后数字；无法测量的改动不进入本阶段；
+- **`MH_01` 作不回归锚**（ATE 不劣于 **0.098784** m，且 `reanchors=0`）；
+- MH_05 / 发散债：④f skip-drop 保留；④g / id 序 top-K / 完整集懒腾槽均证伪；
+  **候选 B 已产品化**：`session.zombie_drop_age=5`（MH_05 ATE≈**2.456**；
+  MH_01 硬门 PASS；全序列 11/11 baseline 已建立；见
+  [zombie-drop-age](research/2026-08-03-note-m3-3-zombie-drop-age-probe-design.md)、
+  [全序列 baseline](research/2026-08-03-note-m3-3-full-suite-baseline-773ea011.md)）；勿默认再
+  整批 drop / 跳 ⑤ / 关整个 skip / 关整个 block / 单独去 Huber / 观测级；⑤ 与
+  M4 耦合，**先对齐再开**。MH_02 已按归因完成 PnP stereo 一致性仲裁；
+  **⑤ 关键帧策略设计已对齐**（组合标准：视差>30px / track率<60% / 时间>0.5s；非关键帧
+  track-only；关键帧=IMU预积分边界；window_size=10 只含关键帧；见
+  [设计](research/2026-08-05-note-m3-3-keyframe-design.md)、
+  [开源对照](research/2026-08-05-opensource-m3-3-keyframe.md)、
+  [计划](plans/2026-08-05_m3.3_slice5_keyframe_790dd106.plan.md)）；
+  **Slice ⑤ 实施后全序列恶化已诊断**（5 改善 / 6 恶化，V2_02 +5400% 灾难；
+  根因：非 KF PnP 位姿质量差 + CV 链污染 + 关键帧选择对旋转不敏感；见
+  [诊断](research/2026-08-05-note-m3-3-slice5-full-suite-results.md)、
+  [调研](research/2026-08-05-note-m3-3-slice5-keyframe-research-refs.md)）；
+  **Slice ⑤b 方案已对齐**（非 KF pose-only LM 精修 [ORB-SLAM3 模板] +
+  shared<min_pnp_inliers 拒绝门控 + 旋转补偿视差 + 低 track 强制关键帧 +
+  snapshot 条件更新；见
+  [设计](research/2026-08-05-note-m3-3-slice5b-pose-refine-design.md)、
+  [计划](plans/2026-08-05_m3.3_slice5b_pose_refine_b42c4a2b.plan.md)）；
+  **Slice ⑤b 已实施**（`78f2746` 起）：门控 + pose-only 精修 + 旋转补偿视差 +
+  低 track 强制 + snapshot 条件更新；修复 V2_02 灾难（121.2→1.906 m）与
+  MH_01 关键帧爆炸（89%→18%，根因是 raw 像素当方向向量 + 旋转方向反）；
+  阈值扫描 30→15→10px 揭示**序列间阈值冲突**（MH 系列偏好稀疏 KF，V1_01
+  偏好密集 KF）；
+  **Slice ⑤c 已实施**（`86212e0`）：非关键帧进窗口 BA（VINS/Basalt 设计，
+  删除 PnP-only 提前返回与 pose-only 精修，Basalt 7KF+3temporal 驱逐）；
+  对照结果：MH_05 同阈值 ⑤b 0.364→⑤c **0.306**（结构有效）；但阈值冲突
+  依旧——MH 系列 30px 最优（MH_01 0.063 / MH_05 0.306，门控全过），V1_01
+  10px 最优（0.234 vs 30px 0.514）；V1_01 已知债待动态阈值方案；见
+  [⑤c 设计](research/2026-08-05-note-m3-3-slice5c-all-frames-ba-design.md)、
+  [⑤c 计划](plans/2026-08-05_m3.3_slice5c_all_frames_ba_5e9f1a22.plan.md)）；
+  **MH_03 回归根因已诊断**
+  （i=1388 仲裁正确拒绝 358 px RMS proposal，但 CV guess 收敛到更差的
+  LM 局部极小值——帧级 RMS 比较的内在权衡，不修复；见
+  [诊断](research/2026-08-05-note-m3-3-mh03-regression-diagnosis.md)）；下一片
+  需结合 V1_03/V2_02/V2_03 剩余 failure 债（已归因为前端跟踪极限 + LandmarkId 重用，
+  不修 estimator；见
+  [诊断](research/2026-08-05-note-m3-3-remaining-failure-debt.md)），不用调 session/cull
+  阈值或任意放大 `stereo_sigma_px` 代替诊断。
+
+**pre-M4 小片（已完成，两轮全否决，`cbb4505` + `8906684` dirty）**：
+Census 兜底（V2_03 7937m/225 锚跳）与 round 2 七变体（② 累积播种 /
+③ 曝光归一化 / 零均值 SAD / no-CV 锚 / seed 门 20 / 首段累积，
+V2_03 3.642~6.715 vs 3.628 门）**全灭**——匹配/播种层不是瓶颈：
+所有变体段内质量 ≥ baseline（加权 RMS 0.538-0.889），ATE 损失 100%
+来自 re-anchor 对齐税（+2.9~+5.6m），且对齐税与 re-anchor 数量/门槛
+无单调关系；首段饿死不是绑定约束（Exp E 覆盖 0.766 仍微劣于门）。
+默认逐项回退 slice-7（`default_revert` 复验一致），变体代码保留在
+CLI flag 后供 M4 复测。**M4 前零剩余 VO 候选**；结构性修复在 M4
+（IMU 预积分锚，消灭 re-anchor 对齐税）。checkpoint：
+[prem4-diag-census](benchmark/m3.3/prem4_diag_census_cbb4505_402d1925.md)、
+[prem4-round2](benchmark/m3.3/prem4_round2_8906684_402d1925.md)。
+
+设计见
+[M3.3 VO 加固设计](research/2026-07-31-note-m3-3-vo-hardening-design.md)、
+[M3.3 Slice ② 右目匹配设计](research/2026-08-01-note-m3-3-slice2-right-match-design.md)、
+[M3.3 Slice ③ PnP 设计](research/2026-08-01-note-m3-3-slice3-pnp-design.md)、
+[M3.3 Slice ④ 外点剔除设计](research/2026-08-01-note-m3-3-slice4-outlier-cull-design.md)、
+[M3.3 Slice ④b 二次 LM 设计](research/2026-08-01-note-m3-3-slice4b-outlier-reopt-design.md)、
+[M3.3 Slice ④c cull-track-drop 设计](research/2026-08-02-note-m3-3-slice4c-cull-track-drop-design.md)、
+[M3.3 Slice ④d 阈值设计](research/2026-08-02-note-m3-3-slice4d-cull-threshold-design.md)、
+[M3.3 Slice ④e 多轮 reopt 设计](research/2026-08-02-note-m3-3-slice4e-multiround-reopt-design.md)、
+[M3.3 Slice ④f skip-drop 设计](research/2026-08-02-note-m3-3-slice4f-skip-drop-design.md)、
+[M3.3 Slice ④g zombie-drop 设计](research/2026-08-02-note-m3-3-slice4g-zombie-drop-design.md)、
+[M3.3 Slice ④g postmortem](research/2026-08-02-note-m3-3-slice4g-postmortem.md)，
+[PnP stereo 一致性仲裁设计](research/2026-08-04-note-m3-3-pnp-stereo-consistency-design.md)，
+根因诊断见
+[M3.3 VO 崩溃根因诊断](research/2026-07-31-note-m3-3-vo-collapse-diagnosis.md)、
+[M3.3 MH_02 首次发散诊断](research/2026-08-04-note-m3-3-mh02-divergence-diagnosis.md)，开源对照见
+[M3.3 VO 加固：开源实现对照](research/2026-07-31-opensource-m3-3-vo-hardening.md)、
+[Slice ② 开源对照](research/2026-08-01-opensource-m3-3-slice2-right-match.md)、
+[Slice ③ 开源对照](research/2026-08-01-opensource-m3-3-slice3-pnp.md)、
+[Slice ④ 开源对照](research/2026-08-01-opensource-m3-3-slice4-outlier-cull.md)、
+[Slice ④e 开源对照](research/2026-08-02-opensource-m3-3-slice4e-multiround.md)、
+[PnP stereo 一致性仲裁开源对照](research/2026-08-04-opensource-m3-3-pnp-stereo-consistency.md)。
+实施计划见
+[M3.3 VO 加固 Slice ①](plans/2026-07-31_m3.3_vo_hardening_a3f7d2e9.plan.md)、
+[M3.3 Slice ②](plans/2026-08-01_m3.3_slice2_right_match_c8e74511.plan.md)、
+[M3.3 Slice ③](plans/2026-08-01_m3.3_slice3_pnp_0154cd20.plan.md)、
+[M3.3 Slice ④](plans/2026-08-01_m3.3_slice4_outlier_cull_840bf39c.plan.md)、
+[M3.3 Slice ④b](plans/2026-08-01_m3.3_slice4b_outlier_reopt_4d57d1fc.plan.md)、
+[M3.3 Slice ④c](plans/2026-08-02_m3.3_slice4c_cull_track_drop_5a3a4e09.plan.md)、
+[M3.3 Slice ④d](plans/2026-08-02_m3.3_slice4d_cull_threshold_ecdd49d4.plan.md)、
+[M3.3 Slice ④e](plans/2026-08-02_m3.3_slice4e_multiround_reopt_e0517b9a.plan.md)、
+[M3.3 Slice ④g](plans/2026-08-02_m3.3_slice4g_zombie_drop_0a81d46d.plan.md)、
+[PnP stereo 一致性仲裁](plans/2026-08-04_m3.3_pnp_stereo_arbitration_4721cb40.plan.md)。
+Issue：[#23](https://github.com/Nothand0212/phad-vio/issues/23)（M3.3 总图）；
+Slice ④/④b/④c/④d/④e/④f/④g：[#24](https://github.com/Nothand0212/phad-vio/issues/24)；
+PnP stereo 一致性仲裁：[#25](https://github.com/Nothand0212/phad-vio/issues/25)。
+
+## M4：接入 IMU
+
+**当前状态（2026-08-24）：M4 仍在进行中且未完成。M4.1 数据路径已完成；Q1 Observe final
+independent PASS；
+Q2 deterministic known-bias rotation-only 已在 `d1c4385` 取得 technical PASS under
+one-time post-hoc evidence-retention waiver，original frozen-plan RED exact-record conformance
+NOT MET。Q3 `PHAD-M4-Q3-GYRO-ALIGN-V1` 已完成且只完成一次 frozen-input qualification；唯一
+scientific verdict 为 `HYPOTHESIS_FAIL`，失败原因为 `HALF_STABILITY`，权限为 `STOP`。Q3 冻结结论
+不重跑、不调阈值、不改判。新的 default-off、no-real online gyro-bias synthetic authority、RED、
+实现与 positive gates 已发生，但 replay2 qualification 在 negative-arm setup 因 harness/operator
+wrong-argument invocation 得到 `HARD_ERROR` 并 STOP；product/scientific attribution 均为 false，
+`permission_granted=false`。这不是旧 Q4，也不推翻 Q3。**
+
+M4.1 之后的 measurement / factor 接入继续服从
+[证据门控的信息接入](agents/evidence-gated-integration.md)。
+[Q1 Observe 实施计划](plans/2026-08-12_m4_gyro_q1_observe_7d3a91e6.plan.md)已完成：packet summary
+与 raw gyro samples 已冻结，M3 off 路径字节不变；独立证据见
+[Q1 Observe 结果](research/2026-08-12-note-m4-minimal-gyro-q1-observe-result.md)。Q1 PASS 当时只把 Q2 状态改为
+**go to plan only**。[Q2 Predict 实施计划](plans/2026-08-12_m4_gyro_q2_predict_3f69becc.plan.md)
+现已完成，独立证据见
+[Q2 Predict 结果](research/2026-08-13-note-m4-minimal-gyro-q2-known-bias-predict-result.md)。该 technical PASS under
+waiver 只覆盖无 production caller 的 deterministic known-bias rotation helper；原 RED lifecycle
+仅作 historical non-qualifying，qualifying weight=`0`，later deletion 不作原 RED 替代。最终 command
+evidence 仍以 `/tmp/q2-missing-evidence-replay-v2.md`（SHA-256
+`06951458173c910dc09e36624a782b233d85ef777703ccf8d155a9ba39ea8809`）为权威：父进程以
+`/usr/bin/env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/home/lin LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=Asia/Shanghai /bin/bash --noprofile --norc /tmp/q2-missing-evidence-replay-v2/run.sh`
+调用固定 `d1c4385` / tree archive，fresh 定向 10/10，并重现相同 shared-endpoint actual、closure
+与 duration。v1 inherited-environment header 与实际 `env -i` 矛盾，已被 supersede，不得作最终
+命令证据。这是一次性且不泛化的 evidence-retention 例外，不声明 MH_01、EuRoC、ATE/RPE、
+noise/covariance/whitening 或 stochastic 产品资格；Q1/Q2 的历史 verdict 与 provenance 均不因
+Q3 或新路线而改写。
+
+Q3 唯一 qualification 的 support、fit 与 effect gates 通过，但最大 early/late 逐轴差
+`0.001227119335357879 rad/s` 超过冻结 half-stability 门 `0.001 rad/s`。权威事实与权限只见
+[Q3 result ledger](research/2026-08-18-note-m4-minimal-gyro-q3-offline-bias-alignment-result.md)；
+[Q3 normative design](research/2026-08-13-note-m4-minimal-gyro-q3-offline-bias-alignment-design.md)继续保留该次运行的
+协议语义。禁止把失败后的窗口重选、threshold 修改或第二次运行称为 Q3 qualification，也禁止把
+Q3 nuisance estimate 当作 physical bias、online prior 或旧 Q4 的 implementation go。
+
+explicit online gyro bias state + random walk 的独立资格链为：
+
+- [online-bias research](research/2026-08-18-note-m4-vio-online-gyro-bias-state-research.md)只提供方案与证据来源；
+- [ADR-0002](adr/0002-stage-gated-gyro-only-bias-state.md)记录放弃全局常值 nuisance 路线、采用
+  stage-gated gyro-only bias state 的架构决策；
+- [online-bias synthetic design](research/2026-08-19-note-m4-online-gyro-bias-synthetic-design.md)是新协议的 normative
+  gate authority；
+- [online-bias implementation plan](plans/2026-08-18_m4_online_gyro_bias_synthetic_1e3569b4.plan.md)
+  规定该新协议的 RED→GREEN 与 qualification 顺序；
+- [online-bias replay2 result](research/2026-08-24-note-m4-online-gyro-bias-synthetic-result.md)记录最终
+  `HARD_ERROR`、有效/未运行 gates、STOP event 与未获得权限。
+
+pre-implementation authority transaction 的 exact six 只包含：online-bias synthetic design、
+ADR-0002、`docs/design/conventions.md`、本 roadmap、online-bias implementation plan 与
+`phad/estimator/README.md`；它已锁定在 commit
+`634c4ecfbc5cbd7b0d8da1a295e48c12f7f81194` / tree
+`a7fd588983b1f8597e98517a3d0d4cbcf6609100`。上述
+online-bias research 只是已经存在的只读方案/证据依据，不属于该 transaction，也不得借此改写；
+Q3 design/result 同样只读。authority lock 后已取得有效 capability RED，并实现到 default-off candidate
+commit `9bdd32df4089774b667db721815bb89a3007a47b` / tree
+`732c8ea3e8a280693b58dac4211646f5a6a0e44a`；exact-six 六文件在 production 阶段保持只读，estimator
+README 不属于 production allowlist。该链不重开 Q3，也不自动产生更宽权限。跟踪 issue：
+[#40](https://github.com/Nothand0212/phad-vio/issues/40)。
+
+当前权威路线只包含：
+
+- **M4.1 数据路径（已完成）**：`StereoPairSynchronizer::pushImu()` 与 `StereoImuPacket` 的时间区间、
+  插值和 `imu_gap` 合同；
+- **Q1/Q2 provenance（冻结）**：Q1 independent PASS；Q2 technical PASS under 上述 one-time waiver；
+- **Q3（冻结失败）**：唯一 qualification=`HYPOTHESIS_FAIL/HALF_STABILITY/STOP`，不重跑且不进入旧 Q4；
+- **online-bias synthetic（实现存在，资格未完成）**：authority 与预期 capability RED 已闭合；clean
+  positive arm 为 oracle `4/4`、online targeted `37/37`、Q2 regression `10/10`、estimator module
+  `114/114`。有效 negative arms 仅完成 `5/19`；rollback-order、static-cap 与全部 12 条 numerical
+  arms 未运行。replay2 因 marker 参数漏掉冻结的 `// ` 前缀与 `AUTHORITY_` 部分，以
+  harness/operator `HARD_ERROR` 停止；没有 product/scientific correctness verdict，也不授权 replay3；
+- **仍未授权**：apps/session 接线、真实序列、GT/ATE/RPE、natural feedback、完整 `X/V/B`、
+  accelerometer/gravity、bounded-online 声称、default-on 产品路径、eviction handoff 或 M5。
+
+### 历史 M4.2+ 路线（non-normative；不可执行）
+
+2026-08-07 的 [M4 接入 IMU 设计](research/2026-08-08-note-m4-imu-integration-design.md) 曾提议直接将
+state 从 `X` 扩展为 `X/V/B`，引入 `CombinedImuFactor`、
+`BetweenFactor<ConstantBias>`、静止初始化、IMU 预积分初值与 re-anchor 退役，
+并设想让 `estimator.enable_imu` 默认为 true 且进入 `config_hash`。该 M4.2–M4.4
+路线及其测试/出口只是历史提案，**不是当前的 production 行为、默认值、API
+合同或实施授权**。未来若要引入 `X/V/B`、gravity、accelerometer、online bias
+initialization 或默认 IMU，必须在 Q1–Q5 证据之后重新设计并单独授权；不得从本历史段
+推导现行配置或代码要求。
+
+## M5：正式初始化
+
+在静止初始化的局限被真实序列暴露后再开始。双目尺度已知，核心是 gyro
+bias、重力方向与初始速度。
+
+范围（择一，决定时补 ADR）：
+
+- 视觉 SfM → 顺序惯性对齐（VINS-Fusion 路线）；
+- MAP-based inertial-only 优化（ORB-SLAM3 路线，更稳但更重）。
+
+出口：
+
+- TUM VI room 等手持起步、无静止段的序列可完成初始化；
+- 初始化失败返回原因与所需的下一步数据，不返回 identity pose 冒充成功；
+- 初始化后 ATE 不劣于静止初始化在 `MH_*` 上的结果。
+
+## M6：边缘化与 fixed-lag
+
+范围：
+
+- `IncrementalFixedLagSmoother` 与 variable timestamps；
+- 旧状态边缘化，bounded state 与 factor 生命周期；
+- 参考 Basalt 的零空间处理与 Tassel 的选择性边缘化处理静止段。
+
+出口：
+
+- 长回放中状态数量保持有界，内存不随帧数线性增长；
+- 边缘化时轨迹无不合理跳变，bias 与 velocity 连续；
+- 与短片段 batch 结果在规定容差内一致；
+- 静止状态下速度不漂移。
+
+## M7：性能与线程
+
+范围：
+
+- `SmartStereoProjectionPoseFactor`（与显式 landmark 版本对照后决定是否
+  采用）；
+- frontend/backend bounded queues；
+- lifecycle、shutdown 与不可变估计快照。
+
+出口：
+
+- `MH_01` 实时率 ≥ 1x；
+- 单线程与多线程在确定性输入上的结果差异可解释；
+- 队列满时显式背压或报错，后台异常不会变成假成功；
+- shutdown 不丢失已接受但未处理的数据；
+- ThreadSanitizer 或等价检查覆盖关键共享路径。
+
+## M8：解耦回环与全局位姿图
+
+采用 Tassel 的事务式架构：估计器提交关键帧与历史路标事务，回环组件在
+独立任务中完成检索、几何验证与位姿图优化；全局轨迹接受修正，滑窗状态、
+边缘化先验与既有线性化点**永不回写**。
+
+范围：
+
+- 关键帧描述子检索与候选管理；
+- 几何验证（历史深度路标 PnP）；
+- 独立的关键帧 global pose graph，odometry 与 loop constraints；
+- world/odometry 校正变换。
+
+出口：
+
+- 关闭回环时局部 VIO 行为完全不变；
+- 错误回环可拒绝，仅图像相似度不写入位姿图；
+- 含回环序列的全局 ATE 下降；
+- global correction 不破坏 fixed-lag graph 中 \(X/V/B\) 的一致性。
+
+## M9：研究平台
+
+在前述里程碑给出稳定基线后，才引入面向实验的可替换性。
+
+范围：
+
+- 在线 camera–IMU time offset 与外参标定；
+- 算法可替换 seam（第二个真实实现出现后才提取）；
+- 配置化实验与 benchmark 脚本；
+- 全序列回归表的自动生成。
+
+出口：
+
+- 更换单个算法模块不需要修改其他模块；
+- 一条命令产出全部目标序列的 ATE/RPE 表。
+
+## 贯穿活动：手写深挖
+
+任意模块在拥有调库 ATE 基线之后，可展开一次自研实现，作为学习活动而非
+独立里程碑。验收标准固定为：
+
+- 同一序列上 ATE 与调库版本在容差内一致；
+- 中间量（track 数、内点率、重投影误差、covariance）分布可比；
+- 差异超出容差时，能定位到具体的公式或实现分歧。
+
+不满足对拍的自研实现不替换调库版本，两者可并存直到差异被解释清楚。
+
+## 暂缓项
+
+在 M8 完成前不排入实现：
+
+- 单目支持与单目尺度初始化；
+- rolling shutter；
+- 多相机（两目以上）；
+- GNSS、轮速计或 LiDAR 融合；
+- 稠密地图、mesh 和语义；
+- 自研非线性求解器；
+- 实机与 ROS 2 接入。

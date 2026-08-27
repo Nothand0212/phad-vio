@@ -36,9 +36,9 @@ Q1 Observe。implementer 自己未执行 GitHub 远程写。
 上位合同：
 
 - [证据门控的信息接入](../agents/evidence-gated-integration.md)
-- [M4 gyro measurement / factor 资格实验设计（修订版）](../research/m4-minimal-gyro-slice-design.md)
-- [MH_01 控制组](../research/m4-minimal-gyro-mh01-control.md)
-- [Q1 Observe final independent PASS 结果](../research/m4-minimal-gyro-q1-observe-result.md)
+- [M4 gyro measurement / factor 资格实验设计（修订版）](../research/2026-08-12-note-m4-minimal-gyro-slice-design.md)
+- [MH_01 控制组](../research/2026-08-12-note-m4-minimal-gyro-mh01-control.md)
+- [Q1 Observe final independent PASS 结果](../research/2026-08-12-note-m4-minimal-gyro-q1-observe-result.md)
 
 历史计划：
 [M4 最小 gyro-aided VO `c4e62b35`](2026-08-12_m4_minimal_gyro_slice_c4e62b35.plan.md)
@@ -234,7 +234,7 @@ packet_index,sample_index,timestamp_ns,gyr_x_radps,gyr_y_radps,gyr_z_radps
 
 最终独立 verifier 已对两个 CSV 的**完整文件 bytes**分别计算 SHA256；hash 与文件大小、
 row count、首末 packet timestamp 已写入强制交付
-[Q1 Observe 结果](../research/m4-minimal-gyro-q1-observe-result.md)。后续工具消费前必须重算
+[Q1 Observe 结果](../research/2026-08-12-note-m4-minimal-gyro-q1-observe-result.md)。后续工具消费前必须重算
 并匹配；任何字节变化都需要新的 Q1 资格 run。artifact SHA 不写入 `flattenConfig()`，
 也不修改 `meta.json.config` / `config_canonical_text`；配置身份与输入证据身份保持分离。
 
@@ -447,7 +447,7 @@ completed，也不得发出 Q2 go。
 - 上述 implementer standalone run、`jq`/segment/replay gate 的 exact commands 以及
   input SHA 当时未完整保留；不得根据其现有产物反推后补为已记录。该缺口后来由 final
   verifier 在 clean commit 上以 fresh build/output 独立重建，并记录于
-  [Q1 Observe 结果](../research/m4-minimal-gyro-q1-observe-result.md)；两套证据不能混称同一 run。
+  [Q1 Observe 结果](../research/2026-08-12-note-m4-minimal-gyro-q1-observe-result.md)；两套证据不能混称同一 run。
 
 完整文件 SHA256：
 
@@ -514,7 +514,7 @@ final verifier 在 clean commit
   完整 config/canonical/hash gate、输入 manifest v2、packet/sample replay 与 segment join；
 - 最终 source/input/output/control 身份、所有有效命令、duration、五个 artifact SHA、完整
   config snapshot、metrics、判定矩阵和剩余风险，以
-  [Q1 Observe final result](../research/m4-minimal-gyro-q1-observe-result.md)为权威记录。
+  [Q1 Observe final result](../research/2026-08-12-note-m4-minimal-gyro-q1-observe-result.md)为权威记录。
 
 首次未带 `PHAD_EUROC_MH01_PATH` 的 `ctest -L mh01` 虽 exit `0`，但 3 项全部 skip，
 明确不计通过。之后两次带 env 的 MH_01 均 3/3 PASS；以最终显式 `env` 的串行命令作为

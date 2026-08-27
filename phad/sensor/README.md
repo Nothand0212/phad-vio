@@ -68,4 +68,4 @@ CMake target：`phad_sensor`（alias `phad::sensor`），公开依赖 Eigen。
 | `phad::camera` | 由 `CameraModelParameters` 构造运行时模型 |
 | `tests/sensor/` | 参数校验与 header 合同单测 |
 
-坐标系与 SI 单位见 [`docs/conventions.md`](../../docs/conventions.md)。
+坐标系与 SI 单位见 [`docs/design/conventions.md`](../../docs/design/conventions.md)。
