@@ -10,10 +10,10 @@ todos:
     status: completed
   - id: complete-q0-euroc11
     content: '在本机从 clean 42f99e9 串行补齐 EuRoC-11 control，并核对 11 条 source/toolchain/config/artifact'
-    status: in_progress
+    status: completed
   - id: freeze-product-envelope
     content: '在任何 Q1/Q4/Q5 candidate 结果前计算 core-4/EuRoC-11 的 gate 基线，确认并冻结 G_ATE/G_RPE、有效性、tail review 与 continuity 数值规则'
-    status: pending
+    status: in_progress
   - id: q1-red-classification
     content: '先经 public seam 写 stereo mapped、left-only mapped、unmapped 三分类红灯及 CSV 第 25 列红灯'
     status: pending
@@ -58,15 +58,15 @@ isProject: false
 ## 状态
 
 **Spec（含多序列产品 gate）与本计划已于 2026-08-27 定稿。短分支、文档提交、
-core-4 clean Q0 与机制归因已经完成；Stage 0 正在同一台本机从保留的 clean
-worktree 补齐 EuRoC-11 control，尚未开始 #47 的生产 C++ 修改或 candidate
-experiment。**
+clean Q0 core-4/EuRoC-11 与机制归因已经完成；Stage 0 正在确认完整 Q0 派生的
+数值 envelope，尚未开始 #47 的生产 C++ 修改或 candidate experiment。**
 
 已完成的 control 事实：clean `42f99e9/default_0337287b` unit 共 `458/458`
-通过（另有 3 个既有 skip）；core-4 全部完成且
-`failed/rejected/reanchors == 0`，ATE 依次为
-`0.072559 / 0.861563 / 0.171546 / 2.081321 m`，segments 为
-`1 / 2 / 1 / 18`。完整 identity、精度、coverage、段内/段间分解与 hash 见
+通过（另有 3 个既有 skip）；EuRoC-11 为 11/11、55/55 required artifacts，统一
+数据质量审计 PASS，`failed/rejected/reanchors == 0`。相对 M4 checkpoint，
+`G_ATE=0.696757`、`G_RPE=0.645531`，ATE/RPE 算术均值分别为
+`0.380628 / 0.113120 m`，segments 为 `93 → 30`。完整 identity、精度、coverage、
+段内/段间分解、hash 与待确认 envelope 见
 [`mapped-landmark-bearing Q0`](../benchmark/m4/mapped-landmark-bearing-q0_42f99e9_0337287b.md)。
 
 本计划把一个 deep Module 内部能力分四个可证伪阶段交付：Q1 只观察 eligible
@@ -200,13 +200,13 @@ mixed mapped population
    身份或 artifact schema 系统性失效才停止 suite。
 4. 每条冻结 ATE/RPE、completion/coverage、segments/reanchors、段内加权 RMS、
    绝对段间分量、status/cadence 与完整 `meta.json`。
-5. 从同一 clean `42f99e9` worktree 与 Release build 在本机串行补齐 EuRoC-11
-   Q0 control；每条保留独立 artifact，并核对 source/tree、toolchain、data、config。
-   单条 accuracy 或运行失败不取消其余序列，以收集完整多序列分布。
-6. 用 11 条 `summary.json` 计算逐序列 ratio 表的 control 侧输入，补齐
-   `mapped-landmark-bearing-q0_42f99e9_0337287b.md`。结合 M4 checkpoint 与绝对
-   工程量级提出 `G_ATE`、`G_RPE`、completion/coverage、tail review 与 V2_03
-   continuity 数值规则，经用户确认后写回 spec/benchmark 并冻结。
+5. 已从同一 clean `42f99e9` worktree 与 Release build 在本机串行补齐
+   EuRoC-11 Q0 control；每条保留独立 artifact，并核对 source/tree、toolchain、
+   data、config。11/11、55/55 required artifacts 的统一数据质量审计已通过。
+6. 已用 11 条 `summary.json` 计算逐序列 ratio 表并补齐
+   `mapped-landmark-bearing-q0_42f99e9_0337287b.md`；结合 M4 checkpoint 与绝对
+   工程量级形成 `G_ATE/G_RPE`、completion/coverage、tail review 与 V2_03
+   continuity 数值提案。经用户确认后写回 spec/benchmark 并冻结。
 7. clean Q0 与既有 record-only run 若存在 manifest 不能解释的差异，先解决
    reproducibility；在多序列 envelope 冻结前不进入 Q1。
 
