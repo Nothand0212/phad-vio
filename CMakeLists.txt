@@ -140,6 +140,7 @@ target_compile_options(phad_viz PRIVATE
 )
 
 add_library(phad_estimator
+  phad/estimator/imu_rotation.cpp
   phad/estimator/stereo_vo_estimator.cpp
 )
 add_library(phad::estimator ALIAS phad_estimator)
@@ -194,8 +195,16 @@ target_compile_options(phad_stereo_pair_stream PRIVATE
 )
 
 add_library(phad_offline_vo_session STATIC
+  apps/candidate_artifacts.cpp
+  apps/candidate_fixed_lag_estimator.cpp
+  apps/candidate_pipeline.cpp
+  apps/fixed_lag_shadow_probe.cpp
+  apps/keyframe_epoch_gate.cpp
+  apps/keyframe_shadow_probe.cpp
   apps/offline_vo_session.cpp
   apps/probe_b_writer.cpp
+  apps/vio_init_probe.cpp
+  apps/vio_state_probe.cpp
 )
 target_compile_features(phad_offline_vo_session PUBLIC cxx_std_20)
 target_include_directories(phad_offline_vo_session PUBLIC
@@ -203,6 +212,10 @@ target_include_directories(phad_offline_vo_session PUBLIC
 )
 target_link_libraries(phad_offline_vo_session
   PUBLIC phad_stereo_pair_stream phad::camera phad::frontend phad::estimator
+  PRIVATE gtsam opencv_core opencv_calib3d nlohmann_json::nlohmann_json
+)
+target_include_directories(phad_offline_vo_session SYSTEM PRIVATE
+  $<TARGET_PROPERTY:gtsam,INTERFACE_INCLUDE_DIRECTORIES>
 )
 target_compile_options(phad_offline_vo_session PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
@@ -339,6 +352,8 @@ if(PHAD_BUILD_TESTS)
     tests/estimator/stereo_vo_outlier_reopt_test.cpp
     tests/estimator/stereo_vo_cull_rebirth_test.cpp
     tests/estimator/keyframe_update_test.cpp
+    tests/estimator/fixed_lag_contract_test.cpp
+    tests/estimator/imu_rotation_test.cpp
     tests/estimator/multiframe_triangulation_test.cpp
     tests/estimator/stereo_vo_imu_test.cpp
   )
@@ -380,9 +395,15 @@ if(PHAD_BUILD_TESTS)
   gtest_discover_tests(phad_bench_tests PROPERTIES LABELS "unit")
 
   add_executable(phad_apps_tests
+    tests/apps/candidate_artifacts_test.cpp
+    tests/apps/candidate_pipeline_test.cpp
+    tests/apps/fixed_lag_shadow_probe_test.cpp
     tests/apps/offline_vo_session_test.cpp
     tests/apps/phad_vo_bench_cli_test.cpp
     tests/apps/keyframe_selection_test.cpp
+    tests/apps/keyframe_shadow_probe_test.cpp
+    tests/apps/vio_init_probe_test.cpp
+    tests/apps/vio_state_probe_test.cpp
   )
   target_link_libraries(phad_apps_tests PRIVATE
     phad_offline_vo_session GTest::gtest_main opencv_imgcodecs

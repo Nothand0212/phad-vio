@@ -1,0 +1,102 @@
+{
+  "generated_at": "2026-08-25T14:28:35.618425+00:00",
+  "nodes": {
+    "docs_architecture_vio_pipeline": {
+      "code_fingerprint": "7bb1ab805167f2d02c1a84d3b49f455c2d93e639eebc92c6bf06cd9e255e37e1",
+      "label": "Target VIO Pipeline",
+      "last": "2026-08-24T03:51:48.185452+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-24T03:51:48.185452+00:00",
+          "outcome": "useful",
+          "q": "分析现在phad-vio开发到哪一步了?"
+        }
+      ],
+      "score": 0.967226813,
+      "source_file": "docs/architecture.md",
+      "status": "tentative",
+      "uses": 1
+    },
+    "docs_architecture_visual_inertial_frontend": {
+      "code_fingerprint": "7bb1ab805167f2d02c1a84d3b49f455c2d93e639eebc92c6bf06cd9e255e37e1",
+      "label": "Visual-Inertial Frontend",
+      "last": "2026-08-24T03:51:48.185452+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-24T03:51:48.185452+00:00",
+          "outcome": "useful",
+          "q": "分析现在phad-vio开发到哪一步了?"
+        }
+      ],
+      "score": 0.967226813,
+      "source_file": "docs/architecture.md",
+      "status": "tentative",
+      "uses": 1
+    },
+    "docs_roadmap_document": {
+      "code_fingerprint": "db0fffa85d7179d96185b74a9d69f1f0152e37a8a65ba06da7b205fa2cfbf309",
+      "label": "PHAD-VIO Implementation Roadmap",
+      "last": "2026-08-24T03:51:48.185452+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-24T03:51:48.185452+00:00",
+          "outcome": "useful",
+          "q": "分析现在phad-vio开发到哪一步了?"
+        }
+      ],
+      "score": 0.967226813,
+      "source_file": "docs/roadmap.md",
+      "status": "tentative",
+      "uses": 1
+    },
+    "phad_estimator_stereo_vo_estimator_stereovoestimator_impl": {
+      "code_fingerprint": "e8385f26d058a6596aada337c3b366f5465198c5921eaf89bcc9cde4a0e7938e",
+      "label": "StereoVoEstimator::Impl",
+      "last": "2026-08-24T03:51:48.185452+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-24T03:51:48.185452+00:00",
+          "outcome": "useful",
+          "q": "分析现在phad-vio开发到哪一步了?"
+        }
+      ],
+      "score": 0.967226813,
+      "source_file": "phad/estimator/stereo_vo_estimator.cpp",
+      "status": "tentative",
+      "uses": 1
+    },
+    "phad_sensor_stereo_imu_packet_stereoimupacket": {
+      "code_fingerprint": "1a52f10957941620fdd5c6057d13b01cffd190555e3c709a6c394df9012a2970",
+      "label": "StereoImuPacket",
+      "last": "2026-08-24T03:51:48.185452+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-24T03:51:48.185452+00:00",
+          "outcome": "useful",
+          "q": "分析现在phad-vio开发到哪一步了?"
+        }
+      ],
+      "score": 0.967226813,
+      "source_file": "phad/sensor/stereo_imu_packet.hpp",
+      "status": "tentative",
+      "uses": 1
+    },
+    "phad_sync_stereo_pair_synchronizer_stereopairsynchronizer": {
+      "code_fingerprint": "d4d1f7f8140a81ca2cbed8906d3b4e0165164eb24e50c020070230187da9dd80",
+      "label": "StereoPairSynchronizer",
+      "last": "2026-08-24T03:51:48.185452+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-24T03:51:48.185452+00:00",
+          "outcome": "useful",
+          "q": "分析现在phad-vio开发到哪一步了?"
+        }
+      ],
+      "score": 0.967226813,
+      "source_file": "phad/sync/stereo_pair_synchronizer.hpp",
+      "status": "tentative",
+      "uses": 1
+    }
+  },
+  "version": 1
+}

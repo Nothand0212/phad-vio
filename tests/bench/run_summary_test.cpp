@@ -52,23 +52,24 @@ namespace
   TEST( RunSummaryTest, FieldCompletenessWithMetrics )
   {
     RunSummary summary;
-    summary.status               = RunStatus::kCompleted;
-    summary.sequence             = "MH_01_easy";
-    summary.git_commit_short     = "abcdef1";
-    summary.config_label         = "default";
-    summary.config_hash          = "9f2ab41c";
-    summary.trajectory           = { .image_frames    = 3682,
-                                     .poses_written   = 3682,
-                                     .ok              = 3682,
-                                     .rejected        = 0,
-                                     .failed          = 0,
-                                     .completion_rate = 1.0,
-                                     .coverage_rate   = 1.0,
-                                     .segments        = 1 };
-    summary.robustness.reanchors             = 0;
-    summary.robustness.pnp_successes         = 0;
-    summary.robustness.pnp_fallbacks         = 0;
-    summary.robustness.outliers_culled       = 0;
+    summary.status                            = RunStatus::kCompleted;
+    summary.sequence                          = "MH_01_easy";
+    summary.git_commit_short                  = "abcdef1";
+    summary.config_label                      = "default";
+    summary.config_hash                       = "9f2ab41c";
+    summary.trajectory                        = { .image_frames    = 3682,
+                                                  .poses_written   = 3682,
+                                                  .ok              = 3682,
+                                                  .rejected        = 0,
+                                                  .failed          = 0,
+                                                  .completion_rate = 1.0,
+                                                  .coverage_rate   = 1.0,
+                                                  .segments        = 1 };
+    summary.trajectory.init_pending_frames    = 10;
+    summary.robustness.reanchors              = 0;
+    summary.robustness.pnp_successes          = 0;
+    summary.robustness.pnp_fallbacks          = 0;
+    summary.robustness.outliers_culled        = 0;
     summary.robustness.outliers_culled_unique = 0;
     MetricReport ate;
     ate.trans.rmse = 0.15;
@@ -90,6 +91,8 @@ namespace
     EXPECT_TRUE( root.contains( "robustness" ) );
     EXPECT_TRUE( root.contains( "warnings" ) );
     EXPECT_EQ( root.at( "trajectory" ).at( "segments" ), 1 );
+    EXPECT_EQ( root.at( "trajectory" ).at( "init_pending_frames" ), 10 );
+    EXPECT_FALSE( root.at( "trajectory" ).contains( "init_dropped_frames" ) );
     EXPECT_EQ( root.at( "robustness" ).at( "reanchors" ), 0 );
     EXPECT_EQ( root.at( "robustness" ).at( "pnp_successes" ), 0 );
     EXPECT_EQ( root.at( "robustness" ).at( "pnp_fallbacks" ), 0 );
@@ -172,10 +175,10 @@ namespace
   TEST( RunSummaryTest, DeferredDropCountersSerialize )
   {
     RunSummary summary;
-    summary.status                        = RunStatus::kCompleted;
-    summary.sequence                      = "MH_05_difficult";
-    summary.robustness.deferred_drops     = 2;
-    summary.robustness.deferred_drop_ids  = 32;
+    summary.status                       = RunStatus::kCompleted;
+    summary.sequence                     = "MH_05_difficult";
+    summary.robustness.deferred_drops    = 2;
+    summary.robustness.deferred_drop_ids = 32;
 
     const json root = json::parse( summary.toJson() );
     EXPECT_EQ( root.at( "robustness" ).at( "deferred_drops" ), 2 );
@@ -185,10 +188,10 @@ namespace
   TEST( RunSummaryTest, EvictSkipCulledCountersSerialize )
   {
     RunSummary summary;
-    summary.status                       = RunStatus::kCompleted;
-    summary.sequence                     = "MH_05_difficult";
-    summary.robustness.evictable_marked  = 1;
-    summary.robustness.tracks_evicted    = 12;
+    summary.status                      = RunStatus::kCompleted;
+    summary.sequence                    = "MH_05_difficult";
+    summary.robustness.evictable_marked = 1;
+    summary.robustness.tracks_evicted   = 12;
 
     const json root = json::parse( summary.toJson() );
     EXPECT_EQ( root.at( "robustness" ).at( "evictable_marked" ), 1 );
@@ -198,10 +201,10 @@ namespace
   TEST( RunSummaryTest, ZombieAgeDropCountersSerialize )
   {
     RunSummary summary;
-    summary.status                          = RunStatus::kCompleted;
-    summary.sequence                        = "MH_05_difficult";
-    summary.robustness.zombie_age_drops     = 2;
-    summary.robustness.zombie_age_drop_ids  = 18;
+    summary.status                         = RunStatus::kCompleted;
+    summary.sequence                       = "MH_05_difficult";
+    summary.robustness.zombie_age_drops    = 2;
+    summary.robustness.zombie_age_drop_ids = 18;
 
     const json root = json::parse( summary.toJson() );
     EXPECT_EQ( root.at( "robustness" ).at( "zombie_age_drops" ), 2 );

@@ -1,7 +1,9 @@
 # M4:接入 IMU 设计(grill 定案)
 
 日期: 2026-08-07
-状态: 设计定案(grill-with-docs 会话产出;代码落地前若底层演进需重新对齐)
+状态: **历史决策记录**；M4.1 sync 合同仍有效，M4.2–M4.3 full-inertial
+estimator 路径已由
+[M4.4 gyro-first 设计](m4.4-gyro-visual-fusion-design.md)取代，不可作为当前实现计划直接执行
 关联: issue [#27](https://github.com/Nothand0212/phad-vio/issues/27)(KF 设计,含 D3/D4)、[#23](https://github.com/Nothand0212/phad-vio/issues/23)(M3.3 总图)
 前置: [M3.3 关键帧策略设计](m3.3-keyframe-design.md) §3 D3/D4、§4(M4 接口边界)
 开源对照: [M3.3 关键帧开源对照](m3.3-keyframe-open-source-refs.md)(VINS / Kimera / Basalt 的 IMU 预积分与 KF 交互);GTSAM 本地 `thirdparty/gtsam-4.3a1/gtsam/navigation/{CombinedImuFactor,PreintegrationParams,PreintegratedRotation}.h`
@@ -47,13 +49,13 @@
 
 | # | 决策点 | 定案 |
 |---|---|---|
-| D7 | 状态与因子 | X/V/B 三变量;`CombinedImuFactor(X_i,V_i,X_j,V_j,B_i,B_j)` + `BetweenFactor<ConstantBias>`(bias random walk);噪声单位转换只发生在 Params 构造一处 |
+| D7 | 状态与因子 | X/V/B 三变量；`CombinedImuFactor(X_i,V_i,X_j,V_j,B_i,B_j)` 的 15 维 residual 已包含 bias evolution；M4.4 删除重复 bias `BetweenFactor`；噪声单位转换只发生在 Params 构造一处 |
 | D8 | 位姿初值 | **IMU 预积分外推优先**;PnP/恒速降级为 `imu_gap`/`enable_imu=false` 时的兜底;`pnp_success` 诊断语义重新定义(见 §4.5) |
 | D9 | re-anchor | **整体退役**: 链跨段保持,锚 = 预积分外推位姿;事务回滚只回滚 landmark/观测,位姿与 IMU 段不回滚;仅 IMU 失效(`imu_gap`)或 IMU 关闭时启用 CV 锚兜底 |
 | C3 | 预积分重算 | 每次窗口变更对窗口内所有相邻对重做预积分(10 帧 × ~10 样本,微秒级,不缓存) |
 | C4 | 伪初始化 | `bias=0`、`v0=0`、`gravity=9.81007`(EuRoC 官方值),常数进 config 可调 |
 | C5 | 初始 yaw | 置 0,由 ATE 的 SE3 对齐吸收(静止初始化只可观 roll/pitch) |
-| C7 | bias 因子噪声 | `BetweenFactor<ConstantBias>` sigma 从 random walk 参数推导(见 §4.3);V/B prior 用中等 sigma(非 gauge 紧) |
+| C7 | bias 因子噪声 | acc/gyr random walk 密度平方写入 `PreintegrationCombinedParams` 的 bias covariance，由 `CombinedImuFactor` 消费（见 §4.3）；V/B prior 用中等 sigma（非 gauge 紧） |
 | C11 | gauge prior | 最老帧 X prior 保留,sigma 从 `1e-4` 放松到 `1e-2` 量级 |
 | C15 | bias prior 不扫参 | 按 C7 推荐值执行;仅当 M4.3 MH_01 门不过时再扫参 |
 | C16 | 非 KF 帧初值 | 与 D8 相同: IMU 外推;非 KF 与 KF 无差别(⑤c 全帧 BA 保持) |
@@ -121,13 +123,14 @@
 |---|---|---|
 | `accelerometerCovariance` | `acc_nd² · I₃` | `4.0e-6 · I₃` |
 | `gyroscopeCovariance` | `gyr_nd² · I₃` | `2.879e-8 · I₃` |
-| `integrationCovariance` | `gyr_rw² · I₃`(旋转积分随机游走) | `3.761e-10 · I₃` |
+| `biasAccCovariance` | `acc_rw² · I₃` | `9.0e-6 · I₃` |
+| `biasOmegaCovariance` | `gyr_rw² · I₃` | `3.761e-10 · I₃` |
+| `integrationCovariance` | 固定积分离散误差 | `1.0e-8 · I₃` |
 | gravity | `MakeSharedU(\|g\|)` | `9.81007`(M4.3 起静止段测量优先,C10) |
 
-`BetweenFactor<ConstantBias>` 噪声: bias random walk 离散化,sigma ≈
-`rw · √dt`(gyr: `1.9393e-5·√0.05 ≈ 4.3e-6` rad/s;acc: `3.0e-3·√0.05 ≈
-6.7e-4` m/s² 量级);V/B prior 用中等 sigma(如 `PriorFactor<Velocity>` 1.0 m/s、
-`PriorFactor<ConstantBias>` gyro 1e-3 rad/s / acc 1e-2 m/s² 量级)。
+`biasAccCovariance` / `biasOmegaCovariance` 由 `CombinedImuFactor` 内部离散并
+形成 bias evolution residual；不得再用 `rw·√dt` 添加第二份 bias
+`BetweenFactor`。V/B prior 是独立的窗口头部锚，使用 config 中的中等 sigma。
 
 ## 3. M4.1 数据路径(`phad::sync` 扩展)
 
@@ -205,8 +208,7 @@ StereoImuPacket {
   (`StereoImuPacket` 的 `samples`/`t_prev`);
 - 变量: `X(k)`(Pose3,沿用 Symbol)、`V(k)`(Velocity3)、`B(k)`(ConstantBias);
 - 每对相邻窗口帧: `CombinedImuFactor(X(k−1), V(k−1), X(k), V(k), B(k−1),
-  B(k), preint(k−1,k))` + `BetweenFactor<ConstantBias>(B(k−1), B(k), Δ=0,
-  rw_noise)`;
+  B(k), preint(k−1,k))`；其 combined PIM 已携带 bias random-walk covariance；
 - 视觉因子不变(GenericStereoFactor + `body_P_sensor`);
 - 首帧: `PriorFactor<Pose3>`(gauge,sigma 放松至 1e-2,C11)、`PriorFactor<
   Velocity>(0)`、`PriorFactor<ConstantBias>(bias_init)`;
@@ -233,8 +235,8 @@ Params::MakeSharedU(g)                       // Z-up 世界系
   `preint.Predict(pose, vel, bias)` 给出本帧初值;非 KF 与 KF 无差别(C16);
 - PnP/恒速初值保留为兜底: `imu_gap`(D6)或 `enable_imu=false`(D3)时走原
   M3.3 链(`pnp_success` 语义: IMU-on 下表示"兜底被使用次数",恒为 0 属正常);
-- bias random walk: `BetweenFactor<ConstantBias>`(§2.3 数值);V/B prior 中等
-  sigma(不扫参,C15)。
+- bias random walk：由 `CombinedImuFactor` 的 combined PIM covariance 表达
+  （§2.3）；V/B prior 中等 sigma（不扫参，C15）。
 
 ### 4.4 re-anchor 退役与事务语义(D9)
 
@@ -291,7 +293,7 @@ IMU-off 零回归: 现有 67 测试全部通过;10 个 M3.3 语义用例显式
 - [x] pending 拼接(共享边界去重 + `pending_gap` 累积;被拒帧段保留,成功帧
       消费清空);
 - [x] buildGraph: 最老帧 X/V/B priors(放松 sigma)+ 相邻非 gap 对
-      `CombinedImuFactor` + bias rw `BetweenFactor`(σ = rw·√dt);gap 帧跳过、
+      `CombinedImuFactor`；bias rw covariance 已在 combined PIM 内；gap 帧跳过、
       gap 后第一帧 V/B weak prior 防 indeterminant;enable_imu=false 时 V/B
       完全不进 graph;
 - [x] 初值链: 非 gap 帧 `preint.Predict`(D8),PnP/恒速保留为 gap / IMU-off
@@ -381,12 +383,21 @@ gyro bias 保持 `1e-3 rad/s` 量级,**PASS**。acc bias 暴露 scale/tilt
 
 ## 6. M4.4 收尾小片
 
-- Rule 4 旋转补偿来源: BA 位姿 → IMU 预积分(keyframe-design D3 已定,时机
-  D13);A/B 同序列对比,全序列 record-only + MH_01 不劣化;
-- KF 冷却(`min_frames_after_kf=5`)评估(D4): 有 IMU 数据后,用旋转段 KF 洪峰
-  的触发率/密度数据决定是否加入;
-- 30px 视差阈值复评: 旋转段由 IMU 承载后成为纯平移段参数,全表重测决定是否
-  对齐 VINS 10px(开放问题 4)。
+2026-08-09 状态：直接把 Rule 4 旋转来源从 BA 位姿换成 last accepted KF →
+current IMU 预积分的候选已完成实现与诊断，但 `30/15/10 px` 三臂的 MH_01 ATE
+均劣于同源 control；10px 已恢复相近 KF 总量仍未恢复选择时刻。候选已回退，
+见 [负结果 checkpoint](../benchmark/m4.4/README.md) 与
+[postmortem](m4.4-rule4-imu-rotation-postmortem.md)。
+
+- 原 source gate **FAIL**，因此 `min_frames_after_kf=5`、sentinel 与全序列均未
+  运行；不得把原计划描述成已完成实验；
+- successor B 的 B0 已提取事务型 `KeyframeEpochGate`；MH_01 的
+  `est.tum/kf.tum/diag.csv` 与 control 逐字节相同，accepted schedule exact=100%；
+- B1 fixed-production-schedule shadow probe 已完成：三主文件相对 B0 逐字节相同；
+  10/15px IMU hit 主要为连续 run，`N=5` hard gap 与 pose/IMU agreement veto
+  都会改变数百个事件。因此 `N=5`、two-hit、hysteresis 与 dual-evidence guard
+  均不晋级；B2 前提未满足，下一刀需重新对齐，不保留失败候选兼容路径。结果见
+  [shadow probe](m4.4-keyframe-shadow-probe.md)。
 
 ## 7. 模块边界与改动面
 
@@ -395,7 +406,7 @@ gyro bias 保持 `1e-3 rad/s` 量级,**PASS**。acc bias 暴露 scale/tilt
 | `phad::sync` | `pushImu`、IMU 队列/插值/`imu_gap`、`StereoImuPacket`、诊断扩展(M4.1) |
 | `phad/sensor` | `StereoImuPacket` 类型(或 `StereoFrame` 扩展) |
 | `apps/StereoPairStream` | 产出 `StereoImuPacket`;session 消费侧暂不消费 IMU(M4.1)→ 消费(M4.2) |
-| `phad/estimator` | X/V/B、预积分构造(§2.3 换算一处)、CombinedImuFactor、BetweenFactor、初值链切换(D8)、回滚语义(D9)、bias 诊断列(M4.3) |
+| `phad/estimator` | X/V/B、预积分构造(§2.3 换算一处)、CombinedImuFactor（内含 bias evolution）、初值链切换(D8)、回滚语义(D9)、bias 诊断列(M4.3) |
 | `apps/offline_vo_session` | dropout 注入 CLI(D11)、`enable_imu` 传递 |
 | `phad::bench` | config 快照新键(自动);`init_dropped_frames` 进 summary schema(C8) |
 | `phad::eval` | 不变(总图约束) |
@@ -412,7 +423,7 @@ dropout 注入参数、`init_dropped_frames`(C8)。
 | M4.1 | packet 矩阵(§3.3)+ 字节级回归 | `est.tum`/`diag.csv` 不变 |
 | M4.2 | 合成对拍(§4.7)+ MH_01 跑通 | 数字只记录不门控 |
 | M4.3 | 三重门(§5.2)+ 注入测试 + bias 收敛 + 误初始化拒绝 | 目标为三重门全过;实测①/②量化 FAIL、dropout/③ PASS(§5.4) |
-| M4.4 | Rule 4 A/B | 全序列 record-only + MH_01 不劣化 |
+| M4.4 | Rule 4 source candidate + successor | 直接替换 30/15/10px 均 FAIL 并回退；B0 seam 与 B1 shadow byte gate PASS；无 guard 晋级，下一刀待重新对齐 |
 
 ## 9. 不做
 

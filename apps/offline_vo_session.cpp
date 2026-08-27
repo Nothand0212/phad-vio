@@ -3,12 +3,13 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <random>
+#include <exception>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <random>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -19,9 +20,14 @@
 #include <variant>
 #include <vector>
 
+#include "apps/fixed_lag_shadow_probe.hpp"
+#include "apps/keyframe_epoch_gate.hpp"
+#include "apps/keyframe_shadow_probe.hpp"
 #include "apps/probe_b_writer.hpp"
 #include "apps/stereo_pair_stream.hpp"
 #include "apps/stereo_vo_glue.hpp"
+#include "apps/vio_init_probe.hpp"
+#include "apps/vio_state_probe.hpp"
 #include "phad/camera/rectified_stereo_calibration.hpp"
 #include "phad/camera/stereo_rectifier.hpp"
 #include "phad/common/landmark_id.hpp"
@@ -68,9 +74,9 @@ namespace phad::apps
       {
         return;
       }
-      const double ratio = std::clamp( *options.dropout_keep_ratio, 0.0, 1.0 );
-      const std::size_t n = measurement.observations.size();
-      std::size_t       keep = static_cast<std::size_t>(
+      const double      ratio = std::clamp( *options.dropout_keep_ratio, 0.0, 1.0 );
+      const std::size_t n     = measurement.observations.size();
+      std::size_t       keep  = static_cast<std::size_t>(
           std::ceil( static_cast<double>( n ) * ratio ) );
       if ( keep >= n )
       {
@@ -82,133 +88,6 @@ namespace phad::apps
       std::shuffle( shuffled.begin(), shuffled.end(), rng );
       shuffled.resize( keep );
       measurement.observations = std::move( shuffled );
-    }
-
-    // ── Slice ⑤ keyframe selection ──────────────────────────────────────
-
-    // Parallax threshold for keyframe selection (pixels). Fixed 30 px since
-    // Slice ⑤c (f07cb93 briefly tried VINS' 10 px, ⑤d tried DKB-SLAM's
-    // dynamic Θ_max=5°; both reverted). Rotation-compensated parallax ≈ 0
-    // under pure rotation, so this rule only fires in translation segments;
-    // fast rotation is governed by Rule 1b/3 (track decay → forced
-    // keyframe). See docs/research/m3.3-keyframe-design.md §D1.
-    constexpr double kKeyframeParallaxPx = 30.0;
-    // Minimum track count to run PnP (matches estimator.min_pnp_inliers).
-    constexpr std::size_t kKeyframeMinPnpTracks = 10U;
-
-    struct KeyframeSelectorState
-    {
-      std::unordered_map<common::LandmarkId, Eigen::Vector2d>
-                         last_kf_pixels;
-      common::Timestamp last_kf_timestamp{ 0 };
-      std::uint32_t     total_keyframes = 0;
-      // Rotation compensation (Slice ⑤b): rotation of the last accepted
-      // pose (BA/PnP-refined) used to project last-KF observations into the
-      // current frame before measuring parallax. Identity until first accept.
-      Eigen::Matrix3d last_accepted_rotation =
-          Eigen::Matrix3d::Identity();
-      // Rotation of the last keyframe pose (snapshot at kf accept).
-      Eigen::Matrix3d last_kf_rotation = Eigen::Matrix3d::Identity();
-    };
-
-    [[nodiscard]] bool isKeyframeImpl(
-        const frontend::FrameTracks& tracks,
-        const common::Timestamp      current_ts,
-        KeyframeSelectorState&       state,
-        const camera::RectifiedStereoCalibration& calibration )
-    {
-      // Rule 0: empty observations never become keyframes (Slice ⑤b; the
-      // estimator rejects them, and snapshot must not advance on reject).
-      if ( tracks.observations.empty() ) return false;
-
-      // Rule 1: first 2 frames always keyframes.
-      if ( state.total_keyframes < 2 ) return true;
-
-      // Rule 1b: too few tracks to run PnP -> force keyframe (VINS
-      // last_track_num < 20 rule; here min_pnp_inliers = 10).
-      if ( tracks.observations.size() < kKeyframeMinPnpTracks ) return true;
-
-      // Rule 2: time fallback (> 0.5 s).
-      const std::int64_t dt_ns = current_ts.nanoseconds() -
-                                 state.last_kf_timestamp.nanoseconds();
-      if ( dt_ns > 500'000'000 ) return true;  // > 0.5 s
-
-      // Rule 3: track survival ratio (< 60%).
-      std::size_t common_count = 0;
-      for ( const auto& obs : tracks.observations )
-      {
-        if ( state.last_kf_pixels.count( obs.id ) > 0U )
-        {
-          ++common_count;
-        }
-      }
-      const double survive_ratio =
-          static_cast<double>( common_count ) /
-          static_cast<double>(
-              std::max( state.last_kf_pixels.size(), std::size_t{ 1 } ) );
-      if ( survive_ratio < 0.6 ) return true;
-
-      // Rule 4: rotation-compensated average parallax (> 30 px).
-      // Project last-KF observations into the current frame using the
-      // rotation between last-KF and last-accepted poses, then measure
-      // translational parallax. Pure rotation yields ~0 parallax and does
-      // not trigger a keyframe (VINS compensatedParallax2 idea).
-      // Camera-frame rotation: R_kf_to_cur = R_cur^T * R_kf (transforms a
-      // direction expressed in the last-KF camera frame into the current
-      // frame).
-      const Eigen::Matrix3d R_kf_to_cur =
-          state.last_accepted_rotation.transpose() *
-          state.last_kf_rotation;
-      // Normalized-coordinate projection of the rotation-compensated ray:
-      // pixel -> normalized ray, rotate, back to pixel. This avoids the
-      // degenerate z~0 blow-up of rotating raw pixel coordinates.
-      const double fx = calibration.fxPixels();
-      const double fy = calibration.fyPixels();
-      const double cx = calibration.cxPixels();
-      const double cy = calibration.cyPixels();
-      double      parallax_sum   = 0.0;
-      std::size_t parallax_count = 0;
-      for ( const auto& obs : tracks.observations )
-      {
-        auto it = state.last_kf_pixels.find( obs.id );
-        if ( it == state.last_kf_pixels.end() ) continue;
-        // Last-KF observation as a unit-depth normalized ray.
-        const Eigen::Vector2d p_lastkf = it->second;
-        const Eigen::Vector2d p_cur    = obs.left_pixel;
-        const Eigen::Vector3d ray_kf(
-            ( p_lastkf.x() - cx ) / fx, ( p_lastkf.y() - cy ) / fy, 1.0 );
-        const Eigen::Vector3d ray_cur = R_kf_to_cur * ray_kf;
-        if ( ray_cur.z() <= 1e-6 )
-        {
-          continue;  // behind camera after rotation; skip
-        }
-        const Eigen::Vector2d p_comp(
-            ray_cur.x() / ray_cur.z() * fx + cx,
-            ray_cur.y() / ray_cur.z() * fy + cy );
-        const double dx = p_cur.x() - p_comp.x();
-        const double dy = p_cur.y() - p_comp.y();
-        parallax_sum += std::sqrt( dx * dx + dy * dy );
-        ++parallax_count;
-      }
-      if ( parallax_count > 0 &&
-           ( parallax_sum / static_cast<double>( parallax_count ) ) >
-               kKeyframeParallaxPx )
-        return true;
-
-      return false;
-    }
-
-    void updateKeyframeSnapshotImpl(
-        const frontend::FrameTracks& tracks,
-        const common::Timestamp      ts,
-        KeyframeSelectorState&       state )
-    {
-      state.last_kf_pixels.clear();
-      for ( const auto& obs : tracks.observations )
-        state.last_kf_pixels[ obs.id ] = obs.left_pixel;
-      state.last_kf_timestamp = ts;
-      state.last_kf_rotation  = state.last_accepted_rotation;
-      ++state.total_keyframes;
     }
 
     [[nodiscard]] double percentile( std::vector<double> values, double q )
@@ -257,6 +136,28 @@ namespace phad::apps
   {
     OfflineVoSessionResult result;
 
+    if ( !options.vio_state_probe_path.empty() &&
+         !options.estimator.enable_imu )
+    {
+      result.error = SessionError{
+          "VIO state probe requires estimator.enable_imu" };
+      return result;
+    }
+    if ( !options.vio_init_probe_path.empty() &&
+         !options.estimator.enable_imu )
+    {
+      result.error = SessionError{
+          "VIO init probe requires estimator.enable_imu" };
+      return result;
+    }
+    if ( !options.fixed_lag_shadow_probe_path.empty() &&
+         !options.estimator.enable_imu )
+    {
+      result.error = SessionError{
+          "fixed-lag shadow probe requires estimator.enable_imu" };
+      return result;
+    }
+
     auto opened = io::dataset::euroc::open( options.sequence_root );
     if ( !opened )
     {
@@ -276,10 +177,33 @@ namespace phad::apps
     const auto&             rectified_cal = rectifier.value().calibration();
     frontend::StereoTracker tracker( rectified_cal, options.tracker );
 
+    // M4.4 P2a: candidate-owned batch twin. CLI-only; create 失败只停
+    // candidate（warning），绝不终止 production。
+    std::optional<CandidatePipeline> candidate;
+    if ( options.enable_candidate )
+    {
+      CandidatePipelineOptions candidate_options;
+      candidate_options.tracker   = options.tracker;
+      candidate_options.estimator = options.estimator;
+      auto created =
+          CandidatePipeline::create( rectified_cal, candidate_options );
+      if ( created )
+      {
+        candidate = std::move( created ).value();
+      }
+      else
+      {
+        result.warnings.push_back( "candidate disabled: " +
+                                   created.error().detail );
+      }
+    }
+    bool   candidate_active = candidate.has_value();
+    double candidate_wall_s = 0.0;
+
     // Probe B: CLI path only. Enable estimator side-channel when writing.
-    std::unique_ptr<ProbeBWriter>              probe_b_writer;
-    std::unordered_set<common::LandmarkId>     lifetime_culled;
-    estimator::EstimatorOptions                estimator_options = options.estimator;
+    std::unique_ptr<ProbeBWriter>          probe_b_writer;
+    std::unordered_set<common::LandmarkId> lifetime_culled;
+    estimator::EstimatorOptions            estimator_options = options.estimator;
     if ( !options.probe_b_path.empty() )
     {
       try
@@ -294,7 +218,69 @@ namespace phad::apps
       }
       estimator_options.enable_probe_b = true;
     }
-    estimator::StereoVoEstimator estimator( rectified_cal, estimator_options );
+    if ( !options.vio_state_probe_path.empty() )
+    {
+      estimator_options.enable_vio_state_probe = true;
+    }
+    std::unique_ptr<FixedLagShadowProbe> fixed_lag_shadow_probe;
+    if ( !options.fixed_lag_shadow_probe_path.empty() )
+    {
+      try
+      {
+        fixed_lag_shadow_probe = std::make_unique<FixedLagShadowProbe>(
+            options.fixed_lag_shadow_probe_path );
+      }
+      catch ( const std::runtime_error& exception )
+      {
+        result.error = SessionError{ exception.what() };
+        return result;
+      }
+      estimator_options.enable_fixed_lag_shadow = true;
+    }
+    estimator::StereoVoEstimator  estimator( rectified_cal, estimator_options );
+    std::unique_ptr<VioInitProbe> vio_init_probe;
+    if ( !options.vio_init_probe_path.empty() )
+    {
+      try
+      {
+        vio_init_probe =
+            std::make_unique<VioInitProbe>( options.vio_init_probe_path );
+      }
+      catch ( const std::runtime_error& exception )
+      {
+        result.error = SessionError{ exception.what() };
+        return result;
+      }
+    }
+    std::unique_ptr<VioStateProbe> vio_state_probe;
+    if ( !options.vio_state_probe_path.empty() )
+    {
+      try
+      {
+        vio_state_probe =
+            std::make_unique<VioStateProbe>( options.vio_state_probe_path );
+      }
+      catch ( const std::runtime_error& exception )
+      {
+        result.error = SessionError{ exception.what() };
+        return result;
+      }
+    }
+    std::unique_ptr<KeyframeShadowProbe> keyframe_shadow_probe;
+    if ( !options.keyframe_shadow_probe_path.empty() )
+    {
+      try
+      {
+        keyframe_shadow_probe = std::make_unique<KeyframeShadowProbe>(
+            options.keyframe_shadow_probe_path, rectified_cal,
+            estimator_options.enable_imu );
+      }
+      catch ( const std::runtime_error& exception )
+      {
+        result.error = SessionError{ exception.what() };
+        return result;
+      }
+    }
 
     // Probe: optional deferred top-K drop after skip (see defer_drop_topk).
     std::unordered_set<common::LandmarkId> pending_drop;
@@ -342,18 +328,7 @@ namespace phad::apps
           return selected;
         };
 
-    // Slice ⑤ keyframe selector state.
-    KeyframeSelectorState kf_state;
-    const auto            isKeyframe =
-        [ &kf_state, &rectified_cal ]( const frontend::FrameTracks& tracks,
-                                       const common::Timestamp      ts ) {
-          return isKeyframeImpl( tracks, ts, kf_state, rectified_cal );
-        };
-    const auto updateKeyframeSnapshot =
-        [ &kf_state ]( const frontend::FrameTracks& tracks,
-                       const common::Timestamp      ts ) {
-          updateKeyframeSnapshotImpl( tracks, ts, kf_state );
-        };
+    KeyframeEpochGate keyframe_gate( rectified_cal );
 
     std::vector<common::TimedPose> poses;
     std::vector<common::TimedPose> kf_poses;
@@ -489,8 +464,26 @@ namespace phad::apps
         }
       }
 
-      // Slice ⑤: keyframe selection.
-      const bool is_kf = isKeyframe( tracks, tracks.timestamp );
+      const KeyframeDecision keyframe_decision =
+          keyframe_gate.decide( tracks );
+      const bool is_kf = keyframe_decision.selected;
+      if ( keyframe_shadow_probe )
+      {
+        try
+        {
+          keyframe_shadow_probe->observe(
+              result.counts.image_frames, packet.samples, packet.imu_gap,
+              tracks, keyframe_decision, keyframe_gate );
+        }
+        catch ( const std::exception& exception )
+        {
+          result.error = SessionError{ exception.what() };
+          result.sync  = stream.diagnostics();
+          flushPendingDrop();
+          finalizeSegmentsAndWarnings();
+          return result;
+        }
+      }
       const auto estimator_begin =
           std::chrono::steady_clock::now();
       estimator::KeyframeMeasurement measurement =
@@ -507,21 +500,77 @@ namespace phad::apps
           estimator.update( measurement, is_kf );
       const auto estimator_end = std::chrono::steady_clock::now();
 
-      // Update keyframe snapshot ONLY when the estimator accepted the
-      // keyframe (Slice ⑤b fix: rejected kf must not advance the parallax
-      // / time baselines).
-      if ( is_kf && update.status == estimator::UpdateStatus::kOk )
-      {
-        updateKeyframeSnapshot( tracks, tracks.timestamp );
-      }
-      // Track last-accepted rotation for rotation-compensated parallax.
+      KeyframeFeedback keyframe_feedback;
+      keyframe_feedback.status = update.status;
       if ( update.status == estimator::UpdateStatus::kOk &&
            update.estimate.has_value() )
       {
-        kf_state.last_accepted_rotation =
-            update.estimate->T_W_B.linear();
+        keyframe_feedback.R_W_B = update.estimate->T_W_B.linear();
       }
-      const auto frame_end     = estimator_end;
+      const KeyframeEvent keyframe_event = keyframe_gate.resolve(
+          keyframe_decision.ticket, keyframe_feedback );
+      if ( keyframe_shadow_probe )
+      {
+        try
+        {
+          keyframe_shadow_probe->resolve(
+              keyframe_event, update.diagnostics.bias_gyro );
+        }
+        catch ( const std::exception& exception )
+        {
+          result.error = SessionError{ exception.what() };
+          result.sync  = stream.diagnostics();
+          flushPendingDrop();
+          finalizeSegmentsAndWarnings();
+          return result;
+        }
+      }
+      if ( vio_state_probe )
+      {
+        try
+        {
+          vio_state_probe->write( is_kf, update );
+        }
+        catch ( const std::exception& exception )
+        {
+          result.error = SessionError{ exception.what() };
+          result.sync  = stream.diagnostics();
+          flushPendingDrop();
+          finalizeSegmentsAndWarnings();
+          return result;
+        }
+      }
+      if ( fixed_lag_shadow_probe )
+      {
+        try
+        {
+          fixed_lag_shadow_probe->write( update );
+        }
+        catch ( const std::exception& exception )
+        {
+          result.error = SessionError{ exception.what() };
+          result.sync  = stream.diagnostics();
+          flushPendingDrop();
+          finalizeSegmentsAndWarnings();
+          return result;
+        }
+      }
+      if ( vio_init_probe )
+      {
+        try
+        {
+          vio_init_probe->write( update );
+        }
+        catch ( const std::exception& exception )
+        {
+          result.error = SessionError{ exception.what() };
+          result.sync  = stream.diagnostics();
+          flushPendingDrop();
+          finalizeSegmentsAndWarnings();
+          return result;
+        }
+      }
+      const auto frame_end = estimator_end;
 
       // Composition-root feedback: drop frontend tracks for ids the
       // estimator permanently removed this frame. Default on (④c); two-level
@@ -614,13 +663,13 @@ namespace phad::apps
         {
           probe_frame.culled_ids = std::vector<std::uint64_t>(
               d.culled_landmark_ids.begin(), d.culled_landmark_ids.end() );
-          probe_frame.zombie_track_n    = zombie_track_n;
-          probe_frame.rejected_block_n  = d.probe_rejected_block_n;
-          probe_frame.new_lm            = d.probe_new_lm_n;
-          probe_frame.shared            = d.num_shared;
-          probe_frame.num_obs           = d.num_observations;
-          probe_frame.lm_iterations     = d.lm_iterations;
-          probe_frame.shift_m           = d.max_window_pose_shift_m;
+          probe_frame.zombie_track_n   = zombie_track_n;
+          probe_frame.rejected_block_n = d.probe_rejected_block_n;
+          probe_frame.new_lm           = d.probe_new_lm_n;
+          probe_frame.shared           = d.num_shared;
+          probe_frame.num_obs          = d.num_observations;
+          probe_frame.lm_iterations    = d.lm_iterations;
+          probe_frame.shift_m          = d.max_window_pose_shift_m;
           std::vector<ProbeBShiftTop> shift_top;
           shift_top.reserve( d.probe_shift_top.size() );
           for ( const auto& entry : d.probe_shift_top )
@@ -674,6 +723,10 @@ namespace phad::apps
       {
         ++result.counts.total_track_only_frames;
       }
+      if ( update.diagnostics.init_pending )
+      {
+        ++result.counts.init_pending_frames;
+      }
 
       switch ( update.status )
       {
@@ -686,10 +739,6 @@ namespace phad::apps
                update.message == kSeedRejectedFirstSegment )
           {
             ++result.counts.seed_rejected;
-          }
-          if ( update.diagnostics.init_pending )
-          {
-            ++result.counts.init_dropped_frames;  // M4.3 C8
           }
           break;
         case estimator::UpdateStatus::kFailed:
@@ -799,9 +848,54 @@ namespace phad::apps
         estimator_s.push_back( seconds( estimator_begin, estimator_end ) );
         total_s.push_back( seconds( frame_begin, frame_end ) );
       }
+
+      // M4.4 P2a: candidate 在 production frame 完整处理后再运行；
+      // terminal/异常只停 candidate（不再调用），production 继续到 EOS。
+      // 调用位于 frame_end 计时之后，不污染 production stage timing。
+      if ( candidate_active )
+      {
+        const auto candidate_begin = std::chrono::steady_clock::now();
+        try
+        {
+          const CandidateProgress progress = candidate->process(
+              CandidateFrameInput{
+                  .rectified   = rectified.value(),
+                  .imu_samples = packet.samples,
+                  .t_prev      = packet.t_prev,
+                  .imu_gap     = packet.imu_gap,
+              } );
+          if ( progress == CandidateProgress::kTerminalFailure )
+          {
+            candidate_active = false;
+          }
+        }
+        catch ( const std::exception& exception )
+        {
+          candidate_active = false;
+          result.warnings.push_back( std::string( "candidate stopped: " ) +
+                                     exception.what() );
+        }
+        const auto candidate_end = std::chrono::steady_clock::now();
+        candidate_wall_s += std::chrono::duration<double>( candidate_end -
+                                                           candidate_begin )
+                                .count();
+      }
     }
 
     flushPendingDrop();
+    result.candidate_wall_s = candidate_wall_s;
+
+    // Candidate run 结果统一在成功路径收尾；production error 提前返回时
+    // candidate 随析构丢弃（其结果在 production 失败下无意义）。
+    if ( candidate.has_value() )
+    {
+      result.candidate = std::move( *candidate ).finish();
+      if ( result.candidate->error.has_value() )
+      {
+        result.warnings.push_back( "candidate stopped: " +
+                                   result.candidate->error->detail );
+      }
+    }
 
     const auto wall_end = std::chrono::steady_clock::now();
     result.wall_s =

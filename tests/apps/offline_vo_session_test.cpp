@@ -5,12 +5,18 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <sstream>
+#include <stdexcept>
 #include <string>
+
+#include "phad/sensor/stereo_frame.hpp"
+#include "tests/apps/synthetic_euroc_fixture.hpp"
+#include "tests/frontend/synthetic_stereo.hpp"
 
 namespace
 {
@@ -141,6 +147,7 @@ namespace
     std::filesystem::path m_root;
   };
 
+
   TEST( OfflineVoSessionTest, MissingSequenceReturnsError )
   {
     OfflineVoSessionOptions options;
@@ -150,6 +157,63 @@ namespace
 
     const auto result = runOfflineVoSession( options );
     ASSERT_TRUE( result.error.has_value() );
+    EXPECT_FALSE( result.trajectory.has_value() );
+    EXPECT_EQ( result.counts.image_frames, 0U );
+  }
+
+  TEST( OfflineVoSessionTest, VioStateProbeRejectsDisabledImuBeforeOpen )
+  {
+    OfflineVoSessionOptions options;
+    options.sequence_root =
+        std::filesystem::temp_directory_path() / "phad_missing_euroc_seq";
+    options.estimator.enable_imu = false;
+    options.vio_state_probe_path =
+        std::filesystem::temp_directory_path() / "phad_vio_state.csv";
+
+    const auto result = runOfflineVoSession( options );
+    ASSERT_TRUE( result.error.has_value() );
+    EXPECT_NE( result.error->detail.find( "requires estimator.enable_imu" ),
+               std::string::npos );
+    EXPECT_FALSE( result.trajectory.has_value() );
+    EXPECT_EQ( result.counts.image_frames, 0U );
+  }
+
+  TEST( OfflineVoSessionTest, VioInitProbeRejectsDisabledImuBeforeOpen )
+  {
+    OfflineVoSessionOptions options;
+    options.sequence_root =
+        std::filesystem::temp_directory_path() / "phad_missing_euroc_seq";
+    options.estimator.enable_imu = false;
+    options.vio_init_probe_path =
+        std::filesystem::temp_directory_path() / "phad_vio_init.csv";
+
+    const auto result = runOfflineVoSession( options );
+    ASSERT_TRUE( result.error.has_value() );
+    EXPECT_NE( result.error->detail.find( "VIO init probe" ),
+               std::string::npos );
+    EXPECT_NE( result.error->detail.find( "requires estimator.enable_imu" ),
+               std::string::npos );
+    EXPECT_FALSE( result.trajectory.has_value() );
+    EXPECT_EQ( result.counts.image_frames, 0U );
+  }
+
+  TEST( OfflineVoSessionTest,
+        FixedLagShadowProbeRejectsDisabledImuBeforeOpen )
+  {
+    OfflineVoSessionOptions options;
+    options.sequence_root =
+        std::filesystem::temp_directory_path() / "phad_missing_euroc_seq";
+    options.estimator.enable_imu = false;
+    options.fixed_lag_shadow_probe_path =
+        std::filesystem::temp_directory_path() /
+        "phad_fixed_lag_shadow.csv";
+
+    const auto result = runOfflineVoSession( options );
+    ASSERT_TRUE( result.error.has_value() );
+    EXPECT_NE( result.error->detail.find( "fixed-lag shadow probe" ),
+               std::string::npos );
+    EXPECT_NE( result.error->detail.find( "requires estimator.enable_imu" ),
+               std::string::npos );
     EXPECT_FALSE( result.trajectory.has_value() );
     EXPECT_EQ( result.counts.image_frames, 0U );
   }
@@ -220,19 +284,19 @@ namespace
     std::filesystem::remove( path );
 
     VoDiagRow row;
-    row.timestamp_ns            = 1403636579763555584LL;
-    row.status                  = "ok";
-    row.num_observations        = 136;
-    row.num_landmarks           = 0;
-    row.num_shared              = 0;
-    row.low_connectivity        = false;
-    row.window_size             = 1;
-    row.prior_key               = 0;
-    row.reproj_rms_before_px    = 0.0;
-    row.reproj_rms_after_px     = 0.0;
-    row.num_cheirality          = 0;
-    row.lm_iterations           = 0;
-    row.max_window_pose_shift_m = 0.0;
+    row.timestamp_ns             = 1403636579763555584LL;
+    row.status                   = "ok";
+    row.num_observations         = 136;
+    row.num_landmarks            = 0;
+    row.num_shared               = 0;
+    row.low_connectivity         = false;
+    row.window_size              = 1;
+    row.prior_key                = 0;
+    row.reproj_rms_before_px     = 0.0;
+    row.reproj_rms_after_px      = 0.0;
+    row.num_cheirality           = 0;
+    row.lm_iterations            = 0;
+    row.max_window_pose_shift_m  = 0.0;
     row.segment_id               = 0;
     row.pnp_success              = false;
     row.pnp_inliers              = 0;
@@ -248,7 +312,7 @@ namespace
     const std::string text = oss.str();
     EXPECT_NE( text.find( "timestamp_ns,status,num_obs," ), std::string::npos );
     EXPECT_NE( text.find( "pnp_success,pnp_inliers,outliers_culled,"
-                           "reproj_rms_after_cull_px" ),
+                          "reproj_rms_after_cull_px" ),
                std::string::npos );
     // Slice ④e / Probe B keep the 19-column contract; Probe B is a
     // separate jsonl side-channel. outlier_reopt_rounds stay off diag
@@ -407,6 +471,126 @@ namespace
                               0;
                      } );
     EXPECT_FALSE( has_cull_warning );
+  }
+
+  void expectSameTrajectory(
+      const std::optional<phad::common::Trajectory>& a,
+      const std::optional<phad::common::Trajectory>& b )
+  {
+    EXPECT_EQ( a.has_value(), b.has_value() );
+    if ( !a.has_value() )
+    {
+      return;
+    }
+    ASSERT_TRUE( b.has_value() );
+    const auto& poses_a = a->poses();
+    const auto& poses_b = b->poses();
+    ASSERT_EQ( poses_a.size(), poses_b.size() );
+    for ( std::size_t i = 0; i < poses_a.size(); ++i )
+    {
+      EXPECT_EQ( poses_a[ i ].timestamp, poses_b[ i ].timestamp );
+      EXPECT_TRUE( poses_a[ i ].T_W_B.matrix().isApprox(
+          poses_b[ i ].T_W_B.matrix(), 1e-12 ) );
+    }
+  }
+
+  void expectSameDiagRow( const VoDiagRow& a, const VoDiagRow& b )
+  {
+    EXPECT_EQ( a.timestamp_ns, b.timestamp_ns );
+    EXPECT_EQ( a.status, b.status );
+    EXPECT_EQ( a.num_observations, b.num_observations );
+    EXPECT_EQ( a.num_landmarks, b.num_landmarks );
+    EXPECT_EQ( a.num_shared, b.num_shared );
+    EXPECT_EQ( a.num_disparity, b.num_disparity );
+    EXPECT_EQ( a.low_connectivity, b.low_connectivity );
+    EXPECT_EQ( a.window_size, b.window_size );
+    EXPECT_EQ( a.prior_key, b.prior_key );
+    EXPECT_EQ( a.reproj_rms_before_px, b.reproj_rms_before_px );
+    EXPECT_EQ( a.reproj_rms_after_px, b.reproj_rms_after_px );
+    EXPECT_EQ( a.num_cheirality, b.num_cheirality );
+    EXPECT_EQ( a.lm_iterations, b.lm_iterations );
+    EXPECT_EQ( a.max_window_pose_shift_m, b.max_window_pose_shift_m );
+    EXPECT_EQ( a.segment_id, b.segment_id );
+    EXPECT_EQ( a.pnp_success, b.pnp_success );
+    EXPECT_EQ( a.pnp_inliers, b.pnp_inliers );
+    EXPECT_EQ( a.outliers_culled, b.outliers_culled );
+    EXPECT_EQ( a.reproj_rms_after_cull_px, b.reproj_rms_after_cull_px );
+    EXPECT_EQ( a.is_keyframe, b.is_keyframe );
+    EXPECT_EQ( a.bias_gyro_x, b.bias_gyro_x );
+    EXPECT_EQ( a.bias_gyro_y, b.bias_gyro_y );
+    EXPECT_EQ( a.bias_gyro_z, b.bias_gyro_z );
+    EXPECT_EQ( a.bias_acc_x, b.bias_acc_x );
+    EXPECT_EQ( a.bias_acc_y, b.bias_acc_y );
+    EXPECT_EQ( a.bias_acc_z, b.bias_acc_z );
+  }
+
+  TEST( OfflineVoSessionTest, CandidateSwitchKeepsProductionArtifactsIdentical )
+  {
+    phad::testing::SyntheticEurocFixture fixture;
+
+    OfflineVoSessionOptions baseline_options;
+    baseline_options.sequence_root = fixture.root();
+    baseline_options.max_frames    = 5;
+    // 合成全同 Gaussian blob：唯一性/双向检查无区分度，与
+    // candidate_pipeline_test 的 trackerOptions 一致（synthetic 专属）。
+    baseline_options.tracker.stereo_uniq_ratio  = 0.0;
+    baseline_options.tracker.stereo_check_bidir = false;
+
+    const auto baseline = runOfflineVoSession( baseline_options );
+    ASSERT_FALSE( baseline.error.has_value() ) << baseline.error->detail;
+
+    OfflineVoSessionOptions candidate_options = baseline_options;
+    candidate_options.enable_candidate        = true;
+    const auto with_candidate                 = runOfflineVoSession( candidate_options );
+    ASSERT_FALSE( with_candidate.error.has_value() )
+        << with_candidate.error->detail;
+
+    // candidate 开关绝不改变 production 主产物或错误。
+    expectSameTrajectory( baseline.trajectory, with_candidate.trajectory );
+    expectSameTrajectory( baseline.kf_trajectory,
+                          with_candidate.kf_trajectory );
+    ASSERT_EQ( baseline.diag.size(), with_candidate.diag.size() );
+    for ( std::size_t i = 0; i < baseline.diag.size(); ++i )
+    {
+      expectSameDiagRow( baseline.diag[ i ], with_candidate.diag[ i ] );
+    }
+    EXPECT_EQ( baseline.counts.image_frames,
+               with_candidate.counts.image_frames );
+    EXPECT_EQ( baseline.counts.ok, with_candidate.counts.ok );
+    EXPECT_EQ( baseline.counts.rejected, with_candidate.counts.rejected );
+    EXPECT_EQ( baseline.counts.failed, with_candidate.counts.failed );
+    EXPECT_EQ( baseline.counts.total_keyframes,
+               with_candidate.counts.total_keyframes );
+    EXPECT_EQ( baseline.warnings.size(), with_candidate.warnings.size() );
+    for ( std::size_t i = 0; i < baseline.warnings.size(); ++i )
+    {
+      EXPECT_EQ( baseline.warnings[ i ], with_candidate.warnings[ i ] );
+    }
+
+    // P2b: candidate 不再是逐位 twin——fixed-lag 是独立估计器，精度与
+    // production 允许不同。结构断言：candidate 无 terminal error、
+    // trajectory 与送入帧数一致、timestamp 严格递增、estimate 全 finite；
+    // 精度对比不属于 P2b structural gate。
+    EXPECT_FALSE( baseline.candidate.has_value() );
+    EXPECT_EQ( baseline.candidate_wall_s, 0.0 );
+    ASSERT_TRUE( with_candidate.candidate.has_value() );
+    ASSERT_FALSE( with_candidate.candidate->error.has_value() )
+        << with_candidate.candidate->error->detail;
+    EXPECT_GT( with_candidate.candidate_wall_s, 0.0 );
+    ASSERT_TRUE( with_candidate.candidate->trajectory.has_value() );
+    EXPECT_EQ( with_candidate.candidate->trajectory->size(),
+               with_candidate.counts.image_frames );
+    const auto& candidate_poses =
+        with_candidate.candidate->trajectory->poses();
+    for ( std::size_t i = 1; i < candidate_poses.size(); ++i )
+    {
+      EXPECT_GT( candidate_poses[ i ].timestamp,
+                 candidate_poses[ i - 1 ].timestamp );
+      EXPECT_TRUE( candidate_poses[ i ].T_W_B.matrix().allFinite() );
+    }
+    ASSERT_EQ( with_candidate.candidate->diagnostics.size(),
+               with_candidate.counts.image_frames );
+    EXPECT_EQ( with_candidate.candidate->counts.failed, 0U );
   }
 
 }  // namespace

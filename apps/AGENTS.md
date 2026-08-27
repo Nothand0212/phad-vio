@@ -48,7 +48,19 @@
   skip 入表龄=1，连续仍在 `FrameTracks` 则 +1，`≥n` 精确 `dropTracks`。见
   `docs/research/m3.3-zombie-drop-age-probe-design.md`。
 - MH_05 Probe B：`--probe-b <path>` 为 CLI-only（bench / probe）；**不**进
-  `flattenConfig` / `config_hash`，**不**改 18 列 `diag.csv`。
+  `flattenConfig` / `config_hash`，**不**改主 `diag.csv`。
+- M4.4 fixed-epoch keyframe shadow：`--keyframe-shadow-probe <path>` 为
+  CLI-only sidecar；只观测 production accepted-KF epoch，不改变 selector、
+  estimator 输入、`diag.csv` 或 `config_hash`。
+- M4.4 VIO state probe：`--vio-state-probe <path>` 为 CLI-only accepted-state
+  sidecar；只序列化 estimator 已产出的 gyro prediction 与 posterior pose/bg，不改变
+  estimator、selector、`diag.csv` 或 `config_hash`。与 `--no-imu` 同用必须报参数
+  错误；open/write/flush 或 schema invariant 失败必须升级为 session error。
+- M4.4 fixed-lag shadow probe：`--fixed-lag-shadow-probe <path>` 为 CLI-only
+  sidecar；只读消费 estimator 的持久 fixed-lag shadow diagnostics，不反馈
+  production pose/bias/selector，不进入 `config_hash`。与 `--no-imu` 同用必须报
+  参数错误；writer 在启用 estimator shadow 前成功打开，任何 lifecycle/schema/I/O
+  错误升级为 session error。
 - 行为保持型重构：先在当前 commit 产出仓库外参考产物，再改代码并以逐字节 diff 验收
 
 ## `diag.csv` 合同（M3.3）

@@ -7,6 +7,8 @@
 #include <string>
 #include <string_view>
 
+#include "tests/apps/synthetic_euroc_fixture.hpp"
+
 #ifdef __linux__
 #include <sys/wait.h>
 #endif
@@ -20,13 +22,13 @@ namespace
 
   [[nodiscard]] std::string readFile( const std::filesystem::path& path )
   {
-    std::ifstream in( path );
+    std::ifstream      in( path );
     std::ostringstream oss;
     oss << in.rdbuf();
     return oss.str();
   }
 
-  [[nodiscard]] int runBench( std::string_view args,
+  [[nodiscard]] int runBench( std::string_view             args,
                               const std::filesystem::path& stdout_path,
                               const std::filesystem::path& stderr_path )
   {
@@ -79,6 +81,11 @@ namespace
     EXPECT_EQ( exit_code, 2 );
     const std::string err = readFile( stderr_path );
     EXPECT_NE( err.find( "--probe-b" ), std::string::npos );
+    EXPECT_NE( err.find( "--keyframe-shadow-probe" ), std::string::npos );
+    EXPECT_NE( err.find( "--vio-state-probe" ), std::string::npos );
+    EXPECT_NE( err.find( "--vio-init-probe" ), std::string::npos );
+    EXPECT_NE( err.find( "--fixed-lag-shadow-probe" ),
+               std::string::npos );
     EXPECT_NE( err.find( "--defer-drop-topk" ), std::string::npos );
     EXPECT_NE( err.find( "--evict-skip-culled" ), std::string::npos );
     EXPECT_NE( err.find( "--zombie-drop-age" ), std::string::npos );
@@ -119,6 +126,308 @@ namespace
     ASSERT_FALSE( hash_default.empty() ) << readFile( stderr_default );
     ASSERT_FALSE( hash_probe.empty() ) << readFile( stderr_probe );
     EXPECT_EQ( hash_default, hash_probe );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, KeyframeShadowPathDoesNotChangeConfigHash )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_keyframe_shadow_hash";
+    std::filesystem::remove_all( root );
+    const auto out_default = root / "out_default";
+    const auto out_probe   = root / "out_probe";
+    std::filesystem::create_directories( root );
+
+    const auto stdout_default = root / "stdout_default.txt";
+    const auto stderr_default = root / "stderr_default.txt";
+    const auto stdout_probe   = root / "stdout_probe.txt";
+    const auto stderr_probe   = root / "stderr_probe.txt";
+    const auto probe_path     = root / "keyframe_shadow.csv";
+
+    (void)runBench( "/nonexistent/sequence --out \"" + out_default.string() +
+                        "\" --sequence-name hash_shadow --force",
+                    stdout_default, stderr_default );
+    (void)runBench(
+        "/nonexistent/sequence --out \"" + out_probe.string() +
+            "\" --sequence-name hash_shadow --force "
+            "--keyframe-shadow-probe \"" +
+            probe_path.string() + "\"",
+        stdout_probe, stderr_probe );
+
+    const std::string hash_default =
+        extractConfigHash( readFile( stdout_default ) );
+    const std::string hash_probe =
+        extractConfigHash( readFile( stdout_probe ) );
+    ASSERT_FALSE( hash_default.empty() ) << readFile( stderr_default );
+    ASSERT_FALSE( hash_probe.empty() ) << readFile( stderr_probe );
+    EXPECT_EQ( hash_default, hash_probe );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, VioStateProbePathDoesNotChangeConfigHash )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_vio_state_hash";
+    std::filesystem::remove_all( root );
+    const auto out_default = root / "out_default";
+    const auto out_probe   = root / "out_probe";
+    std::filesystem::create_directories( root );
+
+    const auto stdout_default = root / "stdout_default.txt";
+    const auto stderr_default = root / "stderr_default.txt";
+    const auto stdout_probe   = root / "stdout_probe.txt";
+    const auto stderr_probe   = root / "stderr_probe.txt";
+    const auto probe_path     = root / "vio_state.csv";
+
+    (void)runBench( "/nonexistent/sequence --out \"" + out_default.string() +
+                        "\" --sequence-name hash_vio_state --force",
+                    stdout_default, stderr_default );
+    (void)runBench(
+        "/nonexistent/sequence --out \"" + out_probe.string() +
+            "\" --sequence-name hash_vio_state --force "
+            "--vio-state-probe \"" +
+            probe_path.string() + "\"",
+        stdout_probe, stderr_probe );
+
+    const std::string hash_default =
+        extractConfigHash( readFile( stdout_default ) );
+    const std::string hash_probe =
+        extractConfigHash( readFile( stdout_probe ) );
+    ASSERT_FALSE( hash_default.empty() ) << readFile( stderr_default );
+    ASSERT_FALSE( hash_probe.empty() ) << readFile( stderr_probe );
+    EXPECT_EQ( hash_default, hash_probe );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, VioStateProbeRequiresPath )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_vio_state_missing";
+    std::filesystem::remove_all( root );
+    std::filesystem::create_directories( root );
+    const auto stdout_path = root / "stdout.txt";
+    const auto stderr_path = root / "stderr.txt";
+
+    const int exit_code = runBench(
+        "/nonexistent/sequence --sequence-name missing_vio_state "
+        "--vio-state-probe",
+        stdout_path, stderr_path );
+    EXPECT_EQ( exit_code, 2 );
+    const std::string err = readFile( stderr_path );
+    EXPECT_NE( err.find( "missing value for --vio-state-probe" ),
+               std::string::npos );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, VioStateProbeRejectsNoImu )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_vio_state_no_imu";
+    std::filesystem::remove_all( root );
+    std::filesystem::create_directories( root );
+    const auto stdout_path = root / "stdout.txt";
+    const auto stderr_path = root / "stderr.txt";
+
+    const int exit_code = runBench(
+        "/nonexistent/sequence --sequence-name conflict_vio_state "
+        "--out \"" +
+            ( root / "out" ).string() +
+            "\" --no-imu --vio-state-probe \"" +
+            ( root / "state.csv" ).string() + "\"",
+        stdout_path, stderr_path );
+    EXPECT_EQ( exit_code, 2 );
+    const std::string err = readFile( stderr_path );
+    EXPECT_NE( err.find( "--vio-state-probe" ), std::string::npos );
+    EXPECT_NE( err.find( "--no-imu" ), std::string::npos );
+    EXPECT_NE( err.find( "cannot be used with" ), std::string::npos );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, VioInitProbePathDoesNotChangeConfigHash )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_vio_init_hash";
+    std::filesystem::remove_all( root );
+    const auto out_default = root / "out_default";
+    const auto out_probe   = root / "out_probe";
+    std::filesystem::create_directories( root );
+
+    const auto stdout_default = root / "stdout_default.txt";
+    const auto stderr_default = root / "stderr_default.txt";
+    const auto stdout_probe   = root / "stdout_probe.txt";
+    const auto stderr_probe   = root / "stderr_probe.txt";
+    const auto probe_path     = root / "vio_init.csv";
+
+    (void)runBench( "/nonexistent/sequence --out \"" + out_default.string() +
+                        "\" --sequence-name hash_vio_init --force",
+                    stdout_default, stderr_default );
+    (void)runBench(
+        "/nonexistent/sequence --out \"" + out_probe.string() +
+            "\" --sequence-name hash_vio_init --force "
+            "--vio-init-probe \"" +
+            probe_path.string() + "\"",
+        stdout_probe, stderr_probe );
+
+    const std::string hash_default =
+        extractConfigHash( readFile( stdout_default ) );
+    const std::string hash_probe =
+        extractConfigHash( readFile( stdout_probe ) );
+    ASSERT_FALSE( hash_default.empty() ) << readFile( stderr_default );
+    ASSERT_FALSE( hash_probe.empty() ) << readFile( stderr_probe );
+    EXPECT_EQ( hash_default, hash_probe );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, VioInitProbeRequiresPath )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_vio_init_missing";
+    std::filesystem::remove_all( root );
+    std::filesystem::create_directories( root );
+    const auto stdout_path = root / "stdout.txt";
+    const auto stderr_path = root / "stderr.txt";
+
+    const int exit_code = runBench(
+        "/nonexistent/sequence --sequence-name missing_vio_init "
+        "--vio-init-probe",
+        stdout_path, stderr_path );
+    EXPECT_EQ( exit_code, 2 );
+    const std::string err = readFile( stderr_path );
+    EXPECT_NE( err.find( "missing value for --vio-init-probe" ),
+               std::string::npos );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, VioInitProbeRejectsNoImu )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_vio_init_no_imu";
+    std::filesystem::remove_all( root );
+    std::filesystem::create_directories( root );
+    const auto stdout_path = root / "stdout.txt";
+    const auto stderr_path = root / "stderr.txt";
+
+    const int exit_code = runBench(
+        "/nonexistent/sequence --sequence-name conflict_vio_init "
+        "--out \"" +
+            ( root / "out" ).string() +
+            "\" --no-imu --vio-init-probe \"" +
+            ( root / "init.csv" ).string() + "\"",
+        stdout_path, stderr_path );
+    EXPECT_EQ( exit_code, 2 );
+    const std::string err = readFile( stderr_path );
+    EXPECT_NE( err.find( "--vio-init-probe" ), std::string::npos );
+    EXPECT_NE( err.find( "--no-imu" ), std::string::npos );
+    EXPECT_NE( err.find( "cannot be used with" ), std::string::npos );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, FixedLagShadowProbePathDoesNotChangeConfigHash )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_fixed_lag_shadow_hash";
+    std::filesystem::remove_all( root );
+    const auto out_default = root / "out_default";
+    const auto out_probe   = root / "out_probe";
+    std::filesystem::create_directories( root );
+
+    const auto stdout_default = root / "stdout_default.txt";
+    const auto stderr_default = root / "stderr_default.txt";
+    const auto stdout_probe   = root / "stdout_probe.txt";
+    const auto stderr_probe   = root / "stderr_probe.txt";
+    const auto probe_path     = root / "fixed_lag_shadow.csv";
+
+    (void)runBench( "/nonexistent/sequence --out \"" + out_default.string() +
+                        "\" --sequence-name hash_fixed_lag_shadow --force",
+                    stdout_default, stderr_default );
+    (void)runBench(
+        "/nonexistent/sequence --out \"" + out_probe.string() +
+            "\" --sequence-name hash_fixed_lag_shadow --force "
+            "--fixed-lag-shadow-probe \"" +
+            probe_path.string() + "\"",
+        stdout_probe, stderr_probe );
+
+    const std::string hash_default =
+        extractConfigHash( readFile( stdout_default ) );
+    const std::string hash_probe =
+        extractConfigHash( readFile( stdout_probe ) );
+    ASSERT_FALSE( hash_default.empty() ) << readFile( stderr_default );
+    ASSERT_FALSE( hash_probe.empty() ) << readFile( stderr_probe );
+    EXPECT_EQ( hash_default, hash_probe );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, FixedLagShadowProbeRequiresPath )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_fixed_lag_shadow_missing";
+    std::filesystem::remove_all( root );
+    std::filesystem::create_directories( root );
+    const auto stdout_path = root / "stdout.txt";
+    const auto stderr_path = root / "stderr.txt";
+
+    const int exit_code = runBench(
+        "/nonexistent/sequence --sequence-name missing_fixed_lag_shadow "
+        "--fixed-lag-shadow-probe",
+        stdout_path, stderr_path );
+    EXPECT_EQ( exit_code, 2 );
+    const std::string err = readFile( stderr_path );
+    EXPECT_NE( err.find( "missing value for --fixed-lag-shadow-probe" ),
+               std::string::npos );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, FixedLagShadowProbeRejectsNoImu )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_fixed_lag_shadow_no_imu";
+    std::filesystem::remove_all( root );
+    std::filesystem::create_directories( root );
+    const auto stdout_path = root / "stdout.txt";
+    const auto stderr_path = root / "stderr.txt";
+
+    const int exit_code = runBench(
+        "/nonexistent/sequence --sequence-name conflict_fixed_lag_shadow "
+        "--out \"" +
+            ( root / "out" ).string() +
+            "\" --no-imu --fixed-lag-shadow-probe \"" +
+            ( root / "shadow.csv" ).string() + "\"",
+        stdout_path, stderr_path );
+    EXPECT_EQ( exit_code, 2 );
+    const std::string err = readFile( stderr_path );
+    EXPECT_NE( err.find( "--fixed-lag-shadow-probe" ), std::string::npos );
+    EXPECT_NE( err.find( "--no-imu" ), std::string::npos );
+    EXPECT_NE( err.find( "cannot be used with" ), std::string::npos );
 
     std::filesystem::remove_all( root );
   }
@@ -415,6 +724,133 @@ namespace
                std::string::npos );
     EXPECT_NE( meta_zero.find( "session.skip_drop_min_culled=0" ),
                std::string::npos );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, UsageMentionsCandidate )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root =
+        std::filesystem::temp_directory_path() / "phad_vo_bench_cli_candidate";
+    std::filesystem::remove_all( root );
+    std::filesystem::create_directories( root );
+    const auto stdout_path = root / "stdout.txt";
+    const auto stderr_path = root / "stderr.txt";
+
+    const int exit_code = runBench( "", stdout_path, stderr_path );
+    EXPECT_EQ( exit_code, 2 );
+    const std::string err = readFile( stderr_path );
+    EXPECT_NE( err.find( "--candidate" ), std::string::npos );
+    EXPECT_NE( err.find( "--tracker-stereo-uniq-ratio" ),
+               std::string::npos );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, CandidateFlagDoesNotChangeConfigHash )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_candidate_hash";
+    std::filesystem::remove_all( root );
+    const auto out_default = root / "out_default";
+    const auto out_cand    = root / "out_cand";
+    std::filesystem::create_directories( root );
+
+    const auto stdout_default = root / "stdout_default.txt";
+    const auto stderr_default = root / "stderr_default.txt";
+    const auto stdout_cand    = root / "stdout_cand.txt";
+    const auto stderr_cand    = root / "stderr_cand.txt";
+
+    // meta.json / config_hash 在打开 dataset 前写；--candidate 是 CLI-only，
+    // 不得进入 flattenConfig。
+    (void)runBench( "/nonexistent/sequence --out \"" + out_default.string() +
+                        "\" --sequence-name hash_probe --force",
+                    stdout_default, stderr_default );
+    (void)runBench( "/nonexistent/sequence --out \"" + out_cand.string() +
+                        "\" --sequence-name hash_probe --force --candidate",
+                    stdout_cand, stderr_cand );
+
+    const std::string hash_default =
+        extractConfigHash( readFile( stdout_default ) );
+    const std::string hash_cand = extractConfigHash( readFile( stdout_cand ) );
+    ASSERT_FALSE( hash_default.empty() ) << readFile( stderr_default );
+    ASSERT_FALSE( hash_cand.empty() ) << readFile( stderr_cand );
+    EXPECT_EQ( hash_default, hash_cand );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, CandidateWritesIndependentArtifacts )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    phad::testing::SyntheticEurocFixture fixture;
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_candidate_artifacts";
+    std::filesystem::remove_all( root );
+    std::filesystem::create_directories( root );
+    const auto out_plain = root / "out_plain";
+    const auto out_cand  = root / "out_cand";
+
+    // 合成全同 blob 需要关闭唯一性/双向检查（与 session 测试一致）。
+    const std::string base =
+        " \"" + fixture.root().string() +
+        "\" --sequence-name synthetic"
+        " --gt-euroc \"" +
+        fixture.root().string() +
+        "\" --rpe-delta-s 0.05 --force --tracker-stereo-uniq-ratio 0"
+        " --tracker-disable-stereo-check-bidir";
+
+    const auto stdout_plain = root / "stdout_plain.txt";
+    const auto stderr_plain = root / "stderr_plain.txt";
+    const auto stdout_cand  = root / "stdout_cand.txt";
+    const auto stderr_cand  = root / "stderr_cand.txt";
+
+    const int plain_code = runBench(
+        base + " --out \"" + out_plain.string() + "\"", stdout_plain,
+        stderr_plain );
+    const int cand_code = runBench(
+        base + " --out \"" + out_cand.string() + "\" --candidate",
+        stdout_cand, stderr_cand );
+
+    ASSERT_EQ( plain_code, 0 ) << readFile( stderr_plain );
+    ASSERT_EQ( cand_code, 0 ) << readFile( stderr_cand );
+
+    // production 主产物在 --candidate 开关下不受影响（meta.json 的
+    // created_utc 每次 run 不同，用 config_hash 代替逐字节比较）。
+    EXPECT_EQ( readFile( out_plain / "est.tum" ),
+               readFile( out_cand / "est.tum" ) );
+    EXPECT_EQ( readFile( out_plain / "diag.csv" ),
+               readFile( out_cand / "diag.csv" ) );
+    EXPECT_EQ( extractConfigHash( readFile( stdout_plain ) ),
+               extractConfigHash( readFile( stdout_cand ) ) );
+
+    // candidate artifacts 只出现在 --candidate run。P2b: candidate 是
+    // 独立 fixed-lag 估计器（非 twin）——结构断言：candidate est 行数
+    // 与 production 相同（同一序列帧数）、无 nan/inf、无 terminal。
+    EXPECT_FALSE( std::filesystem::exists( out_plain / "candidate" ) );
+    const auto candidate_dir = out_cand / "candidate";
+    ASSERT_TRUE( std::filesystem::exists( candidate_dir / "est.tum" ) );
+    const std::string cand_est    = readFile( candidate_dir / "est.tum" );
+    const auto        count_lines = []( const std::string& text ) {
+      return static_cast<std::size_t>(
+          std::count( text.begin(), text.end(), '\n' ) );
+    };
+    EXPECT_EQ( count_lines( cand_est ),
+               count_lines( readFile( out_cand / "est.tum" ) ) );
+    EXPECT_EQ( cand_est.find( "nan" ), std::string::npos );
+    EXPECT_EQ( cand_est.find( "inf" ), std::string::npos );
+    ASSERT_TRUE( std::filesystem::exists( candidate_dir / "diag.csv" ) );
+    ASSERT_TRUE( std::filesystem::exists( candidate_dir / "meta.json" ) );
+    const std::string meta = readFile( candidate_dir / "meta.json" );
+    EXPECT_NE( meta.find( "\"ownership\":\"full_pipeline\"" ),
+               std::string::npos );
+    EXPECT_NE( meta.find( "\"terminal\":0" ), std::string::npos );
 
     std::filesystem::remove_all( root );
   }

@@ -19,8 +19,9 @@
 5. **前端风险最先出清。** 决定 VIO 能否工作的是特征跟踪与初始化，
    不是后端公式；因此 LK frontend 属于第二个里程碑而非最后一个。
 6. **后端从第一天就是 GTSAM 因子图。** VO 阶段建立的 stereo projection
-   factor 与 landmark 生命周期在接入 IMU 时完全不动，加入 IMU 只是新增
-   `V(k)`、`B(k)` 变量与 `ImuFactor`、`BetweenFactor<ConstantBias>`。
+   factor 与 landmark 生命周期在接入惯性时保持不动。M4.4 先以 pose-only
+   `AHRSFactor + shared gyro bias` 交付可验收的 gyro-visual slice；未来 full
+   inertial 只有在初始化可观测性通过独立门后才新增 `V/B`，不预留双实现路径。
 
 ## 参考项目的定位
 
@@ -606,10 +607,10 @@ PnP stereo 一致性仲裁：[#25](https://github.com/Nothand0212/phad-vio/issue
 
 ## M4：接入 IMU
 
-M3.3 出口已由 pre-M4 小片（两轮全否决，见上）锁定：纯 VO 内覆盖率的
-代价是 re-anchor 对齐税且无法在匹配/播种层消除 —— re-anchor 锚必须
-来自 IMU 预积分外推（消除 CV 锚错位），段间错位税结构性消失。这是
-本里程碑的第一动机，先于纯精度提升。定案设计见
+M3.3 出口暴露了纯 VO 的 re-anchor 对齐税，形成接入 IMU 的初始动机。M4.2–M4.3
+随后证明：把未可观测的 accelerometer/gravity/velocity 直接接入图会使精度劣于
+VO；M4.4 因而改用 gyro-first vertical slice，并把“同 support 严格优于 VO”升级为
+当前出口。早期 full-inertial 决策链见
 [M4 接入 IMU 设计](research/m4-imu-integration-design.md)（2026-08-07
 grill 定案；决策链 D1–D13 / C1–C17）。
 
@@ -620,7 +621,8 @@ grill 定案；决策链 D1–D13 / C1–C17）。
   边界 IMU 线性插值与 `StereoImuPacket` 构造（段内 ΣΔt ≡ 图像间隔，原始
   样本 + 两端插值，左端样本归新段）；大间断标 `imu_gap`；不新建
   synchronizer；
-- **M4.2 估计器机制（已实施，`0a9faaa` + `c346201`，issue #32）**：状态由
+- **M4.2 估计器机制（历史切片，`0a9faaa` + `c346201`，issue #32；production
+  consumer 已在 M4.4 删除）**：状态曾由
   `X` 扩展为 `X/V/B`，新增 `CombinedImuFactor` 与
   `BetweenFactor<ConstantBias>`；GTSAM preintegration 参数构造与噪声单位
   转换只发生在一处（acc_nd² / gyr_nd² / rw² 连续密度平方）；位姿初值 =
@@ -639,38 +641,59 @@ grill 定案；决策链 D1–D13 / C1–C17）。
   （8/8 `segments/reanchors=1/0`，gyro bias 为 `1e-3 rad/s` 量级）；
   IMU-off 回归 PASS。详见
   [M4.3 checkpoint](benchmark/m4.3/README.md)。本片完成表示实现、跑数与
-  归因收口，不表示失败的数值门已通过；结构性初始化修复移交 M5；
-- **M4.4 收尾小片**：Rule 4 旋转补偿来源 BA 位姿 → IMU 预积分，全序列
-  record-only + MH_01 不劣化；KF 冷却（Basalt `min_frames_after_kf=5`）
-  评估一并做。
+  归因收口，不表示失败的数值门已通过。M4.4 保留 static low-variance gate 与
+  一次性 truth audit，但不再把其 gravity/acc-bias candidate 送进 production graph；
+- **M4.4 gyro-first 收尾（进行中，issue #34）**：Rule 4 30/15/10px、fixed-
+  epoch schedule guard、Combined-only 合同修复与 PIM/posterior 分解均已作为负
+  结果收口；初始化 truth audit 确认 static tilt/acc-bias tangent ambiguity 在
+  optimizer 前已经污染 full inertial prediction。当前 production 删除
+  `CombinedImuFactor`、`ImuFactor`、`V/B` 与全部无 consumer 配置，改为 staged gyro-first：
+  pure-visual accepted rotations 累计 `100 s` → shared gyro bias alignment →
+  pose-only AHRS factors；factor covariance 同时包含 PIM white noise 与实测
+  alignment residual。non-blocking B3 在完整 3681 exact-common poses 上仍为
+  **ATE FAIL / RPE PASS**：`0.0833210 > 0.0809641 m`、
+  `0.0168992 < 0.0177812 m`。撤回失败 full stage 后，三份主产物与 B3 逐字节
+  相同；1680-row/83.95 s objective 显示 boundary median/p90=`0.334/0.594σ`，
+  与最大 ATE 坏桶不同相，故 boundary robustification 关闭。按已确认 A→B 完成
+  fixed-lag P0 installed-library contract 与 P1 read-only shadow：MH_01 主三产物保持
+  byte-identical，2001/1680 inactive/active rows 中 slot/orphan/lifecycle failure 为 0，
+  max pose set 与 batch 同为 10；但 shadow-vs-batch translation delta p95/max 达
+  `0.606/0.643 m`，且该 shadow 仍由 production graph events 驱动，不能作为 handoff
+  ATE 反事实。P1 结构门通过、direct handoff 未授权；未扩 MH_05/11，M4/M4.4 仍不能
+  标完成。
+  设计与完整证据见 [gyro-first 设计](research/m4.4-gyro-visual-fusion-design.md)、
+  [gyro-only recovery](research/m4.4-gyro-only-recovery-design.md)、
+  [fixed-lag reference](research/m4.4-gyro-fixed-lag-reference.md)、
+  [fixed-lag P1 result](research/m4.4-gyro-fixed-lag-shadow-result.md)、
+  [boundary objective](research/m4.4-gyro-boundary-factor-reference.md)和
+  [M4.4 checkpoint](benchmark/m4.4/README.md)。
 
 `estimator.enable_imu`（默认 true）进 `config_hash`；IMU-off 时
-`est.tum`/`diag.csv` 相对 M3.3 基线（`4cf55ca/default_773ea011`）
-**逐字节相同**，作为 A/B 归因与回退锚。
+MH_01 的 `est.tum`/`kf.tum`/`diag.csv` 相对冻结 VO reference
+`b9da3bf/imuoff_c793f690` **逐字节相同**，作为 A/B 归因与回退锚；其余序列
+使用同一 clean code 的 `--no-imu` 配对 control，避免跨代码版本归因。
 
 测试：
 
-- 预积分解析验证作为单元测试：静止、匀速、恒定角速度、已知 bias 的
-  first-order correction 与重新积分一致；
+- AHRS 预积分解析验证：静止、恒定角速度、absolute gyro bias 与旋转方向；
+- staged activation：alignment update 保持 vision-only，下一 update 才建 factor；
+- adversarial accelerometer 不改变 gyro-visual trajectory；
 - rad/s 与 deg/s 错用能被测试发现；
-- covariance 对称且特征值在容差内非负；
 - packet 的 IMU \(\sum\Delta t\) 等于图像时间间隔；
 - 图像时刻恰好落在 IMU 样本上、落在两样本之间、缺样、重复、逆序、
   大间断（`imu_gap` 跳因子不跳帧）；
 - 失败路径：逆序时间戳、非有限测量、非正 \(\Delta t\)、非法 noise 配置；
 - 静止检测成功与运动中误初始化拒绝；
-- 合成退化注入（`--dropout-*`，CLI-only 不进 config_hash）：注入期位姿
-  由预积分外推连续、恢复后无永久损伤；IMU-off 对照为冻结语义。
+- empty/zero-overlap non-keyframe、dropout、re-anchor 与 transaction rollback。
 
-出口（三重门）：
+当前出口：
 
-- **① MH_01 ATE ≤ 0.100 m**（绝对门；M3.3 锚 0.0988 已接近纯 VO 极限，
-  IMU 增量在良好视觉段期望不高，不设"严格优于"硬门）；
-- **② 视觉短时退化时轨迹连续**：MH_05 相对 M3.3 基线显著改善 + 注入
-  测试断言连续性与恢复性，不出现跳变或发散；
-- **③ 机制证据**：IMU-on 下 `segments`/`reanchors` 恒 1/0（re-anchor 税
-  结构性消失）；逐段 ATE 分解的段间错位显著下降；IMU bias 从扰动初值
-  收敛（gyro < 1e-3 rad/s 量级）。
+- **① MH_01 首门**：exact-common support 上 VIO 的 ATE translation 与 1 s RPE
+  translation 都严格小于 VO，且 failed=0、finite、completion/coverage 不退化；
+- **② IMU-off sentinel**：清理后的 `--no-imu` 主产物与冻结 VO reference
+  逐字节相同；
+- **③ EuRoC 11/11**：每个序列都在各自 exact-common support 上同时严格优于
+  VO，并通过同一健康门。任何序列失败先停在该序列诊断，不以平均值掩盖。
 
 时间错位用例（视觉与 IMU 时间错位误差增大）纳入 M9 在线估计前的离线
 对拍测试，不在本里程碑单独验收。

@@ -1,6 +1,6 @@
-// M4.2 合成对拍测试 (§4.7): 视觉观测与 IMU 测量由同一地面真值运动生成,
-// 断言估计轨迹贴合真值 —— 验证预积分机制/ΣΔt 语义/初值链/伪初始化/
-// pending 拼接/imu_gap 退化, 以及 IMU-on 与 IMU-off 的行为分界。
+// M4.4 gyro-visual 合成对拍：视觉观测与 IMU 测量由同一地面真值运动
+// 生成，验证 AHRS 预积分、ΣΔt、staged activation、pending 拼接、gap
+// 退化，以及 IMU-on / IMU-off 的行为分界。
 #include <gtest/gtest.h>
 
 #include <Eigen/Core>
@@ -22,6 +22,7 @@ namespace
 
   using phad::camera::RectifiedStereoCalibration;
   using phad::estimator::EstimatorOptions;
+  using phad::estimator::FusionMode;
   using phad::estimator::KeyframeMeasurement;
   using phad::estimator::LandmarkId;
   using phad::estimator::StereoObservation;
@@ -31,7 +32,7 @@ namespace
   using phad::sensor::RigidTransform;
 
   // Z-up 世界系, 伪初始化重力 (C4/C5): g_w = [0, 0, -g]。
-  constexpr double kGravity = 9.81007;
+  constexpr double      kGravity = 9.81007;
   const Eigen::Vector3d kGravityWorld{ 0.0, 0.0, -kGravity };
   const Eigen::Vector3d kZero3 = Eigen::Vector3d::Zero();
 
@@ -83,7 +84,7 @@ namespace
     const Eigen::Vector3d a_w = motion.accel_world( t_s );
     const Eigen::Matrix3d R   = motion.pose_at( t_s ).linear();
     Eigen::Vector3d       a_m = R.transpose() * ( a_w - kGravityWorld ) +
-                           bias_acc;
+                          bias_acc;
     Eigen::Vector3d omega_m = motion.omega_body( t_s ) + bias_gyro;
     if ( rng != nullptr )
     {
@@ -119,7 +120,7 @@ namespace
     {
       const double frac = static_cast<double>( i ) /
                           static_cast<double>( n_samples - 1 );
-      const double t_s  = t_prev_s + frac * ( t_cur_s - t_prev_s );
+      const double       t_s  = t_prev_s + frac * ( t_cur_s - t_prev_s );
       const std::int64_t t_ns = static_cast<std::int64_t>(
           ( t_ns_abs_offset_s + t_prev_s ) * 1e9 +
           frac * ( t_cur_s - t_prev_s ) * 1e9 );
@@ -134,12 +135,12 @@ namespace
       const RectifiedStereoCalibration& calibration,
       const Eigen::Isometry3d& T_W_B, std::int64_t t_prev_ns,
       std::int64_t t_cur_ns, const std::vector<Eigen::Vector3d>& landmarks_W,
-      const std::vector<LandmarkId>& ids,
+      const std::vector<LandmarkId>&     ids,
       const std::vector<ImuMeasurement>& segment, bool imu_gap = false )
   {
     KeyframeMeasurement measurement;
-    measurement.timestamp = phad::common::Timestamp{ t_cur_ns };
-    measurement.t_prev    = phad::common::Timestamp{ t_prev_ns };
+    measurement.timestamp   = phad::common::Timestamp{ t_cur_ns };
+    measurement.t_prev      = phad::common::Timestamp{ t_prev_ns };
     measurement.imu_samples = segment;
     measurement.imu_gap     = imu_gap;
     for ( std::size_t index = 0; index < landmarks_W.size(); ++index )
@@ -151,7 +152,7 @@ namespace
   }
 
   [[nodiscard]] std::vector<LandmarkId> sequentialIds( std::size_t count,
-                                                       LandmarkId start = 1 )
+                                                       LandmarkId  start = 1 )
   {
     std::vector<LandmarkId> ids;
     ids.reserve( count );
@@ -164,26 +165,30 @@ namespace
 
   // 与 reanchor 测试同源的路标集 (z ≈ 4.2-6 m, 保证全程在视锥内)。
   const std::vector<Eigen::Vector3d> kLandmarks{
-      { 0.4, 0.1, 5.0 },  { -0.3, 0.2, 4.5 }, { 0.1, -0.25, 6.0 },
-      { 0.6, -0.1, 5.5 }, { -0.5, -0.2, 4.8 }, { 0.0, 0.3, 5.2 },
-      { 0.25, 0.15, 4.2 }, { -0.2, -0.15, 5.8 }, { 0.35, -0.05, 5.3 },
+      { 0.4, 0.1, 5.0 },
+      { -0.3, 0.2, 4.5 },
+      { 0.1, -0.25, 6.0 },
+      { 0.6, -0.1, 5.5 },
+      { -0.5, -0.2, 4.8 },
+      { 0.0, 0.3, 5.2 },
+      { 0.25, 0.15, 4.2 },
+      { -0.2, -0.15, 5.8 },
+      { 0.35, -0.05, 5.3 },
       { -0.15, 0.25, 4.6 },
   };
 
   struct RunResult
   {
-    std::vector<Eigen::Isometry3d>            accepted;
+    std::vector<Eigen::Isometry3d>                accepted;
     std::vector<phad::estimator::VioUpdateResult> results;
   };
 
   // ── M4.3 静止 init 前缀语义 ──
   // 静止运动定义见下方运动学场景节。
   const ImuMotion& stationaryMotion();
-  // 帧 0..kInitFrames−1 静止 (init 期全部被拒, init_pending);帧
-  // kInitFrames 为播种帧 (静止, 被接受, 即 accepted[0], τ=0);场景帧
-  // j ≥ 1 的 τ = j·dt —— 播种帧之后运动才启动, 检测窗口 [t0, t0+0.5 s]
-  // 恒为静止样本 (plan 决策 A/C: init 样本 = 被拒帧段累积, t0 = 缓冲
-  // 首样本时刻)。
+  // 帧 0..kInitFrames 静止，视觉从首帧正常接受；前 kInitFrames 帧在
+  // diagnostics 中标记 init_pending，末帧发布一次 audit snapshot。运动场景
+  // 从末帧的同一 identity pose（τ=0）继续。
   constexpr int kInitFrames = 10;  // 0.5 s @ 20 Hz
 
   // 场景帧输入 (前缀语义): 场景帧 j (≥ 1) 的绝对时间 = (kInitFrames + j)·dt,
@@ -198,12 +203,12 @@ namespace
 
   [[nodiscard]] ScenarioInput scenarioInput(
       const ImuMotion& motion, double dt_img_s, int j, int n_samples,
-      const Eigen::Vector3d& bias_acc = kZero3,
+      const Eigen::Vector3d& bias_acc  = kZero3,
       const Eigen::Vector3d& bias_gyro = kZero3, std::mt19937* rng = nullptr,
       double noise_acc = 0.0, double noise_gyr = 0.0 )
   {
     ScenarioInput input;
-    input.t_cur_ns  = static_cast<std::int64_t>(
+    input.t_cur_ns = static_cast<std::int64_t>(
         static_cast<double>( kInitFrames + j ) * dt_img_s * 1e9 );
     input.t_prev_ns = static_cast<std::int64_t>(
         static_cast<double>( kInitFrames + j - 1 ) * dt_img_s * 1e9 );
@@ -217,22 +222,22 @@ namespace
     return input;
   }
 
-  // 静止 init 前缀 (手写循环测试用): 帧 0..kInitFrames−1 被拒
-  // (init_pending), 帧 kInitFrames 播种 (静止, 接受)。返回播种帧位姿
-  // (accepted[0], τ=0)。
+  // 静止 audit 前缀：视觉帧全部接受；末帧发布 snapshot。返回末帧位姿
+  // （运动场景 τ=0 的 identity anchor）。
   [[nodiscard]] Eigen::Isometry3d runStaticInitPrefix(
       StereoVoEstimator& estimator, const RectifiedStereoCalibration& calibration,
-      double dt_img_s )
+      double dt_img_s, const Eigen::Vector3d& bias_acc = kZero3,
+      const Eigen::Vector3d& bias_gyro = kZero3 )
   {
     const std::vector<LandmarkId> ids = sequentialIds( kLandmarks.size() );
     for ( int i = 0; i <= kInitFrames; ++i )
     {
-      const double t_cur_s = static_cast<double>( i ) * dt_img_s;
+      const double       t_cur_s = static_cast<double>( i ) * dt_img_s;
       const std::int64_t t_cur_ns =
           static_cast<std::int64_t>( t_cur_s * 1e9 );
-      const std::int64_t t_prev_ns = i == 0
-                                         ? 0
-                                         : static_cast<std::int64_t>(
+      const std::int64_t          t_prev_ns = i == 0
+                                                  ? 0
+                                                  : static_cast<std::int64_t>(
                                                ( static_cast<double>( i ) -
                                                  1.0 ) *
                                                dt_img_s * 1e9 );
@@ -240,22 +245,22 @@ namespace
       if ( i > 0 )
       {
         segment = makeImuSegment( stationaryMotion(), t_cur_s - dt_img_s,
-                                  t_cur_s, 6 );
+                                  t_cur_s, 6, bias_acc, bias_gyro );
       }
       auto result = estimator.update( makeFrameWithImu(
-          calibration, stationaryMotion().pose_at( t_cur_s ), t_prev_ns,
-          t_cur_ns, kLandmarks, ids, segment ), true );
+                                          calibration, stationaryMotion().pose_at( t_cur_s ), t_prev_ns,
+                                          t_cur_ns, kLandmarks, ids, segment ),
+                                      true );
+      EXPECT_EQ( result.status, UpdateStatus::kOk )
+          << "init frame " << i << ": " << result.message;
+      EXPECT_TRUE( result.estimate.has_value() ) << "init frame " << i;
       if ( i < kInitFrames )
       {
-        EXPECT_EQ( result.status, UpdateStatus::kRejected )
-            << "init frame " << i << ": " << result.message;
         EXPECT_TRUE( result.diagnostics.init_pending ) << "init frame " << i;
       }
       else
       {
-        EXPECT_EQ( result.status, UpdateStatus::kOk )
-            << "seed frame: " << result.message;
-        EXPECT_TRUE( result.estimate.has_value() );
+        EXPECT_TRUE( result.diagnostics.imu_init.has_value() );
         return result.estimate->T_W_B;
       }
     }
@@ -264,30 +269,30 @@ namespace
   }
 
   // 帧时间: 首帧 t=0, 之后每帧 dt_img_s。IMU 段 6 样本/帧 (10 ms 步长, 含两端)。
-  // 首帧 t_prev=0 (seed 路径不使用段)。imu_init=true (M4.3): 先跑静止
-  // init 前缀 (kInitFrames 被拒帧 + 播种帧 = accepted[0], τ=0), 场景帧
-  // j ≥ 1 的 τ = j·dt; imu_init=false (IMU-off): 保持原时序 (帧 i →
-  // τ = i·dt, 无前缀)。
+  // 首帧 t_prev=0。imu_init=true 时先跑 non-blocking 静止 audit 前缀；
+  // 为让运动学断言继续以 τ=0 编号，只把前缀末帧纳入返回的 RunResult，
+  // 之前已接受的视觉 warm-up 帧由专门的 lifecycle 测试覆盖。场景帧
+  // j ≥ 1 的 τ = j·dt；imu_init=false 时无前缀。
   [[nodiscard]] RunResult runImuSegment(
       StereoVoEstimator& estimator, const RectifiedStereoCalibration& calibration,
       const ImuMotion& motion, double dt_img_s, int frames,
-      const Eigen::Vector3d& bias_acc = kZero3,
+      const Eigen::Vector3d& bias_acc  = kZero3,
       const Eigen::Vector3d& bias_gyro = kZero3, double noise_acc = 0.0,
       double noise_gyr = 0.0, bool imu_init = true )
   {
     const std::vector<LandmarkId> ids = sequentialIds( kLandmarks.size() );
     RunResult                     run;
-    std::mt19937 rng( 42 );  // 固定种子, 确定性噪声
+    std::mt19937                  rng( 42 );  // 固定种子, 确定性噪声
     if ( imu_init )
     {
       for ( int i = 0; i <= kInitFrames; ++i )
       {
-        const double t_cur_s = static_cast<double>( i ) * dt_img_s;
+        const double       t_cur_s = static_cast<double>( i ) * dt_img_s;
         const std::int64_t t_cur_ns =
             static_cast<std::int64_t>( t_cur_s * 1e9 );
-        const std::int64_t t_prev_ns = i == 0
-                                           ? 0
-                                           : static_cast<std::int64_t>(
+        const std::int64_t          t_prev_ns = i == 0
+                                                    ? 0
+                                                    : static_cast<std::int64_t>(
                                                  ( static_cast<double>( i ) -
                                                    1.0 ) *
                                                  dt_img_s * 1e9 );
@@ -299,19 +304,23 @@ namespace
                                     bias_gyro, &rng, noise_acc, noise_gyr );
         }
         auto result = estimator.update( makeFrameWithImu(
-            calibration, stationaryMotion().pose_at( t_cur_s ), t_prev_ns,
-            t_cur_ns, kLandmarks, ids, segment ), true );
-        run.results.push_back( result );
-        if ( result.status == UpdateStatus::kOk &&
-             result.estimate.has_value() )
+                                            calibration, stationaryMotion().pose_at( t_cur_s ), t_prev_ns,
+                                            t_cur_ns, kLandmarks, ids, segment ),
+                                        true );
+        if ( i == kInitFrames )
         {
-          run.accepted.push_back( result.estimate->T_W_B );
+          run.results.push_back( result );
+          if ( result.status == UpdateStatus::kOk &&
+               result.estimate.has_value() )
+          {
+            run.accepted.push_back( result.estimate->T_W_B );
+          }
         }
       }
     }
     for ( int j = imu_init ? 1 : 0; j < frames; ++j )
     {
-      const double             tau = static_cast<double>( j ) * dt_img_s;
+      const double       tau      = static_cast<double>( j ) * dt_img_s;
       const std::int64_t t_cur_ns = static_cast<std::int64_t>(
           static_cast<double>( imu_init ? kInitFrames + j : j ) *
           dt_img_s * 1e9 );
@@ -326,10 +335,10 @@ namespace
                                   static_cast<double>( kInitFrames ) *
                                       dt_img_s );
       }
-      const Eigen::Isometry3d T_W_B = motion.pose_at( tau );
-      auto result = estimator.update( makeFrameWithImu(
-          calibration, T_W_B, t_prev_ns, t_cur_ns, kLandmarks, ids, segment ),
-                                      true );
+      const Eigen::Isometry3d T_W_B  = motion.pose_at( tau );
+      auto                    result = estimator.update( makeFrameWithImu(
+                                          calibration, T_W_B, t_prev_ns, t_cur_ns, kLandmarks, ids, segment ),
+                                                         true );
       run.results.push_back( result );
       if ( result.status == UpdateStatus::kOk && result.estimate.has_value() )
       {
@@ -339,30 +348,42 @@ namespace
     return run;
   }
 
-  // 所有接受帧必须 ok 且逐帧贴合真值 (容差逐测试给定)。前缀 init 帧
-  // (若有, 如 M4.3 的 kInitFrames 帧) 全部被拒且 init_pending; accepted[j]
-  // 对应 τ = j·dt (播种帧 = accepted[0])。
+  // 所有返回帧必须 ok 且逐帧贴合真值；accepted[j] 对应 τ=j·dt。
   void expectAllOkAndClose( const RunResult& run, const ImuMotion& motion,
                             double dt_img_s, double tol_trans_m,
-                            double tol_rot_rad = 1e-2 )
+                            double tol_rot_rad       = 1e-2,
+                            bool   expect_gyro_state = true )
   {
-    const std::size_t rejected = run.results.size() - run.accepted.size();
-    for ( std::size_t index = 0; index < rejected; ++index )
-    {
-      EXPECT_EQ( run.results[ index ].status, UpdateStatus::kRejected )
-          << "init frame " << index << ": " << run.results[ index ].message;
-      EXPECT_TRUE( run.results[ index ].diagnostics.init_pending )
-          << "init frame " << index;
-    }
-    ASSERT_EQ( run.accepted.size(), run.results.size() - rejected );
+    ASSERT_EQ( run.accepted.size(), run.results.size() );
     for ( std::size_t index = 0; index < run.accepted.size(); ++index )
     {
-      const auto& result = run.results[ rejected + index ];
+      const auto& result = run.results[ index ];
       EXPECT_EQ( result.status, UpdateStatus::kOk ) << "frame " << index
                                                     << ": " << result.message;
-      const double t_s = static_cast<double>( index ) * dt_img_s;
-      const Eigen::Isometry3d& est    = run.accepted[ index ];
-      const Eigen::Isometry3d& truth  = motion.pose_at( t_s );
+      EXPECT_EQ( result.diagnostics.gyro_state.has_value(), expect_gyro_state )
+          << "frame " << index;
+      if ( expect_gyro_state && result.diagnostics.gyro_state.has_value() )
+      {
+        const auto& state = *result.diagnostics.gyro_state;
+        const bool  expects_prediction =
+            result.diagnostics.fusion_mode == FusionMode::kGyroVisual;
+        EXPECT_EQ( state.prediction_valid, expects_prediction )
+            << "frame " << index;
+        EXPECT_GE( state.imu_sample_count, 2U ) << "frame " << index;
+        EXPECT_LT( state.imu_t_i_ns, state.imu_t_j_ns ) << "frame " << index;
+        EXPECT_NEAR(
+            state.imu_dt_s,
+            static_cast<double>( state.imu_t_j_ns - state.imu_t_i_ns ) * 1e-9,
+            1e-12 )
+            << "frame " << index;
+        EXPECT_TRUE( state.predicted_T_W_B.matrix().allFinite() )
+            << "frame " << index;
+        EXPECT_TRUE( state.prediction_bias_gyro.allFinite() )
+            << "frame " << index;
+      }
+      const double             t_s   = static_cast<double>( index ) * dt_img_s;
+      const Eigen::Isometry3d& est   = run.accepted[ index ];
+      const Eigen::Isometry3d& truth = motion.pose_at( t_s );
       const double             d_trans =
           ( est.translation() - truth.translation() ).norm();
       EXPECT_NEAR( d_trans, 0.0, tol_trans_m ) << "frame " << index;
@@ -447,6 +468,70 @@ namespace
     };
   }
 
+  struct DiscreteAlignmentState
+  {
+    Eigen::Isometry3d T_W_B  = Eigen::Isometry3d::Identity();
+    Eigen::Vector3d   acc_W  = Eigen::Vector3d::Zero();
+    Eigen::Vector3d   rate_B = Eigen::Vector3d::Zero();
+  };
+
+  [[nodiscard]] Eigen::Matrix3d richRotation( const double t_s )
+  {
+    const double roll  = 0.4 * std::sin( 0.9 * t_s );
+    const double pitch = 0.35 * std::sin( 0.7 * t_s );
+    const double yaw   = 0.45 * std::sin( 0.6 * t_s );
+    return ( Eigen::AngleAxisd( yaw, Eigen::Vector3d::UnitZ() ) *
+             Eigen::AngleAxisd( pitch, Eigen::Vector3d::UnitY() ) *
+             Eigen::AngleAxisd( roll, Eigen::Vector3d::UnitX() ) )
+        .toRotationMatrix();
+  }
+
+  [[nodiscard]] std::vector<DiscreteAlignmentState> alignmentStates(
+      const int intervals, const double dt_s )
+  {
+    std::vector<DiscreteAlignmentState> states(
+        static_cast<std::size_t>( intervals + 1 ) );
+    const Eigen::Vector3d frequency{ 2.0, 2.4, 2.8 };
+    Eigen::Vector3d       position = Eigen::Vector3d::Zero();
+    Eigen::Vector3d       velocity{ 0.6, 0.4, 0.25 };
+    for ( int index = 0; index <= intervals; ++index )
+    {
+      const double t_s          = static_cast<double>( index ) * dt_s;
+      auto&        state        = states[ static_cast<std::size_t>( index ) ];
+      state.T_W_B.linear()      = richRotation( t_s );
+      state.T_W_B.translation() = position;
+      state.acc_W =
+          -frequency.cwiseProduct( frequency ).cwiseProduct( position );
+      if ( index < intervals )
+      {
+        const Eigen::Matrix3d   R_next = richRotation( t_s + dt_s );
+        const Eigen::AngleAxisd delta(
+            state.T_W_B.linear().transpose() * R_next );
+        state.rate_B = delta.axis() * delta.angle() / dt_s;
+      }
+      else
+      {
+        state.rate_B = states[ static_cast<std::size_t>( index - 1 ) ].rate_B;
+      }
+      position += velocity * dt_s + 0.5 * state.acc_W * dt_s * dt_s;
+      velocity += state.acc_W * dt_s;
+    }
+    return states;
+  }
+
+  [[nodiscard]] ImuMeasurement alignmentSample(
+      const DiscreteAlignmentState& state, const std::int64_t timestamp_ns,
+      const Eigen::Vector3d& bias_acc, const Eigen::Vector3d& bias_gyro )
+  {
+    const Eigen::Vector3d accel =
+        state.T_W_B.linear().transpose() * ( state.acc_W - kGravityWorld ) +
+        bias_acc;
+    const Eigen::Vector3d gyro = state.rate_B + bias_gyro;
+    return ImuMeasurement{ phad::common::Timestamp{ timestamp_ns },
+                           { accel.x(), accel.y(), accel.z() },
+                           { gyro.x(), gyro.y(), gyro.z() } };
+  }
+
   [[nodiscard]] EstimatorOptions imuOptions()
   {
     EstimatorOptions options;
@@ -464,15 +549,9 @@ namespace
 TEST( StereoVoImu, StationaryKeepsPose )
 {
   StereoVoEstimator estimator( makeCalibration(), imuOptions() );
-  const auto run = runImuSegment( estimator, makeCalibration(),
-                                  stationaryMotion(), 0.05, 10 );
+  const auto        run = runImuSegment( estimator, makeCalibration(),
+                                         stationaryMotion(), 0.05, 10 );
   expectAllOkAndClose( run, stationaryMotion(), 0.05, 2e-2 );
-  // D8: IMU-on 非 gap 帧初值 = preint.Predict, PnP 不运行。
-  for ( const auto& result : run.results )
-  {
-    EXPECT_FALSE( result.diagnostics.pnp_success );
-    EXPECT_EQ( result.diagnostics.pnp_inliers, 0U );
-  }
 }
 
 // ── §4.7-b 匀速: 视觉位移 = IMU 积分位移。 ──
@@ -480,9 +559,9 @@ TEST( StereoVoImu, ConstantVelocityMatchesGroundTruth )
 {
   const Eigen::Vector3d v{ 0.3, 0.0, 0.0 };
   const ImuMotion       motion = constantVelocityMotion( v );
-  StereoVoEstimator estimator( makeCalibration(), imuOptions() );
-  const auto run = runImuSegment( estimator, makeCalibration(), motion, 0.05,
-                                  12 );
+  StereoVoEstimator     estimator( makeCalibration(), imuOptions() );
+  const auto            run = runImuSegment( estimator, makeCalibration(), motion, 0.05,
+                                             12 );
   expectAllOkAndClose( run, motion, 0.05, 2e-2 );
   // ΣΔt ≡ 图像间隔: 12 帧后累计位移 = p(0.55) ≈ 0.15 m (0.3 m/s 巡航
   // 0.45 s + 斜坡 0.015 m; 相对误差 < 1%)。
@@ -495,9 +574,9 @@ TEST( StereoVoImu, ConstantRotationMatchesGroundTruth )
 {
   const Eigen::Vector3d v{ 0.2, 0.0, 0.0 };
   const ImuMotion       motion = constantRotationMotion( 0.2, v );
-  StereoVoEstimator estimator( makeCalibration(), imuOptions() );
-  const auto run = runImuSegment( estimator, makeCalibration(), motion, 0.05,
-                                  12 );
+  StereoVoEstimator     estimator( makeCalibration(), imuOptions() );
+  const auto            run = runImuSegment( estimator, makeCalibration(), motion, 0.05,
+                                             12 );
   expectAllOkAndClose( run, motion, 0.05, 3e-2, 2e-2 );
 }
 
@@ -507,7 +586,7 @@ TEST( StereoVoImu, KnownBiasIsAbsorbed )
   const Eigen::Vector3d bias_acc{ 0.3, -0.2, 0.1 };
   const Eigen::Vector3d bias_gyro{ 0.02, -0.01, 0.015 };
   const ImuMotion       motion = stationaryMotion();
-  StereoVoEstimator estimator( makeCalibration(), imuOptions() );
+  StereoVoEstimator     estimator( makeCalibration(), imuOptions() );
   // 0.5 s 静止。bias 若无估计, 预积分漂移 ≈ 0.5 * 0.25/2 = 6 cm —— 容差
   // 3 cm 区分「偏置被图吸收」与「伪初始化完全不估计」。
   // M4.3: init 的 R_W_I0 用含 bias 的 a_mean 定 roll/pitch → 姿态偏
@@ -519,13 +598,192 @@ TEST( StereoVoImu, KnownBiasIsAbsorbed )
   expectAllOkAndClose( run, motion, 0.05, 3e-2, 6e-2 );
 }
 
+TEST( StereoVoImu, GyroFactorUsesAbsoluteBiasWithoutDoubleCorrection )
+{
+  EstimatorOptions options        = imuOptions();
+  options.imu_gyro_align_window_s = 0.2;
+  options.enable_vio_state_probe  = true;
+  const Eigen::Vector3d bias_gyro{ 0.02, -0.01, 0.015 };
+  const ImuMotion       motion =
+      constantRotationMotion( 0.2, Eigen::Vector3d{ 0.2, 0.0, 0.0 } );
+  StereoVoEstimator estimator( makeCalibration(), options );
+
+  const RunResult run = runImuSegment(
+      estimator, makeCalibration(), motion, 0.05, 12, kZero3, bias_gyro );
+  expectAllOkAndClose( run, motion, 0.05, 3e-2, 2e-2 );
+
+  bool saw_active = false;
+  for ( const auto& result : run.results )
+  {
+    if ( result.diagnostics.fusion_mode != FusionMode::kGyroVisual )
+    {
+      continue;
+    }
+    saw_active = true;
+    EXPECT_TRUE( result.diagnostics.bias_gyro.isApprox( bias_gyro, 1e-8 ) );
+    EXPECT_GT( result.diagnostics.gyro_factor_count, 0U );
+    ASSERT_TRUE( result.diagnostics.gyro_graph_cost.has_value() );
+    const auto& cost = *result.diagnostics.gyro_graph_cost;
+    EXPECT_EQ( cost.gyro_factor_count,
+               result.diagnostics.gyro_factor_count );
+    EXPECT_EQ( cost.interior_factor_count + 1U,
+               cost.gyro_factor_count );
+    EXPECT_GT( cost.stereo_factor_count, 0U );
+    EXPECT_GE( cost.boundary_initial_residual_norm_rad, 0.0 );
+    EXPECT_GE( cost.boundary_posterior_residual_norm_rad, 0.0 );
+    EXPECT_GE( cost.boundary_initial_whitened_norm, 0.0 );
+    EXPECT_GE( cost.boundary_posterior_whitened_norm, 0.0 );
+    EXPECT_GE( cost.newest_initial_residual_norm_rad, 0.0 );
+    EXPECT_GE( cost.newest_posterior_residual_norm_rad, 0.0 );
+    EXPECT_GE( cost.newest_initial_whitened_norm, 0.0 );
+    EXPECT_GE( cost.newest_posterior_whitened_norm, 0.0 );
+  }
+  EXPECT_TRUE( saw_active );
+}
+
+TEST( StereoVoImu, StaticInitDoesNotBlockVisualUpdatesBeforeGyroActivation )
+{
+  EstimatorOptions vio_options        = imuOptions();
+  vio_options.imu_gyro_align_window_s = 100.0;
+  EstimatorOptions vo_options         = vio_options;
+  vo_options.enable_imu               = false;
+  StereoVoEstimator             vio( makeCalibration(), vio_options );
+  StereoVoEstimator             vo( makeCalibration(), vo_options );
+  const std::vector<LandmarkId> ids = sequentialIds( kLandmarks.size() );
+
+  int init_snapshot_count = 0;
+  for ( int i = 0; i <= kInitFrames + 2; ++i )
+  {
+    const double       t_cur_s  = static_cast<double>( i ) * 0.05;
+    const std::int64_t t_cur_ns = static_cast<std::int64_t>( t_cur_s * 1e9 );
+    const std::int64_t t_prev_ns =
+        i == 0 ? 0 : static_cast<std::int64_t>( ( t_cur_s - 0.05 ) * 1e9 );
+    std::vector<ImuMeasurement> segment;
+    if ( i > 0 )
+    {
+      segment = makeImuSegment( stationaryMotion(), t_cur_s - 0.05,
+                                t_cur_s, 6 );
+    }
+    const KeyframeMeasurement measurement = makeFrameWithImu(
+        makeCalibration(), stationaryMotion().pose_at( t_cur_s ), t_prev_ns,
+        t_cur_ns, kLandmarks, ids, segment );
+    const auto vio_result = vio.update( measurement, true );
+    const auto vo_result  = vo.update( measurement, true );
+
+    EXPECT_EQ( vio_result.status, vo_result.status ) << "frame " << i;
+    ASSERT_EQ( vio_result.estimate.has_value(),
+               vo_result.estimate.has_value() )
+        << "frame " << i;
+    if ( vio_result.estimate.has_value() )
+    {
+      EXPECT_TRUE( vio_result.estimate->T_W_B.matrix().isApprox(
+          vo_result.estimate->T_W_B.matrix(), 1e-12 ) )
+          << "frame " << i;
+    }
+    EXPECT_EQ( vio_result.diagnostics.fusion_mode, FusionMode::kVisionOnly );
+    EXPECT_EQ( vio_result.diagnostics.gyro_factor_count, 0U );
+    if ( i < kInitFrames )
+    {
+      EXPECT_TRUE( vio_result.diagnostics.init_pending ) << "frame " << i;
+    }
+    if ( vio_result.diagnostics.imu_init.has_value() )
+    {
+      ++init_snapshot_count;
+    }
+  }
+  EXPECT_EQ( init_snapshot_count, 1 );
+}
+
+TEST( StereoVoImu, AccelerometerDoesNotAffectGyroVisualTrajectory )
+{
+  const ImuMotion motion =
+      constantRotationMotion( 0.2, Eigen::Vector3d{ 0.2, 0.0, 0.0 } );
+  StereoVoEstimator nominal( makeCalibration(), imuOptions() );
+  StereoVoEstimator adversarial( makeCalibration(), imuOptions() );
+
+  const RunResult nominal_run = runImuSegment(
+      nominal, makeCalibration(), motion, 0.05, 12 );
+  const RunResult adversarial_run = runImuSegment(
+      adversarial, makeCalibration(), motion, 0.05, 12,
+      Eigen::Vector3d{ 1.0, -0.7, 0.4 } );
+
+  ASSERT_EQ( nominal_run.accepted.size(), adversarial_run.accepted.size() );
+  ASSERT_FALSE( nominal_run.accepted.empty() );
+  const Eigen::Isometry3d T_N0_Ni = nominal_run.accepted.front().inverse();
+  const Eigen::Isometry3d T_A0_Ai = adversarial_run.accepted.front().inverse();
+  for ( std::size_t i = 0; i < nominal_run.accepted.size(); ++i )
+  {
+    const Eigen::Isometry3d T_N0_Nj = T_N0_Ni * nominal_run.accepted[ i ];
+    const Eigen::Isometry3d T_A0_Aj = T_A0_Ai * adversarial_run.accepted[ i ];
+    EXPECT_NEAR(
+        ( T_N0_Nj.translation() - T_A0_Aj.translation() ).norm(), 0.0,
+        1e-9 )
+        << "frame " << i;
+    EXPECT_NEAR(
+        Eigen::AngleAxisd( T_N0_Nj.linear().transpose() *
+                           T_A0_Aj.linear() )
+            .angle(),
+        0.0, 1e-9 )
+        << "frame " << i;
+  }
+}
+
+TEST( StereoVoImu, StaticInitPublishesOneTruthSnapshot )
+{
+  const Eigen::Vector3d bias_acc{ 0.3, -0.2, 0.1 };
+  const Eigen::Vector3d bias_gyro{ 0.02, -0.01, 0.015 };
+  StereoVoEstimator     estimator( makeCalibration(), imuOptions() );
+  const auto            run = runImuSegment(
+      estimator, makeCalibration(), stationaryMotion(), 0.05, 4, bias_acc,
+      bias_gyro );
+
+  const phad::estimator::ImuInitDiagnostics* snapshot    = nullptr;
+  std::size_t                                event_count = 0;
+  for ( const auto& result : run.results )
+  {
+    if ( result.diagnostics.imu_init.has_value() )
+    {
+      ++event_count;
+      snapshot = &*result.diagnostics.imu_init;
+    }
+  }
+  ASSERT_EQ( event_count, 1U );
+  ASSERT_NE( snapshot, nullptr );
+
+  const Eigen::Vector3d expected_acc =
+      Eigen::Vector3d( 0.0, 0.0, kGravity ) + bias_acc;
+  const Eigen::Vector3d expected_acc_bias =
+      expected_acc - kGravity * expected_acc.normalized();
+  EXPECT_EQ( snapshot->imu_sample_count, 51U );
+  EXPECT_EQ( snapshot->imu_t_i_ns, 0 );
+  EXPECT_EQ( snapshot->imu_t_j_ns, 500'000'000 );
+  EXPECT_NEAR( snapshot->imu_dt_s, 0.5, 1e-12 );
+  EXPECT_TRUE( snapshot->gyro_mean.isApprox( bias_gyro, 1e-12 ) );
+  EXPECT_TRUE( snapshot->gyro_std.isZero( 1e-12 ) );
+  EXPECT_TRUE( snapshot->acc_mean.isApprox( expected_acc, 1e-12 ) );
+  EXPECT_TRUE( snapshot->acc_std.isZero( 1e-12 ) );
+  EXPECT_TRUE(
+      ( snapshot->T_W_B0.linear() * expected_acc.normalized() )
+          .isApprox( Eigen::Vector3d::UnitZ(), 1e-12 ) );
+  EXPECT_TRUE( snapshot->velocity_W.isZero( 1e-12 ) );
+  EXPECT_TRUE( snapshot->bias_gyro.isApprox( bias_gyro, 1e-12 ) );
+  EXPECT_TRUE(
+      snapshot->bias_acc.isApprox( expected_acc_bias, 1e-12 ) );
+  EXPECT_NEAR( snapshot->acc_mean_norm, expected_acc.norm(), 1e-12 );
+  EXPECT_DOUBLE_EQ( snapshot->gravity_model_magnitude, kGravity );
+  EXPECT_DOUBLE_EQ( snapshot->gyro_std_limit,
+                    imuOptions().imu_init_gyro_std );
+  EXPECT_DOUBLE_EQ( snapshot->acc_std_limit,
+                    imuOptions().imu_init_accel_std );
+}
+
 // ── §4.7-e covariance: 带高斯噪声 (密度量级) 的 IMU 段轨迹仍准确 ——
 // 协方差 = 密度平方的换算若错误, LM 权重失当 → 漂移/发散。 ──
 TEST( StereoVoImu, NoisyImuStaysAccurate )
 {
   const Eigen::Vector3d v{ 0.3, 0.0, 0.0 };
   const ImuMotion       motion = constantVelocityMotion( v );
-  StereoVoEstimator estimator( makeCalibration(), imuOptions() );
+  StereoVoEstimator     estimator( makeCalibration(), imuOptions() );
   // 噪声 σ = 密度量级 (2e-3 m/s², 1.7e-4 rad/s) 的 5 倍, 仍远小于运动
   // 信号;accel σ = 1e-2 保持在静止检测阈值 (2e-2) 以下带余量, init 在
   // 播种帧确定性通过。
@@ -538,20 +796,20 @@ TEST( StereoVoImu, NoisyImuStaysAccurate )
 // rebuildPreintegration 用 samples[0] 覆盖整个 [t_prev, t_cur]。 ──
 TEST( StereoVoImu, TwoSampleSegmentIntegratesWholeInterval )
 {
-  const Eigen::Vector3d v{ 0.3, 0.0, 0.0 };
-  const ImuMotion       motion = constantVelocityMotion( v );
-  StereoVoEstimator estimator( makeCalibration(), imuOptions() );
+  const Eigen::Vector3d         v{ 0.3, 0.0, 0.0 };
+  const ImuMotion               motion = constantVelocityMotion( v );
+  StereoVoEstimator             estimator( makeCalibration(), imuOptions() );
   const std::vector<LandmarkId> ids = sequentialIds( kLandmarks.size() );
   // M4.3: 静止 init 前缀 (播种帧 = accepted[0], τ=0), 场景帧 j ≥ 1 两样本段。
   std::vector<Eigen::Isometry3d> accepted{
-    runStaticInitPrefix( estimator, makeCalibration(), 0.05 )
-  };
+      runStaticInitPrefix( estimator, makeCalibration(), 0.05 ) };
   for ( int j = 1; j < 12; ++j )
   {
-    const ScenarioInput in = scenarioInput( motion, 0.05, j, 2 );
-    auto result = estimator.update( makeFrameWithImu(
-        makeCalibration(), in.T_W_B, in.t_prev_ns, in.t_cur_ns, kLandmarks,
-        ids, in.segment ), true );
+    const ScenarioInput in     = scenarioInput( motion, 0.05, j, 2 );
+    auto                result = estimator.update( makeFrameWithImu(
+                                        makeCalibration(), in.T_W_B, in.t_prev_ns, in.t_cur_ns, kLandmarks,
+                                        ids, in.segment ),
+                                                   true );
     EXPECT_EQ( result.status, UpdateStatus::kOk ) << "frame " << j
                                                   << ": " << result.message;
     if ( result.estimate.has_value() )
@@ -569,24 +827,24 @@ TEST( StereoVoImu, TwoSampleSegmentIntegratesWholeInterval )
 // (weak priors 防 indeterminant), 后续帧继续正常。 ──
 TEST( StereoVoImu, ImuGapFallsBackToVision )
 {
-  const Eigen::Vector3d v{ 0.3, 0.0, 0.0 };
-  const ImuMotion       motion = constantVelocityMotion( v );
-  StereoVoEstimator estimator( makeCalibration(), imuOptions() );
+  const Eigen::Vector3d         v{ 0.3, 0.0, 0.0 };
+  const ImuMotion               motion = constantVelocityMotion( v );
+  StereoVoEstimator             estimator( makeCalibration(), imuOptions() );
   const std::vector<LandmarkId> ids = sequentialIds( kLandmarks.size() );
   // M4.3: 静止 init 前缀 (播种帧 = accepted[0]), 场景帧 j ≥ 1; 场景
   // j=5 段缺失 → imu_gap (初始化已完成, gap 不再重置 init)。
   std::vector<phad::estimator::VioUpdateResult> results;
-  std::vector<Eigen::Isometry3d> accepted{
-    runStaticInitPrefix( estimator, makeCalibration(), 0.05 )
-  };
+  std::vector<Eigen::Isometry3d>                accepted{
+      runStaticInitPrefix( estimator, makeCalibration(), 0.05 ) };
   for ( int j = 1; j < 12; ++j )
   {
-    const ScenarioInput in = scenarioInput( motion, 0.05, j, 6 );
+    const ScenarioInput         in = scenarioInput( motion, 0.05, j, 6 );
     std::vector<ImuMeasurement> segment =
         j == 5 ? std::vector<ImuMeasurement>{} : in.segment;
     auto result = estimator.update( makeFrameWithImu(
-        makeCalibration(), in.T_W_B, in.t_prev_ns, in.t_cur_ns, kLandmarks,
-        ids, segment, j == 5 ), true );
+                                        makeCalibration(), in.T_W_B, in.t_prev_ns, in.t_cur_ns, kLandmarks,
+                                        ids, segment, j == 5 ),
+                                    true );
     results.push_back( result );
     if ( result.status == UpdateStatus::kOk && result.estimate.has_value() )
     {
@@ -597,6 +855,8 @@ TEST( StereoVoImu, ImuGapFallsBackToVision )
   // 后续帧链断恢复。
   ASSERT_EQ( accepted.size(), 12U );
   EXPECT_TRUE( results[ 4 ].diagnostics.pnp_success ) << "gap 帧应走 PnP";
+  ASSERT_TRUE( results[ 4 ].diagnostics.gyro_state.has_value() );
+  EXPECT_FALSE( results[ 4 ].diagnostics.gyro_state->prediction_valid );
   for ( std::size_t j = 1; j < 12; ++j )
   {
     const std::size_t index = j - 1;
@@ -604,7 +864,8 @@ TEST( StereoVoImu, ImuGapFallsBackToVision )
         << "frame " << j << ": " << results[ index ].message;
     const double d_trans =
         ( accepted[ j ].translation() - motion.pose_at(
-             static_cast<double>( j ) * 0.05 ).translation() )
+                                                  static_cast<double>( j ) * 0.05 )
+                                            .translation() )
             .norm();
     EXPECT_NEAR( d_trans, 0.0, 1e-1 ) << "frame " << j;
   }
@@ -615,15 +876,14 @@ TEST( StereoVoImu, ImuGapFallsBackToVision )
 // 帧已放行, 故改用畸形观测触发拒绝 (段同样已入 pending)。 ──
 TEST( StereoVoImu, PendingAppendsOnRejectAndConsumesOnAccept )
 {
-  const Eigen::Vector3d v{ 0.3, 0.0, 0.0 };
-  const ImuMotion       motion = constantVelocityMotion( v );
-  StereoVoEstimator estimator( makeCalibration(), imuOptions() );
+  const Eigen::Vector3d         v{ 0.3, 0.0, 0.0 };
+  const ImuMotion               motion = constantVelocityMotion( v );
+  StereoVoEstimator             estimator( makeCalibration(), imuOptions() );
   const std::vector<LandmarkId> ids = sequentialIds( kLandmarks.size() );
   // M4.3: 静止 init 前缀 (播种帧 = accepted[0]), 场景帧 j ≥ 1; 场景
   // j=5 被拒 (畸形观测: 负 disparity → rejected), 其段 (已入 pending) 保留。
   std::vector<Eigen::Isometry3d> accepted{
-    runStaticInitPrefix( estimator, makeCalibration(), 0.05 )
-  };
+      runStaticInitPrefix( estimator, makeCalibration(), 0.05 ) };
   for ( int j = 1; j < 10; ++j )
   {
     const ScenarioInput in = scenarioInput( motion, 0.05, j, 6 );
@@ -634,7 +894,7 @@ TEST( StereoVoImu, PendingAppendsOnRejectAndConsumesOnAccept )
       rejected.t_prev      = phad::common::Timestamp{ in.t_prev_ns };
       rejected.imu_samples = in.segment;
       rejected.imu_gap     = false;
-      StereoObservation bad;
+      StereoObservation bad{};
       bad.left_pixel   = Eigen::Vector2d{ 0.0, 0.0 };
       bad.disparity_px = -1.0;  // 触发 "negative disparity" 拒绝
       rejected.observations.push_back( bad );
@@ -643,8 +903,9 @@ TEST( StereoVoImu, PendingAppendsOnRejectAndConsumesOnAccept )
       continue;
     }
     auto result = estimator.update( makeFrameWithImu(
-        makeCalibration(), in.T_W_B, in.t_prev_ns, in.t_cur_ns, kLandmarks,
-        ids, in.segment ), true );
+                                        makeCalibration(), in.T_W_B, in.t_prev_ns, in.t_cur_ns, kLandmarks,
+                                        ids, in.segment ),
+                                    true );
     EXPECT_EQ( result.status, UpdateStatus::kOk )
         << "frame " << j << ": " << result.message;
     if ( result.estimate.has_value() )
@@ -661,47 +922,53 @@ TEST( StereoVoImu, PendingAppendsOnRejectAndConsumesOnAccept )
                2e-2 );
 }
 
-// ── §4.7-i D12: overlap 断裂 (全新 id) 时 IMU-on 不清位姿链 —— 帧仍 ok,
-// segment_id 不增加, 新路标进窗口, 后续帧继续。 ──
-TEST( StereoVoImu, OverlapBreakKeepsChainWithImu )
+// Gyro-only 无法跨 zero-overlap 约束 translation。关键帧满足 seed 质量门
+// 时必须显式 re-anchor 为新 segment，然后只在新地图上继续。
+TEST( StereoVoImu, OverlapBreakReanchorsWithGyroVisual )
 {
-  const Eigen::Vector3d v{ 0.3, 0.0, 0.0 };
-  const ImuMotion       motion = constantVelocityMotion( v );
-  StereoVoEstimator estimator( makeCalibration(), imuOptions() );
+  const Eigen::Vector3d         v{ 0.3, 0.0, 0.0 };
+  const ImuMotion               motion = constantVelocityMotion( v );
+  StereoVoEstimator             estimator( makeCalibration(), imuOptions() );
   const std::vector<LandmarkId> ids_a = sequentialIds( kLandmarks.size() );
   // 全新 id 集合 + 稍远的路标 (覆盖平移后仍在视锥内)。
   const std::vector<Eigen::Vector3d> landmarks_b{
-      { 1.4, -0.3, 5.4 }, { 0.9, 0.35, 4.9 }, { 1.1, -0.15, 6.2 },
-      { 1.6, 0.05, 5.1 }, { 0.65, -0.4, 4.7 }, { 1.0, 0.2, 5.6 },
-      { 1.25, -0.2, 4.4 }, { 0.8, 0.3, 5.9 }, { 1.35, -0.05, 5.0 },
+      { 1.4, -0.3, 5.4 },
+      { 0.9, 0.35, 4.9 },
+      { 1.1, -0.15, 6.2 },
+      { 1.6, 0.05, 5.1 },
+      { 0.65, -0.4, 4.7 },
+      { 1.0, 0.2, 5.6 },
+      { 1.25, -0.2, 4.4 },
+      { 0.8, 0.3, 5.9 },
+      { 1.35, -0.05, 5.0 },
       { 0.85, 0.15, 4.8 },
   };
   const std::vector<LandmarkId> ids_b = sequentialIds( kLandmarks.size(), 1000 );
 
-  // M4.3: 静止 init 前缀 (播种帧 = accepted[0]), 场景帧 j ≥ 1; 场景
-  // j=5 换成全新 id (overlap 断裂, D12)。
+  // 静止 init 后，j=5 起切换到全新 id 并持续跟踪新地图。
   std::vector<Eigen::Isometry3d> accepted{
-    runStaticInitPrefix( estimator, makeCalibration(), 0.05 )
-  };
+      runStaticInitPrefix( estimator, makeCalibration(), 0.05 ) };
   for ( int j = 1; j < 10; ++j )
   {
-    const ScenarioInput in = scenarioInput( motion, 0.05, j, 6 );
-    const bool          broken = j == 5;
-    const auto          landmarks = broken ? landmarks_b : kLandmarks;
-    const auto          ids       = broken ? ids_b : ids_a;
-    auto result = estimator.update( makeFrameWithImu(
-        makeCalibration(), in.T_W_B, in.t_prev_ns, in.t_cur_ns, landmarks,
-        ids, in.segment ), true );
+    const ScenarioInput in          = scenarioInput( motion, 0.05, j, 6 );
+    const bool          new_segment = j >= 5;
+    const auto          landmarks   = new_segment ? landmarks_b : kLandmarks;
+    const auto          ids         = new_segment ? ids_b : ids_a;
+    auto                result      = estimator.update( makeFrameWithImu(
+                                        makeCalibration(), in.T_W_B, in.t_prev_ns, in.t_cur_ns, landmarks,
+                                        ids, in.segment ),
+                                                        true );
     ASSERT_EQ( result.status, UpdateStatus::kOk )
         << "frame " << j << ": " << result.message;
-    EXPECT_EQ( result.diagnostics.segment_id, 0U )
-        << "IMU-on 不再 re-anchor (D12), segment 恒为 0";
+    EXPECT_EQ( result.diagnostics.segment_id, new_segment ? 1U : 0U )
+        << "frame " << j;
     if ( result.estimate.has_value() )
     {
       accepted.push_back( result.estimate->T_W_B );
     }
   }
-  // 播种帧 + 9 场景帧 (末帧 τ = 9 * 0.05)。
+  // 播种帧 + 9 场景帧 (末帧 τ = 9 * 0.05)；re-anchor 不得打断
+  // world pose 连续性。
   ASSERT_EQ( accepted.size(), 10U );
   const Eigen::Isometry3d& est   = accepted.back();
   const Eigen::Isometry3d& truth = motion.pose_at( 9 * 0.05 );
@@ -714,7 +981,7 @@ TEST( StereoVoImu, OverlapBreakKeepsChainWithImu )
 TEST( StereoVoImu, DisabledImuReproducesVisionChain )
 {
   const Eigen::Vector3d v{ 0.3, 0.0, 0.0 };
-  const ImuMotion       motion = constantVelocityMotion( v );
+  const ImuMotion       motion  = constantVelocityMotion( v );
   EstimatorOptions      options = imuOptions();
   options.enable_imu            = false;
   StereoVoEstimator estimator( makeCalibration(), options );
@@ -722,55 +989,505 @@ TEST( StereoVoImu, DisabledImuReproducesVisionChain )
   // (帧 i → τ = i·dt, 无前缀)。
   const auto run = runImuSegment( estimator, makeCalibration(), motion, 0.05,
                                   12, kZero3, kZero3, 0.0, 0.0, false );
-  expectAllOkAndClose( run, motion, 0.05, 2e-2 );
+  expectAllOkAndClose( run, motion, 0.05, 2e-2, 1e-2, false );
   // IMU-off: 非 gap 帧走 PnP 初值。
   EXPECT_TRUE( run.results[ 3 ].diagnostics.pnp_success );
+  for ( const auto& result : run.results )
+  {
+    EXPECT_FALSE( result.diagnostics.gyro_state.has_value() );
+    EXPECT_FALSE( result.diagnostics.imu_init.has_value() );
+  }
 }
 
-// ── M4.3 dropout 注入 (plan 定案 G, 合成断言 1): IMU-on 观测全清 →
-// 图 = 仅 IMU 因子 + priors 有解 → 注入期每帧 accepted, 轨迹连续 (预积分
-// 外推, 相对真值偏差 ≤ 阈值);恢复后 50 帧内 ATE 回基线 (无永久损伤)。
-// 等价于 session 侧 --dropout-keep-ratio 0 对观测子采样后的估计器行为。 ──
-TEST( StereoVoImu, DropoutInjectionKeepsChainWithImu )
+TEST( StereoVoImu, EmptyObservationsAreRejectedWithoutTranslationConstraint )
 {
-  const Eigen::Vector3d v{ 0.3, 0.0, 0.0 };
-  const ImuMotion       motion = constantVelocityMotion( v );
+  const ImuMotion motion =
+      constantRotationMotion( 0.2, Eigen::Vector3d{ 0.2, 0.0, 0.0 } );
   StereoVoEstimator estimator( makeCalibration(), imuOptions() );
-  const std::vector<LandmarkId> ids = sequentialIds( kLandmarks.size() );
-  // M4.3: 静止 init 前缀 (播种帧 = accepted[0], τ=0), 场景帧 j ≥ 1。
-  ( void )runStaticInitPrefix( estimator, makeCalibration(), 0.05 );
+  (void)runStaticInitPrefix( estimator, makeCalibration(), 0.05 );
 
-  constexpr int kDropoutStart = 5;  // 场景帧号 (播种帧之后)
-  constexpr int kDropoutEnd   = 9;  // 含
-  for ( int j = 1; j <= 16; ++j )
+  const ScenarioInput input  = scenarioInput( motion, 0.05, 1, 6 );
+  const auto          result = estimator.update(
+      makeFrameWithImu( makeCalibration(), input.T_W_B, input.t_prev_ns,
+                                 input.t_cur_ns, {}, {}, input.segment ),
+      true );
+
+  EXPECT_EQ( result.status, UpdateStatus::kRejected );
+  EXPECT_FALSE( result.estimate.has_value() );
+  EXPECT_EQ( result.message, "empty observations" );
+}
+
+TEST( StereoVoImu, ZeroOverlapNonKeyframeIsRejected )
+{
+  const ImuMotion motion =
+      constantRotationMotion( 0.2, Eigen::Vector3d{ 0.2, 0.0, 0.0 } );
+  StereoVoEstimator estimator( makeCalibration(), imuOptions() );
+  (void)runStaticInitPrefix( estimator, makeCalibration(), 0.05 );
+
+  const ScenarioInput           input = scenarioInput( motion, 0.05, 1, 6 );
+  const std::vector<LandmarkId> new_ids =
+      sequentialIds( kLandmarks.size(), 1000 );
+  const auto result = estimator.update(
+      makeFrameWithImu( makeCalibration(), input.T_W_B, input.t_prev_ns,
+                        input.t_cur_ns, kLandmarks, new_ids, input.segment ),
+      false );
+
+  EXPECT_EQ( result.status, UpdateStatus::kRejected );
+  EXPECT_FALSE( result.estimate.has_value() );
+  EXPECT_EQ( result.message, "zero shared landmarks (non-keyframe)" );
+}
+
+TEST( StereoVoImu, InsufficientSharedNonKeyframeIsRejected )
+{
+  const ImuMotion motion =
+      constantRotationMotion( 0.2, Eigen::Vector3d{ 0.2, 0.0, 0.0 } );
+  StereoVoEstimator estimator( makeCalibration(), imuOptions() );
+  (void)runStaticInitPrefix( estimator, makeCalibration(), 0.05 );
+
+  const ScenarioInput     input = scenarioInput( motion, 0.05, 1, 6 );
+  std::vector<LandmarkId> mostly_new_ids =
+      sequentialIds( kLandmarks.size(), 1000 );
+  mostly_new_ids.front() = 1;
+  const auto result      = estimator.update(
+      makeFrameWithImu( makeCalibration(), input.T_W_B, input.t_prev_ns,
+                             input.t_cur_ns, kLandmarks, mostly_new_ids,
+                             input.segment ),
+      false );
+
+  EXPECT_EQ( result.status, UpdateStatus::kRejected );
+  EXPECT_FALSE( result.estimate.has_value() );
+  EXPECT_EQ( result.message, "insufficient shared landmarks (non-keyframe)" );
+}
+
+TEST( StereoVoImu, VisualPnpRemainsAvailableWithGyroFactor )
+{
+  EstimatorOptions options        = imuOptions();
+  options.imu_gyro_align_window_s = 0.2;
+  const ImuMotion motion =
+      constantRotationMotion( 0.2, Eigen::Vector3d{ 0.2, 0.0, 0.0 } );
+  StereoVoEstimator estimator( makeCalibration(), options );
+  (void)runStaticInitPrefix( estimator, makeCalibration(), 0.05 );
+
+  phad::estimator::VioUpdateResult result;
+  for ( int j = 1; j <= 5; ++j )
   {
-    const ScenarioInput in = scenarioInput( motion, 0.05, j, 6 );
-    const bool          dropped = j >= kDropoutStart && j <= kDropoutEnd;
-    auto result = estimator.update( makeFrameWithImu(
-        makeCalibration(), in.T_W_B, in.t_prev_ns, in.t_cur_ns,
-        dropped ? std::vector<Eigen::Vector3d>{} : kLandmarks,
-        dropped ? std::vector<LandmarkId>{} : ids, in.segment ), true );
+    const ScenarioInput input = scenarioInput( motion, 0.05, j, 6 );
+    result                    = estimator.update(
+        makeFrameWithImu( makeCalibration(), input.T_W_B, input.t_prev_ns,
+                                             input.t_cur_ns, kLandmarks,
+                                             sequentialIds( kLandmarks.size() ), input.segment ),
+        true );
+    ASSERT_EQ( result.status, UpdateStatus::kOk ) << result.message;
+  }
+
+  EXPECT_EQ( result.diagnostics.fusion_mode, FusionMode::kGyroVisual );
+  EXPECT_GT( result.diagnostics.gyro_factor_count, 0U );
+  EXPECT_TRUE( result.diagnostics.pnp_success );
+  EXPECT_GE( result.diagnostics.pnp_inliers,
+             static_cast<std::uint32_t>( imuOptions().min_pnp_inliers ) );
+}
+
+TEST( StereoVoImu, NormalFrameKeepsVisualInitialValueWithGyroPrediction )
+{
+  EstimatorOptions options        = imuOptions();
+  options.imu_gyro_align_window_s = 0.2;
+  options.enable_pnp_init         = false;
+  StereoVoEstimator estimator( makeCalibration(), options );
+  (void)runStaticInitPrefix( estimator, makeCalibration(), 0.05 );
+
+  ScenarioInput input = scenarioInput( stationaryMotion(), 0.05, 1, 6 );
+  for ( ImuMeasurement& sample : input.segment )
+  {
+    sample.gyro_radps[ 2 ] += 1.0;
+  }
+  const auto result = estimator.update(
+      makeFrameWithImu( makeCalibration(), input.T_W_B, input.t_prev_ns,
+                        input.t_cur_ns, kLandmarks,
+                        sequentialIds( kLandmarks.size() ), input.segment ),
+      true );
+
+  ASSERT_EQ( result.status, UpdateStatus::kOk ) << result.message;
+  ASSERT_TRUE( result.diagnostics.gyro_state.has_value() );
+  const auto& state = *result.diagnostics.gyro_state;
+  ASSERT_EQ( result.diagnostics.fusion_mode, FusionMode::kGyroVisual );
+  ASSERT_TRUE( state.prediction_valid );
+  EXPECT_GT( Eigen::AngleAxisd( state.predicted_T_W_B.linear() ).angle(),
+             0.04 );
+  EXPECT_NEAR(
+      Eigen::AngleAxisd( state.graph_initial_T_W_B.linear() ).angle(), 0.0,
+      1e-10 );
+}
+
+TEST( StereoVoImu, GyroFusionWaitsForStaticReadyAndVisualBiasAlignment )
+{
+  EstimatorOptions options = imuOptions();
+  // Static prefix contributes 0.5 s visual/gyro evidence. Requiring 0.6 s
+  // makes activation occur at the end of scenario frame 2; factors therefore
+  // first appear on frame 3.
+  options.imu_gyro_align_window_s = 0.6;
+  const ImuMotion motion =
+      constantRotationMotion( 0.2, Eigen::Vector3d{ 0.2, 0.0, 0.0 } );
+  StereoVoEstimator estimator( makeCalibration(), options );
+  (void)runStaticInitPrefix( estimator, makeCalibration(), 0.05 );
+
+  for ( int j = 1; j <= 6; ++j )
+  {
+    ScenarioInput input = scenarioInput( motion, 0.05, j, 6 );
+    for ( ImuMeasurement& sample : input.segment )
+    {
+      sample.gyro_radps[ 0 ] += j % 2 == 0 ? 2e-3 : -2e-3;
+    }
+    const auto result = estimator.update(
+        makeFrameWithImu( makeCalibration(), input.T_W_B, input.t_prev_ns,
+                          input.t_cur_ns, kLandmarks,
+                          sequentialIds( kLandmarks.size() ), input.segment ),
+        true );
     ASSERT_EQ( result.status, UpdateStatus::kOk )
         << "frame " << j << ": " << result.message;
-    EXPECT_EQ( result.diagnostics.segment_id, 0U )
-        << "IMU-on 注入期与恢复期均不 re-anchor (D12)";
-    ASSERT_TRUE( result.estimate.has_value() );
-    const Eigen::Isometry3d& est   = result.estimate->T_W_B;
-    const Eigen::Isometry3d& truth = motion.pose_at(
-        static_cast<double>( j ) * 0.05 );
-    const double err_m = ( est.translation() - truth.translation() ).norm();
-    if ( dropped )
+    if ( j <= 2 )
     {
-      // 注入期: 仅 IMU 因子 + priors, 位姿由预积分外推 → 连续但不逐帧
-      // 视觉锚定, 允许小漂移 (0.25 s 窗口)。
-      EXPECT_LE( err_m, 5e-2 ) << "frame " << j;
+      EXPECT_EQ( result.diagnostics.fusion_mode, FusionMode::kVisionOnly );
+      EXPECT_EQ( result.diagnostics.gyro_factor_count, 0U );
     }
     else
     {
-      // 恢复后: 视觉回到图里, ATE 回基线 (50 帧内; 合成 16 帧内即达)。
-      EXPECT_LE( err_m, 2e-2 ) << "frame " << j;
+      EXPECT_EQ( result.diagnostics.fusion_mode, FusionMode::kGyroVisual );
+      EXPECT_GT( result.diagnostics.gyro_factor_count, 0U );
+      EXPECT_GT(
+          result.diagnostics.gyro_alignment_residual_rms_rad, 0.0 );
     }
   }
+}
+
+TEST( StereoVoImu, LongRunRemainsGyroOnlyAfterActivation )
+{
+  constexpr double       kDtS       = 0.05;
+  constexpr int          kIntervals = 225;
+  constexpr std::int64_t kDtNs      = 50'000'000;
+  constexpr std::int64_t kOffsetNs =
+      static_cast<std::int64_t>( kInitFrames ) * kDtNs;
+  const Eigen::Vector3d bias_acc{ 0.08, -0.12, 0.05 };
+  const Eigen::Vector3d bias_gyro{ 0.012, -0.018, 0.027 };
+  EstimatorOptions      options   = imuOptions();
+  options.imu_gyro_align_window_s = 0.6;
+  options.enable_vio_state_probe  = true;
+  StereoVoEstimator estimator( makeCalibration(), options );
+  (void)runStaticInitPrefix( estimator, makeCalibration(), kDtS, bias_acc,
+                             bias_gyro );
+
+  const auto                                    states = alignmentStates( kIntervals, kDtS );
+  const auto                                    ids    = sequentialIds( kLandmarks.size() );
+  std::vector<phad::estimator::VioUpdateResult> results;
+  results.reserve( static_cast<std::size_t>( kIntervals ) );
+  ImuMeasurement previous =
+      alignmentSample( states.front(), kOffsetNs, bias_acc, bias_gyro );
+  for ( int index = 1; index <= kIntervals; ++index )
+  {
+    const std::int64_t t_cur_ns =
+        kOffsetNs + static_cast<std::int64_t>( index ) * kDtNs;
+    const ImuMeasurement current = alignmentSample(
+        states[ static_cast<std::size_t>( index ) ], t_cur_ns, bias_acc,
+        bias_gyro );
+    results.push_back( estimator.update(
+        makeFrameWithImu(
+            makeCalibration(), states[ static_cast<std::size_t>( index ) ].T_W_B,
+            t_cur_ns - kDtNs, t_cur_ns, kLandmarks, ids,
+            { previous, current } ),
+        true ) );
+    ASSERT_EQ( results.back().status, UpdateStatus::kOk )
+        << "frame " << index << ": " << results.back().message;
+    previous = current;
+  }
+
+  std::size_t gyro_rows = 0U;
+  for ( std::size_t index = 0U; index < results.size(); ++index )
+  {
+    const auto& result = results[ index ];
+    if ( result.diagnostics.fusion_mode == FusionMode::kVisionOnly )
+    {
+      continue;
+    }
+    ASSERT_EQ( result.diagnostics.fusion_mode, FusionMode::kGyroVisual )
+        << "frame " << index;
+    EXPECT_GT( result.diagnostics.gyro_factor_count, 0U )
+        << "frame " << index;
+    ASSERT_TRUE( result.diagnostics.gyro_graph_cost.has_value() )
+        << "frame " << index;
+    EXPECT_EQ( result.diagnostics.gyro_graph_cost->gyro_factor_count,
+               result.diagnostics.gyro_factor_count )
+        << "frame " << index;
+    ++gyro_rows;
+  }
+  EXPECT_GT( gyro_rows, 200U );
+}
+
+TEST( StereoVoImu, FixedLagShadowIsReadOnlyBoundedAndExplicit )
+{
+  EstimatorOptions control_options        = imuOptions();
+  control_options.imu_gyro_align_window_s = 0.2;
+  EstimatorOptions shadow_options         = control_options;
+  shadow_options.enable_fixed_lag_shadow  = true;
+
+  const ImuMotion motion =
+      constantRotationMotion( 0.2, Eigen::Vector3d{ 0.2, 0.0, 0.0 } );
+  StereoVoEstimator control( makeCalibration(), control_options );
+  StereoVoEstimator shadow( makeCalibration(), shadow_options );
+  const RunResult   control_run =
+      runImuSegment( control, makeCalibration(), motion, 0.05, 40 );
+  const RunResult shadow_run =
+      runImuSegment( shadow, makeCalibration(), motion, 0.05, 40 );
+
+  ASSERT_EQ( control_run.results.size(), shadow_run.results.size() );
+  std::size_t reset_count      = 0U;
+  std::size_t active_count     = 0U;
+  bool        saw_fixed_bias   = false;
+  bool        saw_marginalized = false;
+  for ( std::size_t index = 0; index < shadow_run.results.size(); ++index )
+  {
+    const auto& control_result = control_run.results[ index ];
+    const auto& shadow_result  = shadow_run.results[ index ];
+    EXPECT_FALSE( control_result.diagnostics.fixed_lag_shadow.has_value() );
+    ASSERT_EQ( shadow_result.status, control_result.status )
+        << "frame " << index << ": " << shadow_result.message;
+    ASSERT_EQ( shadow_result.estimate.has_value(),
+               control_result.estimate.has_value() )
+        << "frame " << index;
+    if ( shadow_result.estimate.has_value() )
+    {
+      EXPECT_TRUE( shadow_result.estimate->T_W_B.matrix().isApprox(
+          control_result.estimate->T_W_B.matrix(), 1e-12 ) )
+          << "frame " << index;
+    }
+    EXPECT_TRUE( shadow_result.diagnostics.bias_gyro.isApprox(
+        control_result.diagnostics.bias_gyro, 1e-12 ) )
+        << "frame " << index;
+    EXPECT_EQ( shadow_result.diagnostics.gyro_factor_count,
+               control_result.diagnostics.gyro_factor_count )
+        << "frame " << index;
+
+    ASSERT_TRUE( shadow_result.diagnostics.fixed_lag_shadow.has_value() )
+        << "frame " << index;
+    const auto& diagnostics =
+        *shadow_result.diagnostics.fixed_lag_shadow;
+    EXPECT_TRUE( diagnostics.update_ok ) << "frame " << index;
+    if ( shadow_result.diagnostics.fusion_mode == FusionMode::kVisionOnly )
+    {
+      EXPECT_FALSE( diagnostics.active ) << "frame " << index;
+      continue;
+    }
+
+    ++active_count;
+    EXPECT_TRUE( diagnostics.active ) << "frame " << index;
+    EXPECT_EQ( diagnostics.smoother_pose_count,
+               diagnostics.batch_window_size )
+        << "frame " << index;
+    EXPECT_LE( diagnostics.smoother_pose_count, 10U ) << "frame " << index;
+    EXPECT_GT( diagnostics.smoother_landmark_count, 0U )
+        << "frame " << index;
+    EXPECT_TRUE( diagnostics.bias_present ) << "frame " << index;
+    EXPECT_EQ( diagnostics.missing_owned_slot_count, 0U )
+        << "frame " << index;
+    EXPECT_EQ( diagnostics.timestamp_without_value_count, 0U )
+        << "frame " << index;
+    EXPECT_LE( diagnostics.cutoff_epoch, diagnostics.current_epoch )
+        << "frame " << index;
+    EXPECT_TRUE( diagnostics.newest_T_W_B.matrix().allFinite() )
+        << "frame " << index;
+    EXPECT_TRUE( std::isfinite( diagnostics.bias_delta_norm ) )
+        << "frame " << index;
+    EXPECT_TRUE( std::isfinite( diagnostics.newest_rotation_delta_rad ) )
+        << "frame " << index;
+    EXPECT_TRUE( std::isfinite( diagnostics.newest_translation_delta_m ) )
+        << "frame " << index;
+    if ( diagnostics.reset )
+    {
+      ++reset_count;
+      EXPECT_EQ( diagnostics.reset_reason,
+                 phad::estimator::FixedLagShadowReset::kBootstrap );
+    }
+    saw_fixed_bias = saw_fixed_bias || diagnostics.bias_fixed;
+    saw_marginalized =
+        saw_marginalized || diagnostics.marginalized_pose_count > 0U;
+  }
+
+  EXPECT_GT( active_count, 20U );
+  EXPECT_EQ( reset_count, 1U );
+  EXPECT_TRUE( saw_fixed_bias );
+  EXPECT_TRUE( saw_marginalized );
+}
+
+TEST( StereoVoImu, FixedLagShadowRetiresAndRegeneratesLandmarkKeys )
+{
+  EstimatorOptions options                     = imuOptions();
+  options.imu_gyro_align_window_s              = 0.2;
+  options.enable_fixed_lag_shadow              = true;
+  const RectifiedStereoCalibration calibration = makeCalibration();
+  const ImuMotion                  motion =
+      constantRotationMotion( 0.2, Eigen::Vector3d{ 0.2, 0.0, 0.0 } );
+  StereoVoEstimator estimator( calibration, options );
+  const RunResult   warmup =
+      runImuSegment( estimator, calibration, motion, 0.05, 40 );
+  ASSERT_EQ( warmup.results.back().status, UpdateStatus::kOk );
+  ASSERT_EQ( warmup.results.back().diagnostics.fusion_mode,
+             FusionMode::kGyroVisual );
+
+  const std::vector<Eigen::Vector3d> persistent_landmarks(
+      kLandmarks.begin() + 1, kLandmarks.end() );
+  const std::vector<LandmarkId> persistent_ids =
+      sequentialIds( persistent_landmarks.size(), 2 );
+  std::uint32_t retired = 0U;
+  for ( int frame = 40; frame < 49; ++frame )
+  {
+    const ScenarioInput input  = scenarioInput( motion, 0.05, frame, 6 );
+    const auto          result = estimator.update(
+        makeFrameWithImu( calibration, input.T_W_B, input.t_prev_ns,
+                                   input.t_cur_ns, persistent_landmarks,
+                                   persistent_ids, input.segment ),
+        true );
+    ASSERT_EQ( result.status, UpdateStatus::kOk )
+        << "frame " << frame << ": " << result.message;
+    ASSERT_TRUE( result.diagnostics.fixed_lag_shadow.has_value() );
+    retired +=
+        result.diagnostics.fixed_lag_shadow->retired_landmark_count;
+  }
+  EXPECT_GE( retired, 1U );
+
+  const std::vector<LandmarkId> all_ids     = sequentialIds( kLandmarks.size() );
+  std::uint32_t                 regenerated = 0U;
+  for ( int frame = 49; frame < 51; ++frame )
+  {
+    const ScenarioInput input  = scenarioInput( motion, 0.05, frame, 6 );
+    const auto          result = estimator.update(
+        makeFrameWithImu( calibration, input.T_W_B, input.t_prev_ns,
+                                   input.t_cur_ns, kLandmarks, all_ids,
+                                   input.segment ),
+        true );
+    ASSERT_EQ( result.status, UpdateStatus::kOk )
+        << "frame " << frame << ": " << result.message;
+    ASSERT_TRUE( result.diagnostics.fixed_lag_shadow.has_value() );
+    regenerated += result.diagnostics.fixed_lag_shadow
+                       ->new_landmark_generation_count;
+  }
+  EXPECT_GE( regenerated, 1U );
+}
+
+TEST( StereoVoImu, FixedLagShadowResetsExplicitlyAtSegmentBoundary )
+{
+  EstimatorOptions options                     = imuOptions();
+  options.imu_gyro_align_window_s              = 0.2;
+  options.enable_fixed_lag_shadow              = true;
+  const RectifiedStereoCalibration calibration = makeCalibration();
+  const ImuMotion                  motion =
+      constantRotationMotion( 0.2, Eigen::Vector3d{ 0.2, 0.0, 0.0 } );
+  StereoVoEstimator estimator( calibration, options );
+  const RunResult   warmup =
+      runImuSegment( estimator, calibration, motion, 0.05, 40 );
+  ASSERT_EQ( warmup.results.back().status, UpdateStatus::kOk );
+
+  const std::vector<LandmarkId> new_ids =
+      sequentialIds( kLandmarks.size(), 1'000 );
+  const ScenarioInput reset_input  = scenarioInput( motion, 0.05, 40, 6 );
+  const auto          reset_result = estimator.update(
+      makeFrameWithImu( calibration, reset_input.T_W_B,
+                                 reset_input.t_prev_ns, reset_input.t_cur_ns,
+                                 kLandmarks, new_ids, reset_input.segment ),
+      true );
+  ASSERT_EQ( reset_result.status, UpdateStatus::kOk )
+      << reset_result.message;
+  ASSERT_TRUE( reset_result.diagnostics.fixed_lag_shadow.has_value() );
+  const auto& reset = *reset_result.diagnostics.fixed_lag_shadow;
+  EXPECT_TRUE( reset.active );
+  EXPECT_TRUE( reset.reset );
+  EXPECT_EQ( reset.reset_reason,
+             phad::estimator::FixedLagShadowReset::kSegment );
+  EXPECT_EQ( reset.smoother_pose_count, 1U );
+  EXPECT_EQ( reset.smoother_landmark_count, 0U );
+
+  const ScenarioInput next_input  = scenarioInput( motion, 0.05, 41, 6 );
+  const auto          next_result = estimator.update(
+      makeFrameWithImu( calibration, next_input.T_W_B,
+                                 next_input.t_prev_ns, next_input.t_cur_ns,
+                                 kLandmarks, new_ids, next_input.segment ),
+      true );
+  ASSERT_EQ( next_result.status, UpdateStatus::kOk ) << next_result.message;
+  ASSERT_TRUE( next_result.diagnostics.fixed_lag_shadow.has_value() );
+  const auto& next = *next_result.diagnostics.fixed_lag_shadow;
+  EXPECT_FALSE( next.reset );
+  EXPECT_EQ( next.reset_reason,
+             phad::estimator::FixedLagShadowReset::kNone );
+  EXPECT_GT( next.smoother_landmark_count, 0U );
+}
+
+TEST( StereoVoImu, FixedLagShadowRequiresImu )
+{
+  EstimatorOptions options;
+  options.enable_imu              = false;
+  options.enable_fixed_lag_shadow = true;
+  EXPECT_THROW( StereoVoEstimator estimator( makeCalibration(), options ),
+                std::invalid_argument );
+}
+
+// Gyro-only 不能在视觉 dropout 期约束 translation：注入帧必须拒绝且
+// 不产生轨迹点，但 pending gyro interval 保留并在视觉恢复帧一次消费。
+TEST( StereoVoImu, DropoutInjectionFreezesWithGyroVisual )
+{
+  const Eigen::Vector3d v{ 0.3, 0.0, 0.0 };
+  const ImuMotion       motion    = constantVelocityMotion( v );
+  EstimatorOptions      options   = imuOptions();
+  options.imu_gyro_align_window_s = 0.2;
+  StereoVoEstimator             estimator( makeCalibration(), options );
+  const std::vector<LandmarkId> ids = sequentialIds( kLandmarks.size() );
+  // M4.3: 静止 init 前缀 (播种帧 = accepted[0], τ=0), 场景帧 j ≥ 1。
+  (void)runStaticInitPrefix( estimator, makeCalibration(), 0.05 );
+
+  constexpr int kDropoutStart   = 5;  // 场景帧号 (播种帧之后)
+  constexpr int kDropoutEnd     = 9;  // 含
+  std::size_t   accepted_before = 0;
+  std::size_t   accepted_after  = 0;
+  for ( int j = 1; j <= 16; ++j )
+  {
+    const ScenarioInput in      = scenarioInput( motion, 0.05, j, 6 );
+    const bool          dropped = j >= kDropoutStart && j <= kDropoutEnd;
+    auto                result  = estimator.update( makeFrameWithImu(
+                                        makeCalibration(), in.T_W_B, in.t_prev_ns, in.t_cur_ns,
+                                        dropped ? std::vector<Eigen::Vector3d>{} : kLandmarks,
+                                        dropped ? std::vector<LandmarkId>{} : ids, in.segment ),
+                                                    true );
+    if ( dropped )
+    {
+      EXPECT_EQ( result.status, UpdateStatus::kRejected )
+          << "frame " << j << ": " << result.message;
+      EXPECT_FALSE( result.estimate.has_value() );
+      EXPECT_EQ( result.message, "empty observations" );
+      continue;
+    }
+
+    ASSERT_EQ( result.status, UpdateStatus::kOk )
+        << "frame " << j << ": " << result.message;
+    EXPECT_EQ( result.diagnostics.segment_id, 0U );
+    ASSERT_TRUE( result.estimate.has_value() );
+    if ( j < kDropoutStart )
+    {
+      ++accepted_before;
+    }
+    else
+    {
+      ++accepted_after;
+      if ( j == kDropoutEnd + 1 )
+      {
+        ASSERT_TRUE( result.diagnostics.gyro_state.has_value() );
+        EXPECT_TRUE( result.diagnostics.gyro_state->prediction_valid );
+        EXPECT_NEAR( result.diagnostics.gyro_state->imu_dt_s, 0.30, 1e-12 );
+      }
+    }
+    const Eigen::Isometry3d& truth =
+        motion.pose_at( static_cast<double>( j ) * 0.05 );
+    EXPECT_LE( ( result.estimate->T_W_B.translation() - truth.translation() ).norm(),
+               2e-2 )
+        << "frame " << j;
+  }
+  EXPECT_EQ( accepted_before, 4U );
+  EXPECT_EQ( accepted_after, 7U );
 }
 
 // ── M4.3 dropout 注入 (合成断言 2): IMU-off 对照 —— 观测全清 → PnP 无点
@@ -779,14 +1496,14 @@ TEST( StereoVoImu, DropoutInjectionKeepsChainWithImu )
 TEST( StereoVoImu, DropoutInjectionFreezesWithoutImu )
 {
   const Eigen::Vector3d v{ 0.3, 0.0, 0.0 };
-  const ImuMotion       motion = constantVelocityMotion( v );
+  const ImuMotion       motion  = constantVelocityMotion( v );
   EstimatorOptions      options = imuOptions();
   options.enable_imu            = false;
-  StereoVoEstimator estimator( makeCalibration(), options );
+  StereoVoEstimator             estimator( makeCalibration(), options );
   const std::vector<LandmarkId> ids = sequentialIds( kLandmarks.size() );
 
-  constexpr int kDropoutStart = 5;
-  constexpr int kDropoutEnd   = 9;  // 含
+  constexpr int kDropoutStart   = 5;
+  constexpr int kDropoutEnd     = 9;  // 含
   std::size_t   accepted_before = 0;
   std::size_t   accepted_after  = 0;
   for ( int j = 0; j <= 14; ++j )
@@ -799,12 +1516,13 @@ TEST( StereoVoImu, DropoutInjectionFreezesWithoutImu )
                                              ( static_cast<double>( j ) -
                                                1.0 ) *
                                              0.05 * 1e9 );
-    const bool dropped = j >= kDropoutStart && j <= kDropoutEnd;
-    auto result = estimator.update( makeFrameWithImu(
-        makeCalibration(), motion.pose_at( static_cast<double>( j ) * 0.05 ),
-        t_prev_ns, t_cur_ns,
-        dropped ? std::vector<Eigen::Vector3d>{} : kLandmarks,
-        dropped ? std::vector<LandmarkId>{} : ids, {} ), true );
+    const bool         dropped   = j >= kDropoutStart && j <= kDropoutEnd;
+    auto               result    = estimator.update( makeFrameWithImu(
+                                        makeCalibration(), motion.pose_at( static_cast<double>( j ) * 0.05 ),
+                                        t_prev_ns, t_cur_ns,
+                                        dropped ? std::vector<Eigen::Vector3d>{} : kLandmarks,
+                                        dropped ? std::vector<LandmarkId>{} : ids, {} ),
+                                                     true );
     if ( dropped )
     {
       // 冻结语义: 注入期全部拒帧, 无新轨迹点。
