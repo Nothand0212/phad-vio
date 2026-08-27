@@ -234,6 +234,50 @@ TEST( StereoVoCullRebirthTest, CulledIdNotRebackprojectedWhenBlocked )
   EXPECT_EQ( run( false ), ids.size() );
 }
 
+TEST( StereoVoCullRebirthTest, LowSupportDoesNotRebirthCulledId )
+{
+  const auto       calibration = makeCalibration();
+  const auto       ids         = sequentialIds( kLandmarks.size(), 1 );
+  const auto       poses       = translatingPoses( 14, 0.05 );
+  const LandmarkId poison_id   = ids.front();
+  VioEstimator     estimator( calibration, phad::test_support::testImuParameters(),
+                              defaultCullOptions() );
+
+  int cull_frame = -1;
+  for ( std::size_t index = 0; index < poses.size(); ++index )
+  {
+    const std::int64_t ts_ns =
+        static_cast<std::int64_t>( index + 1U ) * 50'000'000;
+    auto measurement =
+        makeFrame( calibration, poses[ index ], ts_ns, kLandmarks, ids );
+    if ( index >= 1U )
+    {
+      offsetLeftPixel( measurement, poison_id, poisonDeltaPx( index ) );
+    }
+    const auto result = estimator.update( measurement );
+    ASSERT_EQ( result.status, UpdateStatus::kOk ) << result.message;
+    if ( containsId( result.diagnostics.culled_landmark_ids, poison_id ) )
+    {
+      cull_frame = static_cast<int>( index );
+      break;
+    }
+  }
+  ASSERT_GE( cull_frame, 0 );
+
+  const std::size_t next = static_cast<std::size_t>( cull_frame + 1 );
+  ASSERT_LT( next, poses.size() );
+  const auto low_support = estimator.update( makeFrame(
+      calibration, poses[ next ],
+      static_cast<std::int64_t>( next + 1U ) * 50'000'000,
+      { kLandmarks.front() }, { poison_id } ) );
+  ASSERT_EQ( low_support.status, UpdateStatus::kOk )
+      << low_support.message;
+  EXPECT_EQ( low_support.diagnostics.num_shared, 0U );
+  EXPECT_EQ( low_support.diagnostics.num_retained_observations, 1U );
+  EXPECT_EQ( low_support.diagnostics.num_seeded_landmarks, 0U );
+  EXPECT_EQ( low_support.diagnostics.num_current_visual_factors, 0U );
+}
+
 TEST( StereoVoCullRebirthTest, ConflictingNearLandmarkDoesNotCullFarLandmarks )
 {
   // Approach with true near projections, then one step whose CV init lands

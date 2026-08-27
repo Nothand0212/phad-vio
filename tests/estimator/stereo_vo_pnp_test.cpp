@@ -398,7 +398,7 @@ TEST( StereoVoPnpTest, AcceptsPnpWithinStereoNoise )
              static_cast<std::uint32_t>( kNearAxisLandmarks.size() ) );
 }
 
-TEST( StereoVoPnpTest, BelowSupportThresholdUsesImuOnlyCadence )
+TEST( StereoVoPnpTest, BelowSupportThresholdSkipsPnpButRetainsVisualCadence )
 {
   const auto calibration = makeCalibration();
   const auto ids         = sequentialIds( kLandmarksA.size(), 1 );
@@ -417,8 +417,8 @@ TEST( StereoVoPnpTest, BelowSupportThresholdUsesImuOnlyCadence )
     ASSERT_EQ( result.status, UpdateStatus::kOk ) << result.message;
   }
 
-  // A new observation cannot enter the visual graph while support is below
-  // the correspondence threshold.
+  // PnP remains gated by full support while graph admission follows map
+  // membership and observation-count rules independently.
   std::vector<Eigen::Vector3d> landmarks_plus = kLandmarksA;
   std::vector<LandmarkId>      ids_plus       = ids;
   const Eigen::Vector3d        probe_point{ 0.5, 0.0, 5.1 };
@@ -430,8 +430,12 @@ TEST( StereoVoPnpTest, BelowSupportThresholdUsesImuOnlyCadence )
       calibration, poses[ 2 ], 150'000'000, landmarks_plus, ids_plus ) );
   ASSERT_EQ( introduced.status, UpdateStatus::kOk ) << introduced.message;
   EXPECT_FALSE( introduced.diagnostics.pnp_success );
-  EXPECT_EQ( introduced.diagnostics.num_landmarks, 0U );
-  EXPECT_EQ( introduced.diagnostics.m_vio.m_visual_factors, 0U );
+  EXPECT_EQ( introduced.diagnostics.num_shared, ids.size() );
+  EXPECT_EQ( introduced.diagnostics.num_seeded_landmarks, 1U );
+  EXPECT_EQ( introduced.diagnostics.num_landmarks, ids.size() );
+  EXPECT_EQ( introduced.diagnostics.num_current_visual_factors,
+             ids.size() );
+  EXPECT_EQ( introduced.diagnostics.m_vio.m_visual_factors, 30U );
 
   auto corrupted = makeFrame( calibration, poses[ 3 ], 200'000'000,
                               landmarks_plus, ids_plus );
@@ -440,11 +444,14 @@ TEST( StereoVoPnpTest, BelowSupportThresholdUsesImuOnlyCadence )
   ASSERT_EQ( fallback.status, UpdateStatus::kOk ) << fallback.message;
   EXPECT_FALSE( fallback.diagnostics.pnp_success );
   EXPECT_EQ( fallback.diagnostics.pnp_inliers, 0U );
-  EXPECT_EQ( fallback.diagnostics.num_landmarks, 0U );
-  EXPECT_EQ( fallback.diagnostics.m_vio.m_visual_factors, 0U );
+  EXPECT_EQ( fallback.diagnostics.num_shared, ids_plus.size() );
+  EXPECT_EQ( fallback.diagnostics.num_landmarks, ids_plus.size() );
+  EXPECT_EQ( fallback.diagnostics.num_current_visual_factors,
+             ids_plus.size() );
+  EXPECT_EQ( fallback.diagnostics.m_vio.m_visual_factors, 42U );
   EXPECT_EQ( fallback.diagnostics.m_vio.m_visual_coast_duration_ns,
              150'000'000 );
-  EXPECT_TRUE( estimator.observationTimestamps( probe_id ).empty() );
+  EXPECT_EQ( estimator.observationTimestamps( probe_id ).size(), 2U );
 }
 
 TEST( StereoVoPnpTest, FallsBackWhenInliersBelowMin )

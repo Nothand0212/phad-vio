@@ -148,7 +148,7 @@ namespace
 
 }  // namespace
 
-TEST( VisualOutageLifecycle, LandmarkIdTurnoverCoastsInActiveSegment )
+TEST( VisualOutageLifecycle, LandmarkIdTurnoverCoastsThenRecoversInActiveSegment )
 {
   const auto calibration = makeCalibration();
   const auto ids_a       = sequentialIds( kLandmarksA.size(), 1 );
@@ -170,28 +170,35 @@ TEST( VisualOutageLifecycle, LandmarkIdTurnoverCoastsInActiveSegment )
   const Eigen::Isometry3d  expected_anchor =
       T_last * ( T_prev.inverse() * T_last );
 
-  // Every current id is outside the active map, so the packet is committed
-  // without visual observations.
+  // Every current id is outside the pre-entry map, so this packet remains
+  // low-support while retaining and seeding the new visual chain.
   const auto turnover = estimator.update( makeFrame(
       calibration, expected_anchor, 250'000'000, kLandmarksB, ids_b ) );
   ASSERT_EQ( turnover.status, UpdateStatus::kOk ) << turnover.message;
   ASSERT_TRUE( turnover.estimate.has_value() );
   EXPECT_EQ( turnover.diagnostics.segment_id, 0U );
   EXPECT_EQ( turnover.diagnostics.num_shared, 0U );
+  EXPECT_EQ( turnover.diagnostics.num_retained_observations,
+             ids_b.size() );
+  EXPECT_EQ( turnover.diagnostics.num_seeded_landmarks, ids_b.size() );
+  EXPECT_EQ( turnover.diagnostics.num_current_visual_factors, 0U );
   EXPECT_EQ( turnover.diagnostics.m_vio.m_visual_coast_duration_ns,
              50'000'000 );
   EXPECT_TRUE( turnover.estimate->T_W_B.matrix().allFinite() );
 
-  // Repeated unmapped ids remain unsupported; they are not silently seeded.
+  // The next packet sees the committed seeds before intake and recovers in
+  // the same active segment.
   Eigen::Isometry3d next_pose = expected_anchor;
   next_pose.translation() += Eigen::Vector3d( 0.05, 0.0, 0.0 );
   const auto continued = estimator.update(
       makeFrame( calibration, next_pose, 300'000'000, kLandmarksB, ids_b ) );
   EXPECT_EQ( continued.status, UpdateStatus::kOk ) << continued.message;
   EXPECT_EQ( continued.diagnostics.segment_id, 0U );
-  EXPECT_EQ( continued.diagnostics.num_shared, 0U );
-  EXPECT_EQ( continued.diagnostics.m_vio.m_visual_coast_duration_ns,
-             100'000'000 );
+  EXPECT_EQ( continued.diagnostics.num_shared, ids_b.size() );
+  EXPECT_EQ( continued.diagnostics.num_current_visual_factors,
+             ids_b.size() );
+  EXPECT_EQ( continued.diagnostics.m_vio.m_visual_coast_duration_ns, 0 );
+  EXPECT_EQ( continued.diagnostics.unsupported_span_ns, 0 );
 }
 
 TEST( VisualOutageLifecycle, UnsupportedIdsDoNotPoisonVisualRecovery )
@@ -210,7 +217,8 @@ TEST( VisualOutageLifecycle, UnsupportedIdsDoNotPoisonVisualRecovery )
   const auto   poses = translatingPoses( 4, 0.05 );
   runNormalSegment( estimator, calibration, poses, ids_a );
 
-  // Sparse unmapped observations are excluded from the committed coast state.
+  // Sparse unmapped observations are retained, but remain below the support
+  // threshold and cannot block recovery on the established map.
   const std::vector<Eigen::Vector3d> sparse_landmarks(
       kLandmarksB.begin(), kLandmarksB.begin() + 3 );
   const std::vector<LandmarkId> sparse_ids( ids_b.begin(), ids_b.begin() + 3 );

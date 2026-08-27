@@ -171,6 +171,102 @@ namespace
     EXPECT_EQ( lhs.estimate->m_segment_id, rhs.estimate->m_segment_id );
   }
 
+  void expectSameCommittedUpdate( const VioUpdateResult& lhs,
+                                  const VioUpdateResult& rhs )
+  {
+    expectSameEstimate( lhs, rhs );
+    EXPECT_EQ( lhs.diagnostics.window_size, rhs.diagnostics.window_size );
+    EXPECT_EQ( lhs.diagnostics.prior_key, rhs.diagnostics.prior_key );
+    EXPECT_EQ( lhs.diagnostics.num_landmarks,
+               rhs.diagnostics.num_landmarks );
+    EXPECT_EQ( lhs.diagnostics.num_retained_observations,
+               rhs.diagnostics.num_retained_observations );
+    EXPECT_EQ( lhs.diagnostics.num_seeded_landmarks,
+               rhs.diagnostics.num_seeded_landmarks );
+    EXPECT_EQ( lhs.diagnostics.num_current_visual_factors,
+               rhs.diagnostics.num_current_visual_factors );
+    EXPECT_EQ( lhs.diagnostics.unsupported_span_ns,
+               rhs.diagnostics.unsupported_span_ns );
+    EXPECT_EQ( lhs.diagnostics.outliers_culled,
+               rhs.diagnostics.outliers_culled );
+    EXPECT_EQ( lhs.diagnostics.outliers_culled_unique,
+               rhs.diagnostics.outliers_culled_unique );
+    EXPECT_EQ( lhs.diagnostics.outlier_reopt_rounds,
+               rhs.diagnostics.outlier_reopt_rounds );
+    EXPECT_EQ( lhs.diagnostics.outlier_reopt,
+               rhs.diagnostics.outlier_reopt );
+    EXPECT_EQ( lhs.diagnostics.outlier_reopt_failed,
+               rhs.diagnostics.outlier_reopt_failed );
+    const auto& lhs_vio = lhs.diagnostics.m_vio;
+    const auto& rhs_vio = rhs.diagnostics.m_vio;
+    EXPECT_EQ( lhs_vio.m_nav_states, rhs_vio.m_nav_states );
+    EXPECT_EQ( lhs_vio.m_imu_factors, rhs_vio.m_imu_factors );
+    EXPECT_EQ( lhs_vio.m_bias_rw_factors, rhs_vio.m_bias_rw_factors );
+    EXPECT_EQ( lhs_vio.m_visual_factors, rhs_vio.m_visual_factors );
+    EXPECT_EQ( lhs_vio.m_root_prior_sets, rhs_vio.m_root_prior_sets );
+    EXPECT_EQ( lhs_vio.m_integration_steps,
+               rhs_vio.m_integration_steps );
+    EXPECT_EQ( lhs_vio.m_integrated_duration_ns,
+               rhs_vio.m_integrated_duration_ns );
+    EXPECT_EQ( lhs_vio.m_visual_coast_duration_ns,
+               rhs_vio.m_visual_coast_duration_ns );
+    EXPECT_EQ( lhs_vio.m_non_keyframe_evictions,
+               rhs_vio.m_non_keyframe_evictions );
+    EXPECT_EQ( lhs_vio.m_imu_reintegrations,
+               rhs_vio.m_imu_reintegrations );
+  }
+
+  void expectZeroPacketCounters( const VioUpdateResult& result )
+  {
+    EXPECT_EQ( result.diagnostics.num_retained_observations, 0U );
+    EXPECT_EQ( result.diagnostics.num_seeded_landmarks, 0U );
+    EXPECT_EQ( result.diagnostics.num_current_visual_factors, 0U );
+  }
+
+  [[nodiscard]] EstimatorOptions transactionOptions()
+  {
+    EstimatorOptions options                = makeOptions();
+    options.window_size                     = 32;
+    options.min_track_observations_for_seed = 2;
+    options.min_landmark_observations       = 2;
+    options.enable_outlier_cull             = false;
+    options.enable_outlier_reopt            = false;
+    return options;
+  }
+
+  void primeSupportedCoast( VioEstimator& estimator )
+  {
+    ASSERT_EQ( estimator
+                   .update( makeMeasurement(
+                       kFramePeriodNs,
+                       stationaryInterval( 0, kFramePeriodNs ) ) )
+                   .status,
+               UpdateStatus::kOk );
+    ASSERT_EQ( estimator
+                   .update( makeMeasurement(
+                       2 * kFramePeriodNs,
+                       stationaryInterval( kFramePeriodNs,
+                                           2 * kFramePeriodNs ) ) )
+                   .status,
+               UpdateStatus::kOk );
+    const auto coast = estimator.update( makeMeasurementWithObservations(
+        3 * kFramePeriodNs,
+        stationaryInterval( 2 * kFramePeriodNs, 3 * kFramePeriodNs ),
+        {} ) );
+    ASSERT_EQ( coast.status, UpdateStatus::kOk ) << coast.message;
+    ASSERT_EQ( coast.diagnostics.m_vio.m_visual_coast_duration_ns,
+               kFramePeriodNs );
+    ASSERT_EQ( coast.diagnostics.unsupported_span_ns, kFramePeriodNs );
+  }
+
+  [[nodiscard]] StereoObservation makeUniqueObservation(
+      std::uint64_t id )
+  {
+    StereoObservation observation = makeObservations().front();
+    observation.id                = id;
+    return observation;
+  }
+
 }  // namespace
 
 TEST( VioFullState, StaticRootAndInterpolatedSuccessorCommitXVB )
@@ -301,6 +397,217 @@ TEST( VioFullState, InvalidRawIntervalPreservesNextTransaction )
              direct.diagnostics.m_vio.m_bias_rw_factors );
 }
 
+TEST( VioFullState, InvalidObservationPreservesCoastAndTrackState )
+{
+  VioEstimator subject( makeCalibration(), makeImuParameters(),
+                        transactionOptions() );
+  VioEstimator control( makeCalibration(), makeImuParameters(),
+                        transactionOptions() );
+  primeSupportedCoast( subject );
+  primeSupportedCoast( control );
+
+  constexpr std::uint64_t kUniqueId = 9'001U;
+  StereoObservation       malformed = makeUniqueObservation( kUniqueId );
+  malformed.disparity_px            = -1.0;
+  const auto invalid                = subject.update( makeMeasurementWithObservations(
+      4 * kFramePeriodNs,
+      stationaryInterval( 3 * kFramePeriodNs, 4 * kFramePeriodNs ),
+      { malformed } ) );
+  ASSERT_EQ( invalid.status, UpdateStatus::kInvalidInput )
+      << invalid.message;
+  EXPECT_FALSE( invalid.estimate.has_value() );
+  expectZeroPacketCounters( invalid );
+  EXPECT_EQ( invalid.diagnostics.m_vio.m_visual_coast_duration_ns,
+             kFramePeriodNs );
+  EXPECT_EQ( invalid.diagnostics.unsupported_span_ns, kFramePeriodNs );
+  EXPECT_TRUE( subject.observationTimestamps( kUniqueId ).empty() );
+
+  const auto legal = makeMeasurementWithObservations(
+      4 * kFramePeriodNs,
+      stationaryInterval( 3 * kFramePeriodNs, 4 * kFramePeriodNs ),
+      { makeUniqueObservation( kUniqueId ) } );
+  const auto after_invalid = subject.update( legal );
+  const auto direct        = control.update( legal );
+  expectSameCommittedUpdate( after_invalid, direct );
+  EXPECT_EQ( after_invalid.diagnostics.num_seeded_landmarks, 0U );
+  EXPECT_EQ( after_invalid.diagnostics.unsupported_span_ns,
+             2 * kFramePeriodNs );
+  EXPECT_EQ( subject.observationTimestamps( kUniqueId ),
+             control.observationTimestamps( kUniqueId ) );
+  ASSERT_EQ( subject.observationTimestamps( kUniqueId ).size(), 1U );
+}
+
+TEST( VioFullState, NonFinitePropagationRollsBackIntakeAndSpan )
+{
+  VioEstimator subject( makeCalibration(), makeImuParameters(),
+                        transactionOptions() );
+  VioEstimator control( makeCalibration(), makeImuParameters(),
+                        transactionOptions() );
+  primeSupportedCoast( subject );
+  primeSupportedCoast( control );
+
+  constexpr std::uint64_t kUniqueId = 9'002U;
+  constexpr std::int64_t  kHugeTimestamp =
+      9'000'000'000'000'000'000LL;
+  constexpr std::int64_t kMidTimestamp = kHugeTimestamp / 2;
+  const double           huge_acc =
+      std::numeric_limits<double>::max() / 4.0;
+  RawImuInterval explosive{
+      .m_t_begin = Timestamp{ 3 * kFramePeriodNs },
+      .m_t_end   = Timestamp{ kHugeTimestamp },
+      .m_samples = {
+          makeImu( 3 * kFramePeriodNs, 0.0 ),
+          makeImuWithAcc( kMidTimestamp,
+                          Eigen::Vector3d{ huge_acc, 0.0, 9.81 } ),
+          makeImuWithAcc( kHugeTimestamp,
+                          Eigen::Vector3d{ huge_acc, 0.0, 9.81 } ) } };
+  auto observations = makeObservations();
+  observations.push_back( makeUniqueObservation( kUniqueId ) );
+  const auto failed = subject.update( makeMeasurementWithObservations(
+      kHugeTimestamp, std::move( explosive ), std::move( observations ) ) );
+  ASSERT_EQ( failed.status, UpdateStatus::kFailed ) << failed.message;
+  EXPECT_FALSE( failed.estimate.has_value() );
+  expectZeroPacketCounters( failed );
+  EXPECT_EQ( failed.diagnostics.m_vio.m_visual_coast_duration_ns,
+             kFramePeriodNs );
+  EXPECT_EQ( failed.diagnostics.unsupported_span_ns, kFramePeriodNs );
+  EXPECT_TRUE( subject.observationTimestamps( kUniqueId ).empty() );
+
+  const auto legal = makeMeasurementWithObservations(
+      4 * kFramePeriodNs,
+      stationaryInterval( 3 * kFramePeriodNs, 4 * kFramePeriodNs ),
+      { makeUniqueObservation( kUniqueId ) } );
+  const auto after_failed = subject.update( legal );
+  const auto direct       = control.update( legal );
+  expectSameCommittedUpdate( after_failed, direct );
+  EXPECT_EQ( after_failed.diagnostics.num_seeded_landmarks, 0U );
+  EXPECT_EQ( subject.observationTimestamps( kUniqueId ),
+             control.observationTimestamps( kUniqueId ) );
+  ASSERT_EQ( subject.observationTimestamps( kUniqueId ).size(), 1U );
+}
+
+TEST( VioFullState, PrimaryGraphFailureRollsBackIntakeSeedAndSpan )
+{
+  VioEstimator            subject( makeCalibration(), makeImuParameters(),
+                                   transactionOptions() );
+  VioEstimator            control( makeCalibration(), makeImuParameters(),
+                                   transactionOptions() );
+  constexpr std::uint64_t kUniqueId = 9'003U;
+  for ( VioEstimator* estimator : { &subject, &control } )
+  {
+    ASSERT_EQ( estimator
+                   ->update( makeMeasurement(
+                       kFramePeriodNs,
+                       stationaryInterval( 0, kFramePeriodNs ) ) )
+                   .status,
+               UpdateStatus::kOk );
+    ASSERT_EQ( estimator
+                   ->update( makeMeasurement(
+                       2 * kFramePeriodNs,
+                       stationaryInterval( kFramePeriodNs,
+                                           2 * kFramePeriodNs ) ) )
+                   .status,
+               UpdateStatus::kOk );
+    const auto retained = estimator->update( makeMeasurementWithObservations(
+        3 * kFramePeriodNs,
+        stationaryInterval( 2 * kFramePeriodNs, 3 * kFramePeriodNs ),
+        { makeUniqueObservation( kUniqueId ) } ) );
+    ASSERT_EQ( retained.status, UpdateStatus::kOk ) << retained.message;
+    ASSERT_EQ( retained.diagnostics.num_seeded_landmarks, 0U );
+  }
+
+  auto conflicting = makeObservations();
+  conflicting.front().left_pixel.x() =
+      std::numeric_limits<double>::max() / 4.0;
+  conflicting.push_back( makeUniqueObservation( kUniqueId ) );
+  const auto failed = subject.update( makeMeasurementWithObservations(
+      4 * kFramePeriodNs,
+      stationaryInterval( 3 * kFramePeriodNs, 4 * kFramePeriodNs ),
+      std::move( conflicting ) ) );
+  ASSERT_EQ( failed.status, UpdateStatus::kFailed ) << failed.message;
+  EXPECT_FALSE( failed.estimate.has_value() );
+  expectZeroPacketCounters( failed );
+  EXPECT_EQ( failed.diagnostics.m_vio.m_visual_coast_duration_ns,
+             kFramePeriodNs );
+  EXPECT_EQ( failed.diagnostics.unsupported_span_ns, kFramePeriodNs );
+  EXPECT_EQ( subject.observationTimestamps( kUniqueId ),
+             control.observationTimestamps( kUniqueId ) );
+  ASSERT_EQ( subject.observationTimestamps( kUniqueId ).size(), 1U );
+
+  const auto legal = makeMeasurementWithObservations(
+      4 * kFramePeriodNs,
+      stationaryInterval( 3 * kFramePeriodNs, 4 * kFramePeriodNs ),
+      { makeUniqueObservation( kUniqueId ) } );
+  const auto after_failed = subject.update( legal );
+  const auto direct       = control.update( legal );
+  expectSameCommittedUpdate( after_failed, direct );
+  EXPECT_EQ( after_failed.diagnostics.num_seeded_landmarks, 1U );
+  EXPECT_EQ( after_failed.diagnostics.num_current_visual_factors, 1U );
+  EXPECT_EQ( subject.observationTimestamps( kUniqueId ),
+             control.observationTimestamps( kUniqueId ) );
+  ASSERT_EQ( subject.observationTimestamps( kUniqueId ).size(), 2U );
+}
+
+TEST( VioFullState, AccumulatedRootFailureDoesNotLeakPendingObservations )
+{
+  EstimatorOptions options        = transactionOptions();
+  options.enable_accumulated_seed = true;
+  options.min_seed_observations   = 10;
+  VioEstimator subject( makeCalibration(), makeImuParameters(), options );
+  VioEstimator control( makeCalibration(), makeImuParameters(), options );
+
+  std::vector<StereoObservation> first = makeObservations();
+  first.resize( 5U );
+  for ( VioEstimator* estimator : { &subject, &control } )
+  {
+    const auto initializing = estimator->update(
+        makeMeasurementWithObservations(
+            kFramePeriodNs,
+            stationaryInterval( 0, kFramePeriodNs ), first ) );
+    ASSERT_EQ( initializing.status, UpdateStatus::kInitializing )
+        << initializing.message;
+  }
+
+  std::vector<StereoObservation> rejected_only = makeObservations();
+  rejected_only.erase( rejected_only.begin(),
+                       rejected_only.begin() + 5 );
+  for ( StereoObservation& observation : rejected_only )
+  {
+    observation.id += 100U;
+  }
+  rejected_only.front().left_pixel.x() =
+      std::numeric_limits<double>::max() / 4.0;
+  const auto rejected = subject.update( makeMeasurementWithObservations(
+      2 * kFramePeriodNs,
+      stationaryInterval( kFramePeriodNs, 2 * kFramePeriodNs ),
+      rejected_only ) );
+  ASSERT_EQ( rejected.status, UpdateStatus::kRejected )
+      << rejected.message;
+  EXPECT_FALSE( rejected.estimate.has_value() );
+  expectZeroPacketCounters( rejected );
+
+  std::vector<StereoObservation> legal = makeObservations();
+  legal.resize( 4U );
+  for ( StereoObservation& observation : legal )
+  {
+    observation.id += 200U;
+  }
+  const auto after_rejected = subject.update( makeMeasurementWithObservations(
+      2 * kFramePeriodNs,
+      stationaryInterval( kFramePeriodNs, 2 * kFramePeriodNs ), legal ) );
+  const auto direct         = control.update( makeMeasurementWithObservations(
+      2 * kFramePeriodNs,
+      stationaryInterval( kFramePeriodNs, 2 * kFramePeriodNs ), legal ) );
+  EXPECT_EQ( after_rejected.status, UpdateStatus::kInitializing )
+      << after_rejected.message;
+  EXPECT_EQ( direct.status, UpdateStatus::kInitializing ) << direct.message;
+  for ( const StereoObservation& observation : rejected_only )
+  {
+    EXPECT_TRUE( subject.observationTimestamps( observation.id ).empty() );
+    EXPECT_TRUE( control.observationTimestamps( observation.id ).empty() );
+  }
+}
+
 TEST( VioFullState, BootstrapTimestampOverflowIsInvalidInputWithoutAdvancingAnchor )
 {
   VioEstimator           estimator( makeCalibration(), makeImuParameters(),
@@ -392,7 +699,7 @@ TEST( VioFullState, DiscontinuityStartsIndependentRootSegment )
   EXPECT_EQ( new_root.diagnostics.m_vio.m_integrated_duration_ns, 0 );
 }
 
-TEST( VioFullState, VisualCoastAddsOnlyNavigationFactorsAndRecoversInSegment )
+TEST( VioFullState, VisualCoastRetainsFactorsAndRecoversInSegment )
 {
   EstimatorOptions options          = makeOptions();
   options.window_size               = 32;
@@ -432,7 +739,10 @@ TEST( VioFullState, VisualCoastAddsOnlyNavigationFactorsAndRecoversInSegment )
   EXPECT_EQ( second_coast.diagnostics.m_vio.m_nav_states, 3U );
   EXPECT_EQ( second_coast.diagnostics.m_vio.m_imu_factors, 2U );
   EXPECT_EQ( second_coast.diagnostics.m_vio.m_bias_rw_factors, 2U );
-  EXPECT_EQ( second_coast.diagnostics.m_vio.m_visual_factors, 10U );
+  EXPECT_EQ( second_coast.diagnostics.num_retained_observations, 10U );
+  EXPECT_EQ( second_coast.diagnostics.num_seeded_landmarks, 10U );
+  EXPECT_EQ( second_coast.diagnostics.num_current_visual_factors, 10U );
+  EXPECT_EQ( second_coast.diagnostics.m_vio.m_visual_factors, 20U );
   EXPECT_EQ( second_coast.diagnostics.m_vio.m_visual_coast_duration_ns,
              2 * kFramePeriodNs );
 
@@ -446,7 +756,8 @@ TEST( VioFullState, VisualCoastAddsOnlyNavigationFactorsAndRecoversInSegment )
   EXPECT_EQ( recovered.diagnostics.m_vio.m_nav_states, 4U );
   EXPECT_EQ( recovered.diagnostics.m_vio.m_imu_factors, 3U );
   EXPECT_EQ( recovered.diagnostics.m_vio.m_bias_rw_factors, 3U );
-  EXPECT_EQ( recovered.diagnostics.m_vio.m_visual_factors, 20U );
+  EXPECT_EQ( recovered.diagnostics.num_current_visual_factors, 10U );
+  EXPECT_EQ( recovered.diagnostics.m_vio.m_visual_factors, 30U );
   EXPECT_EQ( recovered.diagnostics.m_vio.m_visual_coast_duration_ns, 0 );
 }
 
@@ -513,6 +824,129 @@ TEST( VioFullState, ExactVisualCoastHorizonCommitsBeforeSegmentCompletion )
   EXPECT_EQ( new_root.diagnostics.m_vio.m_imu_factors, 0U );
   EXPECT_EQ( new_root.diagnostics.m_vio.m_bias_rw_factors, 0U );
   EXPECT_EQ( new_root.diagnostics.m_vio.m_visual_factors, 10U );
+}
+
+TEST( VioFullState, FactorBearingExactHorizonPreservesSupportFirstCadence )
+{
+  EstimatorOptions options                = makeOptions();
+  options.window_size                     = 32;
+  options.min_track_observations_for_seed = 2;
+  options.min_landmark_observations       = 2;
+  options.min_pnp_inliers                 = 10;
+  options.m_visual_coast_horizon_ns       = 4 * kFramePeriodNs;
+
+  std::vector<StereoObservation> low_support = makeUnmappedObservations();
+  low_support.pop_back();
+  ASSERT_EQ( low_support.size(), 9U );
+
+  VioEstimator recovery( makeCalibration(), makeImuParameters(), options );
+  VioEstimator outage( makeCalibration(), makeImuParameters(), options );
+  const auto   feed_to_horizon = [ & ]( VioEstimator& estimator ) {
+    ASSERT_EQ( estimator
+                     .update( makeMeasurement(
+                       kFramePeriodNs,
+                       stationaryInterval( 0, kFramePeriodNs ) ) )
+                     .status,
+                 UpdateStatus::kOk );
+    const auto supported = estimator.update( makeMeasurement(
+        2 * kFramePeriodNs,
+        stationaryInterval( kFramePeriodNs, 2 * kFramePeriodNs ) ) );
+    ASSERT_EQ( supported.status, UpdateStatus::kOk ) << supported.message;
+    ASSERT_EQ( supported.diagnostics.num_shared, 10U );
+
+    VioUpdateResult at_horizon;
+    for ( std::int64_t packet = 3; packet <= 6; ++packet )
+    {
+      at_horizon = estimator.update( makeMeasurementWithObservations(
+          packet * kFramePeriodNs,
+          stationaryInterval( ( packet - 1 ) * kFramePeriodNs,
+                                packet * kFramePeriodNs ),
+          low_support ) );
+      ASSERT_EQ( at_horizon.status, UpdateStatus::kOk )
+          << "packet=" << packet << ": " << at_horizon.message;
+    }
+    ASSERT_TRUE( at_horizon.estimate.has_value() );
+    EXPECT_EQ( at_horizon.estimate->m_segment_id, 0U );
+    EXPECT_EQ( at_horizon.diagnostics.num_shared, low_support.size() );
+    EXPECT_EQ( at_horizon.diagnostics.num_retained_observations,
+                 low_support.size() );
+    EXPECT_EQ( at_horizon.diagnostics.num_current_visual_factors,
+                 low_support.size() );
+    EXPECT_EQ( at_horizon.diagnostics.m_vio.m_visual_coast_duration_ns,
+                 options.m_visual_coast_horizon_ns );
+    EXPECT_EQ( at_horizon.diagnostics.unsupported_span_ns,
+                 options.m_visual_coast_horizon_ns );
+  };
+
+  feed_to_horizon( recovery );
+  feed_to_horizon( outage );
+
+  const auto recovered = recovery.update( makeMeasurement(
+      7 * kFramePeriodNs,
+      stationaryInterval( 6 * kFramePeriodNs, 7 * kFramePeriodNs ) ) );
+  ASSERT_EQ( recovered.status, UpdateStatus::kOk ) << recovered.message;
+  ASSERT_TRUE( recovered.estimate.has_value() );
+  EXPECT_EQ( recovered.estimate->m_segment_id, 0U );
+  EXPECT_EQ( recovered.diagnostics.num_shared, 10U );
+  EXPECT_EQ( recovered.diagnostics.m_vio.m_visual_coast_duration_ns, 0 );
+  EXPECT_EQ( recovered.diagnostics.unsupported_span_ns, 0 );
+
+  const auto resumed_coast = recovery.update( makeMeasurementWithObservations(
+      8 * kFramePeriodNs,
+      stationaryInterval( 7 * kFramePeriodNs, 8 * kFramePeriodNs ),
+      low_support ) );
+  ASSERT_EQ( resumed_coast.status, UpdateStatus::kOk )
+      << resumed_coast.message;
+  EXPECT_GT( resumed_coast.diagnostics.num_current_visual_factors, 0U );
+  EXPECT_EQ( resumed_coast.diagnostics.m_vio.m_visual_coast_duration_ns,
+             kFramePeriodNs );
+  EXPECT_EQ( resumed_coast.diagnostics.unsupported_span_ns,
+             kFramePeriodNs );
+
+  const auto discontinuity = recovery.update( makeMeasurementWithObservations(
+      9 * kFramePeriodNs,
+      MeasurementDiscontinuity{
+          .m_t_begin = Timestamp{ 8 * kFramePeriodNs },
+          .m_t_end   = Timestamp{ 9 * kFramePeriodNs } },
+      {} ) );
+  ASSERT_EQ( discontinuity.status, UpdateStatus::kDiscontinuity )
+      << discontinuity.message;
+  EXPECT_FALSE( discontinuity.estimate.has_value() );
+  EXPECT_EQ( discontinuity.diagnostics.unsupported_span_ns, 0 );
+  EXPECT_EQ( discontinuity.diagnostics.num_retained_observations, 0U );
+  EXPECT_EQ( discontinuity.diagnostics.num_seeded_landmarks, 0U );
+  EXPECT_EQ( discontinuity.diagnostics.num_current_visual_factors, 0U );
+  EXPECT_TRUE( recovery
+                   .observationTimestamps( low_support.front().id )
+                   .empty() );
+
+  const auto over_horizon = outage.update( makeMeasurementWithObservations(
+      7 * kFramePeriodNs,
+      stationaryInterval( 6 * kFramePeriodNs, 7 * kFramePeriodNs ),
+      low_support ) );
+  ASSERT_EQ( over_horizon.status, UpdateStatus::kVisualOutage )
+      << over_horizon.message;
+  EXPECT_FALSE( over_horizon.estimate.has_value() );
+  EXPECT_EQ( over_horizon.diagnostics.segment_id, 1U );
+  ASSERT_TRUE(
+      over_horizon.diagnostics.m_vio.m_completed_segment_id.has_value() );
+  EXPECT_EQ( *over_horizon.diagnostics.m_vio.m_completed_segment_id, 0U );
+  EXPECT_EQ( over_horizon.diagnostics.unsupported_span_ns,
+             5 * kFramePeriodNs );
+  EXPECT_EQ( over_horizon.diagnostics.num_retained_observations, 0U );
+  EXPECT_EQ( over_horizon.diagnostics.num_seeded_landmarks, 0U );
+  EXPECT_EQ( over_horizon.diagnostics.num_current_visual_factors, 0U );
+
+  const auto initializing = outage.update( makeMeasurementWithObservations(
+      8 * kFramePeriodNs,
+      stationaryInterval( 7 * kFramePeriodNs, 8 * kFramePeriodNs ), {} ) );
+  ASSERT_EQ( initializing.status, UpdateStatus::kInitializing )
+      << initializing.message;
+  EXPECT_EQ( initializing.diagnostics.unsupported_span_ns,
+             6 * kFramePeriodNs );
+  EXPECT_EQ( initializing.diagnostics.num_retained_observations, 0U );
+  EXPECT_EQ( initializing.diagnostics.num_seeded_landmarks, 0U );
+  EXPECT_EQ( initializing.diagnostics.num_current_visual_factors, 0U );
 }
 
 TEST( VioFullState, InvalidRawIntervalPreservesVisualCoastLifecycle )

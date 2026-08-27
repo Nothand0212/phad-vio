@@ -2,6 +2,7 @@
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
+#include <algorithm>
 #include <cstdint>
 #include <stdexcept>
 #include <vector>
@@ -222,6 +223,62 @@ TEST( StereoVoOutlierCullTest, CullsPersistentHighReprojLandmark )
   const auto probe_result = estimator.update( probe_meas );
   ASSERT_EQ( probe_result.status, UpdateStatus::kOk ) << probe_result.message;
   EXPECT_EQ( probe_result.diagnostics.num_shared, ids.size() - 1U );
+}
+
+TEST( StereoVoOutlierCullTest, LowSupportFactorsRunExistingCullPath )
+{
+  const auto calibration = makeCalibration();
+  const auto base_ids    = sequentialIds( kLandmarks.size(), 1 );
+
+  EstimatorOptions options     = defaultCullOptions();
+  options.min_pnp_inliers      = 20;
+  options.enable_outlier_reopt = false;
+  VioEstimator estimator( calibration,
+                          phad::test_support::testImuParameters(), options );
+
+  ASSERT_EQ( estimator
+                 .update( makeFrame( calibration, Eigen::Isometry3d::Identity(),
+                                     50'000'000, kLandmarks, base_ids ) )
+                 .status,
+             UpdateStatus::kOk );
+  ASSERT_EQ( estimator
+                 .update( makeFrame( calibration, Eigen::Isometry3d::Identity(),
+                                     100'000'000, kLandmarks, base_ids ) )
+                 .status,
+             UpdateStatus::kOk );
+
+  constexpr std::size_t              kCoastLandmarks = 19U;
+  const std::vector<Eigen::Vector3d> coast_landmarks(
+      kLandmarks.begin(), kLandmarks.begin() + kCoastLandmarks );
+  const auto       coast_ids = sequentialIds( kCoastLandmarks, 100 );
+  const LandmarkId poison_id = coast_ids.front();
+
+  phad::estimator::VioUpdateResult result;
+  for ( std::size_t index = 0; index < 4U; ++index )
+  {
+    const std::int64_t ts_ns =
+        150'000'000 + static_cast<std::int64_t>( index ) * 50'000'000;
+    auto measurement = makeFrame( calibration, Eigen::Isometry3d::Identity(),
+                                  ts_ns, coast_landmarks, coast_ids );
+    if ( index >= 1U )
+    {
+      offsetLeftPixel( measurement, poison_id, poisonDeltaPx( index ) );
+    }
+    result = estimator.update( measurement );
+    ASSERT_EQ( result.status, UpdateStatus::kOk ) << result.message;
+  }
+
+  EXPECT_EQ( result.diagnostics.num_shared, kCoastLandmarks );
+  EXPECT_EQ( result.diagnostics.num_current_visual_factors,
+             kCoastLandmarks );
+  EXPECT_EQ( result.diagnostics.m_vio.m_visual_coast_duration_ns,
+             200'000'000 );
+  EXPECT_EQ( result.diagnostics.unsupported_span_ns, 200'000'000 );
+  EXPECT_GE( result.diagnostics.outliers_culled, 1U );
+  EXPECT_NE( std::find( result.diagnostics.culled_landmark_ids.begin(),
+                        result.diagnostics.culled_landmark_ids.end(),
+                        poison_id ),
+             result.diagnostics.culled_landmark_ids.end() );
 }
 
 TEST( StereoVoOutlierCullTest, SkipsLandmarksWithFewerThanFourObs )

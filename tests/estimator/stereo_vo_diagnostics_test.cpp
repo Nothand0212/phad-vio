@@ -119,7 +119,7 @@ namespace
 
 }  // namespace
 
-TEST( StereoVoDiagnostics, ZeroSharedCommitsImuOnlyStateAndRecovers )
+TEST( StereoVoDiagnostics, ZeroSharedCommitsContinuousStateAndRecovers )
 {
   const auto calibration = makeCalibration();
   const auto poses       = translatingPoses( 3, 0.05 );

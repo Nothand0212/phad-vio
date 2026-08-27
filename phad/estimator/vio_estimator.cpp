@@ -67,6 +67,7 @@ namespace phad::estimator
       std::uint32_t               m_imu_factors            = 0;
       std::uint32_t               m_bias_rw_factors        = 0;
       std::uint32_t               m_visual_factors         = 0;
+      std::uint32_t               m_current_visual_factors = 0;
       std::uint32_t               m_root_prior_sets        = 0;
       std::uint32_t               m_integration_steps      = 0;
       std::int64_t                m_integrated_duration_ns = 0;
@@ -1451,6 +1452,11 @@ namespace phad::estimator
                 X( frame.m_frame_index ), L( observation.id ), K,
                 body_P_sensor );
             ++vio_info.m_visual_factors;
+            if ( frame.m_frame_index ==
+                 m_state->m_window.back().m_frame_index )
+            {
+              ++vio_info.m_current_visual_factors;
+            }
           }
         }
       }
@@ -1691,11 +1697,32 @@ namespace phad::estimator
                                        : m_impl->m_state->m_window.front()
                                              .m_frame_index;
     result.diagnostics.m_vio     = m_impl->m_state->m_vio_diagnostics;
+    result.diagnostics.unsupported_span_ns =
+        m_impl->m_state->m_unsupported_span_ns;
     const auto finalizePreStagingHardResult =
         [ & ]( UpdateStatus status, std::string message ) -> VioUpdateResult {
       result.status  = status;
       result.message = std::move( message );
       return result;
+    };
+    const auto stageUnsupportedSpanForCurrentTimestamp = [ & ]() -> bool {
+      if ( !m_impl->m_state->m_last_visual_support_timestamp.has_value() )
+      {
+        m_impl->m_state->m_unsupported_span_ns = 0;
+        result.diagnostics.unsupported_span_ns = 0;
+        return true;
+      }
+      const std::optional<std::int64_t> unsupported_span_ns =
+          checkedPositiveDurationNs(
+              *m_impl->m_state->m_last_visual_support_timestamp,
+              measurement.m_timestamp );
+      if ( !unsupported_span_ns.has_value() )
+      {
+        return false;
+      }
+      m_impl->m_state->m_unsupported_span_ns = *unsupported_span_ns;
+      result.diagnostics.unsupported_span_ns = *unsupported_span_ns;
+      return true;
     };
 
     const std::optional<common::Timestamp> expected_t_begin =
@@ -1723,6 +1750,9 @@ namespace phad::estimator
       m_impl->m_state->m_bootstrap_nodes.clear();
       m_impl->m_state->m_visual_coast_duration_ns = 0;
       m_impl->m_state->m_continuity_anchor        = discontinuity.m_t_end;
+      m_impl->m_state->m_last_visual_support_timestamp.reset();
+      m_impl->m_state->m_unsupported_span_ns = 0;
+      result.diagnostics.unsupported_span_ns = 0;
       if ( !m_impl->m_state->m_initialized )
       {
         result.status  = UpdateStatus::kInitializing;
@@ -1854,6 +1884,12 @@ namespace phad::estimator
           m_impl->m_state->m_bootstrap_nodes = std::move( bootstrap_nodes );
           result.status                      = UpdateStatus::kInitializing;
           result.message                     = "collecting static bootstrap evidence";
+          if ( !stageUnsupportedSpanForCurrentTimestamp() )
+          {
+            return finalizePreStagingHardResult(
+                UpdateStatus::kFailed,
+                "unsupported visual span is not representable" );
+          }
         }
         transaction.commit();
         return result;
@@ -1872,18 +1908,32 @@ namespace phad::estimator
         m_impl->m_state->m_continuity_anchor = measurement.m_timestamp;
         result.status                        = UpdateStatus::kInitializing;
         result.message                       = "static bootstrap ready; waiting for visual seed";
+        if ( !stageUnsupportedSpanForCurrentTimestamp() )
+        {
+          return finalizePreStagingHardResult(
+              UpdateStatus::kFailed,
+              "unsupported visual span is not representable" );
+        }
         transaction.commit();
         return result;
       }
     }
 
+    auto       pending_seed_obs = m_impl->m_state->m_pending_seed_obs;
     const auto retainBootstrapAndReturn =
         [ & ]( std::string message ) -> VioUpdateResult {
       VioUpdateTransaction transaction( m_impl->m_state );
       m_impl->m_state->m_bootstrap_nodes   = bootstrap_nodes;
       m_impl->m_state->m_continuity_anchor = measurement.m_timestamp;
+      m_impl->m_state->m_pending_seed_obs  = pending_seed_obs;
       result.status                        = UpdateStatus::kInitializing;
       result.message                       = std::move( message );
+      if ( !stageUnsupportedSpanForCurrentTimestamp() )
+      {
+        return finalizePreStagingHardResult(
+            UpdateStatus::kFailed,
+            "unsupported visual span is not representable" );
+      }
       transaction.commit();
       return result;
     };
@@ -1909,18 +1959,17 @@ namespace phad::estimator
     result.diagnostics.num_shared    = num_shared;
     result.diagnostics.num_disparity = num_disparity;
 
-    const bool visual_supported =
-        !m_impl->m_state->m_initialized ||
+    const bool active_segment = m_impl->m_state->m_initialized;
+    const bool full_visual_support =
+        !active_segment ||
         static_cast<int>( num_shared ) >= m_impl->options.min_pnp_inliers;
-    const bool imu_only_coast =
-        m_impl->m_state->m_initialized && !visual_supported;
+    const bool low_visual_support =
+        active_segment && !full_visual_support;
     std::int64_t next_visual_coast_duration_ns = 0;
 
-    if ( m_impl->m_state->m_initialized && visual_supported )
-    {
-      m_impl->m_state->m_pending_seed_obs.clear();
-    }
-    if ( imu_only_coast )
+    bool clear_pending_seed_obs =
+        m_impl->m_state->m_initialized && full_visual_support;
+    if ( low_visual_support )
     {
       const std::int64_t coast_duration_ns =
           m_impl->m_state->m_visual_coast_duration_ns;
@@ -1935,7 +1984,13 @@ namespace phad::estimator
       if ( normalized_imu.m_duration_ns > horizon_ns - coast_duration_ns )
       {
         VioUpdateTransaction transaction( m_impl->m_state );
-        const std::uint32_t  completed_segment =
+        if ( !stageUnsupportedSpanForCurrentTimestamp() )
+        {
+          return finalizePreStagingHardResult(
+              UpdateStatus::kFailed,
+              "unsupported visual span is not representable" );
+        }
+        const std::uint32_t completed_segment =
             m_impl->completeActiveSegment( measurement.m_timestamp );
         result.diagnostics.segment_id  = m_impl->m_state->m_segment_id;
         result.diagnostics.window_size = 0;
@@ -1968,18 +2023,18 @@ namespace phad::estimator
       {
         if ( obs.disparity_px > 0.0 )
         {
-          m_impl->m_state->m_pending_seed_obs[ obs.id ] = obs;  // latest wins
+          pending_seed_obs[ obs.id ] = obs;  // latest wins
         }
       }
-      if ( static_cast<int>( m_impl->m_state->m_pending_seed_obs.size() ) <
+      if ( static_cast<int>( pending_seed_obs.size() ) <
            m_impl->options.min_seed_observations )
       {
         return false;
       }
       accumulated_measurement.m_observations.clear();
       accumulated_measurement.m_observations.reserve(
-          m_impl->m_state->m_pending_seed_obs.size() );
-      for ( const auto& [ id, obs ] : m_impl->m_state->m_pending_seed_obs )
+          pending_seed_obs.size() );
+      for ( const auto& [ id, obs ] : pending_seed_obs )
       {
         (void)id;
         accumulated_measurement.m_observations.push_back( obs );
@@ -1989,7 +2044,7 @@ namespace phad::estimator
     };
 
     result.diagnostics.low_connectivity =
-        m_impl->m_state->m_initialized && visual_supported &&
+        m_impl->m_state->m_initialized && full_visual_support &&
         static_cast<int>( num_shared ) < m_impl->options.min_shared_landmarks;
 
     if ( !m_impl->m_state->m_initialized )
@@ -1998,7 +2053,7 @@ namespace phad::estimator
           static_cast<int>( m_impl->countStereoObservations( measurement ) );
       if ( stereo_count >= m_impl->options.min_seed_observations )
       {
-        m_impl->m_state->m_pending_seed_obs.clear();
+        clear_pending_seed_obs = true;
       }
       else if ( m_impl->options.enable_accumulated_seed )
       {
@@ -2018,6 +2073,11 @@ namespace phad::estimator
     std::vector<LandmarkId> frame_culled;
 
     VioUpdateTransaction transaction( m_impl->m_state );
+    m_impl->m_state->m_pending_seed_obs = pending_seed_obs;
+    if ( clear_pending_seed_obs )
+    {
+      m_impl->m_state->m_pending_seed_obs.clear();
+    }
     m_impl->m_state->m_visual_coast_duration_ns =
         next_visual_coast_duration_ns;
     auto finalizePostStagingHardResult =
@@ -2080,13 +2140,10 @@ namespace phad::estimator
     else
     {
       WindowFrame candidate;
-      candidate.m_frame_index = m_impl->m_state->m_next_frame_index;
-      candidate.m_timestamp   = measurement.m_timestamp;
-      if ( !imu_only_coast )
-      {
-        candidate.m_observations = measurement.m_observations;
-      }
-      candidate.m_is_keyframe = keyframe;
+      candidate.m_frame_index  = m_impl->m_state->m_next_frame_index;
+      candidate.m_timestamp    = measurement.m_timestamp;
+      candidate.m_observations = measurement.m_observations;
+      candidate.m_is_keyframe  = keyframe;
 
       const Eigen::Isometry3d guess_T_W_B = propagated_T_W_B;
       candidate.m_T_W_B                   = guess_T_W_B;
@@ -2164,16 +2221,13 @@ namespace phad::estimator
         return finalizePostStagingHardResult(
             UpdateStatus::kFailed, "non-finite pose initial value" );
       }
-      if ( !imu_only_coast )
+      // Track history uses the full validated measurement, including shared
+      // PnP outliers masked from candidate.m_observations.
+      for ( const StereoObservation& observation :
+            measurement.m_observations )
       {
-        // track_times sees the full supported measurement, including shared
-        // outliers masked out of candidate.m_observations.
-        for ( const StereoObservation& observation :
-              measurement.m_observations )
-        {
-          m_impl->m_state->m_track_times[ observation.id ].push_back(
-              measurement.m_timestamp );
-        }
+        m_impl->m_state->m_track_times[ observation.id ].push_back(
+            measurement.m_timestamp );
       }
       // Slice ⑦ (E12g, final: part of the E13-composed gate): a far-return
       // landmark — one whose last stereo observation left the window while
@@ -2347,6 +2401,14 @@ namespace phad::estimator
         static_cast<std::uint32_t>( m_impl->m_state->m_window.size() );
     result.diagnostics.reproj_rms_before_px =
         stereoReprojRms( graph, values );
+    if ( !std::isfinite( result.diagnostics.reproj_rms_before_px ) )
+    {
+      return finalizePostStagingHardResult(
+          UpdateStatus::kFailed,
+          "initial graph reprojection error is non-finite" );
+    }
+    const bool graph_has_visual_factors =
+        vio_graph_info.m_visual_factors > 0U;
     const std::uint32_t cheirality_before = std::max(
         countCheiralityFactors(
             graph, values, m_impl->calibration.fxPixels() ),
@@ -2488,7 +2550,7 @@ namespace phad::estimator
     std::uint32_t outliers_culled        = 0;
     std::uint32_t outliers_culled_unique = 0;
     std::uint32_t culled_round           = 0;
-    if ( !imu_only_coast )
+    if ( graph_has_visual_factors )
     {
       culled_round = m_impl->runCheiralityAndMeanCull(
           optimized, graph, frame_culled, outliers_culled,
@@ -2501,7 +2563,8 @@ namespace phad::estimator
         stereoReprojRms( graph, optimized );
     // Slice ④ after_cull initial value (final when reopt is skipped / fails).
     double after_cull = result.diagnostics.reproj_rms_after_px;
-    if ( m_impl->options.enable_outlier_cull && !imu_only_coast )
+    if ( m_impl->options.enable_outlier_cull &&
+         graph_has_visual_factors )
     {
       after_cull = stereoReprojRmsSkippingMissingLandmarks(
           graph, optimized, m_impl->m_state->m_landmarks_w );
@@ -2509,7 +2572,8 @@ namespace phad::estimator
 
     std::uint32_t rounds               = 0;
     bool          outlier_reopt_failed = false;
-    while ( !imu_only_coast && m_impl->options.enable_outlier_reopt &&
+    while ( graph_has_visual_factors &&
+            m_impl->options.enable_outlier_reopt &&
             rounds <
                 static_cast<std::uint32_t>( m_impl->options.max_outlier_reopts ) &&
             culled_round >= 4U )
@@ -2604,7 +2668,8 @@ namespace phad::estimator
 
         result.diagnostics.lm_iterations +=
             reopt_success.m_lm_iterations;
-        optimized = optimized_r;
+        optimized      = optimized_r;
+        vio_graph_info = reopt_vio_info;
         ++rounds;
         after_cull   = stereoReprojRms( g_r, optimized_r );
         culled_round = m_impl->runCheiralityAndMeanCull(
@@ -2663,6 +2728,27 @@ namespace phad::estimator
 
     m_impl->m_state->m_initialized = true;
 
+    result.diagnostics.num_retained_observations =
+        static_cast<std::uint32_t>(
+            m_impl->m_state->m_window.back().m_observations.size() );
+    result.diagnostics.num_seeded_landmarks =
+        result.diagnostics.probe_new_lm_n;
+    result.diagnostics.num_current_visual_factors =
+        vio_graph_info.m_current_visual_factors;
+    if ( active_segment && full_visual_support )
+    {
+      m_impl->m_state->m_last_visual_support_timestamp =
+          measurement.m_timestamp;
+      m_impl->m_state->m_unsupported_span_ns = 0;
+    }
+    else if ( !stageUnsupportedSpanForCurrentTimestamp() )
+    {
+      return finalizePostStagingHardResult(
+          UpdateStatus::kFailed,
+          "unsupported visual span is not representable" );
+    }
+    result.diagnostics.unsupported_span_ns =
+        m_impl->m_state->m_unsupported_span_ns;
     result.status                     = UpdateStatus::kOk;
     const WindowFrame& estimate_frame = m_impl->m_state->m_window.back();
     result.estimate                   = VioEstimate{

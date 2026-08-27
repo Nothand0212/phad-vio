@@ -46,6 +46,8 @@ namespace phad::estimator::internal
     std::unordered_map<LandmarkId, StereoObservation> m_pending_seed_obs;
     std::vector<sensor::ImuMeasurement>               m_bootstrap_nodes;
     std::optional<common::Timestamp>                  m_continuity_anchor;
+    std::optional<common::Timestamp>                  m_last_visual_support_timestamp;
+    std::int64_t                                      m_unsupported_span_ns      = 0;
     std::int64_t                                      m_visual_coast_duration_ns = 0;
     std::uint64_t                                     m_non_keyframe_evictions   = 0;
     std::uint64_t                                     m_imu_reintegrations       = 0;

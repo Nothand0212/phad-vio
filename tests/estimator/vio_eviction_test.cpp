@@ -21,6 +21,7 @@ namespace
   using phad::camera::RectifiedStereoCalibration;
   using phad::common::Timestamp;
   using phad::estimator::EstimatorOptions;
+  using phad::estimator::LandmarkId;
   using phad::estimator::StereoObservation;
   using phad::estimator::UpdateStatus;
   using phad::estimator::VioDiagnostics;
@@ -207,6 +208,11 @@ namespace
     EXPECT_EQ( failed.diagnostics.prior_key, committed.diagnostics.prior_key );
     EXPECT_EQ( failed.diagnostics.segment_id,
                committed.diagnostics.segment_id );
+    EXPECT_EQ( failed.diagnostics.unsupported_span_ns,
+               committed.diagnostics.unsupported_span_ns );
+    EXPECT_EQ( failed.diagnostics.num_retained_observations, 0U );
+    EXPECT_EQ( failed.diagnostics.num_seeded_landmarks, 0U );
+    EXPECT_EQ( failed.diagnostics.num_current_visual_factors, 0U );
     const VioDiagnostics& lhs = failed.diagnostics.m_vio;
     const VioDiagnostics& rhs = committed.diagnostics.m_vio;
     EXPECT_EQ( lhs.m_nav_states, rhs.m_nav_states );
@@ -324,62 +330,100 @@ TEST( VioEviction, ReintegratesInteriorNonKeyframeFromRawIntervals )
 
 TEST( VioEviction, SignedZeroEndpointMismatchRollsBackAtomically )
 {
-  VioEstimator estimator( makeCalibration(), makeImuParameters(),
-                          makeOptions() );
-  ASSERT_EQ( estimator
-                 .update( makeMeasurement(
-                              50 * kMs, stationaryInterval( 0, 50 * kMs ), true ),
-                          true )
-                 .status,
-             UpdateStatus::kOk );
+  VioEstimator subject( makeCalibration(), makeImuParameters(),
+                        makeOptions() );
+  VioEstimator control( makeCalibration(), makeImuParameters(),
+                        makeOptions() );
+  for ( VioEstimator* estimator : { &subject, &control } )
+  {
+    ASSERT_EQ( estimator
+                   ->update( makeMeasurement(
+                                 50 * kMs,
+                                 stationaryInterval( 0, 50 * kMs ), true ),
+                             true )
+                   .status,
+               UpdateStatus::kOk );
+  }
 
   const std::vector<ImuNode> predecessor_interval{
       ImuNode{ 50 * kMs, 0.0, 0.0 }, ImuNode{ 73 * kMs, 0.4, 0.02 },
       ImuNode{ 100 * kMs, +0.0, 0.0 } };
-  ASSERT_EQ( estimator
-                 .update( makeMeasurement(
-                              100 * kMs, makeInterval( predecessor_interval ), false ),
-                          false )
-                 .status,
-             UpdateStatus::kOk );
+  for ( VioEstimator* estimator : { &subject, &control } )
+  {
+    ASSERT_EQ( estimator
+                   ->update( makeMeasurement(
+                                 100 * kMs,
+                                 makeInterval( predecessor_interval ), true ),
+                             false )
+                   .status,
+               UpdateStatus::kOk );
+  }
 
   const std::vector<ImuNode> successor_interval{
       ImuNode{ 100 * kMs, -0.0, 0.0 }, ImuNode{ 127 * kMs, -0.3, -0.01 },
       ImuNode{ 150 * kMs, 0.2, 0.03 } };
-  const VioUpdateResult committed = estimator.update(
+  const VioUpdateResult committed = subject.update(
+      makeMeasurement( 150 * kMs, makeInterval( successor_interval ), false ),
+      true );
+  const VioUpdateResult control_committed = control.update(
       makeMeasurement( 150 * kMs, makeInterval( successor_interval ), false ),
       true );
   ASSERT_EQ( committed.status, UpdateStatus::kOk ) << committed.message;
+  ASSERT_EQ( control_committed.status, UpdateStatus::kOk )
+      << control_committed.message;
   EXPECT_EQ( committed.diagnostics.window_size, 3U );
   EXPECT_EQ( committed.diagnostics.prior_key, 0U );
   EXPECT_EQ( committed.diagnostics.m_vio.m_non_keyframe_evictions, 0U );
   EXPECT_EQ( committed.diagnostics.m_vio.m_imu_reintegrations, 0U );
+  EXPECT_EQ( committed.diagnostics.unsupported_span_ns, 50 * kMs );
 
   const std::vector<ImuNode> trigger_interval{
       ImuNode{ 150 * kMs, 0.2, 0.03 }, ImuNode{ 179 * kMs, 0.1, -0.02 },
       ImuNode{ 200 * kMs, 0.5, 0.01 } };
-  const VioUpdateResult failed = estimator.update(
-      makeMeasurement( 200 * kMs, makeInterval( trigger_interval ), false ),
-      true );
+  constexpr LandmarkId kFailedOnlyId = 9'004U;
+  VioMeasurement       failing       = makeMeasurement(
+      200 * kMs, makeInterval( trigger_interval ), true );
+  StereoObservation failed_only = makeObservations().front();
+  failed_only.id                = kFailedOnlyId;
+  failing.m_observations.push_back( failed_only );
+  const VioUpdateResult failed = subject.update( failing, true );
   EXPECT_EQ( failed.status, UpdateStatus::kFailed );
   EXPECT_FALSE( failed.estimate.has_value() );
   expectSameCommittedCounters( failed, committed );
+  EXPECT_TRUE( subject.observationTimestamps( kFailedOnlyId ).empty() );
 
-  const VioUpdateResult discontinuity = estimator.update( VioMeasurement{
+  const VioMeasurement discontinuity_measurement{
       .m_timestamp    = Timestamp{ 200 * kMs },
       .m_observations = {},
       .m_imu          = MeasurementDiscontinuity{
                    .m_t_begin = Timestamp{ 150 * kMs },
-                   .m_t_end   = Timestamp{ 200 * kMs } } } );
+                   .m_t_end   = Timestamp{ 200 * kMs } } };
+  const VioUpdateResult discontinuity =
+      subject.update( discontinuity_measurement );
+  const VioUpdateResult control_discontinuity =
+      control.update( discontinuity_measurement );
   ASSERT_EQ( discontinuity.status, UpdateStatus::kDiscontinuity )
       << discontinuity.message;
+  ASSERT_EQ( control_discontinuity.status, UpdateStatus::kDiscontinuity )
+      << control_discontinuity.message;
+  EXPECT_EQ( discontinuity.diagnostics.unsupported_span_ns,
+             control_discontinuity.diagnostics.unsupported_span_ns );
 
-  const VioUpdateResult new_root = estimator.update(
-      makeMeasurement( 250 * kMs,
-                       stationaryInterval( 200 * kMs, 250 * kMs ), true ),
-      true );
+  const VioMeasurement root_measurement = makeMeasurement(
+      250 * kMs, stationaryInterval( 200 * kMs, 250 * kMs ), true );
+  const VioUpdateResult new_root     = subject.update( root_measurement,
+                                                       true );
+  const VioUpdateResult control_root = control.update( root_measurement,
+                                                       true );
   ASSERT_EQ( new_root.status, UpdateStatus::kOk ) << new_root.message;
+  ASSERT_EQ( control_root.status, UpdateStatus::kOk )
+      << control_root.message;
   ASSERT_TRUE( new_root.estimate.has_value() );
+  ASSERT_TRUE( control_root.estimate.has_value() );
+  EXPECT_TRUE( new_root.estimate->T_W_B.matrix().isApprox(
+      control_root.estimate->T_W_B.matrix(), 1e-12 ) );
+  EXPECT_TRUE( new_root.estimate->m_v_W_B.isApprox(
+      control_root.estimate->m_v_W_B, 1e-12 ) );
   EXPECT_EQ( new_root.diagnostics.prior_key, 3U );
   EXPECT_EQ( new_root.diagnostics.window_size, 1U );
   EXPECT_EQ( new_root.diagnostics.m_vio.m_non_keyframe_evictions, 0U );

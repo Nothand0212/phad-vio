@@ -149,27 +149,31 @@ namespace phad::estimator
 
   struct UpdateDiagnostics
   {
-    std::uint32_t num_observations         = 0;
-    std::uint32_t num_landmarks            = 0;  // in the graph
-    std::uint32_t num_shared               = 0;  // new frame ∩ window landmark table
-    std::uint32_t num_disparity            = 0;  // obs with disparity_px > 0 (regardless of landmark table)
-    std::uint32_t num_cheirality           = 0;
-    std::uint32_t lm_iterations            = 0;
-    std::uint32_t window_size              = 0;
-    std::uint32_t segment_id               = 0;  // active estimator segment; 0 is first
-    std::uint64_t prior_key                = 0;  // Symbol('x', k) index k
-    double        reproj_rms_before_px     = 0.0;
-    double        reproj_rms_after_px      = 0.0;
-    double        max_window_pose_shift_m  = 0.0;
-    bool          low_connectivity         = false;
-    bool          pnp_success              = false;
-    std::uint32_t pnp_inliers              = 0;
-    std::uint32_t outliers_culled          = 0;
-    std::uint32_t outliers_culled_unique   = 0;
-    double        reproj_rms_after_cull_px = 0.0;
-    bool          outlier_reopt            = false;  // rounds > 0
-    bool          outlier_reopt_failed     = false;  // LM₂ 失败已回退；不进 diag.csv
-    std::uint32_t outlier_reopt_rounds     = 0;      // 不进 diag.csv
+    std::uint32_t num_observations           = 0;
+    std::uint32_t num_retained_observations  = 0;
+    std::uint32_t num_seeded_landmarks       = 0;
+    std::uint32_t num_current_visual_factors = 0;
+    std::int64_t  unsupported_span_ns        = 0;
+    std::uint32_t num_landmarks              = 0;  // in the graph
+    std::uint32_t num_shared                 = 0;  // new frame ∩ window landmark table
+    std::uint32_t num_disparity              = 0;  // obs with disparity_px > 0 (regardless of landmark table)
+    std::uint32_t num_cheirality             = 0;
+    std::uint32_t lm_iterations              = 0;
+    std::uint32_t window_size                = 0;
+    std::uint32_t segment_id                 = 0;  // active estimator segment; 0 is first
+    std::uint64_t prior_key                  = 0;  // Symbol('x', k) index k
+    double        reproj_rms_before_px       = 0.0;
+    double        reproj_rms_after_px        = 0.0;
+    double        max_window_pose_shift_m    = 0.0;
+    bool          low_connectivity           = false;
+    bool          pnp_success                = false;
+    std::uint32_t pnp_inliers                = 0;
+    std::uint32_t outliers_culled            = 0;
+    std::uint32_t outliers_culled_unique     = 0;
+    double        reproj_rms_after_cull_px   = 0.0;
+    bool          outlier_reopt              = false;  // rounds > 0
+    bool          outlier_reopt_failed       = false;  // LM₂ 失败已回退；不进 diag.csv
+    std::uint32_t outlier_reopt_rounds       = 0;      // 不进 diag.csv
     // 本帧永久移出地图的 id（mean-cull ∪ cheirality）；不进 diag.csv
     std::vector<common::LandmarkId> culled_landmark_ids;
     // Probe B 旁路字段；不进 diag.csv

@@ -245,6 +245,10 @@ TEST( StereoVoOutlierReoptTest, ReoptsWhenAtLeastFourCulled )
       EXPECT_EQ( r_on.diagnostics.outlier_reopt_rounds, 1U );
       EXPECT_GT( r_on.diagnostics.lm_iterations,
                  r_off.diagnostics.lm_iterations );
+      EXPECT_LT( r_on.diagnostics.num_current_visual_factors,
+                 r_off.diagnostics.num_current_visual_factors );
+      EXPECT_EQ( r_off.diagnostics.num_current_visual_factors,
+                 ids.size() );
       EXPECT_FALSE( r_off.diagnostics.outlier_reopt );
       EXPECT_EQ( r_off.diagnostics.outlier_reopt_rounds, 0U );
       saw = true;
@@ -285,6 +289,8 @@ TEST( StereoVoOutlierReoptTest, MaxZeroSkipsReopt )
       EXPECT_EQ( result.diagnostics.outlier_reopt_rounds, 0U );
       EXPECT_FALSE( result.diagnostics.outlier_reopt );
       EXPECT_FALSE( result.diagnostics.outlier_reopt_failed );
+      EXPECT_EQ( result.diagnostics.num_current_visual_factors,
+                 ids.size() );
       saw = true;
       break;
     }

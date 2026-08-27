@@ -81,6 +81,46 @@ apps/stereo_vo_glue.hpp  ── filter kValid ──► KeyframeMeasurement
                     → probe / phad_vo_bench
 ```
 
+## M4 active local visual continuity
+
+`VioEstimator::update()` 在同一 active local estimator 中区分三层视觉语义：
+
+| 层级 | 判定与作用 |
+|---|---|
+| observation retained | packet 通过现有校验与 PnP mask 后，observations 写入当前 transaction/window；`m_track_times` 按 normal path 更新，包含 zero-disparity observation |
+| graph visually constrained | 最终成功 solve 的 graph 含当前 frame 的既有 `GenericStereoFactor`；factor admission 继续要求 positive disparity、map membership 与 `min_landmark_observations` |
+| full visual support | packet 摄入前的 committed map 上，positive-disparity `num_shared >= min_pnp_inliers` |
+
+低于 full visual support 的 accepted packet 仍可保留 observations、seed landmarks、
+建立 visual factors 并运行既有 cheirality / mean-cull / optional-reopt 质量路径。
+landmark refresh/seed 继续遵守 keyframe、track age、positive disparity、
+cull/rebirth 与 backprojection 门。当前 packet 的新 seed 不回流到本 packet 的
+support 判定。
+
+full visual support 每个 packet 只在摄入前计算一次。只有摄入前已达门且整个
+primary transaction 成功 commit，才刷新 support anchor，并将
+`m_visual_coast_duration_ns` 与 `unsupported_span_ns` 归零。实际 visual-factor
+presence 不改变 support anchor；factor-bearing low-support packet 继续消耗同一个
+500 ms coast budget。unsupported endpoint 恰好落在 horizon 时可提交 `kOk`；超过
+horizon 才返回一次 `kVisualOutage`。后续 supported endpoint 优先在原
+`segment_id` 恢复。visual outage 保留 support anchor/span 供后续诊断累计，
+discontinuity 完成段并清除它们。
+
+propagation、observation intake、track lifetime、landmark、window eviction /
+reintegration、graph/solver、quality、support/span 与 diagnostics 受同一 transaction
+保护。hard failure 返回实际状态并恢复调用前 committed state。成功 commit 后发布：
+
+| `UpdateDiagnostics` 字段 | 语义 |
+|---|---|
+| `num_retained_observations` | 现有 PnP mask 后写入当前 frame 的 observation 数 |
+| `num_seeded_landmarks` | 本 transaction 插入 map 的新 landmark 事件数；同 packet 后续 cull 不回写该事件数 |
+| `num_current_visual_factors` | 产生最终 committed optimized state 的最后一次成功 solve 中，属于当前 frame 的 stereo factor 数 |
+| `unsupported_span_ns` | 当前 timestamp 相对最近 committed full-support anchor 的诊断 span；support commit 与 discontinuity row 为 `0` |
+
+primary solve 后 cull 而未成功 reopt 时，factor count 保留 primary graph 口径；
+成功 reopt 后改用该 graph；optional reopt 失败并局部回滚时保留前一次成功 solve
+的 graph 口径。packet counters 为 update-local，只在整个 transaction commit 后发布。
+
 ## 段生命周期（M3.3）
 
 `update()` 在已初始化且 `num_shared == 0`（新帧 landmark id 与窗口内
@@ -262,13 +302,16 @@ timestamp_ns,status,num_obs,num_landmarks,num_shared,low_connectivity,
 window_size,prior_key,reproj_rms_before_px,reproj_rms_after_px,
 num_cheirality,lm_iterations,max_window_pose_shift_m,segment_id,
 pnp_success,pnp_inliers,outliers_culled,reproj_rms_after_cull_px,
-is_keyframe
+is_keyframe,num_disparity,unsupported_span_ns,num_retained_observations,
+num_seeded_landmarks,num_current_visual_factors
 ```
 
-共 **19 列**（Slice ① 在 M2.3 的 13 列尾追加 `segment_id` → 14；Slice ③
+共 **24 列**（Slice ① 在 M2.3 的 13 列尾追加 `segment_id` → 14；Slice ③
 再追加 `pnp_success,pnp_inliers` → 16；Slice ④ 再追加
 `outliers_culled,reproj_rms_after_cull_px` → 18；Slice ⑤ 再追加
-`is_keyframe` → 19；有意的契约变更）。
+`is_keyframe` → 19；随后追加 `num_disparity` → 20；M4 轨迹连续性在尾部追加
+`unsupported_span_ns,num_retained_observations,num_seeded_landmarks,`
+`num_current_visual_factors` → 24）。
 `pnp_success` 为 `0/1` 整数，`is_keyframe` 为 `0/1` 整数。`status` 为
 `ok` / `rejected` / `failed`。accepted 非关键帧实际进入 graph/LM，因此优化相关列
 （`reproj_rms_before/after`、`num_cheirality`、`lm_iterations`、`outliers_culled`

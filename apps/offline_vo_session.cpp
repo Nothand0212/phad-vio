@@ -848,26 +848,30 @@ namespace phad::apps
       }
 
       result.diag.push_back( VoDiagRow{
-          .timestamp_ns             = tracks.timestamp.nanoseconds(),
-          .status                   = updateStatusName( update.status ),
-          .num_observations         = d.num_observations,
-          .num_landmarks            = d.num_landmarks,
-          .num_shared               = d.num_shared,
-          .num_disparity            = d.num_disparity,
-          .low_connectivity         = d.low_connectivity,
-          .window_size              = d.window_size,
-          .prior_key                = d.prior_key,
-          .reproj_rms_before_px     = d.reproj_rms_before_px,
-          .reproj_rms_after_px      = d.reproj_rms_after_px,
-          .num_cheirality           = d.num_cheirality,
-          .lm_iterations            = d.lm_iterations,
-          .max_window_pose_shift_m  = d.max_window_pose_shift_m,
-          .segment_id               = d.segment_id,
-          .pnp_success              = d.pnp_success,
-          .pnp_inliers              = d.pnp_inliers,
-          .outliers_culled          = d.outliers_culled,
-          .reproj_rms_after_cull_px = d.reproj_rms_after_cull_px,
-          .is_keyframe              = is_kf,
+          .timestamp_ns               = tracks.timestamp.nanoseconds(),
+          .status                     = updateStatusName( update.status ),
+          .num_observations           = d.num_observations,
+          .num_landmarks              = d.num_landmarks,
+          .num_shared                 = d.num_shared,
+          .num_disparity              = d.num_disparity,
+          .low_connectivity           = d.low_connectivity,
+          .window_size                = d.window_size,
+          .prior_key                  = d.prior_key,
+          .reproj_rms_before_px       = d.reproj_rms_before_px,
+          .reproj_rms_after_px        = d.reproj_rms_after_px,
+          .num_cheirality             = d.num_cheirality,
+          .lm_iterations              = d.lm_iterations,
+          .max_window_pose_shift_m    = d.max_window_pose_shift_m,
+          .segment_id                 = d.segment_id,
+          .pnp_success                = d.pnp_success,
+          .pnp_inliers                = d.pnp_inliers,
+          .outliers_culled            = d.outliers_culled,
+          .reproj_rms_after_cull_px   = d.reproj_rms_after_cull_px,
+          .is_keyframe                = is_kf,
+          .unsupported_span_ns        = d.unsupported_span_ns,
+          .num_retained_observations  = d.num_retained_observations,
+          .num_seeded_landmarks       = d.num_seeded_landmarks,
+          .num_current_visual_factors = d.num_current_visual_factors,
       } );
 
       if ( options.collect_timing )
@@ -1098,7 +1102,9 @@ namespace phad::apps
            "reproj_rms_before_px,reproj_rms_after_px,num_cheirality,"
            "lm_iterations,max_window_pose_shift_m,segment_id,"
            "pnp_success,pnp_inliers,outliers_culled,"
-           "reproj_rms_after_cull_px,is_keyframe,num_disparity\n";
+           "reproj_rms_after_cull_px,is_keyframe,num_disparity,"
+           "unsupported_span_ns,num_retained_observations,"
+           "num_seeded_landmarks,num_current_visual_factors\n";
 
     for ( const VoDiagRow& row : rows )
     {
@@ -1115,7 +1121,10 @@ namespace phad::apps
           << row.pnp_inliers << ',' << row.outliers_culled << ','
           << row.reproj_rms_after_cull_px << ','
           << ( row.is_keyframe ? 1 : 0 ) << ','
-          << row.num_disparity << '\n';
+          << row.num_disparity << ',' << row.unsupported_span_ns << ','
+          << row.num_retained_observations << ','
+          << row.num_seeded_landmarks << ','
+          << row.num_current_visual_factors << '\n';
     }
 
     if ( !out )

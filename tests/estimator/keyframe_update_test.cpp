@@ -3,6 +3,7 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include "phad/camera/rectified_stereo_calibration.hpp"
@@ -84,7 +85,7 @@ TEST( KeyframeUpdateTest, NonKeyframeEntersWindow )
   EXPECT_EQ( r2.diagnostics.window_size, win_sz_before + 1U );
 }
 
-TEST( KeyframeUpdateTest, NonKeyframeAllNewIdsUsesImuOnlyCoast )
+TEST( KeyframeUpdateTest, NonKeyframeAllNewIdsRetainsLowSupportObservations )
 {
   auto         calib = makeCalibration();
   VioEstimator estimator( calib, phad::test_support::testImuParameters() );
@@ -106,17 +107,31 @@ TEST( KeyframeUpdateTest, NonKeyframeAllNewIdsUsesImuOnlyCoast )
   {
     new_ids.push_back( LandmarkId{ static_cast<std::uint64_t>( i ) } );
   }
-  auto m2 = makeMeasurement( 300'000'000, new_ids );
-  auto r2 = estimator.update( m2, false );
+  auto m2                               = makeMeasurement( 300'000'000, new_ids );
+  m2.m_observations.back().disparity_px = 0.0;
+  auto r2                               = estimator.update( m2, false );
   ASSERT_EQ( r2.status, UpdateStatus::kOk ) << r2.message;
   EXPECT_TRUE( r2.estimate.has_value() );
+  EXPECT_EQ( r2.estimate->m_segment_id, 0U );
   EXPECT_EQ( r2.diagnostics.num_shared, 0U );
   EXPECT_EQ( r2.diagnostics.window_size, 3U );
   EXPECT_EQ( r2.diagnostics.m_vio.m_visual_coast_duration_ns, 100'000'000 );
-  EXPECT_TRUE( estimator.observationTimestamps( new_ids.front() ).empty() );
+  EXPECT_FALSE( r2.diagnostics.pnp_success );
+  EXPECT_EQ( r2.diagnostics.num_retained_observations,
+             m2.m_observations.size() );
+  EXPECT_EQ( r2.diagnostics.num_seeded_landmarks, 0U );
+  EXPECT_EQ( r2.diagnostics.num_current_visual_factors, 0U );
+
+  const auto stereo_times =
+      estimator.observationTimestamps( new_ids.front() );
+  ASSERT_EQ( stereo_times.size(), 1U );
+  EXPECT_EQ( stereo_times.front(), m2.m_timestamp );
+  const auto mono_times = estimator.observationTimestamps( new_ids.back() );
+  ASSERT_EQ( mono_times.size(), 1U );
+  EXPECT_EQ( mono_times.front(), m2.m_timestamp );
 }
 
-TEST( KeyframeUpdateTest, NonKeyframeLowSupportUsesImuOnlyCoast )
+TEST( KeyframeUpdateTest, NonKeyframeLowSupportConsumesCoastBudget )
 {
   auto         calib = makeCalibration();
   VioEstimator estimator( calib, phad::test_support::testImuParameters() );
@@ -147,6 +162,234 @@ TEST( KeyframeUpdateTest, NonKeyframeLowSupportUsesImuOnlyCoast )
   EXPECT_TRUE( r2.estimate.has_value() );
   EXPECT_EQ( r2.diagnostics.num_shared, 5U );
   EXPECT_EQ( r2.diagnostics.m_vio.m_visual_coast_duration_ns, 100'000'000 );
+}
+
+TEST( KeyframeUpdateTest, LowSupportKeyframeRequiresTrackAgeToSeed )
+{
+  EstimatorOptions options;
+  options.min_track_observations_for_seed = 2;
+  options.min_landmark_observations       = 3;
+  VioEstimator estimator( makeCalibration(),
+                          phad::test_support::testImuParameters(), options );
+
+  std::vector<LandmarkId> root_ids;
+  for ( int i = 0; i < 10; ++i )
+  {
+    root_ids.push_back( LandmarkId{ static_cast<std::uint64_t>( i ) } );
+  }
+  ASSERT_EQ( estimator.update( makeMeasurement( 100'000'000, root_ids ), true ).status,
+             UpdateStatus::kOk );
+  ASSERT_EQ( estimator.update( makeMeasurement( 200'000'000, root_ids ), true ).status,
+             UpdateStatus::kOk );
+
+  const std::vector<LandmarkId> new_id{ LandmarkId{ 100 } };
+  const auto                    first =
+      estimator.update( makeMeasurement( 300'000'000, new_id ), true );
+  ASSERT_EQ( first.status, UpdateStatus::kOk ) << first.message;
+  EXPECT_EQ( first.diagnostics.num_retained_observations, 1U );
+  EXPECT_EQ( first.diagnostics.num_seeded_landmarks, 0U );
+  EXPECT_EQ( first.diagnostics.num_current_visual_factors, 0U );
+
+  const auto second =
+      estimator.update( makeMeasurement( 400'000'000, new_id ), true );
+  ASSERT_EQ( second.status, UpdateStatus::kOk ) << second.message;
+  EXPECT_EQ( second.diagnostics.num_shared, 0U );
+  EXPECT_EQ( second.diagnostics.num_seeded_landmarks, 1U );
+  EXPECT_EQ( second.diagnostics.num_current_visual_factors, 0U );
+  EXPECT_EQ( second.diagnostics.m_vio.m_visual_coast_duration_ns,
+             200'000'000 );
+}
+
+TEST( KeyframeUpdateTest, LowSupportNonKeyframeDoesNotSeedMatureTrack )
+{
+  EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;
+  VioEstimator estimator( makeCalibration(),
+                          phad::test_support::testImuParameters(), options );
+
+  std::vector<LandmarkId> root_ids;
+  for ( int i = 0; i < 10; ++i )
+  {
+    root_ids.push_back( LandmarkId{ static_cast<std::uint64_t>( i ) } );
+  }
+  ASSERT_EQ( estimator.update( makeMeasurement( 100'000'000, root_ids ), true ).status,
+             UpdateStatus::kOk );
+  ASSERT_EQ( estimator.update( makeMeasurement( 200'000'000, root_ids ), true ).status,
+             UpdateStatus::kOk );
+
+  const std::vector<LandmarkId> new_id{ LandmarkId{ 100 } };
+  const auto                    non_keyframe =
+      estimator.update( makeMeasurement( 300'000'000, new_id ), false );
+  ASSERT_EQ( non_keyframe.status, UpdateStatus::kOk )
+      << non_keyframe.message;
+  EXPECT_EQ( non_keyframe.diagnostics.num_retained_observations, 1U );
+  EXPECT_EQ( non_keyframe.diagnostics.num_seeded_landmarks, 0U );
+  ASSERT_EQ( estimator.observationTimestamps( new_id.front() ).size(), 1U );
+
+  const auto keyframe =
+      estimator.update( makeMeasurement( 400'000'000, new_id ), true );
+  ASSERT_EQ( keyframe.status, UpdateStatus::kOk ) << keyframe.message;
+  EXPECT_EQ( keyframe.diagnostics.num_shared, 0U );
+  EXPECT_EQ( keyframe.diagnostics.num_seeded_landmarks, 1U );
+}
+
+TEST( KeyframeUpdateTest, LowSupportZeroDisparityRetainsLifetimeWithoutSeed )
+{
+  EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;
+  VioEstimator estimator( makeCalibration(),
+                          phad::test_support::testImuParameters(), options );
+
+  std::vector<LandmarkId> root_ids;
+  for ( int i = 0; i < 10; ++i )
+  {
+    root_ids.push_back( LandmarkId{ static_cast<std::uint64_t>( i ) } );
+  }
+  ASSERT_EQ( estimator.update( makeMeasurement( 100'000'000, root_ids ), true ).status,
+             UpdateStatus::kOk );
+  ASSERT_EQ( estimator.update( makeMeasurement( 200'000'000, root_ids ), true ).status,
+             UpdateStatus::kOk );
+
+  const LandmarkId zero_id{ 100 };
+  auto             zero                    = makeMeasurement( 300'000'000, { zero_id } );
+  zero.m_observations.front().disparity_px = 0.0;
+  const auto retained                      = estimator.update( zero, true );
+  ASSERT_EQ( retained.status, UpdateStatus::kOk ) << retained.message;
+  EXPECT_EQ( retained.diagnostics.num_retained_observations, 1U );
+  EXPECT_EQ( retained.diagnostics.num_seeded_landmarks, 0U );
+  EXPECT_EQ( retained.diagnostics.num_current_visual_factors, 0U );
+  ASSERT_EQ( estimator.observationTimestamps( zero_id ).size(), 1U );
+
+  const auto stereo_return =
+      estimator.update( makeMeasurement( 400'000'000, { zero_id } ), false );
+  ASSERT_EQ( stereo_return.status, UpdateStatus::kOk )
+      << stereo_return.message;
+  EXPECT_EQ( stereo_return.diagnostics.num_shared, 0U );
+  EXPECT_EQ( stereo_return.diagnostics.num_seeded_landmarks, 0U );
+}
+
+TEST( KeyframeUpdateTest, LowSupportSkipsOnlyNonFiniteBackprojection )
+{
+  EstimatorOptions options;
+  options.min_track_observations_for_seed = 1;
+  VioEstimator estimator( makeCalibration(),
+                          phad::test_support::testImuParameters(), options );
+
+  std::vector<LandmarkId> root_ids;
+  for ( int i = 0; i < 10; ++i )
+  {
+    root_ids.push_back( LandmarkId{ static_cast<std::uint64_t>( i ) } );
+  }
+  ASSERT_EQ( estimator.update( makeMeasurement( 100'000'000, root_ids ), true ).status,
+             UpdateStatus::kOk );
+  ASSERT_EQ( estimator.update( makeMeasurement( 200'000'000, root_ids ), true ).status,
+             UpdateStatus::kOk );
+
+  auto low_support = makeMeasurement(
+      300'000'000, { LandmarkId{ 100 }, LandmarkId{ 101 } } );
+  low_support.m_observations.front().disparity_px =
+      std::numeric_limits<double>::min();
+  const auto result = estimator.update( low_support, true );
+  ASSERT_EQ( result.status, UpdateStatus::kOk ) << result.message;
+  EXPECT_EQ( result.diagnostics.num_retained_observations, 2U );
+  EXPECT_EQ( result.diagnostics.num_seeded_landmarks, 1U );
+  EXPECT_EQ( result.diagnostics.num_current_visual_factors, 0U );
+  ASSERT_EQ( estimator.observationTimestamps( LandmarkId{ 100 } ).size(), 1U );
+  ASSERT_EQ( estimator.observationTimestamps( LandmarkId{ 101 } ).size(), 1U );
+}
+
+TEST( KeyframeUpdateTest, LowSupportSeedAddsFactorsWithoutSelfSupport )
+{
+  EstimatorOptions options;
+  options.min_track_observations_for_seed = 2;
+  options.min_landmark_observations       = 2;
+  VioEstimator estimator( makeCalibration(),
+                          phad::test_support::testImuParameters(), options );
+
+  std::vector<LandmarkId> root_ids;
+  for ( int i = 0; i < 10; ++i )
+  {
+    root_ids.push_back( LandmarkId{ static_cast<std::uint64_t>( i ) } );
+  }
+  ASSERT_EQ( estimator.update( makeMeasurement( 100'000'000, root_ids ), true ).status,
+             UpdateStatus::kOk );
+  ASSERT_EQ( estimator.update( makeMeasurement( 200'000'000, root_ids ), true ).status,
+             UpdateStatus::kOk );
+
+  const std::vector<LandmarkId> new_ids{
+      LandmarkId{ 100 }, LandmarkId{ 101 }, LandmarkId{ 102 }, LandmarkId{ 103 } };
+  const auto retained =
+      estimator.update( makeMeasurement( 300'000'000, new_ids ), true );
+  ASSERT_EQ( retained.status, UpdateStatus::kOk ) << retained.message;
+  EXPECT_EQ( retained.diagnostics.num_shared, 0U );
+  EXPECT_EQ( retained.diagnostics.num_seeded_landmarks, 0U );
+  EXPECT_EQ( retained.diagnostics.num_current_visual_factors, 0U );
+  EXPECT_EQ( retained.diagnostics.unsupported_span_ns, 100'000'000 );
+
+  const auto constrained =
+      estimator.update( makeMeasurement( 400'000'000, new_ids ), true );
+  ASSERT_EQ( constrained.status, UpdateStatus::kOk ) << constrained.message;
+  EXPECT_EQ( constrained.diagnostics.num_shared, 0U );
+  EXPECT_EQ( constrained.diagnostics.num_seeded_landmarks, new_ids.size() );
+  EXPECT_EQ( constrained.diagnostics.num_current_visual_factors,
+             new_ids.size() );
+  EXPECT_EQ( constrained.diagnostics.m_vio.m_visual_coast_duration_ns,
+             200'000'000 );
+  EXPECT_EQ( constrained.diagnostics.unsupported_span_ns, 200'000'000 );
+}
+
+TEST( KeyframeUpdateTest, RetainedVisualChainRecoversInSameSegment )
+{
+  EstimatorOptions options;
+  options.min_track_observations_for_seed = 2;
+  options.min_landmark_observations       = 2;
+  VioEstimator estimator( makeCalibration(),
+                          phad::test_support::testImuParameters(), options );
+
+  std::vector<LandmarkId> root_ids;
+  std::vector<LandmarkId> recovery_ids;
+  for ( int i = 0; i < 10; ++i )
+  {
+    root_ids.push_back( LandmarkId{ static_cast<std::uint64_t>( i ) } );
+    recovery_ids.push_back(
+        LandmarkId{ static_cast<std::uint64_t>( i + 100 ) } );
+  }
+  ASSERT_EQ( estimator.update( makeMeasurement( 100'000'000, root_ids ), true ).status,
+             UpdateStatus::kOk );
+  const auto supported =
+      estimator.update( makeMeasurement( 200'000'000, root_ids ), true );
+  ASSERT_EQ( supported.status, UpdateStatus::kOk ) << supported.message;
+  ASSERT_TRUE( supported.estimate.has_value() );
+  const std::uint32_t segment_id = supported.estimate->m_segment_id;
+
+  const auto retained =
+      estimator.update( makeMeasurement( 300'000'000, recovery_ids ), true );
+  ASSERT_EQ( retained.status, UpdateStatus::kOk ) << retained.message;
+  EXPECT_EQ( retained.diagnostics.num_shared, 0U );
+  EXPECT_EQ( retained.diagnostics.num_seeded_landmarks, 0U );
+  EXPECT_EQ( retained.diagnostics.num_current_visual_factors, 0U );
+
+  const auto seeded =
+      estimator.update( makeMeasurement( 400'000'000, recovery_ids ), true );
+  ASSERT_EQ( seeded.status, UpdateStatus::kOk ) << seeded.message;
+  ASSERT_TRUE( seeded.estimate.has_value() );
+  EXPECT_EQ( seeded.estimate->m_segment_id, segment_id );
+  EXPECT_EQ( seeded.diagnostics.num_shared, 0U );
+  EXPECT_EQ( seeded.diagnostics.num_seeded_landmarks, recovery_ids.size() );
+  EXPECT_EQ( seeded.diagnostics.num_current_visual_factors,
+             recovery_ids.size() );
+  EXPECT_EQ( seeded.diagnostics.m_vio.m_visual_coast_duration_ns,
+             200'000'000 );
+  EXPECT_EQ( seeded.diagnostics.unsupported_span_ns, 200'000'000 );
+
+  const auto recovered =
+      estimator.update( makeMeasurement( 500'000'000, recovery_ids ), true );
+  ASSERT_EQ( recovered.status, UpdateStatus::kOk ) << recovered.message;
+  ASSERT_TRUE( recovered.estimate.has_value() );
+  EXPECT_EQ( recovered.estimate->m_segment_id, segment_id );
+  EXPECT_EQ( recovered.diagnostics.num_shared, recovery_ids.size() );
+  EXPECT_EQ( recovered.diagnostics.m_vio.m_visual_coast_duration_ns, 0 );
+  EXPECT_EQ( recovered.diagnostics.unsupported_span_ns, 0 );
 }
 
 TEST( KeyframeUpdateTest, NonKeyframeZeroSupportKeepsSegmentCadence )
