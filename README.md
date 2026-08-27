@@ -70,34 +70,20 @@ build/phad_vo_bench /path/to/euroc/MH_01_easy --bench-root /tmp/bench --sequence
 
 ## 文档索引
 
-### 项目级
+完整地图（问题 / 寿命 / 命名）见 [`docs/README.md`](docs/README.md)。
 
-| 文档 | 内容 |
+| 目录 / 文档 | 回答的问题 |
 |---|---|
-| [`docs/design/roadmap.md`](docs/design/roadmap.md) | 里程碑、出口条件、全序列基准数字 |
-| [`docs/design/architecture.md`](docs/design/architecture.md) | 模块职责、数据流、目标架构 |
-| [`docs/specs/`](docs/specs/) | 已收口的架构 / 行为合同 |
-| [`docs/design/conventions.md`](docs/design/conventions.md) | 坐标系、时间、单位合同 |
+| [`docs/design/`](docs/design/) | 系统是什么（roadmap / architecture / conventions） |
+| [`docs/specs/`](docs/specs/) | 这一片必须交付什么 |
+| [`docs/research/`](docs/research/) | 查到了什么（调研、诊断、历史切片笔记） |
+| [`docs/plans/`](docs/plans/) | 怎么执行 |
+| [`docs/benchmark/`](docs/benchmark/) | 跑出了什么数字（行为 checkpoint） |
+| [`docs/adr/`](docs/adr/) | 为什么选 X |
+| [`docs/agents/`](docs/agents/) | agent 怎么工作 |
+| [`AGENTS.md`](AGENTS.md) | 根索引：原则、权威文档、模块表、现行事实 |
 | [`CONTEXT.md`](CONTEXT.md) | 领域语言（传感器、标定、估计概念） |
-
-### 设计与诊断
-
-| 目录 | 内容 |
-|---|---|
-| [`docs/research/`](docs/research/) | 设计文档、根因诊断、开源对照 |
-| [`docs/plans/`](docs/plans/) | 实施计划（YAML frontmatter + 可执行步骤） |
-| [`docs/benchmark/`](docs/benchmark/) | 关键 checkpoint 的全量 EuRoC 快照与对比 |
-| [`docs/adr/`](docs/adr/) | 架构决策记录 |
-| [`docs/historical-branch-evidence.md`](docs/historical-branch-evidence.md) | 历史分支与 evidence snapshot 的定位、边界和入口 |
-
-### Agent 约定
-
-| 文档 | 内容 |
-|---|---|
-| [`AGENTS.md`](AGENTS.md) | 项目级 agent 偏好、learned facts、模块索引 |
-| [`docs/agents/`](docs/agents/) | 增量开发、issue 管理、C++ 命名/风格、Git 工作流 |
-
-### 模块
+| [`docs/historical-branch-evidence.md`](docs/historical-branch-evidence.md) | 历史分支与 evidence snapshot 入口 |
 
 每个 `phad/` 子目录有 `README.md`（合同、边界、数据流）和 `AGENTS.md`（agent 提示）。
 模块索引见根 [`AGENTS.md`](AGENTS.md) 的模块表格。
