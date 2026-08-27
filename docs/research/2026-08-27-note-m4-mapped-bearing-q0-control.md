@@ -1,0 +1,93 @@
+# M4 mapped-landmark bearing Q0 control diagnosis
+
+## 1. 问题与证据边界
+
+[Q0 control](../benchmark/m4/mapped-landmark-bearing-q0_42f99e9_0337287b.md)
+在 clean `42f99e9/default_0337287b` 的首条 `MH_01_easy` 上得到 ATE
+`0.0725592618 m`，超过冻结上界 `0.070539 m`。该值与 spec 记录的同 source
+record-only run 一致，因此 dirty manifest 不是该数值差异的解释。
+
+本诊断只定位 Q0 的既有行为差异，不修改 #43 或 #47 合同，也不把临时消融
+当作候选实现。
+
+## 2. 可重复的短回路
+
+在两个 detached clean worktree 中分别构建 `c999f58` 与 `42f99e9`，对同一
+`MH_01_easy` 输入运行：
+
+```bash
+./build/phad_vo_bench \
+  /home/lin/Projects/data/thidparty/euroc/native/MH_01_easy \
+  --out <baseline-or-candidate> \
+  --sequence-name MH_01_easy_prefix_379 \
+  --repo <matching-clean-worktree> \
+  --estimator-enable-moving-bootstrap \
+  --max-frames 379
+```
+
+两次运行各约 10 秒；`est.tum` 前 377 行逐字节相同，唯一进入该前缀的分叉为：
+
+```text
+line 378 / timestamp 1403636598.663555584
+c999f58 : 0.02442980932050947 -0.0075171635448574893 -0.19176539154199376 ...
+42f99e9 : 0.025041498631116734 -0.0079990170819646995 -0.19369089945278556 ...
+```
+
+首个 translation 差为 `0.0020769996 m`。同一候选的 full run 与 prefix run
+在该行逐字节相同，排除了该边界上的运行间漂移。
+
+## 3. 首分叉诊断
+
+以 shared CSV 列按 timestamp 对齐，首个共同字段差异出现在对应 packet：
+
+| 字段 | `42f99e9` 前一 packet | `c999f58` | `42f99e9` |
+|---|---:|---:|---:|
+| `num_shared` | `17` | `8` | `8` |
+| `unsupported_span_ns` | `0` | 不适用 | `50000128` |
+| `num_current_visual_factors` | `15` | 不适用 | `8` |
+| `num_landmarks` | `80` | `78` | `79` |
+| reprojection RMS before (px) | `0.559955` | `0.564185` | `0.577818` |
+| reprojection RMS after (px) | `0.566685` | `0.539598` | `0.572089` |
+
+`42f99e9` 在 `num_shared < min_pnp_inliers` 时按 #43 合同保留 observations，
+并让 8 个当前 stereo factors 进入 graph；`c999f58` 的 coast frame 没有这些
+当前 observations/factors。下一 packet 上，候选 PnP 成功且有 10 个 inliers，
+control 则 fallback，行为开始进入离散分支。
+
+全序列只有连续 2 帧同时满足 `unsupported_span_ns > 0` 与
+`num_current_visual_factors > 0`。二者足以改变后续 PnP、outlier、keyframe 与
+window 路径：两条 raw trajectory 的 translation 差在第 1225 行首次超过
+`1 cm`，末行达到 `0.108139 m`；评估各自全轨迹对齐后表现为 ATE
+`0.0705388305 → 0.0725592618 m`。
+
+## 4. 临时消融
+
+在临时 `42f99e9` worktree 中只让 low-support 当前 frame 跳过 visual graph
+admission，同时保留它的 window/map 生命周期，然后重建并重跑 379 帧前缀：
+
+| variant | prefix ATE (m) | prefix RPE (m) | line 378 translation 差 |
+|---|---:|---:|---:|
+| `c999f58` | `0.0161634` | `0.0125777` | `0` |
+| `42f99e9` | `0.0161619` | `0.0125779` | `0.0020769996 m` |
+| temporary no-current-factor | `0.0161634` | `0.0125777` | 约 `1e-15 m` |
+
+临时源码随后恢复到 clean `42f99e9`。该消融证明首个有意义的位姿分叉由
+low-support 当前 visual factors 直接触发；单独保留 map/window 生命周期在该
+前缀只留下浮点舍入量级差异。它没有执行 full-run counterfactual，也不证明
+“删除因子”满足 #43 的产品目标。
+
+## 5. 结论与下一决策面
+
+事实：Q0 的 clean identity、config 与输入均有效；首个 material 分叉来自
+`bf8c321` 引入且由 #43 冻结合同明确要求的 low-support factor admission。
+Q0 不是 #47 新增代码造成的回归，因为 #47 尚未进入 Q1。
+
+推断：该分叉触发下一帧 PnP 的离散分支，并沿后续生命周期放大到 full-run ATE；
+尚未执行 full-run counterfactual 来量化 retention 与 factor admission 各自的最终
+ATE 贡献。继续 Q1/Q4/Q5 会把新 bearing 机制叠加到一个未通过自身 MH_01 产品门
+的 control 上，最终无法把产品指标变化单独归因给 #47。
+
+下一步应先为 #43 建立独立 control-repair slice，首个 Observe 问题是：这两帧
+当前 factors 的 predicted/optimized residual、PnP 可验证性与后续离散分支中，
+哪一项能提供不改变 support predicate 的质量许可。该 slice 需要重新对齐 factor
+admission/quality 合同；通过 `MH_01 <= 0.070539` 后，#47 才能回到 Q1。

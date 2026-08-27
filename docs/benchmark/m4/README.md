@@ -11,6 +11,7 @@ Issue：[#41](https://github.com/Nothand0212/phad-vio/issues/41)。
 | checkpoint | commit | config | predecessor | 全量状态 | 用途 | 文档 |
 |---|---|---|---|---|---|---|
 | Minimal full-state VIO | `c999f58` | `default_0337287b` | M3.3 Slice ⑦ | clean 11/11 ✓ | M4 后续精度与 lifecycle 优化的首个全量锚点 | [checkpoint](minimal-full-state-vio_c999f58_0337287b.md) |
+| Mapped-landmark bearing Q0 control | `42f99e9` | `default_0337287b` | `c999f58` | clean 1/4；首门 STOP | 冻结 #47 实施前 control 与 Q0 归因 | [checkpoint](mapped-landmark-bearing-q0_42f99e9_0337287b.md) |
 
 原始产物位于：
 
