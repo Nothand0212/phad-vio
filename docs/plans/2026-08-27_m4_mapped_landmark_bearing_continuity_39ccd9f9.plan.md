@@ -1,12 +1,18 @@
 ---
 name: M4 已建图 landmark 左目重投影连续性
-overview: 在既有 VioEstimator::update() seam 内，按 Q1 Observe、Q4 Constrain、Q5 PnP/support 的证据门，让已建图 landmark 的 left-only bearing 进入诊断、posterior 与连续性反馈；双目继续独占深度、播种与尺度。完成机制回归后运行一次 clean Remote CI record-only 实验并据结果确定下一工作方向。
+overview: 在既有 VioEstimator::update() seam 内，先补齐 clean Q0 的 core-4/EuRoC-11 并冻结多序列产品 envelope，再按 Q1 Observe、Q4 Constrain、Q5 PnP/support 的证据门，让已建图 landmark 的 left-only bearing 进入诊断、posterior 与连续性反馈；双目继续独占深度、播种与尺度。完成机制回归后运行一次 clean candidate Remote CI，与 Q0 全量对拍并据结果确定下一工作方向。
 todos:
   - id: isolate-control-and-workspace
     content: '记录 42f99e9、default_0337287b 与现有 dirty paths；在独立 clean worktree 运行 Q0，实施分支只显式暂存 #47 文件'
+    status: completed
+  - id: complete-q0-core4
+    content: '补跑 clean Q0 的 V1_03→V2_02→V2_03；无 accuracy early-stop，冻结 core-4 identity、meta、逐序列精度、coverage 与段内/段间指标'
+    status: in_progress
+  - id: complete-q0-euroc11
+    content: '从 clean 42f99e9 运行 ci-euroc11 control，fetch 并核对 11 条 source/toolchain/config/artifact'
     status: pending
-  - id: freeze-q0-control
-    content: '串行复跑 MH_01→V1_03→V2_02→V2_03，冻结 identity、meta、ATE/RPE、completion/coverage、segments 与段内/段间指标'
+  - id: freeze-product-envelope
+    content: '在任何 Q1/Q4/Q5 candidate 结果前计算 core-4/EuRoC-11 的 gate 基线，确认并冻结 G_ATE/G_RPE、有效性、tail review 与 continuity 数值规则'
     status: pending
   - id: q1-red-classification
     content: '先经 public seam 写 stereo mapped、left-only mapped、unmapped 三分类红灯及 CSV 第 25 列红灯'
@@ -39,10 +45,10 @@ todos:
     content: '在用户授权下形成带 #47 的分阶段 local commits 和 clean candidate identity；不 push/merge'
     status: pending
   - id: run-remote-ci-experiment
-    content: '从 clean candidate commit 启动一次 ci-euroc11，等待、fetch 并核对 source/toolchain/config 与逐序列 artifact'
+    content: '从 clean candidate commit 启动一次 ci-euroc11，等待、fetch，核对身份并与 clean Q0 做 11 条多序列产品判定'
     status: pending
   - id: analyze-next-direction
-    content: '按机制生效、串行产品门、段内/段间误差与 initializing/outage 分布形成结论和下一 vertical slice 建议'
+    content: '按机制生效、suite-level outcome、逐序列 tail、段内/段间误差与 initializing/outage 分布形成结论和下一 vertical slice 建议'
     status: pending
 isProject: false
 ---
@@ -51,8 +57,14 @@ isProject: false
 
 ## 状态
 
-**Spec 已于 2026-08-27 定稿；本计划待用户确认。尚未开始 #47 的 C++
-修改、实施分支、commit、Q0 或 candidate experiment。**
+**Spec（含多序列产品 gate）与本计划已于 2026-08-27 定稿。短分支、文档提交、
+首条 clean Q0 与机制归因已经完成；Stage 0 正在补齐多序列 control，尚未开始
+#47 的生产 C++ 修改或 candidate experiment。**
+
+已完成的 control 事实：clean `42f99e9/default_0337287b` unit 共 `458/458`
+通过（另有 3 个既有 skip）；`MH_01_easy` ATE `0.0725592618 m`、RPE
+`0.0326412725 m`、completion/coverage 约 `0.999728`、segments `1`。该单条
+结果已纳入 Q0，不能代替其余 core-4 与 EuRoC-11。
 
 本计划把一个 deep Module 内部能力分四个可证伪阶段交付：Q1 只观察 eligible
 population，Q4 只让 mapped left-only bearing 约束 posterior，Q5a 再扩展 PnP，
@@ -78,7 +90,7 @@ Q5b 最后扩展 support/liveness。每一阶段的前一门必须实际 PASS，
 | 行为 checkpoint | `c999f58` / `default_0337287b` |
 | 当前 runtime continuity | `bf8c321` 已包含在 `42f99e9` |
 | canonical config | `default_0337287b`，本片不增加 key |
-| 计划分支 | `codex/m4-mapped-landmark-bearing-continuity`（计划获批后创建） |
+| 实施分支 | `codex/m4-mapped-landmark-bearing-continuity`（已创建） |
 | issue | `#47`；所有授权 commit subject 带 `(#47)` |
 | dataset root | `/home/lin/Projects/data/thidparty/euroc/native`；CI 为 `/home/lin/data/euroc/native` |
 | artifact root | `/home/lin/Projects/data/phad-bench` 与 `artifacts/remote-ci/runs/<run-id>` |
@@ -95,8 +107,8 @@ Q5b 最后扩展 support/liveness。每一阶段的前一门必须实际 PASS，
 4. 分支切换或显式暂存若与既有 dirty paths 发生重叠，立即停止，不 stash、reset、
    clean 或改写其内容。
 
-创建分支与 local commits 需要本计划评审时的明确授权；全程不 push、merge 或
-修改 shared/prod 配置。
+已授权的文档证据使用 local commits 固化；剩余 production/test commits 只在本
+计划确认后按 §4.2 逐门形成。全程不 push、merge 或修改 shared/prod 配置。
 
 ## 2. Deep Module、Interface 与 Seam
 
@@ -173,32 +185,43 @@ mixed mapped population
 
 ### 4.1 Q0 clean control
 
-在 detached clean `42f99e9` worktree 中：
+在 detached clean `42f99e9` worktree 中完成两层 control：
 
-1. 记录 `git rev-parse HEAD^{tree}`、`git status --porcelain=v1`、config canonical
-   text/hash、compiler/GTSAM/OpenCV identity 与实际命令。
-2. 配置 Release + tests，运行完整 unit suites，确认 control 本身可用。
-3. 严格按
-   `MH_01_easy → V1_03_difficult → V2_02_medium → V2_03_difficult`
-   串行运行；任一序列失败，Q0 停止。
+1. 复核 `git rev-parse HEAD^{tree}`、`git status --porcelain=v1`、config canonical
+   text/hash、compiler/GTSAM/OpenCV identity 与实际命令。当前工作树的文档与
+   `scripts/remote_ci.py`、`tests/scripts/test_remote_ci.py` 不进入 snapshot。
+2. 已完成 Release + tests 与 `MH_01_easy`；继续按
+   `V1_03_difficult → V2_02_medium → V2_03_difficult` 补齐 core-4。
+3. accuracy、completion、coverage 或 segments 的单项数值不终止 core-4；单条
+   运行失败也保留 artifact 并在可执行时继续。只有 source/config/input/evaluator
+   身份或 artifact schema 系统性失效才停止 suite。
 4. 每条冻结 ATE/RPE、completion/coverage、segments/reanchors、段内加权 RMS、
    绝对段间分量、status/cadence 与完整 `meta.json`。
-5. 与 spec §13 的预注册边界核对。clean Q0 与既有 dirty record-only run 若无法由
-   source manifest 解释，先修 control，不进入 Q1。
+5. 从同一 clean `42f99e9` 启动一次 `ci-euroc11` Q0 control；等待 11 个任务终态、
+   fetch，并核对 toolchain/image/data/config。profile 的并行与“单任务失败不取消
+   兄弟任务”语义正好用于收集完整多序列分布。
+6. 用 11 条 `summary.json` 计算逐序列 ratio 表的 control 侧输入，补齐
+   `mapped-landmark-bearing-q0_42f99e9_0337287b.md`。结合 M4 checkpoint 与绝对
+   工程量级提出 `G_ATE`、`G_RPE`、completion/coverage、tail review 与 V2_03
+   continuity 数值规则，经用户确认后写回 spec/benchmark 并冻结。
+7. clean Q0 与既有 record-only run 若存在 manifest 不能解释的差异，先解决
+   reproducibility；在多序列 envelope 冻结前不进入 Q1。
 
-Q0 不使用当前工作树的 Remote CI snapshot。现有 `ci-euroc11` profile 是 11 序列
-并行 record-only，不能作为本步骤“串行 stop-on-failure”的替代证据。
+Q0 的 `ci-euroc11` 是 control 测量；最终仍只运行一次 clean **candidate** Remote
+CI。两次 run 使用相同 profile/toolchain/config/data，使 source commit 成为主要
+实验变量。最终 `core-4` 产品 ratio 也取这两次 Remote CI 中对应四条的子集；本地
+串行 core-4 负责开发前复现与分解，不与远端 candidate 跨环境计算 ratio。
 
 ### 4.2 授权后的分支与 logical commits
 
-计划获批并明确授权 local commits 后创建短分支。建议 checkpoint：
+#47 短分支与 spec/Q0/gate 文档 checkpoints 已存在。计划确认后的剩余 logical
+commits 为：
 
-1. `docs(spec): define mapped bearing continuity (#47)`
-2. `feat(estimator): observe mapped landmark population (#47)` — Q1
-3. `feat(estimator): constrain mapped landmark bearings (#47)` — Q4
-4. `feat(estimator): use mapped observations for pnp (#47)` — Q5a
-5. `feat(estimator): use mapped observations for support (#47)` — Q5b
-6. `docs(benchmark): record mapped bearing experiment (#47)` — 最终证据
+1. `feat(estimator): observe mapped landmark population (#47)` — Q1
+2. `feat(estimator): constrain mapped landmark bearings (#47)` — Q4
+3. `feat(estimator): use mapped observations for pnp (#47)` — Q5a
+4. `feat(estimator): use mapped observations for support (#47)` — Q5b
+5. `docs(benchmark): record mapped bearing experiment (#47)` — 最终证据
 
 每个机制 commit 必须处于对应 GREEN 且门控通过的状态。RED 证据记录在执行日志/
 issue comment，不提交不可用代码。每次 commit 用显式 pathspec 审核 staged diff；不
@@ -458,14 +481,14 @@ git diff -- <本片显式路径>
 ### 11.1 Q1 natural replay
 
 Q1 eligibility 默认在 clean Q1 worktree 的 Release build 上只跑 V2_02/V2_03，
-沿用现有 bench/artifact 合同并串行执行，从而把服务器实验保留给最终 candidate。
+沿用现有 bench/artifact 合同并串行执行；单项 accuracy 不形成停止条件。
 保存：
 
 - commit/tree/config/build identity；
 - V2_02/V2_03 的 eligible frames/episodes；
 - status/cadence 和旧字段的 Q0 equivalence 报告。
 
-### 11.2 最终一次 Remote CI 实验
+### 11.2 最终一次 candidate Remote CI 实验
 
 机制与 local regression 全部通过后，从 clean candidate commit 运行一次：
 
@@ -475,42 +498,39 @@ python3 scripts/remote_ci.py start --profile ci-euroc11
 python3 scripts/remote_ci.py wait <run-id>
 ```
 
-该 run 是用户要求的服务器实验和 11 序列 broad record-only 证据。必须核对
+该 run 是用户要求的 candidate 服务器实验。必须核对
 `git_dirty=false`、candidate HEAD/tree、canonical config、toolchain/image ID、unit
 task 和 11 个 sequence task；fetch 后再分析，不从运行中的部分 artifact 下结论。
 
-当前 profile 会并行运行 11 序列，因此不把它标记为 spec §13 的正式串行产品
-PASS。正式授权默认路径还需要同一 clean candidate 按以下顺序 stop-on-failure：
+`ci-euroc11` 在工具层继续生成完整 raw record；#47 在 fetch 后对同 profile 的 clean
+Q0/candidate 结果应用已冻结产品 gate。并行执行不会改变判定，因为结论只在 11 个
+任务全部终态后形成；accuracy tail 与单任务失败均不会取消兄弟任务。无需修改
+`scripts/remote_ci.py` 或其现有测试改动。
 
-```text
-MH_01_easy → V1_03_difficult → V2_02_medium → V2_03_difficult
-```
+### 11.3 冻结多序列产品门
 
-若执行时仓库已有经评审的一序列/串行 Remote CI profile，则在服务器使用它；
-否则用同一 clean candidate 的 Release build 串行执行现有 `phad_vo_bench` 门，并在
-artifact 中记录本机/服务器环境。扩展 `scripts/remote_ci.py` profile 属于独立 CI
-工具范围，须先解决该文件当前已有修改的 ownership，再单独获得授权；#47 不混入
-这项工具改动。
+Stage 0 生成并经用户确认的 gate record 至少包含：
 
-### 11.3 冻结数值门
+| 层 | primary / guardrail | 冻结内容 |
+|---|---|---|
+| `core-4` | `G_ATE` / `G_RPE` | aggregate envelope、逐序列原始值与 tail review 规则 |
+| `EuRoC-11` | `G_ATE` / `G_RPE` | 最终 aggregate envelope、11 条完整性与 tail review 规则 |
+| validity | completion/coverage、finite、task status | 有效性界限；所有 4/11 sequence 必须进入结果表 |
+| continuity | segments、段内 RMS、绝对段间分量 | V2_03 改善目标及容差 |
 
-clean Q0 可收紧、不可在看到 candidate 后放宽：
+candidate 的 suite-level ratio 按 spec §13 计算；原始值、绝对 delta、ratio、算术
+均值与几何均值全部落盘。单序列 accuracy tail 进入 `REVIEW`，不触发 early-stop；
+identity/hard validity、机制门或冻结 aggregate envelope 失败才形成自动 `FAIL`。
 
-| sequence | ATE 上界 | RPE 上界 | completion 下界 | coverage 下界 | segments |
-|---|---:|---:|---:|---:|---:|
-| MH_01_easy | `0.070539` | Q0 值 | `0.999728` | `0.999728` | `1` |
-| V1_03_difficult | `0.861563` | `0.130757` | `0.974407` | `0.974860` | `<= 2` |
-| V2_02_medium | `0.171546` | `0.057113` | `0.974020` | `0.974009` | `1` |
-| V2_03_difficult | `1.707513` | `0.688425` | `0.535138` | `0.791345` | `< 18` |
-
-四条还要求 `failed/rejected/reanchors == 0`；V2_03 必须同时出现：
+所有正式 candidate 还要求 `failed/rejected/reanchors == 0`；V2_03 必须同时出现：
 
 - `num_mapped_observations - num_shared > 0`；
 - `num_current_mono_visual_factors > 0`；
 - `num_shared < min_pnp_inliers <= num_mapped_observations` 的同段成功 commit；
-- 段内 RMS 不高于 clean Q0，绝对段间分量严格下降。
+- 达到 gate record 冻结的 continuity 改善量。
 
-任一正式序列失败立即停止后续序列、保留 artifact 并进入根因分析。
+若某条 hard-fail，最终结论至少为 `FAIL`，但仍收集其余 sequence；如果只有
+per-sequence tail，则完成 §12 的归因后给出 `PASS` 或 `REVIEW` 结论。
 
 ## 12. 实验分析与下一方向决策
 
@@ -528,9 +548,10 @@ clean Q0 可收紧、不可在看到 candidate 后放宽：
 
 | 结果 | 结论 | 下一工作方向 |
 |---|---|---|
-| eligible、mono factors、support flip 均非零，四门通过且 V2_03 段间分量下降 | 本片机制与产品假设成立 | 将行为纳入当前 stereo VIO 默认路径；优先 M5 正式动态初始化，处理剩余 cold-root initializing |
+| eligible、mono factors、support flip 均非零，core-4/EuRoC-11 aggregate 与 continuity gate 通过 | 本片机制与产品假设成立 | 将行为纳入当前 stereo VIO 默认路径；优先 M5 正式动态初始化，处理剩余 cold-root initializing |
+| aggregate 与机制门通过，存在少量 per-sequence tail | 当前为 `REVIEW`，不能只由 aggregate 或 tail 单独定性 | 对 tail 做绝对量级、RPE、coverage、segments 与段内/段间归因，再决定接受或收窄承诺场景 |
 | mono factors 生效但 support flip 稀少，segments 基本不变 | bearing 约束存在，liveness population 不足 | 分析 track identity/map retention 与 outage 前可复用 landmark 寿命，形成新的 Observe gate |
-| support flip/segments 改善但 ATE 或段内 RMS 失败 | 连续性收益伴随错误约束 | 按 residual、cheirality、cull/reopt 与序列片段定位 correspondence/quality 根因 |
+| support flip/segments 改善但 suite-level accuracy 或 continuity guardrail 失败 | 连续性收益伴随错误约束 | 按 residual、cheirality、cull/reopt 与序列片段定位 correspondence/quality 根因 |
 | eligible population 存在但 attached mono 为零 | factor admission/count 生命周期未闭合 | 回到 Q4 synthetic/natural 差异，核查 PnP mask、window count、seed/cull 顺序 |
 | V2_03 主要剩余为 segment root initializing，active 段内已稳定 | 本片完成 active-map 能力，瓶颈转移 | M5 moving/dynamic initialization；是否需要 relocalization 由段间分解另立 spec |
 | Q1 无 flip-capable population | 当前数据不能证实本片的 liveness 假设 | 停止 Q4/Q5，转向 frontend disparity/track population 与 ID 持续性的观测设计 |
@@ -547,9 +568,10 @@ clean Q0 可收紧、不可在看到 candidate 后放宽：
 4. estimator/apps 完整 suites 和 diff audit 通过；
 5. clean candidate commit 可复现，Remote CI `ci-euroc11` 已完成并 fetch；
 6. 机制计数与 11 序列分析已写入 benchmark/research 记录和 #47；
-7. 严格区分 record-only run 与正式串行产品门；未执行的门不标为 PASS；
+7. clean Q0/candidate 的 core-4 与 EuRoC-11 aggregate、tail review、validity 和
+   continuity 判定完整；未执行的门不标为 PASS；
 8. 给出一个由实际实验分支支持的下一工作方向及其首个 Observe 问题。
 
-若正式串行门尚未执行，交付状态为“candidate experiment 已完成，default-path
-promotion 待门控”，并明确剩余验证与环境差异。所有 commit、push、merge、远端
-清理和 shared 配置修改均遵守单独授权边界。
+若完整多序列判定尚未形成，交付状态保持在已取得的资格阶段，并明确剩余验证与
+环境差异。所有 commit、push、merge、远端清理和 shared 配置修改均遵守单独授权
+边界。
