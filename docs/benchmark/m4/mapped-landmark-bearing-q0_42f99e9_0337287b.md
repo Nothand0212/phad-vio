@@ -1,8 +1,8 @@
 # M4 mapped-landmark bearing Q0 control
 
 本文记录 [mapped-landmark bearing continuity spec](../../specs/2026-08-27-m4-mapped-landmark-bearing-continuity.md)
-§13.1 的 clean Q0 control。Q0 在首条 `MH_01_easy` 数值门停止；后续
-`V1_03_difficult`、`V2_02_medium`、`V2_03_difficult` 未运行。
+§13.1 的 clean Q0 control。core-4 已完整运行；EuRoC-11 Remote CI control
+等待服务器恢复后补齐。
 
 ## 1. 身份与执行范围
 
@@ -10,12 +10,12 @@
 |---|---|
 | code | `42f99e9117d2c04fdb4ebdfc308d9ca786312e60` (`42f99e9`) |
 | tree | `76b46a3ebe696cd8d40ba12dd9581f21fe8cd0d4` |
-| worktree | detached HEAD，`git_dirty=false` |
+| worktree | 两个 detached clean worktree，均为同一 commit/tree，`git_dirty=false` |
 | config | `default_0337287b` |
 | predecessor | `c999f58/default_0337287b` |
 | dataset root | `/home/lin/Projects/data/thidparty/euroc/native` |
 | artifact root | `/home/lin/Projects/data/phad-bench/m4-mapped-bearing-q0-42f99e9-20260827T134813Z` |
-| run date | `2026-08-27`（Asia/Shanghai） |
+| run date | `2026-08-27`（Asia/Shanghai）；core-4 分两次续跑 |
 | build | Release，GNU 13.3.0，Ninja |
 
 实际命令：
@@ -28,34 +28,55 @@ cmake -S . -B build -G Ninja \
 cmake --build build --parallel 8
 ctest --test-dir build --output-on-failure -L unit --parallel 8
 ./build/phad_vo_bench \
-  /home/lin/Projects/data/thidparty/euroc/native/MH_01_easy \
-  --out /home/lin/Projects/data/phad-bench/m4-mapped-bearing-q0-42f99e9-20260827T134813Z/MH_01_easy \
-  --sequence-name MH_01_easy \
-  --repo /tmp/phad-q0-MyEw1z/worktree \
+  /home/lin/Projects/data/thidparty/euroc/native/<sequence> \
+  --out /home/lin/Projects/data/phad-bench/m4-mapped-bearing-q0-42f99e9-20260827T134813Z/<sequence> \
+  --sequence-name <sequence> \
+  --repo <clean-42f99e9-worktree> \
   --estimator-enable-moving-bootstrap
 ```
 
 完整 unit suite 为 `458/458` 通过；另有 3 个既有 skip。bench 返回
-`completed_with_warnings`，唯一 warning 为 PnP 汇总。
+`completed_with_warnings`；每条都有 PnP 汇总，`V2_03_difficult` 另有已知 stereo
+sync drop warning。
 
-## 2. 首门结果
+## 2. Core-4 结果
 
-| 指标 | `c999f58` | Q0 `42f99e9` | 差值 | Q0 门 |
-|---|---:|---:|---:|---|
-| ATE trans RMSE (m) | `0.0705388305` | `0.0725592618` | `+0.0020204313` (`+2.864%`) | **STOP**；上界 `0.070539` |
-| RPE trans RMSE (m) | `0.0331756107` | `0.0326412725` | `-0.0005343382` | 记录为 Q0 值 |
-| completion | `0.9997284085` | `0.9997284085` | `0` | PASS |
-| coverage | `0.9997283354` | `0.9997283354` | `0` | PASS |
-| segments | `1` | `1` | `0` | PASS |
-| failed / rejected / reanchors | `0 / 0 / 0` | `0 / 0 / 0` | `0 / 0 / 0` | PASS |
-| PnP success / fallback | `3667 / 13` | `3670 / 10` | `+3 / -3` | record-only |
-| keyframe / track-only | `660 / 3022` | `663 / 3019` | `+3 / -3` | record-only |
+| sequence | ATE (m) | RPE (m) | completion | coverage | segments | 段内 RMS (m) | 绝对段间分量 (m) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `MH_01_easy` | `0.072559262` | `0.032641273` | `0.999728408` | `0.999728335` | `1` | `0.072559` | `0.000` |
+| `V1_03_difficult` | `0.861562954` | `0.130756976` | `0.974406701` | `0.974860335` | `2` | `0.144` | `0.718` |
+| `V2_02_medium` | `0.171546155` | `0.057113027` | `0.974020443` | `0.974009375` | `1` | `0.172` | `0.000` |
+| `V2_03_difficult` | `2.081321466` | `0.688425331` | `0.535137949` | `0.791345331` | `18` | `0.062` | `2.020` |
 
-两版均只有一个 segment，因此独立 segment ATE 等于各自全局 ATE；该门的
-差异是段内轨迹差异，不是段间拼接分量。
+四条均为 `failed=0`、`rejected=0`、`reanchors=0`。Q0 的 segments 合计 `22`，
+相对 M4 checkpoint 的 `78` 减少 `56`；`V1_03` 与 `V2_03` 的全局 ATE 仍主要由
+段间关系贡献。
 
-按 spec 的 stop-on-failure 顺序，首条 ATE 超过冻结上界后没有运行后续三条
-序列，也没有扫描 sigma、Huber、support 门限或 coast horizon。
+### 2.1 相对 M4 checkpoint
+
+| sequence | ATE ratio | ATE 变化 | RPE ratio | RPE 变化 | segments `c999f58 → Q0` |
+|---|---:|---:|---:|---:|---:|
+| `MH_01_easy` | `1.0286` | `+2.86%` | `0.9839` | `-1.61%` | `1 → 1` |
+| `V1_03_difficult` | `0.6123` | `-38.77%` | `0.2450` | `-75.50%` | `16 → 2` |
+| `V2_02_medium` | `0.0866` | `-91.34%` | `0.1204` | `-87.96%` | `9 → 1` |
+| `V2_03_difficult` | `1.2189` | `+21.89%` | `0.8201` | `-17.99%` | `52 → 18` |
+
+四序列 ATE 算术均值从 `1.291756 m` 降到 `0.796747 m`，RPE 算术均值从
+`0.470125 m` 降到 `0.227234 m`。等权归一化几何平均 ratio 为：
+
+```text
+G_ATE = 0.5077
+G_RPE = 0.3928
+```
+
+这两个 aggregate 只描述 `42f99e9` 相对 milestone checkpoint 的整体变化；后续
+candidate gate 使用 matched clean Q0 Remote CI 作为 immediate control。
+
+### 2.2 当前产品判定边界
+
+core-4 证明 control 可复现并提供逐序列 tail，但尚不形成 Q0 完整产品 envelope。
+需先取得 matched Remote CI EuRoC-11 control，再冻结 `G_ATE/G_RPE`、有效性、
+tail review 与 continuity 数值规则。
 
 ## 3. 完整 canonical config
 
@@ -110,15 +131,50 @@ tracker.stereo_uniq_ratio=0.5
 相对 predecessor 没有 config 增量键；唯一 CLI override
 `--estimator-enable-moving-bootstrap` 已进入 canonical snapshot。
 
-## 4. 完整性
+## 4. Core-4 完整性
 
-| artifact | SHA-256 |
+| 检查 | 结果 |
 |---|---|
-| `meta.json` | `edd1c341084ba88e2b21e329d9af57774999112ad406488f7466626259ca6b70` |
-| `summary.json` | `1f53fe158805dfc482a1d5d6f60dfb4b24167b5a09b4163c6efd355801c58a2d` |
-| `diag.csv` | `3f954e83cd321a141923c4b75926a67178d98a324bf8a9c9bd8483955e131e2c` |
-| `est.tum` | `bcb5a95993644e6fa5b75d030e731e0d63b9a23f540157ee67c6376212cd2f97` |
-| `kf.tum` | `7ba388a1c2b87652e7bcdb89468116e8a05e6f702b702523f4e6c024f1f042e9` |
+| required artifacts | 4/4 均有非空 `meta.json`、`summary.json`、`diag.csv`、`est.tum`、`kf.tum` |
+| code identity | 4/4 为 `42f99e9117d2c04fdb4ebdfc308d9ca786312e60`，`git_dirty=false` |
+| config identity | 4/4 为 `default_0337287b`；canonical text 逐字一致 |
+| diag grain | 每条 image frame 一行；分别为 `3682 / 2149 / 2348 / 1921` 行，均与 summary 一致 |
+| timestamps | 4/4 严格递增 |
+| numeric validity | 所有 diag numeric cells 有限；计数非负；每行 `num_shared <= num_disparity <= num_obs` |
+| status domain | 仅出现 `initializing`、`ok`、`visual_outage`；与当前 lifecycle 合同一致 |
+
+| sequence / artifact | SHA-256 |
+|---|---|
+| `MH_01_easy/meta.json` | `edd1c341084ba88e2b21e329d9af57774999112ad406488f7466626259ca6b70` |
+| `MH_01_easy/summary.json` | `1f53fe158805dfc482a1d5d6f60dfb4b24167b5a09b4163c6efd355801c58a2d` |
+| `MH_01_easy/diag.csv` | `3f954e83cd321a141923c4b75926a67178d98a324bf8a9c9bd8483955e131e2c` |
+| `MH_01_easy/est.tum` | `bcb5a95993644e6fa5b75d030e731e0d63b9a23f540157ee67c6376212cd2f97` |
+| `MH_01_easy/kf.tum` | `7ba388a1c2b87652e7bcdb89468116e8a05e6f702b702523f4e6c024f1f042e9` |
+| `V1_03_difficult/meta.json` | `58eda0cf646285e5639a6bc4bf7178114b7517621e307a675b65f9f7f50636be` |
+| `V1_03_difficult/summary.json` | `14c0184d5ec4e649144d460d389bd27dda9307fff7e87103484653981023da3f` |
+| `V1_03_difficult/diag.csv` | `57357a0e3457dcf5d1f92b6335507fb3fb6ea7fd12a956effa0f6c431cf1bf8d` |
+| `V1_03_difficult/est.tum` | `46d99feb8f15aa43b9ca64744214072113415ac6b10407208a9f650d37e52b01` |
+| `V1_03_difficult/kf.tum` | `72e0fd8450b9084380a86735529f8735e93587d48c7aa05a1f2b7419fb423537` |
+| `V2_02_medium/meta.json` | `8c2bd9a47246194f5106caee0db55a820275356be5d4cc5c83bcee89b82a83b1` |
+| `V2_02_medium/summary.json` | `e24d952c40454f31af9242d48ac248f839796eaacf15be0606423115d81df675` |
+| `V2_02_medium/diag.csv` | `60b28396b898e7c3887e0c2bcd710e962d1acc69fbefe08f5597f06fc23c1e9c` |
+| `V2_02_medium/est.tum` | `02684b420e59f8933b4a9a836740bf617b1d46c3f268ccd7c8480d60146f83ec` |
+| `V2_02_medium/kf.tum` | `cc7294106bac44e152b12ba89005c0dc6690467a30a6136b2986a0b7cc798c62` |
+| `V2_03_difficult/meta.json` | `21794e24e08e701ef5b8cdc3b744587cd59f0e0bc55c988d56de453477971d87` |
+| `V2_03_difficult/summary.json` | `30ce9c3fb2a08e029edadefdb4f1c0bce680959f3c28772a6f27d26a440f3f19` |
+| `V2_03_difficult/diag.csv` | `2c54f1606e9ae0e44b8c0568c924ff1c2abf7aa7e865882ea99e84fc46a00d3f` |
+| `V2_03_difficult/est.tum` | `6b1f9b3b69175967fd909ed6aa2eac644139d7e8295d83deea76d03a5fcd223b` |
+| `V2_03_difficult/kf.tum` | `1337c800e66c6220b7a574921462f77c28d090f84d9b0d2d7ce78ba1eb6b3b32` |
+
+MH_01 的五个 hash 与首次 Q0 记录逐字一致，证明续跑没有改写已有 artifact。
+
+## 5. EuRoC-11 Remote control 状态
+
+2026-08-27T23:11:13+08:00 从 clean worktree 执行
+`python3 scripts/remote_ci.py doctor`。本机到 `192.168.110.119` 返回
+`Destination Host Unreachable` / `No route to host`，`ssh-keyscan` 未取得 key，
+因此没有建立 SSH 会话、上传 snapshot 或创建 run。服务器恢复后从同一
+`42f99e9` clean worktree 重试。
 
 首分叉与因果归属见
 [Q0 control diagnosis](../../research/2026-08-27-note-m4-mapped-bearing-q0-control.md)。

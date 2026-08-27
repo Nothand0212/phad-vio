@@ -7,10 +7,10 @@ todos:
     status: completed
   - id: complete-q0-core4
     content: '补跑 clean Q0 的 V1_03→V2_02→V2_03；无 accuracy early-stop，冻结 core-4 identity、meta、逐序列精度、coverage 与段内/段间指标'
-    status: in_progress
+    status: completed
   - id: complete-q0-euroc11
     content: '从 clean 42f99e9 运行 ci-euroc11 control，fetch 并核对 11 条 source/toolchain/config/artifact'
-    status: pending
+    status: in_progress
   - id: freeze-product-envelope
     content: '在任何 Q1/Q4/Q5 candidate 结果前计算 core-4/EuRoC-11 的 gate 基线，确认并冻结 G_ATE/G_RPE、有效性、tail review 与 continuity 数值规则'
     status: pending
@@ -58,13 +58,15 @@ isProject: false
 ## 状态
 
 **Spec（含多序列产品 gate）与本计划已于 2026-08-27 定稿。短分支、文档提交、
-首条 clean Q0 与机制归因已经完成；Stage 0 正在补齐多序列 control，尚未开始
-#47 的生产 C++ 修改或 candidate experiment。**
+core-4 clean Q0 与机制归因已经完成；Stage 0 正在等待 Remote CI 服务器恢复以
+补齐 EuRoC-11 control，尚未开始 #47 的生产 C++ 修改或 candidate experiment。**
 
 已完成的 control 事实：clean `42f99e9/default_0337287b` unit 共 `458/458`
-通过（另有 3 个既有 skip）；`MH_01_easy` ATE `0.0725592618 m`、RPE
-`0.0326412725 m`、completion/coverage 约 `0.999728`、segments `1`。该单条
-结果已纳入 Q0，不能代替其余 core-4 与 EuRoC-11。
+通过（另有 3 个既有 skip）；core-4 全部完成且
+`failed/rejected/reanchors == 0`，ATE 依次为
+`0.072559 / 0.861563 / 0.171546 / 2.081321 m`，segments 为
+`1 / 2 / 1 / 18`。完整 identity、精度、coverage、段内/段间分解与 hash 见
+[`mapped-landmark-bearing Q0`](../benchmark/m4/mapped-landmark-bearing-q0_42f99e9_0337287b.md)。
 
 本计划把一个 deep Module 内部能力分四个可证伪阶段交付：Q1 只观察 eligible
 population，Q4 只让 mapped left-only bearing 约束 posterior，Q5a 再扩展 PnP，
@@ -190,8 +192,9 @@ mixed mapped population
 1. 复核 `git rev-parse HEAD^{tree}`、`git status --porcelain=v1`、config canonical
    text/hash、compiler/GTSAM/OpenCV identity 与实际命令。当前工作树的文档与
    `scripts/remote_ci.py`、`tests/scripts/test_remote_ci.py` 不进入 snapshot。
-2. 已完成 Release + tests 与 `MH_01_easy`；继续按
-   `V1_03_difficult → V2_02_medium → V2_03_difficult` 补齐 core-4。
+2. 已完成 Release + tests，并按
+   `MH_01_easy → V1_03_difficult → V2_02_medium → V2_03_difficult`
+   补齐 core-4。
 3. accuracy、completion、coverage 或 segments 的单项数值不终止 core-4；单条
    运行失败也保留 artifact 并在可执行时继续。只有 source/config/input/evaluator
    身份或 artifact schema 系统性失效才停止 suite。
