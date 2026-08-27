@@ -4,11 +4,12 @@
 
 [Q0 control](../benchmark/m4/mapped-landmark-bearing-q0_42f99e9_0337287b.md)
 在 clean `42f99e9/default_0337287b` 的首条 `MH_01_easy` 上得到 ATE
-`0.0725592618 m`，超过冻结上界 `0.070539 m`。该值与 spec 记录的同 source
-record-only run 一致，因此 dirty manifest 不是该数值差异的解释。
+`0.0725592618 m`，相对 M4 checkpoint 的 `0.0705388305 m` 增加约
+`2.0 mm`。该值与 spec 记录的同 source record-only run 一致，因此 dirty
+manifest 不是该数值差异的解释。
 
-本诊断只定位 Q0 的既有行为差异，不修改 #43 或 #47 合同，也不把临时消融
-当作候选实现。
+本诊断只定位 Q0 的既有行为差异，不把临时消融当作候选实现。产品判定方法见
+[多序列产品 gate 设计笔记](2026-08-27-note-m4-multisequence-product-gate.md)。
 
 ## 2. 可重复的短回路
 
@@ -84,13 +85,9 @@ Q0 不是 #47 新增代码造成的回归，因为 #47 尚未进入 Q1。
 
 推断：该分叉触发下一帧 PnP 的离散分支，并沿后续生命周期放大到 full-run ATE；
 尚未执行 full-run counterfactual 来量化 retention 与 factor admission 各自的最终
-ATE 贡献。继续 Q1/Q4/Q5 会把新 bearing 机制叠加到一个未通过自身 MH_01 产品门
-的 control 上，最终无法把产品指标变化单独归因给 #47。
-
-下一步应先为 #43 建立独立 control-repair slice，首个 Observe 问题是：这两帧
-当前 factors 的 predicted/optimized residual、PnP 可验证性与后续离散分支中，
-哪一项能提供不改变 support predicate 的质量许可。该 slice 需要重新对齐 factor
-admission/quality 合同；通过 `MH_01 <= 0.070539` 后，#47 才能回到 Q1。
+ATE 贡献。该因果归因不等于产品否决：`MH_01` 的约 `2.0 mm` ATE 变化必须与
+其 RPE、其他 sequence、continuity 和机制证据共同判断。下一步先补齐 clean
+多序列 Q0，不根据这一条 sequence 单独修改 #43 合同。
 
 ## 6. Full-run delayed-current-factor counterfactual
 
@@ -135,13 +132,11 @@ low-support row 继续保留额外一个 landmark (`79` 对 `78`)，且其
 按当前合同会接受这批 factors，因此不能用“复用既有 residual 门”解释或修复
 Q0。临时 instrumentation 随后与 worktree 一同清除。
 
-当前证据支持把 control-repair 的首选合同问题收窄为：是否允许
-**one-packet delayed current-factor admission**——立即保留 low-support observation
-与 map 生命周期，但直到下一次 graph rebuild 才让该 observation 约束 posterior。
-这保留了后续视觉因果边，也在完整 `MH_01` 恢复冻结门；同时它会把 #43 的
-“factor-bearing low-support 当前帧”改为“retained low-support 历史帧可在后续图中
-成 factor”，需要先修订 #43 的机制诊断与对应 public-seam tests，不能作为 #47
-内部实现细节直接落地。
+当前证据把 delayed-current-factor 明确为一个可复现的 attribution oracle：它会
+立即保留 low-support observation 与 map 生命周期，但直到下一次 graph rebuild
+才让该 observation 约束 posterior，并在完整 `MH_01` 恢复 checkpoint 数值。
+它同时改变 #43 已确认的 factor 时序，因此只有完整多序列证据表明现行时序造成
+整体产品退化时，才值得作为独立合同变更评估；它不进入当前 #47 实现。
 
 ## 8. Public-seam contract delta audit
 
@@ -158,7 +153,7 @@ Q0。临时 instrumentation 随后与 worktree 一同清除。
 以及 coast/span 随新增 packet 从 `200 ms` 增为 `250 ms`。这证明 quality path
 是随 observation factor **延迟一次 rebuild**，而不是丢失。
 
-因此，若用户批准 control repair，需在 #43 amendment 中明确且只改以下时序面：
+该审计界定了未来若评估 delayed admission 时必须显式处理的时序面：
 
 1. low-support 当前 stereo observation 立即进入 transaction state，但不在同一
    endpoint 的 graph 中建立 stereo factor；
@@ -170,7 +165,7 @@ Q0。临时 instrumentation 随后与 worktree 一同清除。
    因而 low-support control row 为 `0`；总 visual factor count 反映已进入 graph 的
    历史 factors；
 5. #47 后续对 current mono bearing factor 与 mapped-support 的权限仍由 Q4/Q5
-   单独授予，不由该 stereo control repair 预先决定。
+   单独授予，不由 delayed admission 预先决定。
 
-这组差异是现有 tests 与完整 MH_01 counterfactual 共同证明的最小合同面；不需要
-新增配置、阈值、factor 类型或 public interface。
+这组差异是现有 tests 与完整 MH_01 counterfactual 共同证明的最小合同面；当前
+多序列 gate 修订不采用该实现，也不修改 #43。

@@ -3,12 +3,13 @@
 本文档描述当前约定，不是绝对约束，会随项目开发修订。
 
 - 日期：2026-08-27
-- 状态：**已定稿**（用户于 2026-08-27 确认方案 A）
+- 状态：**已定稿**（用户于 2026-08-27 确认主体合同与 §13 多序列产品 gate）
 - issue：[#47](https://github.com/Nothand0212/phad-vio/issues/47)
   （epic：[#42](https://github.com/Nothand0212/phad-vio/issues/42)）
 - 前序合同：[视觉中断期轨迹连续性 spec（片 1b）](2026-08-26-m4-world-frame-continuity.md)
 - 方向证据：[M4 下一方向分析](../research/2026-08-26-note-m4-next-direction-analysis.md)
   §D、§E
+- gate 证据：[M4 多序列产品 gate 设计笔记](../research/2026-08-27-note-m4-multisequence-product-gate.md)
 - 现状证据：Remote CI run
   `20260827T092127Z-ci-euroc11-b837bc9361fb-2fb02b`
 
@@ -37,8 +38,8 @@ GTSAM `GenericProjectionFactor`，进入 PnP、visual support 与
 
 上述 Remote CI run 的 source identity 为
 `sha256:b837bc9361fba359c1efdbd574c317644b5cc33debb76367e7489a44d128c0a3`，
-对应 `42f99e9` / tree `76b46a3e`，但 `git_dirty=true`，且 MH_01 超过片 1b
-冻结硬门。因此它只提供选方向与预注册门限的证据，不构成产品 PASS。
+对应 `42f99e9` / tree `76b46a3e`，但 `git_dirty=true`。因此它只提供选方向与
+设计多序列 gate 的证据，不构成 clean Q0 或产品 PASS。
 
 ### 1.2 当前证据缺口
 
@@ -408,7 +409,7 @@ Red→Green cases 至少覆盖：
 `phad_estimator_tests` → 完整 `phad_apps_tests` → `git diff --check` 与完整 diff
 审计。
 
-## 13. Q0 control 与 EuRoC stop-on-failure 产品门
+## 13. Q0 control 与多序列产品 gate
 
 ### 13.1 Q0
 
@@ -418,29 +419,67 @@ ATE、RPE、completion、coverage、segments、段内 RMS、段间分量与完�
 `meta.json`。若 clean Q0 与现有 record-only run 的差异无法由 source manifest
 解释，先修 control，不进入 Q1。
 
-现有 run 仅预注册以下上界/下界；clean Q0 只能收紧，不能在看到 candidate
-后放宽：
+Q0 是 immediate control 的测量快照，不是待判定 candidate。任何单条 sequence
+的 ATE/RPE 数值都不触发 early-stop；四条必须完整运行。只有以下系统性问题使
+后续结果同样不可解释时，才停止整个 suite：source/tree/config/input/evaluator
+身份不一致，或 artifact schema/评估器失效。单条运行失败应如实记录，并在执行
+条件允许时继续后续 sequence。
 
-| sequence | ATE 上界 | RPE 上界 | completion 下界 | coverage 下界 | segments |
-|---|---:|---:|---:|---:|---:|
-| MH_01_easy | `0.070539` | Q0 值 | `0.999728` | `0.999728` | `1` |
-| V1_03_difficult | `0.861563` | `0.130757` | `0.974407` | `0.974860` | `<= 2` |
-| V2_02_medium | `0.171546` | `0.057113` | `0.974020` | `0.974009` | `1` |
-| V2_03_difficult | `1.707513` | `0.688425` | `0.535138` | `0.791345` | `< 18` |
+四条 clean Q0 完成后，使用同一 source/config 补齐 EuRoC 11 条 clean control。
+在看到 Q1/Q4/Q5 candidate 结果前，依据完整 Q0、M4 checkpoint 与绝对工程量级
+冻结 §13.3 的 aggregate envelope、有效性界限与 tail review 规则；之后不得根据
+candidate 放宽。
 
-MH_01 ATE 保留 M4 checkpoint 的冻结硬门；不能用片 1b dirty run 的
-`0.072559` 放宽。V2_03 必须同时收回相对 checkpoint 的 ATE 回归并减少当前
-18 段；只改善其一不构成产品 PASS。
+### 13.2 Suite-level accuracy
 
-### 13.2 串行门
+对 suite 中每条有效 sequence `s` 定义：
 
-正式 candidate 严格按表中顺序运行，任一失败立即停止，不运行后续序列、
-不扫 sigma/Huber/门限、不扩大 visual-coast horizon。
+```text
+r_ATE(s) = ATE_candidate(s) / ATE_Q0(s)
+G_ATE    = exp(mean_s(log(r_ATE(s))))
 
-每条除表格门外还必须满足：
+r_RPE(s) = RPE_candidate(s) / RPE_Q0(s)
+G_RPE    = exp(mean_s(log(r_RPE(s))))
+```
+
+正式判定分两层：
+
+1. `core-4`：上述四条代表序列，用于 Q0、开发反馈和 V2_03 段内/段间诊断；
+2. `EuRoC-11`：最终产品判定。不能以 `core-4` 或其中任一 sequence 代替全量
+   evidence。
+
+每条 sequence 的原始 ATE/RPE、相对 Q0 ratio、绝对 delta、completion、coverage、
+segments 与段内/段间分量必须完整落盘。`G_ATE` 是 primary accuracy outcome；
+`G_RPE` 是 accuracy guardrail。归一化几何平均让每条 sequence 等权，不让绝对
+误差较大的 difficult sequence 单独支配结果。
+
+单条 sequence 的 ATE/RPE 退化只触发 `REVIEW`，不自动 `FAIL`，也不阻止其他
+sequence 运行。review 必须结合绝对误差量级、RPE、completion/coverage、segments
+与段内/段间分解解释；例如 `MH_01` 的毫米级 ATE 波动不能脱离其他序列结果单独
+否决 candidate。
+
+### 13.3 三态产品判定
+
+数值 envelope 在 clean Q0 完整后按 §13.1 冻结；判定结构为：
+
+- `PASS`：identity 与 hard validity 成立；Q1/Q4/Q5 机制门成立；`core-4` 与
+  `EuRoC-11` 的 `G_ATE` 满足冻结 envelope；`G_RPE`、completion、coverage 无
+  不可接受的整体退化；continuity target 改善。
+- `REVIEW`：suite-level outcome 与机制门成立，但存在单序列 accuracy、coverage
+  或 completion tail。完成逐序列归因后再作产品决定，tail 本身不是自动否决。
+- `FAIL`：身份/有效性失真，机制没有实际触发，出现 hard runtime failure，或
+  suite-level outcome/guardrail 越过冻结 envelope。
+
+candidate 的 accuracy 数值不能触发 suite early-stop。若某条运行 hard-fail，
+该 candidate 最终至少为 `FAIL`，但仍应在执行条件允许时跑完其余 sequence，保留
+完整失败分布。
+
+### 13.4 Hard validity、机制与 continuity 条件
+
+正式 candidate 必须满足：
 
 1. `failed == 0`、`rejected == 0`、`reanchors == 0`；
-2. 四条 artifact 都报告 eligible/attached 分布；V2_03 必须实际出现
+2. 所有 artifact 都报告 eligible/attached 分布；V2_03 必须实际出现
    `num_mapped_observations - num_shared > 0` 与
    `num_current_mono_visual_factors > 0`；
 3. V2_03 至少有一次 flip-capable episode：
@@ -448,16 +487,18 @@ MH_01 ATE 保留 M4 checkpoint 的冻结硬门；不能用片 1b dirty run 的
    `segment_id` 中成功提交；V1_03 / V2_02 记录该 episode 数但不设非零硬门；
 4. `num_current_visual_factors >= num_current_mono_visual_factors` 每帧成立；
 5. 用 `scripts/segment_ate_decomp.py` 比较段内 RMS 与绝对段间分量；V2_03
-   的段内 RMS 不高于 clean Q0，段间分量严格下降；
+   的 continuity target 及容差在 clean Q0 后预注册，并与 aggregate accuracy
+   一起判定；
 6. artifact 保留 clean code/tree identity、canonical config、命令、逐帧
    diagnostics 与 Q1/Q4/Q5 机制计数。
 
-通过四条串行门只授权本行为进入当前 stereo VIO 默认路径，不授权完整单目
-输入、单目初始化、跨段 relocalization 或下一里程碑。
+通过 `core-4` 只授权进入最终 EuRoC-11 实验；通过完整多序列产品 gate 才授权
+本行为进入当前 stereo VIO 默认路径。它不授权完整单目输入、单目初始化、跨段
+relocalization 或下一里程碑。
 
 ## 14. 已确认决策
 
-以下组合构成 plan 与实现的冻结输入：
+以下四项仍构成 plan 与实现的冻结输入：
 
 1. 保留 `num_shared` 的 stereo-only 历史语义，新增
    `num_mapped_observations` 作为 PnP/support population；
@@ -465,7 +506,17 @@ MH_01 ATE 保留 M4 checkpoint 的冻结硬门；不能用片 1b dirty run 的
    mono breakdown 字段；
 3. mixed PnP / RMS / mean-cull 按“每 observation / factor 一个 L2 norm”统计，
    使 stereo-only 数值不变；
-4. 按 Q1 Observe → Q4 Constrain → Q5 PnP/support 的证据门逐步扩权；
-5. 四条 EuRoC 串行门采用 §13 的预注册数值。
+4. 按 Q1 Observe → Q4 Constrain → Q5 PnP/support 的证据门逐步扩权。
 
-以上五项已于 2026-08-27 确认。
+以上四项已于 2026-08-27 确认。
+
+多序列 gate 合同为：
+
+1. `core-4` accuracy 不 early-stop；最终产品判定补齐 `EuRoC-11`；
+2. 以 clean Q0 归一化的等权几何平均 ATE 为 primary outcome，RPE 为 guardrail；
+3. 单序列 accuracy tail 进入 `REVIEW`，hard validity、机制门或 suite-level
+   envelope 失败才自动 `FAIL`；
+4. 完整 clean Q0 后、candidate 前冻结数值 envelope 与 tail 规则。
+
+上述四项已于 2026-08-27 确认。implementation plan 必须从完整合同派生，并在
+计划确认后才进入实现。
