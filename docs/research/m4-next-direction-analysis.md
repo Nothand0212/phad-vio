@@ -8,9 +8,9 @@
 
 相关：[Slice ⑦ checkpoint](../benchmark/m3.3/slice-7_e77ee5d_402d1925.md)、
 [M3.3 残余 failure 债](m3.3-remaining-failure-debt.md)、
-[estimator AGENTS](../../phad/estimator/AGENTS.md)、[roadmap](../roadmap.md)
+[estimator AGENTS](../../phad/estimator/AGENTS.md)、[roadmap](../design/roadmap.md)
 
-本文只做方向分析：不改代码、不改 `docs/roadmap.md`、不跑 bench、不建 issue。
+本文只做方向分析：不改代码、不改 `docs/design/roadmap.md`、不跑 bench、不建 issue。
 
 ---
 
@@ -390,7 +390,7 @@ helper + 约 32 个公开诊断字段，在有可测需求之前属于投机抽�
    语境下令 `p^W_0 = 0`。而 §C.1 实测 93/93 段首帧均为 `[0,0,0]`——这正是
    §B 里 99.9% 错位的机制，也是两份文档都缺的那一环。
 
-4. **两份都未指出 `docs/roadmap.md` 的 M4 段落与本 checkpoint 矛盾。**
+4. **两份都未指出 `docs/design/roadmap.md` 的 M4 段落与本 checkpoint 矛盾。**
    roadmap L609–618 仍停在「M4 仍在进行中且未完成」、Q3
    `HYPOTHESIS_FAIL / HALF_STABILITY / STOP`、replay2 `HARD_ERROR`、
    `permission_granted=false`；而 M4 checkpoint 已是 11/11 clean 全量。
@@ -421,7 +421,7 @@ helper + 约 32 个公开诊断字段，在有可测需求之前属于投机抽�
    幅度——片 3 的预期是推断。建议片 3 先加该计数再动因子。
 4. **`robustness.reanchors` 已是恒 `0` 的死字段**（§C.3），而
    `phad/bench/README.md` 与 `phad/estimator/README.md` 仍按旧语义描述它。
-5. **`docs/roadmap.md` M4 段落与 checkpoint 矛盾**（§F 需修正 4），本次
+5. **`docs/design/roadmap.md` M4 段落与 checkpoint 矛盾**（§F 需修正 4），本次
    只记录。
 6. **checkpoint §5 的 RPE 计数与其自身表格不一致**：正文写「RPE 为 4 条
    下降、7 条上升」，而同节表格的 `RPE Δ` 列为 3 条下降（V1_02 / V1_03 /

@@ -38,7 +38,7 @@ original frozen-plan RED exact-record conformance NOT MET；只授权 Q3 plan/de
 - [Q2 known-bias deterministic predict 资格结果](../research/m4-minimal-gyro-q2-known-bias-predict-result.md)
 - [Q1 Observe 实施计划](2026-08-12_m4_gyro_q1_observe_7d3a91e6.plan.md)
 - [证据门控的信息接入](../agents/evidence-gated-integration.md)
-- [M4 路线](../roadmap.md)
+- [M4 路线](../design/roadmap.md)
 
 本计划的代码 base 是 `c0e214a04f8521dcf7f1c2769ebf10bf7ca06051`（短 hash
 `c0e214a`）；Q1 executable evidence 是
@@ -94,7 +94,7 @@ waiver；这不是原 §2 已有的第七路径，也不是 `222c5a3` 的事后�
 
 除上述路径外不得修改 implementation 文件；不需要某个文件时不改。资格结果文档只预定为
 `docs/research/m4-minimal-gyro-q2-known-bias-predict-result.md`，用于完成后记录证据，**不进入
-implementation allowlist**。本次 plan preregistration 对 `docs/roadmap.md` 的链接更新也不是
+implementation allowlist**。本次 plan preregistration 对 `docs/design/roadmap.md` 的链接更新也不是
 Q2 implementation 差异。
 
 CMake 只把新 `.cpp` 加入既有 `phad_estimator`，把新 test 加入既有

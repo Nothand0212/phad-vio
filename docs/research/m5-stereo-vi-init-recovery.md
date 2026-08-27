@@ -41,7 +41,7 @@ EuRoC 锚点：[`docs/benchmark/m4/minimal-full-state-vio_c999f58_0337287b.md`](
 - MH_02 ATE 从旧 VO `0.089` 升到 `0.291`、segments=6；V2_02 从 `0.853` 升到 `1.982`、segments=9。这与「带着错误速度/重力进入 IMU 传播」一致，而不是 estimator 崩溃。
 - V2_03 的 896 帧 `initializing`、52 次 visual-outage、completion `50.65%` 说明 **同一初始化模块必须同时服务起步与中断恢复**；否则每次 `completeActiveSegment` 都会再种一个零速度 root。
 
-M5 出口要求：无静止段可起步、失败返回原因而不是 identity pose、MH_* 不劣于静止初始化。[`docs/roadmap.md` M5](../roadmap.md)
+M5 出口要求：无静止段可起步、失败返回原因而不是 identity pose、MH_* 不劣于静止初始化。[`docs/design/roadmap.md` M5](../design/roadmap.md)
 
 ### 明确不建议现在做什么
 
@@ -499,9 +499,9 @@ MH_01/03/04/05 在 `c999f58` 上已是单段、ATE 优于或接近旧 VO。验�
 
 ### 官方文档 / 项目文档
 
-- [`docs/roadmap.md` M5/M6](../roadmap.md)
+- [`docs/design/roadmap.md` M5/M6](../design/roadmap.md)
 - [`docs/benchmark/m4/minimal-full-state-vio_c999f58_0337287b.md`](../benchmark/m4/minimal-full-state-vio_c999f58_0337287b.md)
-- [`docs/spec/m4-minimal-full-state-vio-spec.md`](../spec/m4-minimal-full-state-vio-spec.md)（单一 `update()` seam、静止 bootstrap 合同）
+- [`docs/specs/2026-08-25-m4-minimal-full-state-vio.md`](../specs/2026-08-25-m4-minimal-full-state-vio.md)（单一 `update()` seam、静止 bootstrap 合同）
 - [`phad/estimator/types.hpp`](../../phad/estimator/types.hpp)、[`vio_estimator.hpp`](../../phad/estimator/vio_estimator.hpp)
 - OpenVINS docs：<https://docs.openvins.com/>（init 默认值以头文件为准）
 

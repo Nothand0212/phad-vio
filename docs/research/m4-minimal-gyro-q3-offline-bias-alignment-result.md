@@ -62,7 +62,7 @@ GT、ATE、RPE；本文不声称 VIO 指标改善。
 | `docs/research/m4-minimal-gyro-q3-offline-bias-alignment-research.md` | `aaccc69a91ad6c0bbcb98c990cf7f5d8b5139934` | `71b422b589d718111341b6f3817954b2bafc61635d50ecdce74fef053565358c` |
 | `docs/research/m4-minimal-gyro-q3-outcome-independent-budget-research.md` | `2e3470b582073918f471cac56111cd7ec788f688` | `9c9448960886dced5904579021be7c6fadcc527f483cd688c88bc29e02c8af6a` |
 | `docs/research/m4-minimal-gyro-slice-design.md` | `3e1d0d479880765fb1bd93bffdaf43d9f1e60c56` | `7d0a03207d38c356a28987a51587acdd96abdc97ba2c4e845a73d1aa7d3a0084` |
-| `docs/roadmap.md` | `e40f8392a90c24491977114c1d9a0b12f917be36` | `54e967f5695c85f2c97697a91faeff999ed73d8691f626f6cb1a2681575780b8` |
+| `docs/design/roadmap.md` | `e40f8392a90c24491977114c1d9a0b12f917be36` | `54e967f5695c85f2c97697a91faeff999ed73d8691f626f6cb1a2681575780b8` |
 
 当前 protocol receipt supersede 旧 `d59a73d...` receipt（SHA-256
 `b9d9bb7787e866029306b3b7c807a991cc6ca84db54564c76e43b0b9356fd6f1`）；原因是 runner protocol

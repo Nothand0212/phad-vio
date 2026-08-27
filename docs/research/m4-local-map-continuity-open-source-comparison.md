@@ -4,7 +4,7 @@
 
 日期：2026-08-27
 
-相关：[世界系连续性 spec](../spec/m4-world-frame-continuity-spec.md)、
+相关：[世界系连续性 spec](../specs/2026-08-26-m4-world-frame-continuity.md)、
 [1b 实施计划](../plans/2026-08-27_m4_observation_intake_continuity_slice1b_9e7a3c41.plan.md)、
 [1a coast 传播探针](m4-coast-propagation-probe-design.md)。
 

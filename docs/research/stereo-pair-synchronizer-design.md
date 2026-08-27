@@ -2,14 +2,14 @@
 
 日期：2026-07-31  
 状态：已确认并入库（§1–§4 分段确认，审阅后收紧见 §0 与 §7）；里程碑
-[M3.2](../roadmap.md)，实施计划
+[M3.2](../design/roadmap.md)，实施计划
 [M3.2 双目配对同步器](../plans/2026-07-31_m3.2_stereo_pair_synchronizer_5b7d1c93.plan.md)  
 相关：
 
 - handoff：[`euroc-stereo-manifest-asymmetry-handoff.md`](euroc-stereo-manifest-asymmetry-handoff.md)
 - 开源对照：[`euroc-stereo-manifest-asymmetry-open-source-refs.md`](euroc-stereo-manifest-asymmetry-open-source-refs.md)
-- [`architecture.md`](../architecture.md) §3.1–§3.2（本稿修订 `pushStereo` → `pushImage` 方向）
-- [`roadmap.md`](../roadmap.md) M3.2（本稿）、M3.3 VO 加固、M4 IMU 包络
+- [`architecture.md`](../design/architecture.md) §3.1–§3.2（本稿修订 `pushStereo` → `pushImage` 方向）
+- [`roadmap.md`](../design/roadmap.md) M3.2（本稿）、M3.3 VO 加固、M4 IMU 包络
 
 ## 0. 决策摘要
 

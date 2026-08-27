@@ -574,7 +574,7 @@ phad/frontend/*
 apps/*
 scripts/*
 tests/apps/*
-docs/roadmap.md
+docs/design/roadmap.md
 任何 runtime config / config_hash / CLI / artifact schema
 ```
 

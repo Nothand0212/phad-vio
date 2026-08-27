@@ -5,8 +5,8 @@
 > **历史调研，接口建议已失效。** 本文保留 2026-07-28 的证据与当时结论，
 > 不再定义当前 dataset contract。顶层 module 布局、公开清单、EuRoC facade
 > 和按位置解码建议均已被 GitHub Parent #1 与 Issue #6 取代。当前实现归属
-> `phad::io::dataset`，当前合同见 `docs/architecture.md` 与
-> `docs/roadmap.md`。
+> `phad::io::dataset`，当前合同见 `docs/design/architecture.md` 与
+> `docs/design/roadmap.md`。
 
 ## 1. 结论
 
@@ -31,10 +31,10 @@
 
 ### 事实
 
-调研当时的 [roadmap](../roadmap.md) 把阶段 1 定义为纯 IMU 预积分，把“目标
+调研当时的 [roadmap](../design/roadmap.md) 把阶段 1 定义为纯 IMU 预积分，把“目标
 数据集 adapter、sensor synchronizer、边界插值和数据集片段回放”一起放在
 阶段 4。
-[architecture](../architecture.md) 又明确要求数据集特有知识只存在于 adapter，
+[architecture](../design/architecture.md) 又明确要求数据集特有知识只存在于 adapter，
 同步模块独占 IMU 切片和图像边界插值。
 
 ### 推断
@@ -51,7 +51,7 @@
 - 后续 replay runner 负责事件调度、暂停、倍速和生命周期；
 - frontend/estimator 不接触路径、CSV、YAML 或 EuRoC 字段名。
 
-采纳后需要另行更新 `docs/roadmap.md`。本调研不直接改写已接受的路线图。
+采纳后需要另行更新 `docs/design/roadmap.md`。本调研不直接改写已接受的路线图。
 
 ## 3. 一手资料
 

@@ -365,7 +365,7 @@ MH_01_easy → V1_03_difficult → V2_02_medium → V2_03_difficult
 实施只引入本 spec 的 observation-intake、累计诊断、测试与 artifact
 wiring；1a 分支不作为产品代码基线。
 
-本片不改 [architecture](../architecture.md)、[conventions](../conventions.md)或
-[roadmap](../roadmap.md)；不扩大 visual-coast horizon，不扫描 prior sigma 或放宽
+本片不改 [architecture](../design/architecture.md)、[conventions](../design/conventions.md)或
+[roadmap](../design/roadmap.md)；不扩大 visual-coast horizon，不扫描 prior sigma 或放宽
 门限；不做 #44、片 3 单目因子、片 4/M5 动态初始化、loop closure、
 global map、cross-segment stitching 或新 factor 类型。

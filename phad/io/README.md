@@ -19,7 +19,7 @@ ROS 等来源转成与格式无关的 `phad::sensor` 测量与标定。数据集
 | 解析 EuRoC / TUM VI 目录与标定，产出 `StereoImuDataset` | ATE / RPE / TUM 轨迹评估（归 `phad::eval`） |
 | 加载 EuRoC 真值为 `common::Trajectory`（`T_W_B`） | 左右配对、IMU 分段、边界插值、`StereoImuPacket`（归 `phad::sync`） |
 | `SensorSource` / `DatasetReplaySource` 按时间拉**单路**事件 | 特征跟踪、估计、可视化 |
-| 单位、轴、外参方向规范化到 `docs/conventions.md` | 猜测序列格式；调用方显式选 `euroc::open` 或 `tum_vi::open` |
+| 单位、轴、外参方向规范化到 `docs/design/conventions.md` | 猜测序列格式；调用方显式选 `euroc::open` 或 `tum_vi::open` |
 
 测量与标定类型本身在 `phad::sensor`；本目录只负责「从磁盘/设备读出并适配」。
 
@@ -122,7 +122,7 @@ auto gt = phad::io::dataset::euroc::openGroundtruth(sequence_root);
 ### 外部格式键
 
 EuRoC / TUM VI 的 YAML、CSV **列名与字段按原文**读写（完整拼写）；缩写只用于
-内部 C++ API。单位与坐标系转换在 adapter 内完成，产出 SI + `docs/conventions.md`
+内部 C++ API。单位与坐标系转换在 adapter 内完成，产出 SI + `docs/design/conventions.md`
 约定下的 `T_W_B` / body 系测量。
 
 ### EuRoC 真值
@@ -148,5 +148,5 @@ EuRoC / TUM VI 的 YAML、CSV **列名与字段按原文**读写（完整拼写�
 | `apps/phad_traj_eval --gt-euroc` | 评估时直接读序列真值 |
 | `tests/io/dataset/` | fixture 单测（`-L unit`）；真实序列 gated（`-L mh01` 等） |
 
-模块边界的权威描述见 [`docs/architecture.md`](../../docs/architecture.md)
-§3.1；坐标系与单位见 [`docs/conventions.md`](../../docs/conventions.md)。
+模块边界的权威描述见 [`docs/design/architecture.md`](../../docs/design/architecture.md)
+§3.1；坐标系与单位见 [`docs/design/conventions.md`](../../docs/design/conventions.md)。

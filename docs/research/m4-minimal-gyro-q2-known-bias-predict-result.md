@@ -273,7 +273,7 @@ production implementation 与这一项 evidence correction 打包为七路径。
 的 pre-edit narrow waiver，不是原 §2 已有的第七路径，也不是 `222c5a3` 的事后追授；
 `222c5a3` 只是后续 ledger commit。
 
-`c0e214a..d1c4385` 总计八条路径：上述七条，加既有 `docs/roadmap.md` 状态链接。没有
+`c0e214a..d1c4385` 总计八条路径：上述七条，加既有 `docs/design/roadmap.md` 状态链接。没有
 apps、sync、sensor、config/hash、factor、posterior、Q3 source 或其他 forbidden production path。
 
 ## 10. Verifier chronology correction

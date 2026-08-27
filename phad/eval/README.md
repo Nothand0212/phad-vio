@@ -116,4 +116,4 @@ timestamp_ns,dt_ns,err_trans_m,err_rot_deg,est_x,est_y,est_z,gt_x,gt_y,gt_z
 | `scripts/plot_trajectory.py` / `plot_errors.py` | 离线绘图（本地 venv，不进 CI） |
 
 交叉验证：`evo_ape tum <gt> <est> -a` 与 `phad_traj_eval` 在 MH_01 上六位
-有效数字一致。坐标系记号见 [`docs/conventions.md`](../../docs/conventions.md)。
+有效数字一致。坐标系记号见 [`docs/design/conventions.md`](../../docs/design/conventions.md)。

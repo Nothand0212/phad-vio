@@ -29,7 +29,7 @@ namespace phad::common
    * @brief 单个带时间戳的 body 位姿。
    *
    * T_W_B 把 body 坐标系中表达的量转换到 world，方向约定见
-   * docs/conventions.md。
+   * docs/design/conventions.md。
    */
   struct TimedPose
   {

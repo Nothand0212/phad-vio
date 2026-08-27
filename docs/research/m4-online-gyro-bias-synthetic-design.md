@@ -205,7 +205,7 @@ Q2 public wrapper 与 private factor 必须调用同一个 reducer；禁止复�
 timestamp subtraction 或 seconds conversion。Q2 的 known-bias public contract 与结果保持不变。
 
 `G(k)` 是 [ADR-0002](../adr/0002-stage-gated-gyro-only-bias-state.md) 与
-[`docs/conventions.md` §3.1](../conventions.md#31-阶段性-gyro-only-资格-keyadr-0002) 允许的窄例外：
+[`docs/design/conventions.md` §3.1](../design/conventions.md#31-阶段性-gyro-only-资格-keyadr-0002) 允许的窄例外：
 只存在于本协议 synthetic、default-off、无 real caller 的 estimator private implementation。
 完整 VIO 的 canonical bias key 仍是 `B(k): imuBias::ConstantBias`；同一 graph 禁止 `G/B` 双写、
 alias 或 adapter。未来 full `X/V/B` slice 获授权时，必须删除 `G(k)`、gyro-only factor 与其
@@ -1593,8 +1593,8 @@ production RED 之前先完成一次独立的 exact-six authority transaction；
 ```text
 docs/research/m4-online-gyro-bias-synthetic-design.md
 docs/adr/0002-stage-gated-gyro-only-bias-state.md                 # 新建
-docs/conventions.md
-docs/roadmap.md
+docs/design/conventions.md
+docs/design/roadmap.md
 docs/plans/2026-08-18_m4_online_gyro_bias_synthetic_1e3569b4.plan.md # 新建
 phad/estimator/README.md
 ```
@@ -1656,7 +1656,7 @@ phad/sensor/**
 phad/frontend/**
 phad/eval/**
 phad/bench/**
-docs/roadmap.md
+docs/design/roadmap.md
 docs/plans/**
 docs/research/m4-minimal-gyro-slice-design.md
 docs/research/m4-minimal-gyro-q3-*.md
@@ -1669,7 +1669,7 @@ docs/research/m4-minimal-gyro-q3-*.md
 ```text
 docs/research/m4-online-gyro-bias-synthetic-result.md       # 新建，完整 receipt
 docs/plans/2026-08-18_m4_online_gyro_bias_synthetic_1e3569b4.plan.md # 只更新状态/证据链接
-docs/roadmap.md                                             # 只记录 verdict/下一权限
+docs/design/roadmap.md                                             # 只记录 verdict/下一权限
 ```
 
 design、ADR、conventions、`phad/estimator/README.md` 与 Q3 继续只读；bookkeeping 不得回改

@@ -24,7 +24,7 @@ actual 与 5 条有效 negative-arm `PASS` 继续作为 provenance 保留，但�
 
 本结果不改写 [normative design](m4-online-gyro-bias-synthetic-design.md)、
 [ADR-0002](../adr/0002-stage-gated-gyro-only-bias-state.md)、
-[conventions](../conventions.md)、[estimator contract](../../phad/estimator/README.md) 或任何冻结阈值、
+[conventions](../design/conventions.md)、[estimator contract](../../phad/estimator/README.md) 或任何冻结阈值、
 fixture、协议与历史结论。Q3 的唯一结论继续是
 `HYPOTHESIS_FAIL / HALF_STABILITY / STOP`，见
 [Q3 result ledger](m4-minimal-gyro-q3-offline-bias-alignment-result.md)。
@@ -224,4 +224,4 @@ receipt 写入前共有 `129` 个 exit files：`120` 个 zero、`9` 个 nonzero�
 
 实施步骤与未完成 todo 见
 [implementation plan](../plans/2026-08-18_m4_online_gyro_bias_synthetic_1e3569b4.plan.md)；M4 总状态见
-[roadmap](../roadmap.md)。
+[roadmap](../design/roadmap.md)。

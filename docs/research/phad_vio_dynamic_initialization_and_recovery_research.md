@@ -615,7 +615,7 @@ VINS 和 ORB-SLAM3 官方实现主要通过 estimator/map reset 再次进入初�
 | `phad/estimator/types.hpp` | 增加公开 POD diagnostics、enum 和 rejection reason；不得出现 GTSAM/PIM 类型 |
 | `apps/offline_vo_session.cpp` | 输出初始化 mode/phase/reason、observability、residual、inheritance、candidate/segment 信息；不加入初始化决策逻辑 |
 | `phad/sync/stereo_pair_synchronizer.cpp` | 初始化算法不应进入同步器；最多补充 paired/left-only/right-only/timestamp-delta counters |
-| `docs/roadmap.md` | 将 M5 拆成 staged initialization、MAP gate、recovery 和定向验证；保持 formal marginalization 在 M6 |
+| `docs/design/roadmap.md` | 将 M5 拆成 staged initialization、MAP gate、recovery 和定向验证；保持 formal marginalization 在 M6 |
 
 ## D.2 最小私有状态
 

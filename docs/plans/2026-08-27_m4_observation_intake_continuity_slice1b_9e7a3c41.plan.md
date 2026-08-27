@@ -56,8 +56,8 @@ shared-ID count 达到既有 `min_pnp_inliers` 时恢复 full visual support。
 
 按具体性从高到低使用：
 
-1. [`m4-world-frame-continuity-spec.md`](../spec/m4-world-frame-continuity-spec.md)。
-2. [`m4-minimal-full-state-vio-spec.md`](../spec/m4-minimal-full-state-vio-spec.md)。
+1. [`m4-world-frame-continuity-spec.md`](../specs/2026-08-26-m4-world-frame-continuity.md)。
+2. [`m4-minimal-full-state-vio-spec.md`](../specs/2026-08-25-m4-minimal-full-state-vio.md)。
 3. [#43](https://github.com/Nothand0212/phad-vio/issues/43) 正文及截至
    2026-08-27 的最新 comments。
 4. [1a 机制及产品门记录](2026-08-26_m4_world_frame_inheritance_slice1a_c5177d31.plan.md)、

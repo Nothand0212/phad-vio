@@ -297,16 +297,16 @@ noise mapping 依据 pinned GTSAM
 
 当前 authority/implementation 与目标合同存在两处已知迁移点：
 
-- [architecture §2.4](../architecture.md) 仍让 frontend 仅在 keyframe 提交，并让 public
+- [architecture §2.4](../design/architecture.md) 仍让 frontend 仅在 keyframe 提交，并让 public
   `KeyframeMeasurement` 携带 `PreintegratedImu`；目标 seam 改为每个连续同步 packet 提交 raw IMU payload。
-- [conventions §5.2](../conventions.md) 与当前
+- [conventions §5.2](../design/conventions.md) 与当前
   [`StereoImuPacket`](../../phad/sensor/stereo_imu_packet.hpp) 把 endpoint interpolation 放在 sync，并用
   `imu_gap` bool 表达 current M4.1 gap；目标 seam 让 sync 只选择 tagged arm，由 estimator 私有完成 endpoint
   normalization 与 full-state lifecycle。
 - 当前 [`UpdateStatus`](../../phad/estimator/types.hpp) 只有 `kOk/kRejected/kFailed`；§5 的 conceptual
   lifecycle results 需要随 estimator 原子迁移，不能被描述为现有行为。
 
-本文不修改或取代 [architecture](../architecture.md)、[conventions](../conventions.md)、
-[estimator README](../../phad/estimator/README.md)、ADR、[roadmap](../roadmap.md)、产品代码或测试。实施获得独立授权后，
+本文不修改或取代 [architecture](../design/architecture.md)、[conventions](../design/conventions.md)、
+[estimator README](../../phad/estimator/README.md)、ADR、[roadmap](../design/roadmap.md)、产品代码或测试。实施获得独立授权后，
 必须把 estimator rename、旧 `G(k)` 删除、PIM ownership、packet contract 与相关 authority 作为一次受控迁移
 共同评审；不得通过 compatibility alias 或并行 backend 分阶段长期共存。

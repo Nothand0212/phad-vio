@@ -656,7 +656,7 @@ explicit online gyro bias state + random walk 的独立资格链为：
   `HARD_ERROR`、有效/未运行 gates、STOP event 与未获得权限。
 
 pre-implementation authority transaction 的 exact six 只包含：online-bias synthetic design、
-ADR-0002、`docs/conventions.md`、本 roadmap、online-bias implementation plan 与
+ADR-0002、`docs/design/conventions.md`、本 roadmap、online-bias implementation plan 与
 `phad/estimator/README.md`；它已锁定在 commit
 `634c4ecfbc5cbd7b0d8da1a295e48c12f7f81194` / tree
 `a7fd588983b1f8597e98517a3d0d4cbcf6609100`。上述

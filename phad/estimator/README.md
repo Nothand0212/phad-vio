@@ -21,7 +21,7 @@ M4 的 `PHAD-M4-ONLINE-GYRO-BIAS-SYNTHETIC-V1` 另行冻结 default-off、无
 real caller 的 estimator-private online gyro-bias 资格机制。本 README 与
 [synthetic design](../../docs/research/m4-online-gyro-bias-synthetic-design.md)、
 [ADR-0002](../../docs/adr/0002-stage-gated-gyro-only-bias-state.md)、
-[conventions](../../docs/conventions.md)、[roadmap](../../docs/roadmap.md) 和
+[conventions](../../docs/design/conventions.md)、[roadmap](../../docs/design/roadmap.md) 和
 [implementation plan](../../docs/plans/2026-08-18_m4_online_gyro_bias_synthetic_1e3569b4.plan.md)
 共同构成 pre-implementation exact-six authority。`EstimatorOptions::m_gyro_bias` 只允许
 synthetic test 直接构造 in-memory POD；不得接 parser、`flattenConfig()`、

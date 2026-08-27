@@ -8,30 +8,31 @@ ORB-SLAM3 和 Basalt 各取一处经过验证的设计，按可测量的小里�
 VIO pipeline。每个里程碑先固定合同和验收标准，再编写实现，并以真实序列上的
 ATE 作为出口条件。
 
-## 当前状态（M3.3：VO 加固）
+## 当前状态（M4：最小 full-state VIO）
 
-M1（数据加载）、M2（双目 VO 最小闭环）、M3.1（回归 benchmark）和 M3.2（双目
-配对同步器）已完成。当前处于 M3.3 VO 加固阶段——已消除 `num_shared==0` 永久拒帧
-的吸收态，补齐 PnP 初值、外点剔除、多轮重优、skip-drop 和 zombie-age 生命周期
-管理。
+M1（数据加载）、M2（双目 VO 最小闭环）、M3.1（回归 benchmark）、M3.2（双目
+配对同步器）和 M3.3（VO 加固）已完成。当前产品是最小 full-state VIO：单一
+`VioEstimator::update()` 在同步图像时刻维护 pose `X(k)`、velocity `V(k)` 与
+IMU bias `B(k)`。双目尺度已知、body≡IMU、滑窗 10，视觉短时丢失最多 500 ms
+IMU coast。
 
-**最新片：Slice ⑤ 关键帧策略**。estimator 滑窗只包含关键帧（组合标准：平均视差
-> 30 px / track 存活率 < 60% / 时间 > 0.5s），非关键帧仅做 PnP 位姿估计。
-MH_01 ATE 从基线 0.099 m 降至 **0.054 m**（−46%），MH_05 从 0.472 m 降至
-**0.360 m**（−24%）。
+**全量锚点**：[`c999f58` / `default_0337287b`](docs/benchmark/m4/minimal-full-state-vio_c999f58_0337287b.md)。
+EuRoC 11/11 均值 ATE ≈ **0.579 m**，段内加权 RMS ≈ **0.134 m**（相对
+ORB-SLAM3 stereo 论文均值约 1.6×）。全局误差的主要来源是视觉中断后切段把
+世界系重置到新原点。此后已合入视觉 overlap 不足时仍把已验证观测写入当前段
+窗口的路径。
 
-当前默认 config hash：`773ea011`（42 键）。EuRoC 11 序列全量 benchmark
-checkpoint 已持久化到 `docs/benchmark/m3.3/`。
+**下一步**：继续世界系连续（视觉中断后保住全局轨迹）；M5 正式动态初始化
+排其后。
 
-**下一步**：M4 接入 IMU（静止初始化 + GTSAM preintegration + 状态 X→X/V/B）。
-
-详细进展见 [`docs/roadmap.md`](docs/roadmap.md)。
+详细进展见 [`docs/design/roadmap.md`](docs/design/roadmap.md)。
 
 ## 技术路线
 
 - 双目相机提供可观尺度，暂不支持单目
-- 后端从第一天起就是 GTSAM 因子图——VO 阶段建立的 stereo projection factor
-  与 landmark 生命周期在接入 IMU 时完全不动
+- 后端从第一天起就是 GTSAM 因子图；视觉侧的 stereo projection factor 与
+  landmark 生命周期保持不变，IMU 只新增 `V(k)`、`B(k)`、`ImuFactor` 与
+  bias random walk
 - 完整状态为 pose、velocity 和 IMU bias
 - 前端用 OpenCV、后端用 GTSAM；调库版本随后作为自研实现的对拍 oracle
 - 边缘化、smart factor、线程和回环在真实 ATE 基线稳定之后才引入
@@ -57,13 +58,13 @@ cmake --build build -j"$(nproc)"
 # 测试
 ctest --test-dir build
 
-# 双目 VO probe（MH_01，2–5 min）
+# 双目 VIO probe（MH_01 静止起步，2–5 min）
 build/phad_stereo_vo_probe /path/to/euroc/MH_01_easy --tum est.tum --diag-csv diag.csv
 
 # 评估 ATE
 build/phad_traj_eval --est est.tum --gt-euroc /path/to/euroc/MH_01_easy
 
-# 回归 benchmark（单序列）
+# 回归 benchmark（单序列；复现 M4 锚点时加 --estimator-enable-moving-bootstrap）
 build/phad_vo_bench /path/to/euroc/MH_01_easy --bench-root /tmp/bench --sequence-name MH_01_easy --force
 ```
 
@@ -73,16 +74,17 @@ build/phad_vo_bench /path/to/euroc/MH_01_easy --bench-root /tmp/bench --sequence
 
 | 文档 | 内容 |
 |---|---|
-| [`docs/roadmap.md`](docs/roadmap.md) | 里程碑、出口条件、全序列基准数字 |
-| [`docs/architecture.md`](docs/architecture.md) | 模块职责、数据流、目标架构 |
-| [`docs/conventions.md`](docs/conventions.md) | 坐标系、时间、单位合同 |
+| [`docs/design/roadmap.md`](docs/design/roadmap.md) | 里程碑、出口条件、全序列基准数字 |
+| [`docs/design/architecture.md`](docs/design/architecture.md) | 模块职责、数据流、目标架构 |
+| [`docs/specs/`](docs/specs/) | 已收口的架构 / 行为合同 |
+| [`docs/design/conventions.md`](docs/design/conventions.md) | 坐标系、时间、单位合同 |
 | [`CONTEXT.md`](CONTEXT.md) | 领域语言（传感器、标定、估计概念） |
 
 ### 设计与诊断
 
 | 目录 | 内容 |
 |---|---|
-| [`docs/research/`](docs/research/) | 设计文档、根因诊断、开源对照（~40 篇） |
+| [`docs/research/`](docs/research/) | 设计文档、根因诊断、开源对照 |
 | [`docs/plans/`](docs/plans/) | 实施计划（YAML frontmatter + 可执行步骤） |
 | [`docs/benchmark/`](docs/benchmark/) | 关键 checkpoint 的全量 EuRoC 快照与对比 |
 | [`docs/adr/`](docs/adr/) | 架构决策记录 |
@@ -102,10 +104,13 @@ build/phad_vo_bench /path/to/euroc/MH_01_easy --bench-root /tmp/bench --sequence
 
 ## 依赖
 
+- **C++20**
 - **OpenCV 4**（core、highgui、imgcodecs、imgproc、calib3d、video）
 - **Eigen 3.4**（须与构建 GTSAM 时使用的同一份，避免 ODR）
 - **yaml-cpp 0.8**
 - **GTSAM 4.3**（系统/前缀安装；`find_package(GTSAM 4.3 REQUIRED)`）
+- **nlohmann_json 3.11**
+- **OpenSSL**（Crypto）
 - **GoogleTest 1.14**（`PHAD_BUILD_TESTS=ON` 时）
 
 已在本地 `thirdparty/`（gitignore）准备但尚未接入：spdlog 1.17.0。
