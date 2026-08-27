@@ -10,8 +10,8 @@
 
 - issue [#26](https://github.com/Nothand0212/phad-vio/issues/26)
 - predecessor：[Slice ④e](../../benchmark/m3.3/slice-4e_0ced28b_3a21162e.md)
-- 设计：[Slice ④f skip-drop](../../research/m3.3-slice4f-skip-drop-design.md)
-- 诊断：[MH_05 failure diagnosis](../../research/m3.3-mh05-failure-diagnosis.md)
+- 设计：[Slice ④f skip-drop](../../research/2026-08-02-note-m3-3-slice4f-skip-drop-design.md)
+- 诊断：[MH_05 failure diagnosis](../../research/2026-08-02-note-m3-3-mh05-failure-diagnosis.md)
 
 ## 1. 身份与执行
 

@@ -19,7 +19,7 @@ optimizer、配置或 feedback。
 
 M4 的 `PHAD-M4-ONLINE-GYRO-BIAS-SYNTHETIC-V1` 另行冻结 default-off、无
 real caller 的 estimator-private online gyro-bias 资格机制。本 README 与
-[synthetic design](../../docs/research/m4-online-gyro-bias-synthetic-design.md)、
+[synthetic design](../../docs/research/2026-08-19-note-m4-online-gyro-bias-synthetic-design.md)、
 [ADR-0002](../../docs/adr/0002-stage-gated-gyro-only-bias-state.md)、
 [conventions](../../docs/design/conventions.md)、[roadmap](../../docs/design/roadmap.md) 和
 [implementation plan](../../docs/plans/2026-08-18_m4_online_gyro_bias_synthetic_1e3569b4.plan.md)
@@ -236,9 +236,9 @@ inlier mask；回退不修改 measurement。
 
 诊断：`UpdateDiagnostics.pnp_success` / `pnp_inliers`；session 汇总
 `pnp_successes` / `pnp_fallbacks`（仅正常路径；seed / re-anchor 不计
-fallback）。详见 `docs/research/m3.3-slice3-pnp-design.md`、
-`docs/research/m3.3-pnp-stereo-consistency-design.md` 与
-`docs/research/m3.3-pnp-stereo-arbitration-results.md`。
+fallback）。详见 `docs/research/2026-08-01-note-m3-3-slice3-pnp-design.md`、
+`docs/research/2026-08-04-note-m3-3-pnp-stereo-consistency-design.md` 与
+`docs/research/2026-08-04-note-m3-3-pnp-stereo-arbitration-results.md`。
 
 ## 外点剔除与多轮重优（M3.3 Slice ④ / ④b / ④e）
 
@@ -284,10 +284,10 @@ backproject。被删 id 的 `m_track_times` / `observationTimestamps()` **仍保
 session 累计成功 reopt **次数**为
 `FrameCounts.outlier_reopts`（Σ `outlier_reopt_rounds`，非帧数）→
 `summary.json` 的 `robustness.outlier_reopts`。详见
-`docs/research/m3.3-slice4-outlier-cull-design.md`、
-`docs/research/m3.3-slice4b-outlier-reopt-design.md`、
-`docs/research/m3.3-slice4c-cull-track-drop-design.md` 与
-`docs/research/m3.3-slice4e-multiround-reopt-design.md`。
+`docs/research/2026-08-01-note-m3-3-slice4-outlier-cull-design.md`、
+`docs/research/2026-08-01-note-m3-3-slice4b-outlier-reopt-design.md`、
+`docs/research/2026-08-02-note-m3-3-slice4c-cull-track-drop-design.md` 与
+`docs/research/2026-08-02-note-m3-3-slice4e-multiround-reopt-design.md`。
 
 ## 诊断 CSV 合同（probe）
 

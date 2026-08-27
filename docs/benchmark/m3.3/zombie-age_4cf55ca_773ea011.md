@@ -11,8 +11,8 @@
 
 - issue [#26](https://github.com/Nothand0212/phad-vio/issues/26)
 - predecessor：[Slice ④f](../../benchmark/m3.3/slice-4f_c446ac5_a5e90dc7.md)
-- 设计：[zombie-drop-age probe](../../research/m3.3-zombie-drop-age-probe-design.md)
-- 原始 baseline 记录：[m3.3 full-suite baseline 773ea011](../../research/m3.3-full-suite-baseline-773ea011.md)
+- 设计：[zombie-drop-age probe](../../research/2026-08-03-note-m3-3-zombie-drop-age-probe-design.md)
+- 原始 baseline 记录：[m3.3 full-suite baseline 773ea011](../../research/2026-08-03-note-m3-3-full-suite-baseline-773ea011.md)
 
 ## 1. 身份与执行
 

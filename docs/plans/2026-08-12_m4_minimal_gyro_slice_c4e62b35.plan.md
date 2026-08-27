@@ -44,7 +44,7 @@ isProject: false
 
 > 本文件只保留旧决策与实施痕迹，不能作为当前 source allowlist、验收门或
 > 后续实现授权。当前合同以
-> [M4 gyro measurement / factor 资格实验设计（修订版）](../research/m4-minimal-gyro-slice-design.md)
+> [M4 gyro measurement / factor 资格实验设计（修订版）](../research/2026-08-12-note-m4-minimal-gyro-slice-design.md)
 > 和独立的 [Q1 Observe 实施计划](2026-08-12_m4_gyro_q1_observe_7d3a91e6.plan.md)
 > 为准；旧实现的“已完成/已编码/已运行”陈述不自动转化为 Q1–Q5 资格证据。
 
@@ -54,7 +54,7 @@ isProject: false
 
 基线：`main@7026ebf`（M3 production VO + M4.1 `StereoImuPacket`）
 
-上位方案：[M4 最小 gyro-aided VO 重启方案](../research/m4-minimal-gyro-slice-proposal.md)
+上位方案：[M4 最小 gyro-aided VO 重启方案](../research/2026-08-12-note-m4-minimal-gyro-slice-proposal.md)
 
 跟踪 issue：[#36](https://github.com/Nothand0212/phad-vio/issues/36)
 
@@ -214,7 +214,7 @@ re-anchor/新 segment 不建立跨段 gyro factor；alignment 可保留先前“
 3. 核对已知 M3 记录：3681 poses、coverage `1.0`、completion `0.9997284085`、ATE
    `0.0809640579 m`、RPE `0.0177812186 m`。数值不一致则先解释 toolchain/config/input
    差异，本计划停止。
-4. 新建 `docs/research/m4-minimal-gyro-mh01-control.md`，记录实际命令、code identity、
+4. 新建 `docs/research/2026-08-12-note-m4-minimal-gyro-mh01-control.md`，记录实际命令、code identity、
    输入路径、参数快照、产物路径与比较结果。已知数值只作核对，文档必须以本次真实产物为准。
 
 这份“实施前控制组”是后续 byte comparison 的权威来源；不依赖 `/tmp` 产物，也不把
@@ -468,7 +468,7 @@ message 文本用稳定前缀便于测试，例如 `gyro segment:`、`gyro align
 | tests | `tests/estimator/*gyro*`、现有 estimator regression tests、`tests/apps/offline_vo_session_test.cpp`、`phad_vo_bench_cli_test.cpp` | 按上表 RED/GREEN |
 | evaluation | `scripts/vio_vo_common_support.py` 及测试/README（仅在 main 缺少等价工具时） | exact-common 指标与诊断摘要 |
 | contracts | `phad/estimator/README.md`、`phad/estimator/AGENTS.md`、必要的 `apps/AGENTS.md` / `scripts/README.md` | 固化 body/noise/bias/sidecar 边界 |
-| evidence | `docs/research/m4-minimal-gyro-mh01-control.md`、最终结果文档、必要的 roadmap 状态 | 保存可复现参数与停止结论 |
+| evidence | `docs/research/2026-08-12-note-m4-minimal-gyro-mh01-control.md`、最终结果文档、必要的 roadmap 状态 | 保存可复现参数与停止结论 |
 
 不预计修改 `phad/frontend`、`phad/sync` 或 `phad/sensor` 的实现；如果实施中发现必须改变 M4.1
 packet 合同，视为实质设计冲突，停止并重新评审，而不是顺手扩范围。

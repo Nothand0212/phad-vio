@@ -193,7 +193,7 @@ namespace phad::apps
     // dynamic Θ_max=5°; both reverted). Rotation-compensated parallax ≈ 0
     // under pure rotation, so this rule only fires in translation segments;
     // fast rotation is governed by Rule 1b/3 (track decay → forced
-    // keyframe). See docs/research/m3.3-keyframe-design.md §D1.
+    // keyframe). See docs/research/2026-08-05-note-m3-3-keyframe-design.md §D1.
     constexpr double kKeyframeParallaxPx = 30.0;
     // Minimum track count to run PnP (matches estimator.min_pnp_inliers).
     constexpr std::size_t kKeyframeMinPnpTracks = 10U;
@@ -622,7 +622,7 @@ namespace phad::apps
       // Probe --defer-drop-topk: on skip, optionally queue sorted top-K ids
       // for flush before next process (K=0 keeps ④f; K=full ≈④g/④e).
       // Probe --zombie-drop-age: on skip, track consecutive presence; drop
-      // when age >= N (see m3.3-zombie-drop-age-probe-design.md).
+      // when age >= N (see 2026-08-03-note-m3-3-zombie-drop-age-probe-design.md).
       // Does not enter warnings.
       bool drops_skipped_this_frame = false;
       if ( options.drop_culled_tracks &&

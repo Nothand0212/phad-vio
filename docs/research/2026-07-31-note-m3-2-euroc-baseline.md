@@ -1,0 +1,144 @@
+# M3.2 EuRoC 全序列基线（对照用）
+
+日期：2026-07-31  
+状态：M3.2 出口快照；供 M3.3 及以后对比，**不是**算法改进清单  
+相关：
+
+- roadmap [M3.2](../design/roadmap.md)
+- 设计 [`2026-07-31-note-stereo-pair-synchronizer-design.md`](2026-07-31-note-stereo-pair-synchronizer-design.md)
+- 计划 [`2026-07-31_m3.2_stereo_pair_synchronizer_5b7d1c93.plan.md`](../plans/2026-07-31_m3.2_stereo_pair_synchronizer_5b7d1c93.plan.md)
+- issue [#22](https://github.com/Nothand0212/phad-vio/issues/22)
+
+## 1. 快照身份
+
+| 项 | 值 |
+|---|---|
+| git commit | `4780660`（clean；`docs(m3.2): update io/sync contracts…`） |
+| config | `default` / hash `0885385a` |
+| bench root | `/home/lin/Projects/data/phad-bench` |
+| 产物路径模板 | `<bench_root>/<sequence>/4780660/default_0885385a/` |
+| 数据集 | EuRoC ASL native：`/home/lin/Projects/data/thidparty/euroc/native/<sequence>` |
+| 工具 | `phad_vo_bench` + `phad::eval`（ATE / RPE Δt=1 s，SE3 `-a` 对齐） |
+| 参数权威源 | 各序列产物 `meta.json` 的 `config` / `config_canonical_text`（与 `config_hash` 同源） |
+
+刷表：
+
+```bash
+.venv/bin/python scripts/bench_table.py /home/lin/Projects/data/phad-bench
+```
+
+### 1.1 运行时参数快照
+
+来源：`MH_01_easy/4780660/default_0885385a/meta.json`（全序列共用同一
+`config_label` / `config_hash`；CLI 未覆盖 tracker/estimator，均为代码默认）。
+
+| 类别 | 项 |
+|---|---|
+| CLI / session | `--config-label default`；无 `--max-frames`；`session.dataset_format=euroc`；GT 同源 EuRoC ASL |
+| eval | `max_dt_ms=2.5`；`min_match_rate=0.5`；`rpe_delta_s=1.0`；ATE/RPE 固定尺度 SE3 对齐 |
+| sync | 未进 `flattenConfig`；`StereoPairStream` / synchronizer 用当时代码默认（exact 配对语义见 M3.2 设计） |
+
+`config_canonical_text`（字典序；`config_hash = 0885385a`）：
+
+```text
+estimator.huber_k_px=3
+estimator.min_landmark_observations=2
+estimator.min_shared_landmarks=10
+estimator.prior_rotation_sigma_rad=0.0001
+estimator.prior_translation_sigma_m=0.0001
+estimator.stereo_sigma_px=1
+estimator.use_constant_velocity_init=true
+estimator.window_size=10
+eval.max_dt_ms=2.5
+eval.min_match_rate=0.5
+eval.rpe_delta_s=1
+session.dataset_format=euroc
+tracker.forward_backward_px=0.5
+tracker.lk_pyramid_levels=3
+tracker.lk_window_px=21
+tracker.mask_radius_px=20
+tracker.max_depth_m=40
+tracker.max_epipolar_px=1.5
+tracker.max_tracks=200
+tracker.min_depth_m=0.29999999999999999
+tracker.min_disparity_px=0.5
+tracker.min_distance_px=20
+tracker.quality_level=0.01
+```
+
+分组速览（与上表等价，便于扫读）：
+
+| 组 | 参数 |
+|---|---|
+| tracker | `max_tracks=200`，`quality_level=0.01`，`min_distance_px=20`，`mask_radius_px=20`，`lk_window_px=21`，`lk_pyramid_levels=3`，`forward_backward_px=0.5`，`min_disparity_px=0.5`，`min_depth_m=0.3`，`max_depth_m=40`，`max_epipolar_px=1.5`（右目仍为 2D LK） |
+| estimator | `window_size=10`，`stereo_sigma_px=1`，`huber_k_px=3`，`min_landmark_observations=2`，`min_shared_landmarks=10`，`prior_*` 各 `1e-4`，`use_constant_velocity_init=true`（尚无 re-anchor 选项） |
+| eval / session | 见上 |
+
+复现：同 commit 上对每条序列跑 `phad_vo_bench <seq> --bench-root …`（默认 config），
+产物目录段应为 `4780660/default_0885385a`。
+
+## 2. 一句话结论
+
+**数据入口 11/11 打通**（含原拒开三条）；**VO 算法未改**（MH_01 相对 M3.1
+基线逐字节相同）。表中质量分层留给 M3.3，本文件只钉「改之前」数字。
+
+分层（按 completion / 可用性，非难度标签）：
+
+| 档 | 序列 | 特征 |
+|---|---|---|
+| 健康闭环 | MH_01、MH_03、MH_05、MH_04、V1_02 | completion≈1，ATE 约 0.15–0.29 m |
+| 跑完但漂 | V1_01、V2_01 | completion≈1 / 0.95，ATE 约 0.68–0.84 m |
+| 早垮 | MH_02、V1_03、V2_02 | completion≈0.11–0.13；低 coverage 时 ATE 不可单独解读 |
+| 几乎废 | V2_03 | completion≈0.03；sync 丢 415 右帧属数据事实 |
+
+## 3. 全序列表（`4780660` / `default_0885385a`）
+
+列说明：`image_frames` = 配对进 pipeline 的帧数（= `sync.emitted_stereo`）；
+`ok` = 估计器接受帧；`emit` / `dL` / `dR` = `summary.sync`。
+
+| sequence | status | ate_trans_rmse | rpe_trans_rmse | completion | coverage | image_frames | ok | emit | dL | dR |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| MH_01_easy | completed | 0.150155 | 0.021579 | 1.000 | 1.000 | 3682 | 3682 | 3682 | 0 | 0 |
+| MH_02_easy | completed | 0.653666 | 0.515221 | 0.131 | 0.131 | 3040 | 398 | 3040 | 0 | 0 |
+| MH_03_medium | completed | 0.175108 | 0.035380 | 1.000 | 1.000 | 2700 | 2700 | 2700 | 0 | 0 |
+| MH_04_difficult | completed_with_warnings | 0.290350 | 0.058717 | 1.000 | 1.000 | 2032 | 2032 | 2032 | 1 | 0 |
+| MH_05_difficult | completed | 0.208074 | 0.033265 | 1.000 | 1.000 | 2273 | 2273 | 2273 | 0 | 0 |
+| V1_01_easy | completed | 0.679744 | 0.077449 | 1.000 | 1.000 | 2912 | 2912 | 2912 | 0 | 0 |
+| V1_02_medium | completed_with_warnings | 0.195962 | 0.105874 | 1.000 | 1.000 | 1710 | 1710 | 1710 | 0 | 1 |
+| V1_03_difficult | completed | 0.035088 | 0.038251 | 0.113 | 0.113 | 2149 | 243 | 2149 | 0 | 0 |
+| V2_01_easy | completed | 0.841618 | 0.099402 | 0.952 | 0.952 | 2280 | 2171 | 2280 | 0 | 0 |
+| V2_02_medium | completed | 0.602361 | 0.714253 | 0.113 | 0.113 | 2348 | 266 | 2348 | 0 | 0 |
+| V2_03_difficult | completed_with_failures | 0.362521 | 0.364204 | 0.032 | 0.046 | 1921 | 62 | 1921 | 1 | 415 |
+
+## 4. 锚点与不等长精确数
+
+### MH_01 字节回归（证明未动算法）
+
+| 项 | 路径 / 值 |
+|---|---|
+| M3.1 参考 | `…/MH_01_easy/2b28616/default_0885385a/{est.tum,diag.csv}` |
+| M3.2 产物 | `…/MH_01_easy/4780660/default_0885385a/{est.tum,diag.csv}` |
+| `diff` | 空（逐字节相同） |
+| ATE translation RMSE | 0.15015464354282854 ≈ **0.150155 m** |
+
+### 原拒开三条（`summary.sync`）
+
+| sequence | cam0 / cam1（pushed） | emit | drop_left | drop_right |
+|---|---:|---:|---:|---:|
+| MH_04_difficult | 2033 / 2032 | 2032 | 1 | 0 |
+| V1_02_medium | 1710 / 1711 | 1710 | 0 | 1 |
+| V2_03_difficult | 1922 / 2336 | 1921 | 1 | 415 |
+
+M3.1 同 config 下这三条 `status=failed`（`open` 阶段）；本快照均已产出完整
+`summary.json`。
+
+## 5. 给 M3.3 的用法
+
+1. 改算法后用同一 `config`（或记录新 `config_hash`）跑 `phad_vo_bench`。
+2. 用 `scripts/bench_table.py` 把新 commit 与本表 `4780660` 列并排。
+3. 优先盯：MH_02 / V1_01 / V2_01 / V2_02 / V2_03 的 **completion** 与 **ATE**；
+   MH_01 作不回归锚（至少不劣于 0.150155 m，理想保持字节级或统计等价）。
+4. 低 coverage 时不要单独用 ATE 报喜（见 V1_03）。
+5. sync 的 emit/drop 若相对本表变化，先查数据入口/配对，再谈算法。
+
+本文件不承诺 M3.3 改哪些模块；只固定对照点。

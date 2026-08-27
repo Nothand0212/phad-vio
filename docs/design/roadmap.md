@@ -62,7 +62,7 @@
 - 常驻内存不随已遍历图像总数线性增长。
 
 详细设计与证据见
-[EuRoC 数据集加载器设计调研](research/euroc-dataset-loader-design.md)。
+[EuRoC 数据集加载器设计调研](research/2026-07-28-note-euroc-dataset-loader-design.md)。
 
 ## M2：双目 VO 最小闭环
 
@@ -157,8 +157,8 @@
 - 轨迹形状需在 `phad_euroc_runner` 上人工确认（agent 不擅自弹窗）。
 
 该组数字为后续里程碑的对比基线。设计见
-[M2.3 VO 后端设计](research/m2.3-vo-backend-design.md)，开源对照见
-[M2.3 VO backend open source references](research/m2.3-vo-backend-open-source-refs.md)。
+[M2.3 VO 后端设计](research/2026-07-31-note-m2-3-vo-backend-design.md)，开源对照见
+[M2.3 VO backend open source references](research/2026-07-31-opensource-m2-3-vo-backend.md)。
 实施计划见
 [M2.3 VO 后端](plans/2026-07-31_m2.3_vo_backend_dcdbfc71.plan.md)。
 
@@ -196,7 +196,7 @@ M3.2 阻塞 M3.3。
 
 v1 **只钉 MH_01**、只支持 EuRoC；多序列矩阵拆给 M3.2（先让 11 条都能打开）
 与 M3.3（序列 × 版本质量对比）。设计见
-[M3.1 VO 回归 Benchmark 设计](research/m3.1-vo-regression-benchmark-design.md)，
+[M3.1 VO 回归 Benchmark 设计](research/2026-07-31-note-m3-1-vo-regression-benchmark-design.md)，
 实施计划见
 [M3.1 VO 回归 Benchmark](plans/2026-07-31_m3.1_vo_regression_benchmark_7c4e91a2.plan.md)。
 Issue：[#21](https://github.com/Nothand0212/phad-vio/issues/21)。
@@ -251,14 +251,14 @@ adapter 移到独立的同步器——那里同时是 M4 的 IMU 包络与未来
   序列 × 版本表）；表中 VO 质量差（如 `V2_03` completion ≈ 0.03、
   `MH_02` / `V1_03` / `V2_02` 低 completion）归 M3.3。
 - 全序列数字快照见
-  [M3.2 EuRoC 全序列基线](research/m3.2-euroc-baseline.md)（钉 `4780660`）。
+  [M3.2 EuRoC 全序列基线](research/2026-07-31-note-m3-2-euroc-baseline.md)（钉 `4780660`）。
 
 设计见
-[Stereo Pair Synchronizer 设计](research/stereo-pair-synchronizer-design.md)，
+[Stereo Pair Synchronizer 设计](research/2026-07-31-note-stereo-pair-synchronizer-design.md)，
 根因诊断见
-[EuRoC 双目 manifest 不等长 handoff](research/euroc-stereo-manifest-asymmetry-handoff.md)，
+[EuRoC 双目 manifest 不等长 handoff](research/2026-07-31-note-euroc-stereo-manifest-asymmetry-handoff.md)，
 开源对照见
-[EuRoC stereo manifest asymmetry open source refs](research/euroc-stereo-manifest-asymmetry-open-source-refs.md)。
+[EuRoC stereo manifest asymmetry open source refs](research/2026-07-31-opensource-euroc-stereo-manifest-asymmetry.md)。
 实施计划见
 [M3.2 双目配对同步器](plans/2026-07-31_m3.2_stereo_pair_synchronizer_5b7d1c93.plan.md)。
 Issue：[#22](https://github.com/Nothand0212/phad-vio/issues/22)。
@@ -292,33 +292,33 @@ record-only baseline 已建立 → **先对齐再开** ⑤）：
 - **④b 剔点后二次 LM（不够 / 停止）**：`outliers_culled >= 4` 时 rebuild + LM₂
   已编码；MH_05 诊断门仍 **不够**（ATE **3.45** m，未 &lt;1 m；reopt 有效：
   大剔后 RMS 0.18/0.26 px）→ **不**跑其余 10 条；需多轮或其它手段；
-  设计见 [Slice ④b](research/m3.3-slice4b-outlier-reopt-design.md)；
+  设计见 [Slice ④b](research/2026-08-01-note-m3-3-slice4b-outlier-reopt-design.md)；
 - **④c cull-track-drop（部分完成）**：`block_culled_rebirth` 默认 `true` +
   session `dropTracks` 已编码；MH_01 健康恢复但 ATE 曾 **0.120** &gt; 锚 →
   硬门不够；由 ④d 收口。设计见
-  [Slice ④c](research/m3.3-slice4c-cull-track-drop-design.md)；
+  [Slice ④c](research/2026-08-02-note-m3-3-slice4c-cull-track-drop-design.md)；
 - **④d mean-cull 阈值（已完成）**：扫参选定默认 `outlier_avg_reproj_px=4.0`
   （`79505f8` / `default_85c97158`）；MH_01 ATE **0.098784** ≤ 0.099263；
   MH_05 与 ④c 持平（**4.565**）→ 全序列只记录；设计见
-  [Slice ④d](research/m3.3-slice4d-cull-threshold-design.md)；
+  [Slice ④d](research/2026-08-02-note-m3-3-slice4d-cull-threshold-design.md)；
 - **④e 多轮 cull↔LM（部分完成）**：`max_outlier_reopts=3` 已编码
   （`0ced28b` / `default_3a21162e`）；MH_01 不回归（ATE **0.0987839**）；
   MH_05 与 ④d **持平**（**4.565**，无软改善）→ **停全序列**；多轮预算未动用；
-  设计见 [Slice ④e](research/m3.3-slice4e-multiround-reopt-design.md)；
+  设计见 [Slice ④e](research/2026-08-02-note-m3-3-slice4e-multiround-reopt-design.md)；
 - **④f 大剔跳过 dropTracks（已完成）**：`session.skip_drop_min_culled=4` 已编码
   （`c446ac5` / `default_a5e90dc7`）；MH_01 硬门 **PASS**（ATE **0.0987839**；
   `drops_skipped=0`）；MH_05 软门 **PASS**（ATE **3.057** vs ④e **4.565**；
   `drops_skipped=1`）；纯 ④f 当时未扩全序列，2026-08-04 已补跑 clean 11/11
   （checkpoint 见 [benchmark/m3.3/slice-4f](benchmark/m3.3/slice-4f_c446ac5_a5e90dc7.md)）；
   设计见
-  [Slice ④f](research/m3.3-slice4f-skip-drop-design.md)；
+  [Slice ④f](research/2026-08-02-note-m3-3-slice4f-skip-drop-design.md)；
 - **④g skip-drop 后延后 drop zombie（证伪 / 编排已回退）**：曾编码并门控失败
   （ATE **4.565**=④e；zombie 归零）；事后诊断 ④g≡④e bit-identical（2026-08-04
   补跑 clean 11/11，全序列 est.tum 均 ≡ ④e；checkpoint 见
   [benchmark/m3.3/slice-4g](benchmark/m3.3/slice-4g_3ee5dea_a5e90dc7.md)）→
   删除 `pending_drop`，默认恢复 ④f；`deferred_*` 合同保留；见
-  [Slice ④g](research/m3.3-slice4g-zombie-drop-design.md)、
-  [postmortem](research/m3.3-slice4g-postmortem.md)；
+  [Slice ④g](research/2026-08-02-note-m3-3-slice4g-zombie-drop-design.md)、
+  [postmortem](research/2026-08-02-note-m3-3-slice4g-postmortem.md)；
 - **④g 后候选 B：多帧 zombie 龄 drop（已产品化 / 当前默认）**：
   `session.zombie_drop_age=5`，相对 ④f 新增该唯一 config 键；默认 hash
   `773ea011`。MH_01 ATE **0.0987839** 硬门 PASS；MH_05 ATE
@@ -326,7 +326,7 @@ record-only baseline 已建立 → **先对齐再开** ⑤）：
   11/11 正式 baseline（checkpoint 见
   [benchmark/m3.3/zombie-age](benchmark/m3.3/zombie-age_4cf55ca_773ea011.md)）；
   全序列只记录、不作硬门，见
-  [全序列 baseline](research/m3.3-full-suite-baseline-773ea011.md)；
+  [全序列 baseline](research/2026-08-03-note-m3-3-full-suite-baseline-773ea011.md)；
 - **⑤** 关键帧策略（视差、跟踪数、时间间隔）— 已实现（`7f08c01` 起）；
   MH_01/MH_05 门控通过但**全序列 5 改善 / 6 恶化**（V2_02 +5400% 灾难）；
   根因与非 KF 位姿质量、CV 链污染、关键帧选择对旋转不敏感相关；
@@ -334,7 +334,7 @@ record-only baseline 已建立 → **先对齐再开** ⑤）：
   与 M4 IMU 预积分边界耦合。→ **⑤b 已实施**（pose-only 精修 + 旋转补偿
   视差 + 门控，V2_02 灾难消除）→ **⑤c 已实施**（非关键帧进窗口 BA +
   Basalt 7KF+3temporal，MH_05 改善至 0.306）→ **⑤d 动态阈值已尝试并回退**（量纲不匹配 + MH_03 临界带相位敏感——KF 位置
-  对 T 微变交错，滞回无效；见 [调研](research/m3.3-slice5-dynamic-threshold-refs.md)）→
+  对 T 微变交错，滞回无效；见 [调研](research/2026-08-06-note-m3-3-slice5-dynamic-threshold-refs.md)）→
   **回退 ⑤c(30px) 收尾**（`9015ae7`：门控全过，MH_03/MH_05 最优；V1_01 0.514
   记账为已知债，留给 M4 IMU）。→ **⑥ 已实施**（立体右目 SAD 瓶颈定位 + 硬门
   baseline，checkpoint `167478e`，[slice-6](benchmark/m3.3/slice-6_167478e_773ea011.md)）
@@ -342,7 +342,7 @@ record-only baseline 已建立 → **先对齐再开** ⑤）：
   后**最终采用 E13 composed g1**：悬挂距离门 1m + 投影一致性刷新 6px。
   vs ⑥ checkpoint：V2_01 -15.3%、V2_02 -39.3% 两增益，MH_01 -1.1% 门限内，
   MH_03 +35.7%、V2_03 +25.4% 两回归（全变体最小）；机制与完整数字见
-  [Slice ⑦ 设计 §8](research/m3.3-slice7-multiframe-triangulation-design.md)，
+  [Slice ⑦ 设计 §8](research/2026-08-06-note-m3-3-slice7-multiframe-triangulation-design.md)，
   checkpoint 见 [slice-7](benchmark/m3.3/slice-7_e77ee5d_402d1925.md)）。
 
 Slice ① 出口（commit `0b0cd34` / `default_030a0197`，对照 `4780660`）：
@@ -358,7 +358,7 @@ Slice ① 出口（commit `0b0cd34` / `default_030a0197`，对照 `4780660`）�
   `enable_reanchor` 不够，因为首段初始化也共用该门限）；
 - ATE **只记录不门控**；跨 coverage 不可直接比较（如 V1_03 / V2_02）；
 - 全序列数字快照见
-  [M3.3 Slice ① 基线](research/m3.3-slice1-baseline.md)。
+  [M3.3 Slice ① 基线](research/2026-08-01-note-m3-3-slice1-baseline.md)。
 
 Slice ② 出口（commit `764d3b2` / `default_a962bc8b`，对照 `0b0cd34`；
 **硬门控仅 MH_01**，其余只记录）：
@@ -371,7 +371,7 @@ Slice ② 出口（commit `764d3b2` / `default_a962bc8b`，对照 `0b0cd34`；
 - 已知债（只记录）：MH_03/04/05 ATE 上升（MH_04≈3.36）；V1_03 re 8→14；
   V2_01 re 0→1；留给后续片；
 - 全序列数字见
-  [M3.3 Slice ② 基线](research/m3.3-slice2-baseline.md)。
+  [M3.3 Slice ② 基线](research/2026-08-01-note-m3-3-slice2-baseline.md)。
 
 Slice ③ 出口（commit `b712c91` / `default_8a9236e0`，对照 `764d3b2`；
 **硬门控 MH_01 + 全序列 reanchors 不增**，其余只记录）：
@@ -384,7 +384,7 @@ Slice ③ 出口（commit `b712c91` / `default_8a9236e0`，对照 `764d3b2`；
 - 已知债（只记录）：MH_02/03 ATE 上升；**MH_05 发散**（ATE≈3.3e4，
   `cheirality=2055`）；V2_01 ATE 略升；留给 Slice ④+；
 - 全序列数字见
-  [M3.3 Slice ③ 基线](research/m3.3-slice3-baseline.md)。
+  [M3.3 Slice ③ 基线](research/2026-08-01-note-m3-3-slice3-baseline.md)。
 
 Slice ④ MH_05 诊断门（commit `b6fbcb6` / `default_bc8b10e2`，对照 `b712c91`）：
 
@@ -393,7 +393,7 @@ Slice ④ MH_05 诊断门（commit `b6fbcb6` / `default_bc8b10e2`，对照 `b712
 - 判定 **不够**：ATE 未回到 &lt;1 m；大剔后 `reproj_rms_after_cull_px` 仍可
   60–337 px，随后长 failed 簇（completion 0.884）——「只删不重优」不足；
 - **停止**其余 10 条；基线见
-  [M3.3 Slice ④ 基线](research/m3.3-slice4-baseline.md)。
+  [M3.3 Slice ④ 基线](research/2026-08-01-note-m3-3-slice4-baseline.md)。
 
 Slice ④b MH_05 诊断门（commit `3855395` / `default_65273570`，对照 `b6fbcb6`）：
 
@@ -401,7 +401,7 @@ Slice ④b MH_05 诊断门（commit `3855395` / `default_65273570`，对照 `b6f
   `outlier_reopts=2`；大剔后 LM₂ `after_cull` **0.18 / 0.26** px（对照 60/154/337）；
   failed 257→**0**，completion 0.884→**0.998**，`reanchors=0`；
 - reopt **有效**但 ATE 硬门槛未过 → **停止**其余 10 条；需多轮或其它手段；
-- 数字见 [M3.3 Slice ④ / ④b 基线](research/m3.3-slice4-baseline.md) §6。
+- 数字见 [M3.3 Slice ④ / ④b 基线](research/2026-08-01-note-m3-3-slice4-baseline.md) §6。
 
 Slice ④c 出口（编码至 `de32bd7` / `default_9da4ccd2`；docs `d5118e0`/`625f688`；
 **部分完成** → 由 ④d 收口 MH_01）：
@@ -410,9 +410,9 @@ Slice ④c 出口（编码至 `de32bd7` / `default_9da4ccd2`；docs `d5118e0`/`6
   **0.099263** → 硬门 **不够**（见基线 §7）；
 - MH_05：ATE **4.565** vs ④b **3.449** → 软判定恶化 → 当时 **停全序列**；
 - 设计 / 计划 / 数字见
-  [Slice ④c 设计](research/m3.3-slice4c-cull-track-drop-design.md)、
+  [Slice ④c 设计](research/2026-08-02-note-m3-3-slice4c-cull-track-drop-design.md)、
   [Slice ④c 计划](plans/2026-08-02_m3.3_slice4c_cull_track_drop_5a3a4e09.plan.md)、
-  [基线](research/m3.3-slice4-baseline.md) §7–§8。
+  [基线](research/2026-08-01-note-m3-3-slice4-baseline.md) §7–§8。
 
 Slice ④d 出口（commit `79505f8` / `default_85c97158`；扫参 `9feb6d4`；
 **MH_01 硬门通过**）：
@@ -422,9 +422,9 @@ Slice ④d 出口（commit `79505f8` / `default_85c97158`；扫参 `9feb6d4`；
   （与 ④c 持平）→ 全序列只记录；
 - 已知债：MH_02 / V1_02 / V1_03 发散；多序列 reanchors 上升；
 - 设计 / 计划 / 数字见
-  [Slice ④d 设计](research/m3.3-slice4d-cull-threshold-design.md)、
+  [Slice ④d 设计](research/2026-08-02-note-m3-3-slice4d-cull-threshold-design.md)、
   [Slice ④d 计划](plans/2026-08-02_m3.3_slice4d_cull_threshold_ecdd49d4.plan.md)、
-  [基线](research/m3.3-slice4-baseline.md) §9。
+  [基线](research/2026-08-01-note-m3-3-slice4-baseline.md) §9。
 
 Slice ④e 出口（commit `0ced28b` / `default_3a21162e`；
 **部分完成** — MH_01 不回归；MH_05 无效/持平 → 停全序列）：
@@ -437,9 +437,9 @@ Slice ④e 出口（commit `0ced28b` / `default_3a21162e`；
 - **未跑**其余 EuRoC（2026-08-04 已补跑 clean 11/11；checkpoint 见
   [benchmark/m3.3/slice-4e](benchmark/m3.3/slice-4e_0ced28b_3a21162e.md)）；
 - 设计 / 计划 / 数字见
-  [Slice ④e 设计](research/m3.3-slice4e-multiround-reopt-design.md)、
+  [Slice ④e 设计](research/2026-08-02-note-m3-3-slice4e-multiround-reopt-design.md)、
   [Slice ④e 计划](plans/2026-08-02_m3.3_slice4e_multiround_reopt_e0517b9a.plan.md)、
-  [基线](research/m3.3-slice4-baseline.md) §10。
+  [基线](research/2026-08-01-note-m3-3-slice4-baseline.md) §10。
 
 Slice ④f 出口（commit `c446ac5` / `default_a5e90dc7`；
 **已完成** — MH_01 硬门 + MH_05 软门通过；本配置当时未跑全序列，后续当前
@@ -454,10 +454,10 @@ Slice ④f 出口（commit `c446ac5` / `default_a5e90dc7`；
 - 纯 ④f 当时**未跑**其余 EuRoC；2026-08-04 已补跑 clean 11/11（checkpoint 见
   [benchmark/m3.3/slice-4f](benchmark/m3.3/slice-4f_c446ac5_a5e90dc7.md)）；
   当前默认全序列数字见
-  [`default_773ea011` baseline](research/m3.3-full-suite-baseline-773ea011.md)；
+  [`default_773ea011` baseline](research/2026-08-03-note-m3-3-full-suite-baseline-773ea011.md)；
 - 设计 / 数字见
-  [Slice ④f 设计](research/m3.3-slice4f-skip-drop-design.md)、
-  [基线](research/m3.3-slice4-baseline.md) §11。
+  [Slice ④f 设计](research/2026-08-02-note-m3-3-slice4f-skip-drop-design.md)、
+  [基线](research/2026-08-01-note-m3-3-slice4-baseline.md) §11。
 
 Slice ④g 出口（commit `3ee5dea` / `default_a5e90dc7`；
 **门控不够** — 后经 postmortem 回退编排，默认再回 ④f）：
@@ -466,9 +466,9 @@ Slice ④g 出口（commit `3ee5dea` / `default_a5e90dc7`；
 - 事后：④g `diag`/`est` ≡ ④e bit-identical → **删除 pending_drop**；
   `deferred_*` 合同保留（恒 0）；
 - 设计 / 数字 / 诊断见
-  [Slice ④g 设计](research/m3.3-slice4g-zombie-drop-design.md)、
-  [基线](research/m3.3-slice4-baseline.md) §12、
-  [postmortem](research/m3.3-slice4g-postmortem.md)。
+  [Slice ④g 设计](research/2026-08-02-note-m3-3-slice4g-zombie-drop-design.md)、
+  [基线](research/2026-08-01-note-m3-3-slice4-baseline.md) §12、
+  [postmortem](research/2026-08-02-note-m3-3-slice4g-postmortem.md)。
 
 当前默认全序列出口（commit `4cf55ca` / `default_773ea011`；
 **正式 baseline 已建立**，全序列 record-only）：
@@ -481,15 +481,15 @@ Slice ④g 出口（commit `3ee5dea` / `default_a5e90dc7`；
   MH_02 ATE≈`5.30e5` / completion≈0.522，以及 V1_02 / V1_03 / V2_01 /
   V2_02 / V2_03 的 4.38–9.79 m ATE 风险，后续须以全表而非单序列优化；
 - 完整 config snapshot、质量表与 robustness 计数见
-  [M3.3 EuRoC 全序列正式 baseline](research/m3.3-full-suite-baseline-773ea011.md)。
+  [M3.3 EuRoC 全序列正式 baseline](research/2026-08-03-note-m3-3-full-suite-baseline-773ea011.md)。
 - **MH_02 首次发散诊断与 PnP stereo 一致性仲裁已完成**：根因是“左目 inlier
   数即采用 PnP proposal → LM₁ 中间位姿授权不可逆 cheirality 删除 → 后续零度
   pose”。仲裁在同一 PnP inlier 集上比较 proposal/guess 的完整 stereo RMS，
   通过后才授权 pose 与 mask（clean 11/11 见
   [benchmark/m3.3/pnp-stereo](benchmark/m3.3/pnp-stereo_afe3829_773ea011.md)）；见
-  [诊断](research/m3.3-mh02-divergence-diagnosis.md)、
-  [设计](research/m3.3-pnp-stereo-consistency-design.md)与
-  [dirty 验证结果](research/m3.3-pnp-stereo-arbitration-results.md)。
+  [诊断](research/2026-08-04-note-m3-3-mh02-divergence-diagnosis.md)、
+  [设计](research/2026-08-04-note-m3-3-pnp-stereo-consistency-design.md)与
+  [dirty 验证结果](research/2026-08-04-note-m3-3-pnp-stereo-arbitration-results.md)。
 
 PnP stereo 一致性仲裁出口（实现已提交；提交前验证产物为
 `4e42517_dirty/default_773ea011`，**非正式 baseline**；对照
@@ -506,7 +506,7 @@ checkpoint 见
   均改善，但 MH_03 ATE/RPE **1.120766/0.196499→1.336250/0.278380 m**，为
   后续选片前必须保留的回归证据；
 - 配置无增量，继续为 42 键 `default_773ea011`；完整表、snapshot 与短诊断见
-  [验证结果](research/m3.3-pnp-stereo-arbitration-results.md)。
+  [验证结果](research/2026-08-04-note-m3-3-pnp-stereo-arbitration-results.md)。
 
 后续切片出口：
 
@@ -515,23 +515,23 @@ checkpoint 见
 - MH_05 / 发散债：④f skip-drop 保留；④g / id 序 top-K / 完整集懒腾槽均证伪；
   **候选 B 已产品化**：`session.zombie_drop_age=5`（MH_05 ATE≈**2.456**；
   MH_01 硬门 PASS；全序列 11/11 baseline 已建立；见
-  [zombie-drop-age](research/m3.3-zombie-drop-age-probe-design.md)、
-  [全序列 baseline](research/m3.3-full-suite-baseline-773ea011.md)）；勿默认再
+  [zombie-drop-age](research/2026-08-03-note-m3-3-zombie-drop-age-probe-design.md)、
+  [全序列 baseline](research/2026-08-03-note-m3-3-full-suite-baseline-773ea011.md)）；勿默认再
   整批 drop / 跳 ⑤ / 关整个 skip / 关整个 block / 单独去 Huber / 观测级；⑤ 与
   M4 耦合，**先对齐再开**。MH_02 已按归因完成 PnP stereo 一致性仲裁；
   **⑤ 关键帧策略设计已对齐**（组合标准：视差>30px / track率<60% / 时间>0.5s；非关键帧
   track-only；关键帧=IMU预积分边界；window_size=10 只含关键帧；见
-  [设计](research/m3.3-keyframe-design.md)、
-  [开源对照](research/m3.3-keyframe-open-source-refs.md)、
+  [设计](research/2026-08-05-note-m3-3-keyframe-design.md)、
+  [开源对照](research/2026-08-05-opensource-m3-3-keyframe.md)、
   [计划](plans/2026-08-05_m3.3_slice5_keyframe_790dd106.plan.md)）；
   **Slice ⑤ 实施后全序列恶化已诊断**（5 改善 / 6 恶化，V2_02 +5400% 灾难；
   根因：非 KF PnP 位姿质量差 + CV 链污染 + 关键帧选择对旋转不敏感；见
-  [诊断](research/m3.3-slice5-full-suite-results.md)、
-  [调研](research/m3.3-slice5-keyframe-research-refs.md)）；
+  [诊断](research/2026-08-05-note-m3-3-slice5-full-suite-results.md)、
+  [调研](research/2026-08-05-note-m3-3-slice5-keyframe-research-refs.md)）；
   **Slice ⑤b 方案已对齐**（非 KF pose-only LM 精修 [ORB-SLAM3 模板] +
   shared<min_pnp_inliers 拒绝门控 + 旋转补偿视差 + 低 track 强制关键帧 +
   snapshot 条件更新；见
-  [设计](research/m3.3-slice5b-pose-refine-design.md)、
+  [设计](research/2026-08-05-note-m3-3-slice5b-pose-refine-design.md)、
   [计划](plans/2026-08-05_m3.3_slice5b_pose_refine_b42c4a2b.plan.md)）；
   **Slice ⑤b 已实施**（`78f2746` 起）：门控 + pose-only 精修 + 旋转补偿视差 +
   低 track 强制 + snapshot 条件更新；修复 V2_02 灾难（121.2→1.906 m）与
@@ -543,15 +543,15 @@ checkpoint 见
   对照结果：MH_05 同阈值 ⑤b 0.364→⑤c **0.306**（结构有效）；但阈值冲突
   依旧——MH 系列 30px 最优（MH_01 0.063 / MH_05 0.306，门控全过），V1_01
   10px 最优（0.234 vs 30px 0.514）；V1_01 已知债待动态阈值方案；见
-  [⑤c 设计](research/m3.3-slice5c-all-frames-ba-design.md)、
+  [⑤c 设计](research/2026-08-05-note-m3-3-slice5c-all-frames-ba-design.md)、
   [⑤c 计划](plans/2026-08-05_m3.3_slice5c_all_frames_ba_5e9f1a22.plan.md)）；
   **MH_03 回归根因已诊断**
   （i=1388 仲裁正确拒绝 358 px RMS proposal，但 CV guess 收敛到更差的
   LM 局部极小值——帧级 RMS 比较的内在权衡，不修复；见
-  [诊断](research/m3.3-mh03-regression-diagnosis.md)）；下一片
+  [诊断](research/2026-08-05-note-m3-3-mh03-regression-diagnosis.md)）；下一片
   需结合 V1_03/V2_02/V2_03 剩余 failure 债（已归因为前端跟踪极限 + LandmarkId 重用，
   不修 estimator；见
-  [诊断](research/m3.3-remaining-failure-debt.md)），不用调 session/cull
+  [诊断](research/2026-08-05-note-m3-3-remaining-failure-debt.md)），不用调 session/cull
   阈值或任意放大 `stereo_sigma_px` 代替诊断。
 
 **pre-M4 小片（已完成，两轮全否决，`cbb4505` + `8906684` dirty）**：
@@ -568,27 +568,27 @@ CLI flag 后供 M4 复测。**M4 前零剩余 VO 候选**；结构性修复在 M
 [prem4-round2](benchmark/m3.3/prem4_round2_8906684_402d1925.md)。
 
 设计见
-[M3.3 VO 加固设计](research/m3.3-vo-hardening-design.md)、
-[M3.3 Slice ② 右目匹配设计](research/m3.3-slice2-right-match-design.md)、
-[M3.3 Slice ③ PnP 设计](research/m3.3-slice3-pnp-design.md)、
-[M3.3 Slice ④ 外点剔除设计](research/m3.3-slice4-outlier-cull-design.md)、
-[M3.3 Slice ④b 二次 LM 设计](research/m3.3-slice4b-outlier-reopt-design.md)、
-[M3.3 Slice ④c cull-track-drop 设计](research/m3.3-slice4c-cull-track-drop-design.md)、
-[M3.3 Slice ④d 阈值设计](research/m3.3-slice4d-cull-threshold-design.md)、
-[M3.3 Slice ④e 多轮 reopt 设计](research/m3.3-slice4e-multiround-reopt-design.md)、
-[M3.3 Slice ④f skip-drop 设计](research/m3.3-slice4f-skip-drop-design.md)、
-[M3.3 Slice ④g zombie-drop 设计](research/m3.3-slice4g-zombie-drop-design.md)、
-[M3.3 Slice ④g postmortem](research/m3.3-slice4g-postmortem.md)，
-[PnP stereo 一致性仲裁设计](research/m3.3-pnp-stereo-consistency-design.md)，
+[M3.3 VO 加固设计](research/2026-07-31-note-m3-3-vo-hardening-design.md)、
+[M3.3 Slice ② 右目匹配设计](research/2026-08-01-note-m3-3-slice2-right-match-design.md)、
+[M3.3 Slice ③ PnP 设计](research/2026-08-01-note-m3-3-slice3-pnp-design.md)、
+[M3.3 Slice ④ 外点剔除设计](research/2026-08-01-note-m3-3-slice4-outlier-cull-design.md)、
+[M3.3 Slice ④b 二次 LM 设计](research/2026-08-01-note-m3-3-slice4b-outlier-reopt-design.md)、
+[M3.3 Slice ④c cull-track-drop 设计](research/2026-08-02-note-m3-3-slice4c-cull-track-drop-design.md)、
+[M3.3 Slice ④d 阈值设计](research/2026-08-02-note-m3-3-slice4d-cull-threshold-design.md)、
+[M3.3 Slice ④e 多轮 reopt 设计](research/2026-08-02-note-m3-3-slice4e-multiround-reopt-design.md)、
+[M3.3 Slice ④f skip-drop 设计](research/2026-08-02-note-m3-3-slice4f-skip-drop-design.md)、
+[M3.3 Slice ④g zombie-drop 设计](research/2026-08-02-note-m3-3-slice4g-zombie-drop-design.md)、
+[M3.3 Slice ④g postmortem](research/2026-08-02-note-m3-3-slice4g-postmortem.md)，
+[PnP stereo 一致性仲裁设计](research/2026-08-04-note-m3-3-pnp-stereo-consistency-design.md)，
 根因诊断见
-[M3.3 VO 崩溃根因诊断](research/m3.3-vo-collapse-diagnosis.md)、
-[M3.3 MH_02 首次发散诊断](research/m3.3-mh02-divergence-diagnosis.md)，开源对照见
-[M3.3 VO 加固：开源实现对照](research/m3.3-vo-hardening-open-source-refs.md)、
-[Slice ② 开源对照](research/m3.3-slice2-right-match-open-source-refs.md)、
-[Slice ③ 开源对照](research/m3.3-slice3-pnp-open-source-refs.md)、
-[Slice ④ 开源对照](research/m3.3-slice4-outlier-cull-open-source-refs.md)、
-[Slice ④e 开源对照](research/m3.3-slice4e-multiround-open-source-refs.md)、
-[PnP stereo 一致性仲裁开源对照](research/m3.3-pnp-stereo-consistency-open-source-refs.md)。
+[M3.3 VO 崩溃根因诊断](research/2026-07-31-note-m3-3-vo-collapse-diagnosis.md)、
+[M3.3 MH_02 首次发散诊断](research/2026-08-04-note-m3-3-mh02-divergence-diagnosis.md)，开源对照见
+[M3.3 VO 加固：开源实现对照](research/2026-07-31-opensource-m3-3-vo-hardening.md)、
+[Slice ② 开源对照](research/2026-08-01-opensource-m3-3-slice2-right-match.md)、
+[Slice ③ 开源对照](research/2026-08-01-opensource-m3-3-slice3-pnp.md)、
+[Slice ④ 开源对照](research/2026-08-01-opensource-m3-3-slice4-outlier-cull.md)、
+[Slice ④e 开源对照](research/2026-08-02-opensource-m3-3-slice4e-multiround.md)、
+[PnP stereo 一致性仲裁开源对照](research/2026-08-04-opensource-m3-3-pnp-stereo-consistency.md)。
 实施计划见
 [M3.3 VO 加固 Slice ①](plans/2026-07-31_m3.3_vo_hardening_a3f7d2e9.plan.md)、
 [M3.3 Slice ②](plans/2026-08-01_m3.3_slice2_right_match_c8e74511.plan.md)、
@@ -621,10 +621,10 @@ M4.1 之后的 measurement / factor 接入继续服从
 [证据门控的信息接入](agents/evidence-gated-integration.md)。
 [Q1 Observe 实施计划](plans/2026-08-12_m4_gyro_q1_observe_7d3a91e6.plan.md)已完成：packet summary
 与 raw gyro samples 已冻结，M3 off 路径字节不变；独立证据见
-[Q1 Observe 结果](research/m4-minimal-gyro-q1-observe-result.md)。Q1 PASS 当时只把 Q2 状态改为
+[Q1 Observe 结果](research/2026-08-12-note-m4-minimal-gyro-q1-observe-result.md)。Q1 PASS 当时只把 Q2 状态改为
 **go to plan only**。[Q2 Predict 实施计划](plans/2026-08-12_m4_gyro_q2_predict_3f69becc.plan.md)
 现已完成，独立证据见
-[Q2 Predict 结果](research/m4-minimal-gyro-q2-known-bias-predict-result.md)。该 technical PASS under
+[Q2 Predict 结果](research/2026-08-13-note-m4-minimal-gyro-q2-known-bias-predict-result.md)。该 technical PASS under
 waiver 只覆盖无 production caller 的 deterministic known-bias rotation helper；原 RED lifecycle
 仅作 historical non-qualifying，qualifying weight=`0`，later deletion 不作原 RED 替代。最终 command
 evidence 仍以 `/tmp/q2-missing-evidence-replay-v2.md`（SHA-256
@@ -638,21 +638,21 @@ Q3 或新路线而改写。
 
 Q3 唯一 qualification 的 support、fit 与 effect gates 通过，但最大 early/late 逐轴差
 `0.001227119335357879 rad/s` 超过冻结 half-stability 门 `0.001 rad/s`。权威事实与权限只见
-[Q3 result ledger](research/m4-minimal-gyro-q3-offline-bias-alignment-result.md)；
-[Q3 normative design](research/m4-minimal-gyro-q3-offline-bias-alignment-design.md)继续保留该次运行的
+[Q3 result ledger](research/2026-08-18-note-m4-minimal-gyro-q3-offline-bias-alignment-result.md)；
+[Q3 normative design](research/2026-08-13-note-m4-minimal-gyro-q3-offline-bias-alignment-design.md)继续保留该次运行的
 协议语义。禁止把失败后的窗口重选、threshold 修改或第二次运行称为 Q3 qualification，也禁止把
 Q3 nuisance estimate 当作 physical bias、online prior 或旧 Q4 的 implementation go。
 
 explicit online gyro bias state + random walk 的独立资格链为：
 
-- [online-bias research](research/m4-vio-online-gyro-bias-state-research.md)只提供方案与证据来源；
+- [online-bias research](research/2026-08-18-note-m4-vio-online-gyro-bias-state-research.md)只提供方案与证据来源；
 - [ADR-0002](adr/0002-stage-gated-gyro-only-bias-state.md)记录放弃全局常值 nuisance 路线、采用
   stage-gated gyro-only bias state 的架构决策；
-- [online-bias synthetic design](research/m4-online-gyro-bias-synthetic-design.md)是新协议的 normative
+- [online-bias synthetic design](research/2026-08-19-note-m4-online-gyro-bias-synthetic-design.md)是新协议的 normative
   gate authority；
 - [online-bias implementation plan](plans/2026-08-18_m4_online_gyro_bias_synthetic_1e3569b4.plan.md)
   规定该新协议的 RED→GREEN 与 qualification 顺序；
-- [online-bias replay2 result](research/m4-online-gyro-bias-synthetic-result.md)记录最终
+- [online-bias replay2 result](research/2026-08-24-note-m4-online-gyro-bias-synthetic-result.md)记录最终
   `HARD_ERROR`、有效/未运行 gates、STOP event 与未获得权限。
 
 pre-implementation authority transaction 的 exact six 只包含：online-bias synthetic design、
@@ -683,7 +683,7 @@ README 不属于 production allowlist。该链不重开 Q3，也不自动产生�
 
 ### 历史 M4.2+ 路线（non-normative；不可执行）
 
-2026-08-07 的 [M4 接入 IMU 设计](research/m4-imu-integration-design.md) 曾提议直接将
+2026-08-07 的 [M4 接入 IMU 设计](research/2026-08-08-note-m4-imu-integration-design.md) 曾提议直接将
 state 从 `X` 扩展为 `X/V/B`，引入 `CombinedImuFactor`、
 `BetweenFactor<ConstantBias>`、静止初始化、IMU 预积分初值与 re-anchor 退役，
 并设想让 `estimator.enable_imu` 默认为 true 且进入 `config_hash`。该 M4.2–M4.4

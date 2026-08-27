@@ -61,9 +61,9 @@ shared-ID count 达到既有 `min_pnp_inliers` 时恢复 full visual support。
 3. [#43](https://github.com/Nothand0212/phad-vio/issues/43) 正文及截至
    2026-08-27 的最新 comments。
 4. [1a 机制及产品门记录](2026-08-26_m4_world_frame_inheritance_slice1a_c5177d31.plan.md)、
-   [`m4-coast-propagation-probe-design.md`](../research/m4-coast-propagation-probe-design.md)、
+   [`2026-08-26-note-m4-coast-propagation-probe-design.md`](../research/2026-08-26-note-m4-coast-propagation-probe-design.md)、
    [`m4-seed-span-propagation-probe-design.md`](../research/m4-seed-span-propagation-probe-design.md)
-   与 [`m4-local-map-continuity-open-source-comparison.md`](../research/m4-local-map-continuity-open-source-comparison.md)。
+   与 [`2026-08-27-opensource-m4-local-map-continuity.md`](../research/2026-08-27-opensource-m4-local-map-continuity.md)。
 5. [`evidence-gated-integration.md`](../agents/evidence-gated-integration.md)、
    [`incremental-development.md`](../agents/incremental-development.md) 与
    [`git-workflow.md`](../agents/git-workflow.md)。

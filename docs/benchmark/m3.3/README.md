@@ -80,9 +80,9 @@ record-only baseline：MH_05 是 n=5 甜区收益，但 MH_02/V1_02/V1_03 暴露
 
 ## 历史资料
 
-- [Slice ④～④g 原始门控史](../../research/m3.3-slice4-baseline.md)
-- [zombie-age=5 修复前正式基线](../../research/m3.3-full-suite-baseline-773ea011.md)
-- [PnP stereo 仲裁 dirty 验证](../../research/m3.3-pnp-stereo-arbitration-results.md)
+- [Slice ④～④g 原始门控史](../../research/2026-08-01-note-m3-3-slice4-baseline.md)
+- [zombie-age=5 修复前正式基线](../../research/2026-08-03-note-m3-3-full-suite-baseline-773ea011.md)
+- [PnP stereo 仲裁 dirty 验证](../../research/2026-08-04-note-m3-3-pnp-stereo-arbitration-results.md)
 
 这些文档在迁移完成前仍保留原始叙事与诊断上下文；本目录生成的 clean checkpoint
 将作为后续数值比较的权威入口。
