@@ -142,3 +142,35 @@ Q0。临时 instrumentation 随后与 worktree 一同清除。
 “factor-bearing low-support 当前帧”改为“retained low-support 历史帧可在后续图中
 成 factor”，需要先修订 #43 的机制诊断与对应 public-seam tests，不能作为 #47
 内部实现细节直接落地。
+
+## 8. Public-seam contract delta audit
+
+把 delayed-current-factor 消融套到 clean `42f99e9` 的完整
+`phad_estimator_tests` 后，102 tests 中 95 个通过、7 个失败：
+
+| contract surface | 失败测试数 | 实际差异 |
+|---|---:|---|
+| current/total factor diagnostics | `6` | low-support 当前 frame count 从 observation 数变为 `0`；其余 recovery、segment、horizon、rollback 断言继续通过 |
+| same-packet low-support cull | `1` | poison landmark 不在第 4 个 low-support packet cull |
+
+把 poison fixture 延长一个 packet 后，既有 cull-ID 与
+`outliers_culled >= 1` 断言通过；剩余失败只来自 current factor count 仍为 `0`
+以及 coast/span 随新增 packet 从 `200 ms` 增为 `250 ms`。这证明 quality path
+是随 observation factor **延迟一次 rebuild**，而不是丢失。
+
+因此，若用户批准 control repair，需在 #43 amendment 中明确且只改以下时序面：
+
+1. low-support 当前 stereo observation 立即进入 transaction state，但不在同一
+   endpoint 的 graph 中建立 stereo factor；
+2. 后续 graph rebuild 按原 count/map 门处理该历史 observation，既有
+   cheirality、mean-cull 与 reopt 在该时点运行；
+3. support predicate、PnP threshold、coast budget、outage/recovery cadence、seed、
+   rollback 与 public `update()` seam 不变；
+4. `num_current_visual_factors` 继续表示最终成功 graph 中连接当前 frame 的 factors，
+   因而 low-support control row 为 `0`；总 visual factor count 反映已进入 graph 的
+   历史 factors；
+5. #47 后续对 current mono bearing factor 与 mapped-support 的权限仍由 Q4/Q5
+   单独授予，不由该 stereo control repair 预先决定。
+
+这组差异是现有 tests 与完整 MH_01 counterfactual 共同证明的最小合同面；不需要
+新增配置、阈值、factor 类型或 public interface。
