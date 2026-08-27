@@ -86,3 +86,18 @@ python3 scripts/remote_ci.py fetch <run-id>
 
 `wait` 默认每 30 秒读取一次并仅输出状态变化，进入终态后自动拉回结果。
 安全合同、远端目录与恢复流程见 [`docs/agents/remote-ci.md`](../docs/agents/remote-ci.md)。
+
+## `graphify.sh`
+
+仓库级 Graphify 入口，当前使用 `graphifyy==0.9.50` 验证。Graphify 作为独立
+开发工具安装，不进入项目 venv：
+
+```bash
+uv tool install graphifyy==0.9.50
+scripts/graphify.sh .
+scripts/graphify.sh query "VioEstimator update transaction"
+```
+
+脚本会在执行前加载可选的仓库根目录 `.env.graphify`，该文件使用 shell assignment
+格式并保持 `0600` 权限；生成的 `graphify-out/` 与本地环境文件均由 Git ignore。
+知识图用于代码导航，产品结论仍以源码、测试和权威文档为准。
