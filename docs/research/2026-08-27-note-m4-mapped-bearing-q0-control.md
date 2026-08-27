@@ -91,3 +91,54 @@ ATE 贡献。继续 Q1/Q4/Q5 会把新 bearing 机制叠加到一个未通过自
 当前 factors 的 predicted/optimized residual、PnP 可验证性与后续离散分支中，
 哪一项能提供不改变 support predicate 的质量许可。该 slice 需要重新对齐 factor
 admission/quality 合同；通过 `MH_01 <= 0.070539` 后，#47 才能回到 Q1。
+
+## 6. Full-run delayed-current-factor counterfactual
+
+为量化 §4 留下的 full-run 证据缺口，在临时 `42f99e9` worktree 中采用同一
+消融：low-support packet 仍立即提交 observations、track history、window 与 map
+lifecycle，但 `buildGraph()` 在该 packet 上跳过当前 back frame；下一 packet
+重建 graph 时，前一 low-support frame 已不再是 back frame，其已保留 observations
+仍按既有 count/map 资格建立 factors。
+
+完整 `MH_01_easy` 结果：
+
+| 指标 | `c999f58` | delayed-current-factor | 差值 |
+|---|---:|---:|---:|
+| ATE trans RMSE (m) | `0.07053883048680992` | `0.07053883048875172` | `+1.94e-12` |
+| RPE trans RMSE (m) | `0.03317561070387584` | `0.03317561070377601` | `-9.98e-14` |
+| keyframe / track-only | `660 / 3022` | `660 / 3022` | `0 / 0` |
+| PnP success / fallback | `3667 / 13` | `3667 / 13` | `0 / 0` |
+| outliers culled / reopt | `17 / 1` | `17 / 1` | `0 / 0` |
+| completion / coverage / segments | `0.9997284085 / 0.9997283354 / 1` | 相同 | `0 / 0 / 0` |
+
+两条 raw trajectory 的最大 translation 差为 `9.73e-11 m`，末行差
+`3.48e-11 m`。所有比较的离散 diagnostics 均相同；唯一生命周期差异是两个
+low-support row 继续保留额外一个 landmark (`79` 对 `78`)，且其
+`num_current_visual_factors == 0`。因此，在 `MH_01` 上 retention 对最终行为可视为
+零影响，当前 endpoint factors 是 Q0 数值分叉的实际载体。
+
+该 run 的 config 仍为 `default_0337287b`，但源码含临时消融并如实标记 dirty；
+它只提供因果证据，不构成 clean candidate 或产品 PASS。
+
+## 7. Factor residual 与现有质量门
+
+恢复原 #43 factor admission 后，在两个 low-support packet 的 primary graph solve
+前逐 factor 读取 `GenericStereoFactor::unwhitenedError()`：
+
+| timestamp (ns) | factors | norm min / median / mean / max (px) | `> 2 px` | `> 3 px` |
+|---|---:|---:|---:|---:|
+| `1403636598663555584` | `8` | `0.102 / 1.124 / 0.910 / 1.343` | `0` | `0` |
+| `1403636598713555456` | `8` | `0.338 / 1.270 / 1.197 / 2.199` | `1` | `0` |
+
+两帧均无 cheirality；所有 residual norm 都低于现有 Huber `k=3`，landmark mean
+也没有触发 `outlier_avg_reproj_px=4` 的 cull。现有 robust noise 与 mean-cull
+按当前合同会接受这批 factors，因此不能用“复用既有 residual 门”解释或修复
+Q0。临时 instrumentation 随后与 worktree 一同清除。
+
+当前证据支持把 control-repair 的首选合同问题收窄为：是否允许
+**one-packet delayed current-factor admission**——立即保留 low-support observation
+与 map 生命周期，但直到下一次 graph rebuild 才让该 observation 约束 posterior。
+这保留了后续视觉因果边，也在完整 `MH_01` 恢复冻结门；同时它会把 #43 的
+“factor-bearing low-support 当前帧”改为“retained low-support 历史帧可在后续图中
+成 factor”，需要先修订 #43 的机制诊断与对应 public-seam tests，不能作为 #47
+内部实现细节直接落地。
