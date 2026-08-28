@@ -13,10 +13,10 @@ todos:
     status: completed
   - id: freeze-product-envelope
     content: '在任何 Q1/Q4/Q5 candidate 结果前计算 core-4/EuRoC-11 的 gate 基线，确认并冻结 G_ATE/G_RPE、有效性、tail review 与 continuity 数值规则'
-    status: in_progress
+    status: completed
   - id: q1-red-classification
     content: '先经 public seam 写 stereo mapped、left-only mapped、unmapped 三分类红灯及 CSV 第 25 列红灯'
-    status: pending
+    status: in_progress
   - id: q1-green-observe
     content: '最小接入 num_mapped_observations 与 OfflineVoSession/diag.csv，不改变 PnP、support、factor、pose 或 lifecycle'
     status: pending
@@ -57,16 +57,16 @@ isProject: false
 
 ## 状态
 
-**Spec（含多序列产品 gate）与本计划已于 2026-08-27 定稿。短分支、文档提交、
-clean Q0 core-4/EuRoC-11 与机制归因已经完成；Stage 0 正在确认完整 Q0 派生的
-数值 envelope，尚未开始 #47 的生产 C++ 修改或 candidate experiment。**
+**Spec、实施计划、clean Q0 core-4/EuRoC-11 与完整数值 envelope 已定稿；Stage 0
+完成，现按 Q1 classification Red→Green 开始实施。尚未取得 Q4/Q5 或 candidate
+experiment 的执行资格。**
 
 已完成的 control 事实：clean `42f99e9/default_0337287b` unit 共 `458/458`
 通过（另有 3 个既有 skip）；EuRoC-11 为 11/11、55/55 required artifacts，统一
 数据质量审计 PASS，`failed/rejected/reanchors == 0`。相对 M4 checkpoint，
 `G_ATE=0.696757`、`G_RPE=0.645531`，ATE/RPE 算术均值分别为
 `0.380628 / 0.113120 m`，segments 为 `93 → 30`。完整 identity、精度、coverage、
-段内/段间分解、hash 与待确认 envelope 见
+段内/段间分解、hash 与已冻结 envelope 见
 [`mapped-landmark-bearing Q0`](../benchmark/m4/mapped-landmark-bearing-q0_42f99e9_0337287b.md)。
 
 本计划把一个 deep Module 内部能力分四个可证伪阶段交付：Q1 只观察 eligible
@@ -206,7 +206,7 @@ mixed mapped population
 6. 已用 11 条 `summary.json` 计算逐序列 ratio 表并补齐
    `mapped-landmark-bearing-q0_42f99e9_0337287b.md`；结合 M4 checkpoint 与绝对
    工程量级形成 `G_ATE/G_RPE`、completion/coverage、tail review 与 V2_03
-   continuity 数值提案。经用户确认后写回 spec/benchmark 并冻结。
+   continuity 数值提案，已于 2026-08-28 经用户确认并写回 spec/benchmark 冻结。
 7. clean Q0 与既有 record-only run 若存在 manifest 不能解释的差异，先解决
    reproducibility；在多序列 envelope 冻结前不进入 Q1。
 

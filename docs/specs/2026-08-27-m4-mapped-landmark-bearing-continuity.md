@@ -460,7 +460,23 @@ sequence 运行。review 必须结合绝对误差量级、RPE、completion/cover
 
 ### 13.3 三态产品判定
 
-数值 envelope 在 clean Q0 完整后按 §13.1 冻结；判定结构为：
+clean `42f99e9/default_0337287b` Q0 完整后冻结的数值 envelope 为：
+
+| 层 | hard envelope |
+|---|---|
+| core-4 accuracy | `G_ATE <= 1.05` 且 `G_RPE <= 1.05` |
+| EuRoC-11 accuracy | `G_ATE <= 1.05` 且 `G_RPE <= 1.05` |
+| suite availability | 11 条平均 completion `>= 0.933409`，平均 coverage `>= 0.956954` |
+| V2_03 continuity | `segments <= 17`；completion `>= 0.555138`；coverage `>= 0.791345`；段内 RMS `<= 0.070 m`；绝对段间分量 `<= 2.020 m` |
+
+逐序列 tail 仅触发 `REVIEW`，不自动 `FAIL`：
+
+1. ATE 增量 `> max(0.010 m, 10% * ATE_Q0)`；
+2. RPE 增量 `> max(0.005 m, 10% * RPE_Q0)`；
+3. completion 或 coverage 相对 Q0 下降 `> 0.010` absolute；
+4. segments 高于 Q0。
+
+判定结构为：
 
 - `PASS`：identity 与 hard validity 成立；Q1/Q4/Q5 机制门成立；`core-4` 与
   `EuRoC-11` 的 `G_ATE` 满足冻结 envelope；`G_RPE`、completion、coverage 无
@@ -478,18 +494,20 @@ candidate 的 accuracy 数值不能触发 suite early-stop。若某条运行 har
 
 正式 candidate 必须满足：
 
-1. `failed == 0`、`rejected == 0`、`reanchors == 0`；
-2. 所有 artifact 都报告 eligible/attached 分布；V2_03 必须实际出现
+1. 11/11 sequence 均有有限 ATE/RPE 与完整 artifact，code/tree/config/input/
+   schema identity 成立；
+2. `failed == 0`、`rejected == 0`、`reanchors == 0`；
+3. 所有 artifact 都报告 eligible/attached 分布；V2_03 必须实际出现
    `num_mapped_observations - num_shared > 0` 与
    `num_current_mono_visual_factors > 0`；
-3. V2_03 至少有一次 flip-capable episode：
+4. V2_03 至少有一次 flip-capable episode：
    `num_shared < min_pnp_inliers <= num_mapped_observations`，并在同一
    `segment_id` 中成功提交；V1_03 / V2_02 记录该 episode 数但不设非零硬门；
-4. `num_current_visual_factors >= num_current_mono_visual_factors` 每帧成立；
-5. 用 `scripts/segment_ate_decomp.py` 比较段内 RMS 与绝对段间分量；V2_03
-   的 continuity target 及容差在 clean Q0 后预注册，并与 aggregate accuracy
-   一起判定；
-6. artifact 保留 clean code/tree identity、canonical config、命令、逐帧
+5. `num_current_visual_factors >= num_current_mono_visual_factors` 每帧成立；
+6. 用 `scripts/segment_ate_decomp.py` 复算 V2_03；相对 Q0 的 `18` segments、
+   `0.535137949` completion、`0.791345331` coverage、`0.061664 m` 段内 RMS 与
+   `2.019656 m` 绝对段间分量，必须满足 §13.3 冻结的 continuity envelope；
+7. artifact 保留 clean code/tree identity、canonical config、命令、逐帧
    diagnostics 与 Q1/Q4/Q5 机制计数。
 
 通过 `core-4` 只授权进入最终 EuRoC-11 实验；通过完整多序列产品 gate 才授权
@@ -520,3 +538,8 @@ relocalization 或下一里程碑。
 
 上述四项已于 2026-08-27 确认。implementation plan 必须从完整合同派生，并在
 计划确认后才进入实现。
+
+完整 clean Q0 派生的数值 gate 为：core-4 与 EuRoC-11 的 `G_ATE/G_RPE` 均不高于
+`1.05`；suite availability、逐序列 tail 和 V2_03 continuity 使用 §13.3 的冻结
+数值。该 gate 已于 2026-08-28 确认，必须在 Q1 candidate 之前固化，后续不得按
+candidate 结果放宽。

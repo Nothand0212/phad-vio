@@ -90,12 +90,12 @@ EuRoC-11 平均 completion 从 `0.939048` 升至 `0.943409`，平均 coverage �
 同时保留 `MH_05`、`V2_03` 等单序列 tail。后续 candidate gate 使用同机 matched
 clean Q0 作为 immediate control，不使用 checkpoint 直接判定 candidate。
 
-### 2.2 待确认的产品 envelope
+### 2.2 已冻结的产品 envelope
 
-下列数值由完整 Q0、M4 checkpoint 的多序列变化和绝对工程量级共同给出；用户确认
-后写入 spec，才授权进入 Q1：
+下列数值由完整 Q0、M4 checkpoint 的多序列变化和绝对工程量级共同给出，已于
+2026-08-28 确认并写入 spec：
 
-| 层 | 建议 hard envelope |
+| 层 | hard envelope |
 |---|---|
 | core-4 accuracy | `G_ATE <= 1.05` 且 `G_RPE <= 1.05` |
 | EuRoC-11 accuracy | `G_ATE <= 1.05` 且 `G_RPE <= 1.05` |
