@@ -39,6 +39,10 @@ class SourceManifestTest(unittest.TestCase):
         (self.root / "deleted.txt").write_text("deleted\n", encoding="utf-8")
         (self.root / "script.sh").write_text("#!/bin/sh\n", encoding="utf-8")
         (self.root / "script.sh").chmod(0o755)
+        (self.root / ".codex").mkdir()
+        (self.root / ".codex" / "config.toml").write_text(
+            "model = \"test\"\n", encoding="utf-8"
+        )
         git(self.root, "add", ".")
         git(self.root, "commit", "-m", "base")
 
@@ -51,11 +55,57 @@ class SourceManifestTest(unittest.TestCase):
         (self.root / "untracked.cpp").write_text("int value = 1;\n", encoding="utf-8")
         (self.root / "build").mkdir()
         (self.root / "build" / "ignored.o").write_bytes(b"ignored")
-        (self.root / ".codex").mkdir()
+        (self.root / ".codex").mkdir(exist_ok=True)
         (self.root / ".codex" / "session.json").write_text("{}\n", encoding="utf-8")
         artifact = self.root / "artifacts" / "remote-ci"
         artifact.mkdir(parents=True)
         (artifact / "old.log").write_text("old\n", encoding="utf-8")
+
+    def reconstruct_source(
+        self, output: Path
+    ) -> tuple[dict[str, object], Path]:
+        source = remote_ci.create_source_inputs(self.root, output / "inputs")
+        reconstructed = output / "repo"
+        subprocess.run(
+            [
+                "git",
+                "clone",
+                "--no-checkout",
+                str(source["bundle_path"]),
+                str(reconstructed),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        git(reconstructed, "read-tree", "HEAD")
+        tar_path = output / "source.tar"
+        subprocess.run(
+            [
+                "zstd",
+                "-d",
+                "--force",
+                str(source["archive_path"]),
+                "-o",
+                str(tar_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            [
+                "tar",
+                "-xf",
+                str(tar_path),
+                "-C",
+                str(reconstructed),
+                "--no-same-owner",
+                "--same-permissions",
+            ],
+            check=True,
+        )
+        return source, reconstructed
 
     def test_source_id_is_deterministic_and_captures_dirty_tree(self) -> None:
         self.prepare_dirty_tree()
@@ -96,48 +146,19 @@ class SourceManifestTest(unittest.TestCase):
         self.prepare_dirty_tree()
         with tempfile.TemporaryDirectory() as output_directory:
             output = Path(output_directory)
-            source = remote_ci.create_source_inputs(self.root, output / "inputs")
-            reconstructed = output / "repo"
-            subprocess.run(
-                [
-                    "git",
-                    "clone",
-                    "--no-checkout",
-                    str(source["bundle_path"]),
-                    str(reconstructed),
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            git(reconstructed, "read-tree", "HEAD")
-            tar_path = output / "source.tar"
-            subprocess.run(
-                [
-                    "zstd",
-                    "-d",
-                    "--force",
-                    str(source["archive_path"]),
-                    "-o",
-                    str(tar_path),
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            subprocess.run(
-                [
-                    "tar",
-                    "-xf",
-                    str(tar_path),
-                    "-C",
-                    str(reconstructed),
-                    "--no-same-owner",
-                    "--same-permissions",
-                ],
-                check=True,
+            source, reconstructed = self.reconstruct_source(output)
+            verified = remote_ci.verify_source_tree(
+                reconstructed, source["manifest_path"]
             )
 
+        self.assertEqual(verified["source_id"], source["source_id"])
+
+    def test_bundle_and_archive_reconstruct_clean_snapshot_with_tracked_exclusion(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as output_directory:
+            output = Path(output_directory)
+            source, reconstructed = self.reconstruct_source(output)
             verified = remote_ci.verify_source_tree(
                 reconstructed, source["manifest_path"]
             )
