@@ -125,6 +125,63 @@ namespace phad::apps
     std::uint32_t num_current_visual_factors      = 0;
     std::uint32_t num_mapped_observations         = 0;
     std::uint32_t num_current_mono_visual_factors = 0;
+
+    estimator::ColdRootPhase m_cold_root_phase =
+        estimator::ColdRootPhase::kNotEvaluated;
+    estimator::ColdRootReason m_cold_root_reason =
+        estimator::ColdRootReason::kNotEvaluated;
+    estimator::ColdRootBootstrapPath m_cold_root_bootstrap_path =
+        estimator::ColdRootBootstrapPath::kNotEvaluated;
+    estimator::ColdRootSeedInputOrigin m_cold_root_seed_input_origin =
+        estimator::ColdRootSeedInputOrigin::kNotEvaluated;
+    estimator::ColdRootGeometryResult m_cold_root_geometry_result =
+        estimator::ColdRootGeometryResult::kNotEvaluated;
+    std::optional<std::uint64_t> m_cold_root_attempt_id;
+
+    estimator::ColdRootGateState m_cold_root_bootstrap_gate =
+        estimator::ColdRootGateState::kNotEvaluated;
+    estimator::ColdRootGateState m_cold_root_keyframe_gate =
+        estimator::ColdRootGateState::kNotEvaluated;
+    estimator::ColdRootGateState m_cold_root_stereo_population_gate =
+        estimator::ColdRootGateState::kNotEvaluated;
+    estimator::ColdRootGateState m_cold_root_geometry_gate =
+        estimator::ColdRootGateState::kNotEvaluated;
+    estimator::ColdRootGateState m_cold_root_imu_excitation_gate =
+        estimator::ColdRootGateState::kNotEvaluated;
+    estimator::ColdRootGateState m_cold_root_conditioning_gate =
+        estimator::ColdRootGateState::kNotEvaluated;
+    estimator::ColdRootGateState m_cold_root_initialization_solve_gate =
+        estimator::ColdRootGateState::kNotEvaluated;
+    estimator::ColdRootGateState m_cold_root_current_graph_gate =
+        estimator::ColdRootGateState::kNotEvaluated;
+    estimator::ColdRootGateState m_cold_root_commit_gate =
+        estimator::ColdRootGateState::kNotEvaluated;
+
+    std::optional<std::uint64_t> m_cold_root_bootstrap_sample_count;
+    std::optional<std::uint32_t> m_cold_root_bootstrap_min_samples;
+    std::optional<std::int64_t>  m_cold_root_bootstrap_duration_ns;
+    std::optional<std::int64_t>  m_cold_root_bootstrap_min_duration_ns;
+    std::optional<double>        m_cold_root_bootstrap_acc_std_max_mps2;
+    std::optional<double>        m_cold_root_bootstrap_acc_std_limit_mps2;
+    std::optional<double>        m_cold_root_bootstrap_gyr_std_max_radps;
+    std::optional<double>        m_cold_root_bootstrap_gyr_std_limit_radps;
+    std::optional<double>        m_cold_root_bootstrap_acc_norm_error_mps2;
+    std::optional<double>        m_cold_root_bootstrap_acc_norm_tolerance_mps2;
+    std::optional<std::int64_t>  m_cold_root_bootstrap_timeout_ns;
+    std::optional<bool>          m_cold_root_moving_bootstrap_enabled;
+    std::optional<std::uint64_t> m_cold_root_moving_suffix_sample_count;
+    std::optional<std::int64_t>  m_cold_root_moving_suffix_duration_ns;
+    std::optional<double>        m_cold_root_moving_acc_mean_norm_mps2;
+    std::optional<double>        m_cold_root_moving_acc_mean_norm_min_mps2;
+
+    std::optional<std::uint64_t>
+                                 m_cold_root_current_positive_disparity_count;
+    std::optional<bool>          m_cold_root_accumulated_seed_enabled;
+    std::optional<std::uint64_t> m_cold_root_pending_unique_seed_count;
+    std::optional<std::uint64_t> m_cold_root_effective_seed_count;
+    std::optional<std::uint32_t> m_cold_root_min_seed_observations;
+    std::optional<std::uint64_t> m_cold_root_geometry_accepted_landmarks;
+    std::optional<std::uint32_t> m_cold_root_geometry_min_landmarks;
   };
 
   struct FrameCounts

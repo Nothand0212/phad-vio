@@ -96,6 +96,19 @@ map 的 observation，不区分是否有 positive disparity。mapped-bearing Q4 
 support 与 low-connectivity 使用 `num_mapped_observations`；`num_shared` 保留
 positive-disparity overlap 的诊断语义。
 
+M5 cold-root current-path Observe 在既有 26 列尾部连续追加 frozen 38 列，将
+`diag.csv` 固定为 **64 列**。列名、顺序、token 与 presence 的 authority 是
+[`2026-08-28-m5-cold-root-seed-observe.md`](../docs/specs/2026-08-28-m5-cold-root-seed-observe.md)
+§6–§7。前 26 列的顺序、值与浮点格式保持现有 projection；新增列由
+`OfflineVoSession` 从 `UpdateDiagnostics::m_cold_root` 逐字段复制到 `VoDiagRow`，
+不解析 `result.message`，也不复算 estimator predicate。
+
+`writeDiagCsv()` 使用 estimator 提供的 stable enum token；optional 缺失写空 field，
+存在的 boolean 写 `0/1`，新增 double 用 round-trip precision。session 继续只为既有
+cadence 已生成的 row 扩列；estimator `kInvalidInput` / `kFailed` hard-stop 仍发生在
+row append 前。`FrameCounts`、warning、summary、config snapshot / hash 不由这些列
+派生。
+
 pre-M4 小片（2026-08-07）**Census 实测否决**：`enable_census` 默认 **false**。
 实测(cbb4505 双路径, MH_01 + V2_03):V2_03 SAD-only ATE 3.628m/0 锚跳
 vs census 兜底 on 7937m/225 次 >5m 锚跳(census 暗帧匹配污染 PnP → 反复

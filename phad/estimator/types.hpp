@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -112,6 +113,233 @@ namespace phad::estimator
     kFailed        = 6
   };
 
+  enum class ColdRootPhase : std::uint8_t
+  {
+    kNotEvaluated,
+    kBootstrap,
+    kKeyframe,
+    kStereoPopulation,
+    kRootGeometry,
+    kCurrentGraph,
+    kCommit
+  };
+
+  enum class ColdRootReason : std::uint8_t
+  {
+    kNotEvaluated,
+    kEvidenceInsufficient,
+    kTimedOut,
+    kKeyframeRequired,
+    kPopulationInsufficient,
+    kPopulationAccumulating,
+    kGeometryRejected,
+    kGraphBuildFailed,
+    kGraphSolveFailed,
+    kGraphValidationFailed,
+    kCommitted
+  };
+
+  enum class ColdRootGateState : std::uint8_t
+  {
+    kNotEvaluated,
+    kPassed,
+    kFailed
+  };
+
+  enum class ColdRootBootstrapPath : std::uint8_t
+  {
+    kNotEvaluated,
+    kCollecting,
+    kStatic,
+    kMoving
+  };
+
+  enum class ColdRootSeedInputOrigin : std::uint8_t
+  {
+    kNotEvaluated,
+    kCurrentPacket,
+    kAccumulated
+  };
+
+  enum class ColdRootGeometryResult : std::uint8_t
+  {
+    kNotEvaluated,
+    kAccepted,
+    kNonfiniteBackprojection,
+    kBehindCamera,
+    kEmptyAfterFilter
+  };
+
+  [[nodiscard]] constexpr std::string_view coldRootPhaseToken(
+      ColdRootPhase phase ) noexcept
+  {
+    switch ( phase )
+    {
+      case ColdRootPhase::kNotEvaluated:
+        return "not_evaluated";
+      case ColdRootPhase::kBootstrap:
+        return "bootstrap";
+      case ColdRootPhase::kKeyframe:
+        return "keyframe";
+      case ColdRootPhase::kStereoPopulation:
+        return "stereo_population";
+      case ColdRootPhase::kRootGeometry:
+        return "root_geometry";
+      case ColdRootPhase::kCurrentGraph:
+        return "current_graph";
+      case ColdRootPhase::kCommit:
+        return "commit";
+    }
+    return "unknown";
+  }
+
+  [[nodiscard]] constexpr std::string_view coldRootReasonToken(
+      ColdRootReason reason ) noexcept
+  {
+    switch ( reason )
+    {
+      case ColdRootReason::kNotEvaluated:
+        return "not_evaluated";
+      case ColdRootReason::kEvidenceInsufficient:
+        return "evidence_insufficient";
+      case ColdRootReason::kTimedOut:
+        return "timed_out";
+      case ColdRootReason::kKeyframeRequired:
+        return "keyframe_required";
+      case ColdRootReason::kPopulationInsufficient:
+        return "population_insufficient";
+      case ColdRootReason::kPopulationAccumulating:
+        return "population_accumulating";
+      case ColdRootReason::kGeometryRejected:
+        return "geometry_rejected";
+      case ColdRootReason::kGraphBuildFailed:
+        return "graph_build_failed";
+      case ColdRootReason::kGraphSolveFailed:
+        return "graph_solve_failed";
+      case ColdRootReason::kGraphValidationFailed:
+        return "graph_validation_failed";
+      case ColdRootReason::kCommitted:
+        return "committed";
+    }
+    return "unknown";
+  }
+
+  [[nodiscard]] constexpr std::string_view coldRootGateStateToken(
+      ColdRootGateState state ) noexcept
+  {
+    switch ( state )
+    {
+      case ColdRootGateState::kNotEvaluated:
+        return "not_evaluated";
+      case ColdRootGateState::kPassed:
+        return "passed";
+      case ColdRootGateState::kFailed:
+        return "failed";
+    }
+    return "unknown";
+  }
+
+  [[nodiscard]] constexpr std::string_view coldRootBootstrapPathToken(
+      ColdRootBootstrapPath path ) noexcept
+  {
+    switch ( path )
+    {
+      case ColdRootBootstrapPath::kNotEvaluated:
+        return "not_evaluated";
+      case ColdRootBootstrapPath::kCollecting:
+        return "collecting";
+      case ColdRootBootstrapPath::kStatic:
+        return "static";
+      case ColdRootBootstrapPath::kMoving:
+        return "moving";
+    }
+    return "unknown";
+  }
+
+  [[nodiscard]] constexpr std::string_view coldRootSeedInputOriginToken(
+      ColdRootSeedInputOrigin origin ) noexcept
+  {
+    switch ( origin )
+    {
+      case ColdRootSeedInputOrigin::kNotEvaluated:
+        return "not_evaluated";
+      case ColdRootSeedInputOrigin::kCurrentPacket:
+        return "current_packet";
+      case ColdRootSeedInputOrigin::kAccumulated:
+        return "accumulated";
+    }
+    return "unknown";
+  }
+
+  [[nodiscard]] constexpr std::string_view coldRootGeometryResultToken(
+      ColdRootGeometryResult result ) noexcept
+  {
+    switch ( result )
+    {
+      case ColdRootGeometryResult::kNotEvaluated:
+        return "not_evaluated";
+      case ColdRootGeometryResult::kAccepted:
+        return "accepted";
+      case ColdRootGeometryResult::kNonfiniteBackprojection:
+        return "nonfinite_backprojection";
+      case ColdRootGeometryResult::kBehindCamera:
+        return "behind_camera";
+      case ColdRootGeometryResult::kEmptyAfterFilter:
+        return "empty_after_filter";
+    }
+    return "unknown";
+  }
+
+  struct ColdRootObserveDiagnostics
+  {
+    ColdRootPhase         m_phase  = ColdRootPhase::kNotEvaluated;
+    ColdRootReason        m_reason = ColdRootReason::kNotEvaluated;
+    ColdRootBootstrapPath m_bootstrap_path =
+        ColdRootBootstrapPath::kNotEvaluated;
+    ColdRootSeedInputOrigin m_seed_input_origin =
+        ColdRootSeedInputOrigin::kNotEvaluated;
+    ColdRootGeometryResult m_geometry_result =
+        ColdRootGeometryResult::kNotEvaluated;
+    std::optional<std::uint64_t> m_attempt_id;
+
+    ColdRootGateState m_bootstrap_gate = ColdRootGateState::kNotEvaluated;
+    ColdRootGateState m_keyframe_gate  = ColdRootGateState::kNotEvaluated;
+    ColdRootGateState m_stereo_population_gate =
+        ColdRootGateState::kNotEvaluated;
+    ColdRootGateState m_root_geometry_gate  = ColdRootGateState::kNotEvaluated;
+    ColdRootGateState m_imu_excitation_gate = ColdRootGateState::kNotEvaluated;
+    ColdRootGateState m_conditioning_gate   = ColdRootGateState::kNotEvaluated;
+    ColdRootGateState m_initialization_solve_gate =
+        ColdRootGateState::kNotEvaluated;
+    ColdRootGateState m_current_graph_gate = ColdRootGateState::kNotEvaluated;
+    ColdRootGateState m_commit_gate        = ColdRootGateState::kNotEvaluated;
+
+    std::optional<std::uint64_t> m_bootstrap_sample_count;
+    std::optional<std::uint32_t> m_bootstrap_min_samples;
+    std::optional<std::int64_t>  m_bootstrap_duration_ns;
+    std::optional<std::int64_t>  m_bootstrap_min_duration_ns;
+    std::optional<double>        m_bootstrap_acc_std_max_mps2;
+    std::optional<double>        m_bootstrap_acc_std_limit_mps2;
+    std::optional<double>        m_bootstrap_gyr_std_max_radps;
+    std::optional<double>        m_bootstrap_gyr_std_limit_radps;
+    std::optional<double>        m_bootstrap_acc_norm_error_mps2;
+    std::optional<double>        m_bootstrap_acc_norm_tolerance_mps2;
+    std::optional<std::int64_t>  m_bootstrap_timeout_ns;
+    std::optional<bool>          m_moving_bootstrap_enabled;
+    std::optional<std::uint64_t> m_moving_suffix_sample_count;
+    std::optional<std::int64_t>  m_moving_suffix_duration_ns;
+    std::optional<double>        m_moving_acc_mean_norm_mps2;
+    std::optional<double>        m_moving_acc_mean_norm_min_mps2;
+
+    std::optional<std::uint64_t> m_current_positive_disparity_count;
+    std::optional<bool>          m_accumulated_seed_enabled;
+    std::optional<std::uint64_t> m_pending_unique_seed_count;
+    std::optional<std::uint64_t> m_effective_seed_count;
+    std::optional<std::uint32_t> m_min_seed_observations;
+    std::optional<std::uint64_t> m_geometry_accepted_landmarks;
+    std::optional<std::uint32_t> m_geometry_min_landmarks;
+  };
+
   struct ImuBias
   {
     Eigen::Vector3d m_acc_mps2  = Eigen::Vector3d::Zero();
@@ -187,6 +415,7 @@ namespace phad::estimator
     double                                        probe_res_max_px  = 0.0;
     LandmarkId                                    probe_res_max_id{};
     bool                                          probe_detail_valid = false;
+    ColdRootObserveDiagnostics                    m_cold_root;
     VioDiagnostics                                m_vio;
   };
 

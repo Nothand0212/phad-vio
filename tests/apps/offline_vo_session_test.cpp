@@ -7,11 +7,12 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/imgcodecs.hpp>
-#include <sstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace
 {
@@ -21,6 +22,24 @@ namespace
   using phad::apps::runOfflineVoSession;
   using phad::apps::VoDiagRow;
   using phad::apps::writeDiagCsv;
+
+  [[nodiscard]] std::vector<std::string> splitCsvLine(
+      std::string_view line )
+  {
+    std::vector<std::string> fields;
+    std::size_t              begin = 0;
+    while ( true )
+    {
+      const std::size_t end = line.find( ',', begin );
+      if ( end == std::string_view::npos )
+      {
+        fields.emplace_back( line.substr( begin ) );
+        return fields;
+      }
+      fields.emplace_back( line.substr( begin, end - begin ) );
+      begin = end + 1U;
+    }
+  }
 
   // Minimal two-frame EuRoC-shaped sequence used to drive
   // runOfflineVoSession() past the dataset-open step and into its per-frame
@@ -211,11 +230,32 @@ namespace
     ASSERT_TRUE( result.error.has_value() );
     EXPECT_EQ( result.counts.image_frames, 1U );
     ASSERT_EQ( result.diag.size(), 1U );
-    EXPECT_EQ( result.diag.front().num_retained_observations, 0U );
-    EXPECT_EQ( result.diag.front().num_seeded_landmarks, 0U );
-    EXPECT_EQ( result.diag.front().num_current_visual_factors, 0U );
-    EXPECT_EQ( result.diag.front().num_current_mono_visual_factors, 0U );
-    EXPECT_EQ( result.diag.front().unsupported_span_ns, 0 );
+    const VoDiagRow& row = result.diag.front();
+    EXPECT_EQ( row.num_retained_observations, 0U );
+    EXPECT_EQ( row.num_seeded_landmarks, 0U );
+    EXPECT_EQ( row.num_current_visual_factors, 0U );
+    EXPECT_EQ( row.num_current_mono_visual_factors, 0U );
+    EXPECT_EQ( row.unsupported_span_ns, 0 );
+    EXPECT_EQ( row.m_cold_root_phase,
+               phad::estimator::ColdRootPhase::kStereoPopulation );
+    EXPECT_EQ( row.m_cold_root_reason,
+               phad::estimator::ColdRootReason::kPopulationInsufficient );
+    EXPECT_EQ( row.m_cold_root_bootstrap_path,
+               phad::estimator::ColdRootBootstrapPath::kStatic );
+    EXPECT_EQ( row.m_cold_root_seed_input_origin,
+               phad::estimator::ColdRootSeedInputOrigin::kCurrentPacket );
+    EXPECT_EQ( row.m_cold_root_bootstrap_gate,
+               phad::estimator::ColdRootGateState::kPassed );
+    EXPECT_EQ( row.m_cold_root_stereo_population_gate,
+               phad::estimator::ColdRootGateState::kFailed );
+    EXPECT_FALSE( row.m_cold_root_attempt_id.has_value() );
+    ASSERT_TRUE( row.m_cold_root_current_positive_disparity_count.has_value() );
+    EXPECT_EQ( *row.m_cold_root_current_positive_disparity_count, 0U );
+    ASSERT_TRUE( row.m_cold_root_accumulated_seed_enabled.has_value() );
+    EXPECT_FALSE( *row.m_cold_root_accumulated_seed_enabled );
+    ASSERT_TRUE( row.m_cold_root_effective_seed_count.has_value() );
+    EXPECT_EQ( *row.m_cold_root_effective_seed_count, 0U );
+    EXPECT_FALSE( row.m_cold_root_pending_unique_seed_count.has_value() );
 
     // Mid-loop stream errors still run segment finalization, but a run
     // With no initialization rejection, no initialization summary warning is
@@ -239,6 +279,25 @@ namespace
     EXPECT_FALSE( has_cull_warning );
     EXPECT_TRUE( result.gyro_observe.packets.empty() );
     EXPECT_TRUE( result.gyro_observe.samples.empty() );
+  }
+
+  TEST( OfflineVoSessionTest, EstimatorHardFailureDoesNotAppendDiagRow )
+  {
+    TinyEurocFixture fixture{ "estimator_hard_failure" };
+
+    OfflineVoSessionOptions options;
+    options.sequence_root                     = fixture.root();
+    options.estimator.m_bootstrap_min_samples = 100U;
+    options.estimator.m_bootstrap_timeout_ns  = 20'000'000;
+
+    const auto result = runOfflineVoSession( options );
+    ASSERT_TRUE( result.error.has_value() );
+    EXPECT_NE( result.error->detail.find( "static bootstrap timed out" ),
+               std::string::npos );
+    EXPECT_EQ( result.counts.image_frames, 1U );
+    EXPECT_EQ( result.counts.failed, 1U );
+    EXPECT_TRUE( result.diag.empty() );
+    EXPECT_FALSE( result.trajectory.has_value() );
   }
 
   TEST( OfflineVoSessionTest, GyroObserveCollectsPacketBeforeLaterStreamError )
@@ -295,6 +354,46 @@ namespace
     row.num_current_visual_factors      = 9;
     row.num_mapped_observations         = 2;
     row.num_current_mono_visual_factors = 4;
+    row.m_cold_root_phase               = phad::estimator::ColdRootPhase::kCommit;
+    row.m_cold_root_reason              = phad::estimator::ColdRootReason::kCommitted;
+    row.m_cold_root_bootstrap_path =
+        phad::estimator::ColdRootBootstrapPath::kMoving;
+    row.m_cold_root_seed_input_origin =
+        phad::estimator::ColdRootSeedInputOrigin::kCurrentPacket;
+    row.m_cold_root_geometry_result =
+        phad::estimator::ColdRootGeometryResult::kAccepted;
+    row.m_cold_root_attempt_id     = 7U;
+    row.m_cold_root_bootstrap_gate = phad::estimator::ColdRootGateState::kPassed;
+    row.m_cold_root_keyframe_gate  = phad::estimator::ColdRootGateState::kPassed;
+    row.m_cold_root_stereo_population_gate =
+        phad::estimator::ColdRootGateState::kPassed;
+    row.m_cold_root_geometry_gate = phad::estimator::ColdRootGateState::kPassed;
+    row.m_cold_root_current_graph_gate =
+        phad::estimator::ColdRootGateState::kPassed;
+    row.m_cold_root_commit_gate                       = phad::estimator::ColdRootGateState::kPassed;
+    row.m_cold_root_bootstrap_sample_count            = 5U;
+    row.m_cold_root_bootstrap_min_samples             = 3U;
+    row.m_cold_root_bootstrap_duration_ns             = 50'000'000;
+    row.m_cold_root_bootstrap_min_duration_ns         = 20'000'000;
+    row.m_cold_root_bootstrap_acc_std_max_mps2        = 0.0;
+    row.m_cold_root_bootstrap_acc_std_limit_mps2      = 0.05;
+    row.m_cold_root_bootstrap_gyr_std_max_radps       = 0.0;
+    row.m_cold_root_bootstrap_gyr_std_limit_radps     = 0.005;
+    row.m_cold_root_bootstrap_acc_norm_error_mps2     = 0.0;
+    row.m_cold_root_bootstrap_acc_norm_tolerance_mps2 = 0.25;
+    row.m_cold_root_bootstrap_timeout_ns              = 1'000'000'000;
+    row.m_cold_root_moving_bootstrap_enabled          = true;
+    row.m_cold_root_moving_suffix_sample_count        = 3U;
+    row.m_cold_root_moving_suffix_duration_ns         = 20'000'000;
+    row.m_cold_root_moving_acc_mean_norm_mps2         = 9.81;
+    row.m_cold_root_moving_acc_mean_norm_min_mps2 =
+        std::numeric_limits<double>::epsilon();
+    row.m_cold_root_current_positive_disparity_count = 10U;
+    row.m_cold_root_accumulated_seed_enabled         = false;
+    row.m_cold_root_effective_seed_count             = 10U;
+    row.m_cold_root_min_seed_observations            = 10U;
+    row.m_cold_root_geometry_accepted_landmarks      = 10U;
+    row.m_cold_root_geometry_min_landmarks           = 1U;
 
     VoDiagRow outage_row;
     outage_row.timestamp_ns        = row.timestamp_ns + 1;
@@ -310,58 +409,238 @@ namespace
 
     std::ifstream in( path );
     ASSERT_TRUE( in );
-    std::ostringstream oss;
-    oss << in.rdbuf();
-    const std::string text = oss.str();
-    EXPECT_NE( text.find( "timestamp_ns,status,num_obs," ), std::string::npos );
-    EXPECT_NE( text.find( "pnp_success,pnp_inliers,outliers_culled,"
-                          "reproj_rms_after_cull_px" ),
-               std::string::npos );
-    // Slice ④e / Probe B keep their existing contract; Probe B is a
-    // separate jsonl side-channel. outlier_reopt_rounds stay off diag
-    // (session/summary only). culled_landmark_ids remain in-memory only
-    // (session dropTracks; not a diag column). Slice ⑦'s
-    // num_triangulated_seed column was dropped again post-gate (the
-    // diagnostic never increments: triangulation seeding is disabled).
-    // Slice 1b appends continuity and committed-intake diagnostics after the
-    // existing num_disparity column. Mapped-bearing diagnostics append the
-    // mapped population and current mono-factor breakdown.
-    const auto header_end = text.find( '\n' );
-    ASSERT_NE( header_end, std::string::npos );
-    const std::string header = text.substr( 0, header_end );
-    EXPECT_EQ( std::count( header.begin(), header.end(), ',' ), 25 );
-    EXPECT_NE(
-        header.find(
-            "num_disparity,unsupported_span_ns,num_retained_observations,"
-            "num_seeded_landmarks,num_current_visual_factors,"
-            "num_mapped_observations,num_current_mono_visual_factors" ),
-        std::string::npos );
-    EXPECT_NE(
-        text.find( "1403636579763555584,ok,136,0,0,0,1,0,0.000000,0.000000,0,"
-                   "0,0.000000,0,0,0,0,0.000000,0,91,250000000,73,11,9,2,4" ),
-        std::string::npos );
-    const auto outage_begin = text.find( ",visual_outage," );
-    ASSERT_NE( outage_begin, std::string::npos );
-    const auto outage_end = text.find( '\n', outage_begin );
-    ASSERT_NE( outage_end, std::string::npos );
-    const std::string outage_line =
-        text.substr( outage_begin, outage_end - outage_begin );
-    EXPECT_EQ( std::count( outage_line.begin(), outage_line.end(), ',' ),
-               25 );
-    EXPECT_EQ(
-        outage_line.rfind( ",300000000,0,0,0,0,0" ),
-        outage_line.size() -
-            std::string{ ",300000000,0,0,0,0,0" }.size() );
-    const auto discontinuity_begin = text.find( ",discontinuity," );
-    ASSERT_NE( discontinuity_begin, std::string::npos );
-    const auto discontinuity_end = text.find( '\n', discontinuity_begin );
-    ASSERT_NE( discontinuity_end, std::string::npos );
-    const std::string discontinuity_line =
-        text.substr( discontinuity_begin,
-                     discontinuity_end - discontinuity_begin );
-    EXPECT_EQ( discontinuity_line.rfind( ",0,0,0,0,0,0" ),
-               discontinuity_line.size() -
-                   std::string{ ",0,0,0,0,0,0" }.size() );
+    std::string header_line;
+    std::string row_line;
+    std::string outage_line;
+    std::string discontinuity_line;
+    std::string extra_line;
+    ASSERT_TRUE( std::getline( in, header_line ) );
+    ASSERT_TRUE( std::getline( in, row_line ) );
+    ASSERT_TRUE( std::getline( in, outage_line ) );
+    ASSERT_TRUE( std::getline( in, discontinuity_line ) );
+    EXPECT_FALSE( std::getline( in, extra_line ) );
+
+    const std::vector<std::string> expected_header{
+        "timestamp_ns",
+        "status",
+        "num_obs",
+        "num_landmarks",
+        "num_shared",
+        "low_connectivity",
+        "window_size",
+        "prior_key",
+        "reproj_rms_before_px",
+        "reproj_rms_after_px",
+        "num_cheirality",
+        "lm_iterations",
+        "max_window_pose_shift_m",
+        "segment_id",
+        "pnp_success",
+        "pnp_inliers",
+        "outliers_culled",
+        "reproj_rms_after_cull_px",
+        "is_keyframe",
+        "num_disparity",
+        "unsupported_span_ns",
+        "num_retained_observations",
+        "num_seeded_landmarks",
+        "num_current_visual_factors",
+        "num_mapped_observations",
+        "num_current_mono_visual_factors",
+        "cold_root_phase",
+        "cold_root_reason",
+        "cold_root_bootstrap_path",
+        "cold_root_seed_input_origin",
+        "cold_root_geometry_result",
+        "cold_root_attempt_id",
+        "cold_root_bootstrap_gate",
+        "cold_root_keyframe_gate",
+        "cold_root_stereo_population_gate",
+        "cold_root_geometry_gate",
+        "cold_root_imu_excitation_gate",
+        "cold_root_conditioning_gate",
+        "cold_root_initialization_solve_gate",
+        "cold_root_current_graph_gate",
+        "cold_root_commit_gate",
+        "cold_root_bootstrap_sample_count",
+        "cold_root_bootstrap_min_samples",
+        "cold_root_bootstrap_duration_ns",
+        "cold_root_bootstrap_min_duration_ns",
+        "cold_root_bootstrap_acc_std_max_mps2",
+        "cold_root_bootstrap_acc_std_limit_mps2",
+        "cold_root_bootstrap_gyr_std_max_radps",
+        "cold_root_bootstrap_gyr_std_limit_radps",
+        "cold_root_bootstrap_acc_norm_error_mps2",
+        "cold_root_bootstrap_acc_norm_tolerance_mps2",
+        "cold_root_bootstrap_timeout_ns",
+        "cold_root_moving_bootstrap_enabled",
+        "cold_root_moving_suffix_sample_count",
+        "cold_root_moving_suffix_duration_ns",
+        "cold_root_moving_acc_mean_norm_mps2",
+        "cold_root_moving_acc_mean_norm_min_mps2",
+        "cold_root_current_positive_disparity_count",
+        "cold_root_accumulated_seed_enabled",
+        "cold_root_pending_unique_seed_count",
+        "cold_root_effective_seed_count",
+        "cold_root_min_seed_observations",
+        "cold_root_geometry_accepted_landmarks",
+        "cold_root_geometry_min_landmarks",
+    };
+
+    const std::vector<std::string> header_fields = splitCsvLine( header_line );
+    const std::vector<std::string> row_fields    = splitCsvLine( row_line );
+    const std::vector<std::string> outage_fields = splitCsvLine( outage_line );
+    const std::vector<std::string> discontinuity_fields =
+        splitCsvLine( discontinuity_line );
+    EXPECT_EQ( header_fields, expected_header );
+    ASSERT_EQ( row_fields.size(), 64U );
+    ASSERT_EQ( outage_fields.size(), 64U );
+    ASSERT_EQ( discontinuity_fields.size(), 64U );
+
+    const std::vector<std::string> expected_legacy_row{
+        "1403636579763555584",
+        "ok",
+        "136",
+        "0",
+        "0",
+        "0",
+        "1",
+        "0",
+        "0.000000",
+        "0.000000",
+        "0",
+        "0",
+        "0.000000",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0.000000",
+        "0",
+        "91",
+        "250000000",
+        "73",
+        "11",
+        "9",
+        "2",
+        "4",
+    };
+    EXPECT_EQ( std::vector<std::string>( row_fields.begin(),
+                                         row_fields.begin() + 26 ),
+               expected_legacy_row );
+
+    EXPECT_EQ( row_fields[ 26 ], "commit" );
+    EXPECT_EQ( row_fields[ 27 ], "committed" );
+    EXPECT_EQ( row_fields[ 28 ], "moving" );
+    EXPECT_EQ( row_fields[ 29 ], "current_packet" );
+    EXPECT_EQ( row_fields[ 30 ], "accepted" );
+    EXPECT_EQ( row_fields[ 31 ], "7" );
+    for ( const std::size_t index : { 32U, 33U, 34U, 35U, 39U, 40U } )
+    {
+      EXPECT_EQ( row_fields[ index ], "passed" );
+    }
+    for ( const std::size_t index : { 36U, 37U, 38U } )
+    {
+      EXPECT_EQ( row_fields[ index ], "not_evaluated" );
+    }
+    EXPECT_EQ( row_fields[ 41 ], "5" );
+    EXPECT_EQ( row_fields[ 42 ], "3" );
+    EXPECT_EQ( row_fields[ 43 ], "50000000" );
+    EXPECT_EQ( row_fields[ 44 ], "20000000" );
+    EXPECT_DOUBLE_EQ( std::stod( row_fields[ 45 ] ), 0.0 );
+    EXPECT_DOUBLE_EQ( std::stod( row_fields[ 46 ] ), 0.05 );
+    EXPECT_DOUBLE_EQ( std::stod( row_fields[ 47 ] ), 0.0 );
+    EXPECT_DOUBLE_EQ( std::stod( row_fields[ 48 ] ), 0.005 );
+    EXPECT_DOUBLE_EQ( std::stod( row_fields[ 49 ] ), 0.0 );
+    EXPECT_DOUBLE_EQ( std::stod( row_fields[ 50 ] ), 0.25 );
+    EXPECT_EQ( row_fields[ 51 ], "1000000000" );
+    EXPECT_EQ( row_fields[ 52 ], "1" );
+    EXPECT_EQ( row_fields[ 53 ], "3" );
+    EXPECT_EQ( row_fields[ 54 ], "20000000" );
+    EXPECT_DOUBLE_EQ( std::stod( row_fields[ 55 ] ), 9.81 );
+    EXPECT_DOUBLE_EQ( std::stod( row_fields[ 56 ] ),
+                      std::numeric_limits<double>::epsilon() );
+    EXPECT_EQ( row_fields[ 57 ], "10" );
+    EXPECT_EQ( row_fields[ 58 ], "0" );
+    EXPECT_TRUE( row_fields[ 59 ].empty() );
+    EXPECT_EQ( row_fields[ 60 ], "10" );
+    EXPECT_EQ( row_fields[ 61 ], "10" );
+    EXPECT_EQ( row_fields[ 62 ], "10" );
+    EXPECT_EQ( row_fields[ 63 ], "1" );
+
+    const std::vector<std::string> expected_outage_legacy{
+        "1403636579763555585",
+        "visual_outage",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0.000000",
+        "0.000000",
+        "0",
+        "0",
+        "0.000000",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0.000000",
+        "0",
+        "0",
+        "300000000",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+    };
+    const std::vector<std::string> expected_discontinuity_legacy{
+        "1403636579763555586",
+        "discontinuity",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0.000000",
+        "0.000000",
+        "0",
+        "0",
+        "0.000000",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0.000000",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+    };
+    EXPECT_EQ( std::vector<std::string>( outage_fields.begin(),
+                                         outage_fields.begin() + 26 ),
+               expected_outage_legacy );
+    EXPECT_EQ( std::vector<std::string>( discontinuity_fields.begin(),
+                                         discontinuity_fields.begin() + 26 ),
+               expected_discontinuity_legacy );
+
+    std::vector<std::string> expected_default_observe( 38U );
+    std::fill_n( expected_default_observe.begin(), 5U, "not_evaluated" );
+    std::fill_n( expected_default_observe.begin() + 6, 9U,
+                 "not_evaluated" );
+    EXPECT_EQ( std::vector<std::string>( outage_fields.begin() + 26,
+                                         outage_fields.end() ),
+               expected_default_observe );
+    EXPECT_EQ( std::vector<std::string>( discontinuity_fields.begin() + 26,
+                                         discontinuity_fields.end() ),
+               expected_default_observe );
     std::filesystem::remove( path );
   }
 
