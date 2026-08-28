@@ -58,6 +58,8 @@ snake_case，transform 用 `m_T_target_source`。已有 public aggregate 旧成�
 | 文件 | 作用 |
 |---|---|
 | `types.hpp` | `StereoObservation`、`KeyframeMeasurement`、`VioUpdateResult` 等合同 |
+| `cold_root_observe.cpp` | M5 cold-root typed result invariant |
+| `vio_estimator.hpp` / `.cpp` | full-state VIO 与唯一 measurement update seam |
 | `stereo_vo_estimator.hpp` / `.cpp` | `StereoVoEstimator`（PIMPL 藏 GTSAM） |
 | `gyro_rotation_predictor.hpp` / `.cpp` | Q2 known-bias deterministic rotation prediction |
 
@@ -128,6 +130,43 @@ reintegration、graph/solver、quality、support/span 与 diagnostics 受同一 
 primary solve 后 cull 而未成功 reopt 时，factor count 保留 primary graph 口径；
 成功 reopt 后改用该 graph；optional reopt 失败并局部回滚时保留前一次成功 solve
 的 graph 口径。packet counters 为 update-local，只在整个 transaction commit 后发布。
+
+## M5 cold-root current-path Observe
+
+`VioEstimator::update()` 在未初始化 entry 上发布
+`UpdateDiagnostics::m_cold_root`。estimator 是 phase、primary reason、gate trace、
+field presence 与 root attempt identity 的唯一 authority；调用方不得从
+`result.message` 或旧 diagnostics 反推这些语义。完整 token 与 presence 合同见
+[`M5 cold-root seed Observe frozen spec`](../../docs/specs/2026-08-28-m5-cold-root-seed-observe.md)。
+
+`ColdRootObserveDiagnostics` 使用 scoped enum 表达 phase/reason、bootstrap path、
+seed input origin、geometry result 与九个三态 gate。partial-phase 数值使用
+`std::optional`：`nullopt` 表示本次没有执行，存在的 `0` / `false` 表示真实观测值。
+通过 raw IMU、observation 与 bootstrap provenance 校验后，uninitialized entry 会在
+bootstrap early return 前发布当前 packet positive-disparity count 与
+`enable_accumulated_seed` option snapshot；旧 `num_disparity` 的赋值位置与语义保持
+原样。
+
+bootstrap predicate 分别记录 full static window 与实际访问的 moving suffix，value 与
+当前 threshold 成对出现。current packet、pending unique 与 effective seed
+population 分开记录；`m_effective_seed_count` 始终对应现有 population gate 实际消费的
+输入。当前实现没有 formal IMU excitation、conditioning 或 staged initialization
+solve，因此对应三个 gate 固定为 `not_evaluated`；既有 full-state graph 只由
+`m_current_graph_gate` 表达。
+
+`attempt_id` 只在唯一 `seedRoot()` call-site 紧邻调用前分配。counter 位于
+`VioEstimator::Impl`，不属于 `VioUpdateState` transaction；geometry rejection 或
+后续 graph rollback 会消耗 ID，discontinuity / segment completion 不重置，同一
+estimator instance 从 `1` 单调递增。private root outcome 保存本 attempt 的 geometry
+result 与 accepted landmark count，使 rollback 后仍能报告真实执行结果，同时保持
+原有 status、message、estimate、state mutation 与 exception propagation。
+
+active-segment update、discontinuity 与 cold-root pre-gate invalid input 使用
+`not_evaluated/not_evaluated`，cold-root-only optional 为空。session 只逐字段复制
+`m_cold_root`，持久化合同见 [`apps/AGENTS.md`](../../apps/AGENTS.md)。每次 public
+`update()` 返回前，estimator 用 private typed invariant 检查 phase/reason、gate trace、
+presence、threshold/origin/geometry 与 status/estimate 的组合；内部产生的无效组合以
+`logic_error` fail-fast，不会进入 session 或 CSV。
 
 ## 段生命周期（M3.3）
 
