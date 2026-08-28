@@ -251,6 +251,43 @@ TEST( StereoVoPnpTest, PnpSucceedsOnCleanMotion )
   }
 }
 
+TEST( StereoVoPnpTest, PnpSucceedsWithMappedLeftOnlyCorrespondences )
+{
+  const auto calibration = makeCalibration();
+  const auto ids         = sequentialIds( kLandmarksA.size(), 1 );
+  const auto poses       = translatingPoses( 2, 0.10 );
+
+  EstimatorOptions options = defaultPnpOptions();
+  VioEstimator     estimator( calibration, phad::test_support::testImuParameters(), options );
+
+  const auto root = estimator.update( makeFrame(
+      calibration, poses[ 0 ], 50'000'000, kLandmarksA, ids ) );
+  ASSERT_EQ( root.status, UpdateStatus::kOk ) << root.message;
+
+  auto left_only = makeFrame( calibration, poses[ 1 ], 100'000'000,
+                              kLandmarksA, ids );
+  for ( StereoObservation& observation : left_only.m_observations )
+  {
+    observation.disparity_px = 0.0;
+  }
+
+  const auto recovered = estimator.update( left_only );
+  ASSERT_EQ( recovered.status, UpdateStatus::kOk ) << recovered.message;
+  ASSERT_TRUE( recovered.estimate.has_value() );
+  EXPECT_EQ( recovered.diagnostics.num_shared, 0U );
+  EXPECT_EQ( recovered.diagnostics.num_mapped_observations, ids.size() );
+  EXPECT_TRUE( recovered.diagnostics.pnp_success );
+  EXPECT_EQ( recovered.diagnostics.pnp_inliers, ids.size() );
+  EXPECT_EQ( recovered.diagnostics.num_current_mono_visual_factors,
+             ids.size() );
+  EXPECT_EQ( recovered.diagnostics.m_vio.m_visual_coast_duration_ns, 0 );
+  EXPECT_EQ( recovered.diagnostics.unsupported_span_ns, 0 );
+  EXPECT_LT( ( recovered.estimate->T_W_B.translation() -
+               poses[ 1 ].translation() )
+                 .norm(),
+             0.05 );
+}
+
 TEST( StereoVoPnpTest, PnpMasksSharedOutliers )
 {
   const auto calibration = makeCalibration();
@@ -303,6 +340,68 @@ TEST( StereoVoPnpTest, PnpMasksSharedOutliers )
   ASSERT_EQ( recovered.status, UpdateStatus::kOk ) << recovered.message;
   EXPECT_EQ( recovered.diagnostics.num_shared, landmarks_plus.size() );
   EXPECT_EQ( recovered.diagnostics.num_landmarks, kLandmarksA.size() + 1U );
+}
+
+TEST( StereoVoPnpTest,
+      PnpMaskDropsMappedStereoAndMonoOutliersButRetainsUnmappedHistory )
+{
+  const auto                   calibration = makeCalibration();
+  std::vector<Eigen::Vector3d> landmarks   = kLandmarksA;
+  landmarks.emplace_back( 0.55, 0.30, 5.7 );
+  landmarks.emplace_back( -0.45, 0.35, 5.4 );
+  const auto ids   = sequentialIds( landmarks.size(), 1 );
+  const auto poses = translatingPoses( 2, 0.05 );
+
+  EstimatorOptions options = defaultPnpOptions();
+  VioEstimator     estimator( calibration,
+                              phad::test_support::testImuParameters(),
+                              options );
+
+  const auto root = estimator.update( makeFrame(
+      calibration, poses[ 0 ], 50'000'000, landmarks, ids ) );
+  ASSERT_EQ( root.status, UpdateStatus::kOk ) << root.message;
+
+  auto             mixed                 = makeFrame( calibration, poses[ 1 ], 100'000'000, landmarks,
+                                                      ids );
+  const LandmarkId good_mono_id          = ids[ 0 ];
+  const LandmarkId stereo_outlier        = ids[ ids.size() - 2 ];
+  const LandmarkId mono_outlier          = ids.back();
+  const LandmarkId unmapped_id           = 99;
+  mixed.m_observations[ 0 ].disparity_px = 0.0;
+  offsetLeftPixel( mixed, stereo_outlier, Eigen::Vector2d( 40.0, 0.0 ) );
+  offsetLeftPixel( mixed, mono_outlier, Eigen::Vector2d( 40.0, 0.0 ) );
+  for ( StereoObservation& observation : mixed.m_observations )
+  {
+    if ( observation.id == mono_outlier )
+    {
+      observation.disparity_px = 0.0;
+    }
+  }
+  StereoObservation unmapped = projectLandmark(
+      calibration, poses[ 1 ], unmapped_id,
+      Eigen::Vector3d( 0.2, -0.35, 5.0 ) );
+  unmapped.disparity_px = 0.0;
+  mixed.m_observations.push_back( unmapped );
+
+  const auto masked = estimator.update( mixed );
+  ASSERT_EQ( masked.status, UpdateStatus::kOk ) << masked.message;
+  EXPECT_TRUE( masked.diagnostics.pnp_success );
+  EXPECT_EQ( masked.diagnostics.pnp_inliers, 10U );
+  EXPECT_EQ( masked.diagnostics.num_mapped_observations, ids.size() );
+  EXPECT_EQ( masked.diagnostics.num_current_visual_factors, 10U );
+  EXPECT_EQ( masked.diagnostics.num_current_mono_visual_factors, 1U );
+
+  const auto good_mono_stamps =
+      estimator.observationTimestamps( good_mono_id );
+  const auto stereo_outlier_stamps =
+      estimator.observationTimestamps( stereo_outlier );
+  const auto mono_outlier_stamps =
+      estimator.observationTimestamps( mono_outlier );
+  const auto unmapped_stamps = estimator.observationTimestamps( unmapped_id );
+  EXPECT_TRUE( hasTimestamp( good_mono_stamps, 100'000'000 ) );
+  EXPECT_TRUE( hasTimestamp( stereo_outlier_stamps, 100'000'000 ) );
+  EXPECT_TRUE( hasTimestamp( mono_outlier_stamps, 100'000'000 ) );
+  EXPECT_TRUE( hasTimestamp( unmapped_stamps, 100'000'000 ) );
 }
 
 TEST( StereoVoPnpTest, FallsBackWhenPnpStereoRmsIsWorseThanGuess )
@@ -396,6 +495,84 @@ TEST( StereoVoPnpTest, AcceptsPnpWithinStereoNoise )
   EXPECT_TRUE( accepted.diagnostics.pnp_success );
   EXPECT_GE( accepted.diagnostics.pnp_inliers,
              static_cast<std::uint32_t>( kNearAxisLandmarks.size() ) );
+}
+
+TEST( StereoVoPnpTest, MixedScoreUsesOneL2NormPerInlierObservation )
+{
+  const auto              calibration = makeCalibration();
+  const auto              ids         = sequentialIds( kNearAxisLandmarks.size(), 1 );
+  const Eigen::Isometry3d stationary  = Eigen::Isometry3d::Identity();
+
+  const auto run = [ & ]( std::size_t mono_count ) {
+    EstimatorOptions options     = defaultPnpOptions();
+    options.stereo_sigma_px      = 0.70;
+    options.enable_outlier_cull  = false;
+    options.enable_outlier_reopt = false;
+    VioEstimator estimator( calibration,
+                            phad::test_support::testImuParameters(),
+                            options );
+    for ( std::int64_t frame = 1; frame <= 2; ++frame )
+    {
+      const auto seeded = estimator.update( makeFrame(
+          calibration, stationary, frame * 50'000'000,
+          kNearAxisLandmarks, ids ) );
+      EXPECT_EQ( seeded.status, UpdateStatus::kOk ) << seeded.message;
+    }
+
+    Eigen::Isometry3d proposal_pose = stationary;
+    proposal_pose.translation().z() = 1.0;
+    auto       mixed                = makeFrame( calibration, proposal_pose, 150'000'000,
+                                                 kNearAxisLandmarks, ids );
+    const auto guess                = makeFrame( calibration, stationary, 150'000'000,
+                                                 kNearAxisLandmarks, ids );
+    for ( std::size_t index = 0; index < mixed.m_observations.size(); ++index )
+    {
+      mixed.m_observations[ index ].disparity_px =
+          index < mono_count ? 0.0
+                             : guess.m_observations[ index ].disparity_px;
+    }
+    return estimator.update( mixed );
+  };
+
+  const auto three_mono = run( 3 );
+  ASSERT_EQ( three_mono.status, UpdateStatus::kOk ) << three_mono.message;
+  EXPECT_FALSE( three_mono.diagnostics.pnp_success );
+  EXPECT_EQ( three_mono.diagnostics.pnp_inliers, 0U );
+
+  const auto four_mono = run( 4 );
+  ASSERT_EQ( four_mono.status, UpdateStatus::kOk ) << four_mono.message;
+  EXPECT_TRUE( four_mono.diagnostics.pnp_success );
+  EXPECT_EQ( four_mono.diagnostics.pnp_inliers, ids.size() );
+}
+
+TEST( StereoVoPnpTest, AcceptsFiniteProposalWhenPropagatedGuessCannotScore )
+{
+  const auto              calibration = makeCalibration();
+  const auto              ids         = sequentialIds( kLandmarksA.size(), 1 );
+  const Eigen::Isometry3d stationary  = Eigen::Isometry3d::Identity();
+
+  EstimatorOptions options = defaultPnpOptions();
+  VioEstimator     estimator( calibration,
+                              phad::test_support::testImuParameters(),
+                              options );
+  const auto       root = estimator.update( makeFrame(
+      calibration, stationary, 50'000'000, kLandmarksA, ids ) );
+  ASSERT_EQ( root.status, UpdateStatus::kOk ) << root.message;
+
+  auto  measurement = makeFrame( calibration, stationary, 100'000'000,
+                                 kLandmarksA, ids );
+  auto& imu         = std::get<phad::sensor::RawImuInterval>( measurement.m_imu );
+  for ( phad::sensor::ImuMeasurement& sample : imu.m_samples )
+  {
+    sample.accel_mps2[ 2 ] += 8'000.0;
+  }
+
+  const auto recovered = estimator.update( measurement );
+  ASSERT_EQ( recovered.status, UpdateStatus::kOk ) << recovered.message;
+  EXPECT_TRUE( recovered.diagnostics.pnp_success );
+  EXPECT_EQ( recovered.diagnostics.pnp_inliers, ids.size() );
+  ASSERT_TRUE( recovered.estimate.has_value() );
+  EXPECT_TRUE( recovered.estimate->T_W_B.matrix().allFinite() );
 }
 
 TEST( StereoVoPnpTest, BelowSupportThresholdSkipsPnpButRetainsVisualCadence )

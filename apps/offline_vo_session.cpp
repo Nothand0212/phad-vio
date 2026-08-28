@@ -838,7 +838,8 @@ namespace phad::apps
         {
           ++result.counts.pnp_successes;
         }
-        if ( options.estimator.enable_pnp_init && d.num_shared > 0U &&
+        if ( options.estimator.enable_pnp_init &&
+             d.num_mapped_observations > 0U &&
              !d.pnp_success && !is_new_segment )
         {
           ++result.counts.pnp_fallbacks;
@@ -872,6 +873,9 @@ namespace phad::apps
           .num_retained_observations  = d.num_retained_observations,
           .num_seeded_landmarks       = d.num_seeded_landmarks,
           .num_current_visual_factors = d.num_current_visual_factors,
+          .num_mapped_observations    = d.num_mapped_observations,
+          .num_current_mono_visual_factors =
+              d.num_current_mono_visual_factors,
       } );
 
       if ( options.collect_timing )
@@ -1104,7 +1108,8 @@ namespace phad::apps
            "pnp_success,pnp_inliers,outliers_culled,"
            "reproj_rms_after_cull_px,is_keyframe,num_disparity,"
            "unsupported_span_ns,num_retained_observations,"
-           "num_seeded_landmarks,num_current_visual_factors\n";
+           "num_seeded_landmarks,num_current_visual_factors,"
+           "num_mapped_observations,num_current_mono_visual_factors\n";
 
     for ( const VoDiagRow& row : rows )
     {
@@ -1124,7 +1129,9 @@ namespace phad::apps
           << row.num_disparity << ',' << row.unsupported_span_ns << ','
           << row.num_retained_observations << ','
           << row.num_seeded_landmarks << ','
-          << row.num_current_visual_factors << '\n';
+          << row.num_current_visual_factors << ','
+          << row.num_mapped_observations << ','
+          << row.num_current_mono_visual_factors << '\n';
     }
 
     if ( !out )

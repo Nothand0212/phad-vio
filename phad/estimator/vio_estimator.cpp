@@ -17,6 +17,7 @@
 #include <gtsam/nonlinear/PriorFactor.h>
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/slam/BetweenFactor.h>
+#include <gtsam/slam/ProjectionFactor.h>
 #include <gtsam/slam/StereoFactor.h>
 
 #include <algorithm>
@@ -61,16 +62,64 @@ namespace phad::estimator
     using internal::VioUpdateTransaction;
     using internal::WindowFrame;
 
+    using StereoVisualFactor =
+        gtsam::GenericStereoFactor<gtsam::Pose3, gtsam::Point3>;
+    using MonoVisualFactor = gtsam::GenericProjectionFactor<
+        gtsam::Pose3, gtsam::Point3, gtsam::Cal3_S2>;
+
+    enum class VisualFactorModality
+    {
+      kStereo,
+      kMono,
+    };
+
+    struct VisualFactorView
+    {
+      const gtsam::NoiseModelFactor* m_factor;
+      gtsam::Key                     m_pose_key;
+      gtsam::Key                     m_landmark_key;
+      VisualFactorModality           m_modality;
+
+      [[nodiscard]] gtsam::Vector unwhitenedError(
+          const gtsam::Values& values ) const
+      {
+        return m_factor->unwhitenedError( values );
+      }
+    };
+
+    [[nodiscard]] std::optional<VisualFactorView> asVisualFactor(
+        const gtsam::NonlinearFactor::shared_ptr& factor )
+    {
+      if ( factor == nullptr )
+      {
+        return std::nullopt;
+      }
+      if ( const auto* stereo =
+               dynamic_cast<const StereoVisualFactor*>( factor.get() ) )
+      {
+        return VisualFactorView{ stereo, stereo->key1(), stereo->key2(),
+                                 VisualFactorModality::kStereo };
+      }
+      if ( const auto* mono =
+               dynamic_cast<const MonoVisualFactor*>( factor.get() ) )
+      {
+        return VisualFactorView{ mono, mono->key1(), mono->key2(),
+                                 VisualFactorModality::kMono };
+      }
+      return std::nullopt;
+    }
+
     struct VioGraphInfo
     {
-      std::uint32_t               m_nav_states             = 0;
-      std::uint32_t               m_imu_factors            = 0;
-      std::uint32_t               m_bias_rw_factors        = 0;
-      std::uint32_t               m_visual_factors         = 0;
-      std::uint32_t               m_current_visual_factors = 0;
-      std::uint32_t               m_root_prior_sets        = 0;
-      std::uint32_t               m_integration_steps      = 0;
-      std::int64_t                m_integrated_duration_ns = 0;
+      std::uint32_t               m_nav_states                  = 0;
+      std::uint32_t               m_imu_factors                 = 0;
+      std::uint32_t               m_bias_rw_factors             = 0;
+      std::uint32_t               m_visual_factors              = 0;
+      std::uint32_t               m_current_visual_factors      = 0;
+      std::uint32_t               m_current_mono_visual_factors = 0;
+      std::uint32_t               m_root_prior_sets             = 0;
+      std::uint32_t               m_integration_steps           = 0;
+      std::int64_t                m_integrated_duration_ns      = 0;
       Eigen::Matrix<double, 6, 1> m_last_bias_rw_sigmas =
           Eigen::Matrix<double, 6, 1>::Zero();
     };
@@ -132,6 +181,13 @@ namespace phad::estimator
           observation.left_pixel.y() );
     }
 
+    [[nodiscard]] gtsam::Point2 toMonoPoint(
+        const StereoObservation& observation )
+    {
+      return gtsam::Point2( observation.left_pixel.x(),
+                            observation.left_pixel.y() );
+    }
+
     [[nodiscard]] bool isFinite( const Eigen::Isometry3d& T_a_b )
     {
       return T_a_b.matrix().allFinite();
@@ -147,6 +203,20 @@ namespace phad::estimator
     {
       const auto gaussian =
           gtsam::noiseModel::Isotropic::Sigma( 3, options.stereo_sigma_px );
+      if ( options.huber_k_px <= 0.0 )
+      {
+        return gaussian;
+      }
+      return gtsam::noiseModel::Robust::Create(
+          gtsam::noiseModel::mEstimator::Huber::Create( options.huber_k_px ),
+          gaussian );
+    }
+
+    [[nodiscard]] gtsam::SharedNoiseModel makeMonoNoise(
+        const EstimatorOptions& options )
+    {
+      const auto gaussian =
+          gtsam::noiseModel::Isotropic::Sigma( 2, options.stereo_sigma_px );
       if ( options.huber_k_px <= 0.0 )
       {
         return gaussian;
@@ -359,7 +429,7 @@ namespace phad::estimator
       return Eigen::AngleAxisd( std::acos( dot ), axis ).toRotationMatrix();
     }
 
-    [[nodiscard]] double stereoReprojRms(
+    [[nodiscard]] double visualReprojRms(
         const gtsam::NonlinearFactorGraph& graph,
         const gtsam::Values&               values )
     {
@@ -367,19 +437,13 @@ namespace phad::estimator
       std::size_t count  = 0;
       for ( const auto& factor : graph )
       {
-        if ( factor == nullptr )
+        const std::optional<VisualFactorView> visual =
+            asVisualFactor( factor );
+        if ( !visual.has_value() )
         {
           continue;
         }
-        const auto* stereo =
-            dynamic_cast<const gtsam::GenericStereoFactor<gtsam::Pose3,
-                                                          gtsam::Point3>*>(
-                factor.get() );
-        if ( stereo == nullptr )
-        {
-          continue;
-        }
-        const gtsam::Vector error = stereo->unwhitenedError( values );
+        const gtsam::Vector error = visual->unwhitenedError( values );
         sum_sq += error.squaredNorm();
         ++count;
       }
@@ -412,7 +476,7 @@ namespace phad::estimator
       }
     }
 
-    // Per-landmark mean stereo residual (unwhitened L2), then mean/max/max_id.
+    // Per-landmark mean visual residual (unwhitened L2), then mean/max/max_id.
     void fillProbeLandmarkResiduals( const gtsam::NonlinearFactorGraph& graph,
                                      const gtsam::Values&               values,
                                      UpdateDiagnostics&                 diagnostics )
@@ -420,22 +484,17 @@ namespace phad::estimator
       std::unordered_map<LandmarkId, std::pair<double, std::size_t>> per_lm;
       for ( const auto& factor : graph )
       {
-        if ( factor == nullptr )
-        {
-          continue;
-        }
-        const auto* stereo =
-            dynamic_cast<const gtsam::GenericStereoFactor<gtsam::Pose3,
-                                                          gtsam::Point3>*>(
-                factor.get() );
-        if ( stereo == nullptr )
+        const std::optional<VisualFactorView> visual =
+            asVisualFactor( factor );
+        if ( !visual.has_value() )
         {
           continue;
         }
         const LandmarkId id =
-            static_cast<LandmarkId>( gtsam::Symbol( stereo->key2() ).index() );
+            static_cast<LandmarkId>(
+                gtsam::Symbol( visual->m_landmark_key ).index() );
         auto& entry = per_lm[ id ];
-        entry.first += stereo->unwhitenedError( values ).norm();
+        entry.first += visual->unwhitenedError( values ).norm();
         ++entry.second;
       }
 
@@ -465,9 +524,9 @@ namespace phad::estimator
       diagnostics.probe_res_max_id = max_id;
     }
 
-    // Same RMS as stereoReprojRms but skips factors whose landmark is no longer
+    // Same RMS as visualReprojRms but skips factors whose landmark is no longer
     // in landmarks_W (cheirality / mean-reproj cull). Does not rebuild the graph.
-    [[nodiscard]] double stereoReprojRmsSkippingMissingLandmarks(
+    [[nodiscard]] double visualReprojRmsSkippingMissingLandmarks(
         const gtsam::NonlinearFactorGraph&                     graph,
         const gtsam::Values&                                   values,
         const std::unordered_map<LandmarkId, Eigen::Vector3d>& landmarks_W )
@@ -476,26 +535,20 @@ namespace phad::estimator
       std::size_t count  = 0;
       for ( const auto& factor : graph )
       {
-        if ( factor == nullptr )
+        const std::optional<VisualFactorView> visual =
+            asVisualFactor( factor );
+        if ( !visual.has_value() )
         {
           continue;
         }
-        const auto* stereo =
-            dynamic_cast<const gtsam::GenericStereoFactor<gtsam::Pose3,
-                                                          gtsam::Point3>*>(
-                factor.get() );
-        if ( stereo == nullptr )
-        {
-          continue;
-        }
-        const gtsam::Key lkey = stereo->key2();
+        const gtsam::Key lkey = visual->m_landmark_key;
         const LandmarkId id =
             static_cast<LandmarkId>( gtsam::Symbol( lkey ).index() );
         if ( landmarks_W.find( id ) == landmarks_W.end() )
         {
           continue;
         }
-        const gtsam::Vector error = stereo->unwhitenedError( values );
+        const gtsam::Vector error = visual->unwhitenedError( values );
         sum_sq += error.squaredNorm();
         ++count;
       }
@@ -506,8 +559,8 @@ namespace phad::estimator
       return std::sqrt( sum_sq / static_cast<double>( count ) );
     }
 
-    // GenericStereoFactor returns 2*fx on each residual axis when the point is
-    // behind the camera (throwCheirality=false).
+    // Both visual factor types return 2*fx on each residual axis when the point
+    // is behind the camera (throwCheirality=false).
     [[nodiscard]] std::uint32_t countCheiralityFactors(
         const gtsam::NonlinearFactorGraph& graph, const gtsam::Values& values,
         double fx_pixels )
@@ -516,23 +569,17 @@ namespace phad::estimator
       std::uint32_t count    = 0;
       for ( const auto& factor : graph )
       {
-        if ( factor == nullptr )
+        const std::optional<VisualFactorView> visual =
+            asVisualFactor( factor );
+        if ( !visual.has_value() )
         {
           continue;
         }
-        const auto* stereo =
-            dynamic_cast<const gtsam::GenericStereoFactor<gtsam::Pose3,
-                                                          gtsam::Point3>*>(
-                factor.get() );
-        if ( stereo == nullptr )
-        {
-          continue;
-        }
-        const gtsam::Vector error = stereo->unwhitenedError( values );
-        if ( error.size() == 3 &&
-             std::abs( error( 0 ) - sentinel ) < 1e-6 &&
-             std::abs( error( 1 ) - sentinel ) < 1e-6 &&
-             std::abs( error( 2 ) - sentinel ) < 1e-6 )
+        const gtsam::Vector error = visual->unwhitenedError( values );
+        const Eigen::Index  expected_size =
+            visual->m_modality == VisualFactorModality::kStereo ? 3 : 2;
+        if ( error.size() == expected_size &&
+             ( error.array() - sentinel ).abs().maxCoeff() < 1e-6 )
         {
           ++count;
         }
@@ -560,11 +607,7 @@ namespace phad::estimator
           bool observes = false;
           for ( const StereoObservation& observation : frame.m_observations )
           {
-            // Slice ⑦: zero-disparity frames carry no constraint on the
-            // landmark; count only stereo observations (mirrors
-            // dropCheiralityLandmarks).
-            if ( observation.id == id &&
-                 observation.disparity_px > 0.0 )
+            if ( observation.id == id )
             {
               observes = true;
               break;
@@ -595,8 +638,10 @@ namespace phad::estimator
     sensor::ImuParameters                        imu;
     EstimatorOptions                             options;
     gtsam::Cal3_S2Stereo::shared_ptr             K;
+    gtsam::Cal3_S2::shared_ptr                   K_mono;
     gtsam::Pose3                                 body_P_sensor;
     gtsam::SharedNoiseModel                      stereo_noise;
+    gtsam::SharedNoiseModel                      mono_noise;
     gtsam::SharedNoiseModel                      prior_noise;
     gtsam::SharedNoiseModel                      velocity_prior_noise;
     gtsam::SharedNoiseModel                      bias_prior_noise;
@@ -613,9 +658,11 @@ namespace phad::estimator
               calibration.fxPixels(), calibration.fyPixels(), 0.0,
               calibration.cxPixels(), calibration.cyPixels(),
               calibration.baselineM() ) ),
+          K_mono( std::make_shared<gtsam::Cal3_S2>( K->calibration() ) ),
           body_P_sensor(
               toPose3( toIsometry( calibration.T_B_left_rectified() ) ) ),
           stereo_noise( makeStereoNoise( options ) ),
+          mono_noise( makeMonoNoise( options ) ),
           prior_noise( makePriorNoise( options ) ),
           velocity_prior_noise( makeVelocityPriorNoise( options ) ),
           bias_prior_noise( makeBiasPriorNoise( options ) ),
@@ -791,14 +838,15 @@ namespace phad::estimator
 
     struct PnpInitResult
     {
-      bool              success = false;
-      Eigen::Isometry3d T_W_B   = Eigen::Isometry3d::Identity();
-      std::vector<int>  inlier_indices;  // into shared correspondence list
+      bool                           success     = false;
+      Eigen::Isometry3d              T_W_B       = Eigen::Isometry3d::Identity();
+      std::uint32_t                  num_inliers = 0;
+      std::unordered_set<LandmarkId> inlier_ids;
     };
 
-    [[nodiscard]] std::optional<double> stereoRmsAtPose(
+    [[nodiscard]] std::optional<double> poseRmsAtPose(
         const Eigen::Isometry3d&                     T_W_B,
-        const std::vector<const StereoObservation*>& shared_observations,
+        const std::vector<const StereoObservation*>& mapped_observations,
         const std::vector<int>&                      inlier_indices ) const
     {
       if ( !isFinite( T_W_B ) || inlier_indices.empty() )
@@ -812,23 +860,17 @@ namespace phad::estimator
       for ( const int index : inlier_indices )
       {
         if ( index < 0 ||
-             static_cast<std::size_t>( index ) >= shared_observations.size() )
+             static_cast<std::size_t>( index ) >= mapped_observations.size() )
         {
           return std::nullopt;
         }
         const StereoObservation* observation =
-            shared_observations[ static_cast<std::size_t>( index ) ];
-        if ( observation == nullptr )
+            mapped_observations[ static_cast<std::size_t>( index ) ];
+        if ( observation == nullptr ||
+             !observation->left_pixel.allFinite() ||
+             !std::isfinite( observation->disparity_px ) )
         {
           return std::nullopt;
-        }
-        // Slice ⑦: a zero-disparity observation carries no stereo
-        // information — toStereoPoint would fabricate a right pixel equal to
-        // the left one and inflate this pose's RMS (it still supports the PnP
-        // correspondence itself via its left pixel).
-        if ( observation->disparity_px <= 0.0 )
-        {
-          continue;
         }
         const auto landmark_it = m_state->m_landmarks_w.find( observation->id );
         if ( landmark_it == m_state->m_landmarks_w.end() ||
@@ -846,22 +888,47 @@ namespace phad::estimator
           return std::nullopt;
         }
 
-        gtsam::StereoPoint2 projected;
-        try
+        double residual_sq = 0.0;
+        if ( observation->disparity_px > 0.0 )
         {
-          projected = camera.project( point_W );
+          gtsam::StereoPoint2 projected;
+          try
+          {
+            projected = camera.project( point_W );
+          }
+          catch ( const gtsam::StereoCheiralityException& )
+          {
+            return std::nullopt;
+          }
+          const gtsam::Vector residual =
+              ( projected - toStereoPoint( *observation ) ).vector();
+          if ( !residual.allFinite() )
+          {
+            return std::nullopt;
+          }
+          residual_sq = residual.squaredNorm();
         }
-        catch ( const gtsam::StereoCheiralityException& )
+        else
+        {
+          const double u = calibration.fxPixels() * point_left.x() /
+                               point_left.z() +
+                           calibration.cxPixels();
+          const double v = calibration.fyPixels() * point_left.y() /
+                               point_left.z() +
+                           calibration.cyPixels();
+          const Eigen::Vector2d residual =
+              Eigen::Vector2d( u, v ) - observation->left_pixel;
+          if ( !residual.allFinite() )
+          {
+            return std::nullopt;
+          }
+          residual_sq = residual.squaredNorm();
+        }
+        if ( !std::isfinite( residual_sq ) )
         {
           return std::nullopt;
         }
-        const gtsam::Vector residual =
-            ( projected - toStereoPoint( *observation ) ).vector();
-        if ( !residual.allFinite() )
-        {
-          return std::nullopt;
-        }
-        sum_sq += residual.squaredNorm();
+        sum_sq += residual_sq;
         if ( !std::isfinite( sum_sq ) )
         {
           return std::nullopt;
@@ -871,10 +938,10 @@ namespace phad::estimator
                         static_cast<double>( inlier_indices.size() ) );
     }
 
-    // Shared landmarks ∩ current left observations → solvePnPRansac.
+    // Mapped landmarks ∩ current left observations → solvePnPRansac.
     // A finite, sufficiently supported proposal is accepted only when its
-    // stereo RMS on the PnP inlier set is no more than one observation sigma
-    // worse than the existing guess.
+    // modality-aware RMS on the PnP inlier set is no more than one
+    // observation sigma worse than the existing guess.
     [[nodiscard]] PnpInitResult tryPnpInit(
         const VioMeasurement&    measurement,
         const Eigen::Isometry3d& guess_T_W_B ) const
@@ -883,10 +950,10 @@ namespace phad::estimator
 
       std::vector<cv::Point3d>              pts3d;
       std::vector<cv::Point2d>              pts2d;
-      std::vector<const StereoObservation*> shared_observations;
+      std::vector<const StereoObservation*> mapped_observations;
       pts3d.reserve( measurement.m_observations.size() );
       pts2d.reserve( measurement.m_observations.size() );
-      shared_observations.reserve( measurement.m_observations.size() );
+      mapped_observations.reserve( measurement.m_observations.size() );
       for ( const StereoObservation& observation : measurement.m_observations )
       {
         const auto landmark_it = m_state->m_landmarks_w.find( observation.id );
@@ -894,18 +961,11 @@ namespace phad::estimator
         {
           continue;
         }
-        // Slice ⑦: zero-disparity observations cannot constrain PnP — they
-        // have no stereo depth, and the stereo RMS acceptance gate cannot
-        // see them.
-        if ( observation.disparity_px <= 0.0 )
-        {
-          continue;
-        }
         const Eigen::Vector3d& point_W = landmark_it->second;
         pts3d.emplace_back( point_W.x(), point_W.y(), point_W.z() );
         pts2d.emplace_back( observation.left_pixel.x(),
                             observation.left_pixel.y() );
-        shared_observations.push_back( &observation );
+        mapped_observations.push_back( &observation );
       }
       if ( static_cast<int>( pts3d.size() ) < options.min_pnp_inliers )
       {
@@ -992,23 +1052,35 @@ namespace phad::estimator
         return result;
       }
 
-      const std::optional<double> proposal_rms = stereoRmsAtPose(
-          T_W_B, shared_observations, inlier_indices );
+      const std::optional<double> proposal_rms = poseRmsAtPose(
+          T_W_B, mapped_observations, inlier_indices );
       if ( !proposal_rms.has_value() )
       {
         return result;
       }
-      const std::optional<double> guess_rms = stereoRmsAtPose(
-          guess_T_W_B, shared_observations, inlier_indices );
+      const std::optional<double> guess_rms = poseRmsAtPose(
+          guess_T_W_B, mapped_observations, inlier_indices );
       if ( guess_rms.has_value() &&
            *proposal_rms > *guess_rms + options.stereo_sigma_px )
       {
         return result;
       }
 
-      result.success        = true;
-      result.T_W_B          = T_W_B;
-      result.inlier_indices = std::move( inlier_indices );
+      result.inlier_ids.reserve( inlier_indices.size() );
+      for ( const int index : inlier_indices )
+      {
+        if ( index < 0 ||
+             static_cast<std::size_t>( index ) >= mapped_observations.size() )
+        {
+          return PnpInitResult{};
+        }
+        result.inlier_ids.insert(
+            mapped_observations[ static_cast<std::size_t>( index ) ]->id );
+      }
+      result.success = true;
+      result.T_W_B   = T_W_B;
+      result.num_inliers =
+          static_cast<std::uint32_t>( inlier_indices.size() );
       return result;
     }
 
@@ -1129,12 +1201,8 @@ namespace phad::estimator
           } ) );
     }
 
-    // Slice ⑦: count only stereo observations (disparity_px > 0) — those are
-    // the ones that become BA factors. A landmark whose window observations
-    // are all zero-disparity must NOT enter the graph: it would carry no
-    // factor, and counting a mixed landmark's zero-disparity observations
-    // toward min_landmark_observations could admit a 1-factor point that
-    // slides freely along its ray.
+    // Factor admission is owned by the staged map. A left-only observation
+    // can constrain an existing landmark but cannot create landmark depth.
     [[nodiscard]] std::unordered_map<LandmarkId, int> countObservations()
         const
     {
@@ -1143,7 +1211,8 @@ namespace phad::estimator
       {
         for ( const StereoObservation& observation : frame.m_observations )
         {
-          if ( observation.disparity_px > 0.0 )
+          if ( m_state->m_landmarks_w.find( observation.id ) !=
+               m_state->m_landmarks_w.end() )
           {
             ++counts[ observation.id ];
           }
@@ -1441,9 +1510,6 @@ namespace phad::estimator
                 landmark_key, point );
             ++num_landmarks_out;
           }
-          // Slice ⑦: zero-disparity observations are not stereo measurements
-          // — building a StereoFactor from them would project a degenerate
-          // right pixel.
           if ( observation.disparity_px > 0.0 )
           {
             graph.emplace_shared<
@@ -1451,12 +1517,25 @@ namespace phad::estimator
                 toStereoPoint( observation ), stereo_noise,
                 X( frame.m_frame_index ), L( observation.id ), K,
                 body_P_sensor );
-            ++vio_info.m_visual_factors;
+          }
+          else
+          {
+            graph.emplace_shared<gtsam::GenericProjectionFactor<
+                gtsam::Pose3, gtsam::Point3, gtsam::Cal3_S2>>(
+                toMonoPoint( observation ), mono_noise,
+                X( frame.m_frame_index ), L( observation.id ), K_mono,
+                body_P_sensor );
             if ( frame.m_frame_index ==
                  m_state->m_window.back().m_frame_index )
             {
-              ++vio_info.m_current_visual_factors;
+              ++vio_info.m_current_mono_visual_factors;
             }
+          }
+          ++vio_info.m_visual_factors;
+          if ( frame.m_frame_index ==
+               m_state->m_window.back().m_frame_index )
+          {
+            ++vio_info.m_current_visual_factors;
           }
         }
       }
@@ -1536,11 +1615,7 @@ namespace phad::estimator
           bool observes = false;
           for ( const StereoObservation& observation : frame.m_observations )
           {
-            // Slice ⑦: only stereo observations constrain the landmark — a
-            // zero-disparity frame's pose drift must not be able to cull a
-            // good landmark.
-            if ( observation.id == id &&
-                 observation.disparity_px > 0.0 )
+            if ( observation.id == id )
             {
               observes = true;
               break;
@@ -1613,23 +1688,17 @@ namespace phad::estimator
         std::size_t n_factors = 0;
         for ( const auto& factor : graph_for_scoring )
         {
-          if ( factor == nullptr )
+          const std::optional<VisualFactorView> visual =
+              asVisualFactor( factor );
+          if ( !visual.has_value() )
           {
             continue;
           }
-          const auto* stereo =
-              dynamic_cast<const gtsam::GenericStereoFactor<gtsam::Pose3,
-                                                            gtsam::Point3>*>(
-                  factor.get() );
-          if ( stereo == nullptr )
+          if ( visual->m_landmark_key != L( id ) )
           {
             continue;
           }
-          if ( stereo->key2() != L( id ) )
-          {
-            continue;
-          }
-          sum_norm += stereo->unwhitenedError( optimized ).norm();
+          sum_norm += visual->unwhitenedError( optimized ).norm();
           ++n_factors;
         }
         if ( n_factors < 4 )
@@ -1938,31 +2007,39 @@ namespace phad::estimator
       return result;
     };
 
-    std::uint32_t num_shared    = 0;
-    std::uint32_t num_disparity = 0;
+    std::uint32_t num_shared              = 0;
+    std::uint32_t num_mapped_observations = 0;
+    std::uint32_t num_disparity           = 0;
     for ( const StereoObservation& observation : measurement.m_observations )
     {
-      // E3 experiment: zero-disparity observations cannot constrain PnP or
-      // BA, so exclude them from the shared-overlap accounting that gates PnP
-      // and low-connectivity.
+      const bool mapped =
+          m_impl->m_state->m_landmarks_w.find( observation.id ) !=
+          m_impl->m_state->m_landmarks_w.end();
+      if ( mapped )
+      {
+        ++num_mapped_observations;
+      }
+      // Keep num_shared as the historical positive-disparity overlap.
+      // PnP, full support, and low-connectivity use the mapped population.
       if ( observation.disparity_px > 0.0 )
       {
         ++num_disparity;  // diag: frontend stereo matching health, independent
                           // of landmark-table overlap (num_shared below)
-        if ( m_impl->m_state->m_landmarks_w.find( observation.id ) !=
-             m_impl->m_state->m_landmarks_w.end() )
+        if ( mapped )
         {
           ++num_shared;
         }
       }
     }
-    result.diagnostics.num_shared    = num_shared;
-    result.diagnostics.num_disparity = num_disparity;
+    result.diagnostics.num_shared              = num_shared;
+    result.diagnostics.num_mapped_observations = num_mapped_observations;
+    result.diagnostics.num_disparity           = num_disparity;
 
     const bool active_segment = m_impl->m_state->m_initialized;
     const bool full_visual_support =
         !active_segment ||
-        static_cast<int>( num_shared ) >= m_impl->options.min_pnp_inliers;
+        static_cast<int>( num_mapped_observations ) >=
+            m_impl->options.min_pnp_inliers;
     const bool low_visual_support =
         active_segment && !full_visual_support;
     std::int64_t next_visual_coast_duration_ns = 0;
@@ -2045,7 +2122,8 @@ namespace phad::estimator
 
     result.diagnostics.low_connectivity =
         m_impl->m_state->m_initialized && full_visual_support &&
-        static_cast<int>( num_shared ) < m_impl->options.min_shared_landmarks;
+        static_cast<int>( num_mapped_observations ) <
+            m_impl->options.min_shared_landmarks;
 
     if ( !m_impl->m_state->m_initialized )
     {
@@ -2154,7 +2232,7 @@ namespace phad::estimator
       candidate.m_imu = normalized_imu;
 
       if ( m_impl->options.enable_pnp_init &&
-           static_cast<int>( num_shared ) >=
+           static_cast<int>( num_mapped_observations ) >=
                m_impl->options.min_pnp_inliers )
       {
         const Impl::PnpInitResult pnp =
@@ -2163,46 +2241,19 @@ namespace phad::estimator
         {
           candidate.m_T_W_B = pnp.T_W_B;
 
-          // Map inlier indices → shared LandmarkIds (same scan order as
-          // tryPnpInit: zero-disparity observations skipped there), then drop
-          // shared outliers; keep new ids.
-          std::vector<LandmarkId> shared_ids;
-          shared_ids.reserve( static_cast<std::size_t>( num_shared ) );
-          for ( const StereoObservation& observation :
-                measurement.m_observations )
-          {
-            if ( observation.disparity_px > 0.0 &&
-                 m_impl->m_state->m_landmarks_w.find( observation.id ) !=
-                     m_impl->m_state->m_landmarks_w.end() )
-            {
-              shared_ids.push_back( observation.id );
-            }
-          }
-          std::unordered_set<LandmarkId> inlier_ids;
-          inlier_ids.reserve( pnp.inlier_indices.size() );
-          for ( const int index : pnp.inlier_indices )
-          {
-            if ( index < 0 ||
-                 static_cast<std::size_t>( index ) >= shared_ids.size() )
-            {
-              continue;
-            }
-            inlier_ids.insert(
-                shared_ids[ static_cast<std::size_t>( index ) ] );
-          }
+          // tryPnpInit maps the accepted RANSAC indices back to the exact
+          // pre-intake mapped-observation scan used to create correspondences.
           std::vector<StereoObservation> filtered;
           filtered.reserve( candidate.m_observations.size() );
           for ( const StereoObservation& observation :
                 candidate.m_observations )
           {
-            const bool is_shared =
+            const bool is_mapped =
                 m_impl->m_state->m_landmarks_w.find( observation.id ) !=
                 m_impl->m_state->m_landmarks_w.end();
-            // Slice ⑦: zero-disparity observations never enter the PnP
-            // inlier set, so never drop them here either — they stay in the
-            // window for when stereo returns.
-            if ( observation.disparity_px > 0.0 && is_shared &&
-                 inlier_ids.find( observation.id ) == inlier_ids.end() )
+            if ( is_mapped &&
+                 pnp.inlier_ids.find( observation.id ) ==
+                     pnp.inlier_ids.end() )
             {
               continue;
             }
@@ -2211,8 +2262,7 @@ namespace phad::estimator
           candidate.m_observations = std::move( filtered );
 
           result.diagnostics.pnp_success = true;
-          result.diagnostics.pnp_inliers =
-              static_cast<std::uint32_t>( pnp.inlier_indices.size() );
+          result.diagnostics.pnp_inliers = pnp.num_inliers;
         }
       }
 
@@ -2221,7 +2271,7 @@ namespace phad::estimator
         return finalizePostStagingHardResult(
             UpdateStatus::kFailed, "non-finite pose initial value" );
       }
-      // Track history uses the full validated measurement, including shared
+      // Track history uses the full validated measurement, including mapped
       // PnP outliers masked from candidate.m_observations.
       for ( const StereoObservation& observation :
             measurement.m_observations )
@@ -2400,7 +2450,7 @@ namespace phad::estimator
     result.diagnostics.window_size =
         static_cast<std::uint32_t>( m_impl->m_state->m_window.size() );
     result.diagnostics.reproj_rms_before_px =
-        stereoReprojRms( graph, values );
+        visualReprojRms( graph, values );
     if ( !std::isfinite( result.diagnostics.reproj_rms_before_px ) )
     {
       return finalizePostStagingHardResult(
@@ -2560,13 +2610,13 @@ namespace phad::estimator
     // Full-graph RMS on LM₁ graph/values (includes just-culled ids) =
     // pre-cull quality; contract unchanged by multi-round reopt.
     result.diagnostics.reproj_rms_after_px =
-        stereoReprojRms( graph, optimized );
+        visualReprojRms( graph, optimized );
     // Slice ④ after_cull initial value (final when reopt is skipped / fails).
     double after_cull = result.diagnostics.reproj_rms_after_px;
     if ( m_impl->options.enable_outlier_cull &&
          graph_has_visual_factors )
     {
-      after_cull = stereoReprojRmsSkippingMissingLandmarks(
+      after_cull = visualReprojRmsSkippingMissingLandmarks(
           graph, optimized, m_impl->m_state->m_landmarks_w );
     }
 
@@ -2671,7 +2721,7 @@ namespace phad::estimator
         optimized      = optimized_r;
         vio_graph_info = reopt_vio_info;
         ++rounds;
-        after_cull   = stereoReprojRms( g_r, optimized_r );
+        after_cull   = visualReprojRms( g_r, optimized_r );
         culled_round = m_impl->runCheiralityAndMeanCull(
             optimized_r, g_r, frame_culled, outliers_culled,
             outliers_culled_unique, result.diagnostics.num_cheirality );
@@ -2735,6 +2785,8 @@ namespace phad::estimator
         result.diagnostics.probe_new_lm_n;
     result.diagnostics.num_current_visual_factors =
         vio_graph_info.m_current_visual_factors;
+    result.diagnostics.num_current_mono_visual_factors =
+        vio_graph_info.m_current_mono_visual_factors;
     if ( active_segment && full_visual_support )
     {
       m_impl->m_state->m_last_visual_support_timestamp =

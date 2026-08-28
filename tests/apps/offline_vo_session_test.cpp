@@ -214,6 +214,7 @@ namespace
     EXPECT_EQ( result.diag.front().num_retained_observations, 0U );
     EXPECT_EQ( result.diag.front().num_seeded_landmarks, 0U );
     EXPECT_EQ( result.diag.front().num_current_visual_factors, 0U );
+    EXPECT_EQ( result.diag.front().num_current_mono_visual_factors, 0U );
     EXPECT_EQ( result.diag.front().unsupported_span_ns, 0 );
 
     // Mid-loop stream errors still run segment finalization, but a run
@@ -269,29 +270,31 @@ namespace
     std::filesystem::remove( path );
 
     VoDiagRow row;
-    row.timestamp_ns               = 1403636579763555584LL;
-    row.status                     = "ok";
-    row.num_observations           = 136;
-    row.num_landmarks              = 0;
-    row.num_shared                 = 0;
-    row.num_disparity              = 91;
-    row.low_connectivity           = false;
-    row.window_size                = 1;
-    row.prior_key                  = 0;
-    row.reproj_rms_before_px       = 0.0;
-    row.reproj_rms_after_px        = 0.0;
-    row.num_cheirality             = 0;
-    row.lm_iterations              = 0;
-    row.max_window_pose_shift_m    = 0.0;
-    row.segment_id                 = 0;
-    row.pnp_success                = false;
-    row.pnp_inliers                = 0;
-    row.outliers_culled            = 0;
-    row.reproj_rms_after_cull_px   = 0.0;
-    row.unsupported_span_ns        = 250'000'000;
-    row.num_retained_observations  = 73;
-    row.num_seeded_landmarks       = 11;
-    row.num_current_visual_factors = 9;
+    row.timestamp_ns                    = 1403636579763555584LL;
+    row.status                          = "ok";
+    row.num_observations                = 136;
+    row.num_landmarks                   = 0;
+    row.num_shared                      = 0;
+    row.num_disparity                   = 91;
+    row.low_connectivity                = false;
+    row.window_size                     = 1;
+    row.prior_key                       = 0;
+    row.reproj_rms_before_px            = 0.0;
+    row.reproj_rms_after_px             = 0.0;
+    row.num_cheirality                  = 0;
+    row.lm_iterations                   = 0;
+    row.max_window_pose_shift_m         = 0.0;
+    row.segment_id                      = 0;
+    row.pnp_success                     = false;
+    row.pnp_inliers                     = 0;
+    row.outliers_culled                 = 0;
+    row.reproj_rms_after_cull_px        = 0.0;
+    row.unsupported_span_ns             = 250'000'000;
+    row.num_retained_observations       = 73;
+    row.num_seeded_landmarks            = 11;
+    row.num_current_visual_factors      = 9;
+    row.num_mapped_observations         = 2;
+    row.num_current_mono_visual_factors = 4;
 
     VoDiagRow outage_row;
     outage_row.timestamp_ns        = row.timestamp_ns + 1;
@@ -314,26 +317,28 @@ namespace
     EXPECT_NE( text.find( "pnp_success,pnp_inliers,outliers_culled,"
                           "reproj_rms_after_cull_px" ),
                std::string::npos );
-    // Slice ④e / Probe B keep the 19-column contract; Probe B is a
+    // Slice ④e / Probe B keep their existing contract; Probe B is a
     // separate jsonl side-channel. outlier_reopt_rounds stay off diag
     // (session/summary only). culled_landmark_ids remain in-memory only
     // (session dropTracks; not a diag column). Slice ⑦'s
     // num_triangulated_seed column was dropped again post-gate (the
     // diagnostic never increments: triangulation seeding is disabled).
     // Slice 1b appends continuity and committed-intake diagnostics after the
-    // existing num_disparity column.
+    // existing num_disparity column. Mapped-bearing diagnostics append the
+    // mapped population and current mono-factor breakdown.
     const auto header_end = text.find( '\n' );
     ASSERT_NE( header_end, std::string::npos );
     const std::string header = text.substr( 0, header_end );
-    EXPECT_EQ( std::count( header.begin(), header.end(), ',' ), 23 );
+    EXPECT_EQ( std::count( header.begin(), header.end(), ',' ), 25 );
     EXPECT_NE(
         header.find(
             "num_disparity,unsupported_span_ns,num_retained_observations,"
-            "num_seeded_landmarks,num_current_visual_factors" ),
+            "num_seeded_landmarks,num_current_visual_factors,"
+            "num_mapped_observations,num_current_mono_visual_factors" ),
         std::string::npos );
     EXPECT_NE(
         text.find( "1403636579763555584,ok,136,0,0,0,1,0,0.000000,0.000000,0,"
-                   "0,0.000000,0,0,0,0,0.000000,0,91,250000000,73,11,9" ),
+                   "0,0.000000,0,0,0,0,0.000000,0,91,250000000,73,11,9,2,4" ),
         std::string::npos );
     const auto outage_begin = text.find( ",visual_outage," );
     ASSERT_NE( outage_begin, std::string::npos );
@@ -342,9 +347,11 @@ namespace
     const std::string outage_line =
         text.substr( outage_begin, outage_end - outage_begin );
     EXPECT_EQ( std::count( outage_line.begin(), outage_line.end(), ',' ),
-               23 );
-    EXPECT_EQ( outage_line.rfind( ",300000000,0,0,0" ),
-               outage_line.size() - std::string{ ",300000000,0,0,0" }.size() );
+               25 );
+    EXPECT_EQ(
+        outage_line.rfind( ",300000000,0,0,0,0,0" ),
+        outage_line.size() -
+            std::string{ ",300000000,0,0,0,0,0" }.size() );
     const auto discontinuity_begin = text.find( ",discontinuity," );
     ASSERT_NE( discontinuity_begin, std::string::npos );
     const auto discontinuity_end = text.find( '\n', discontinuity_begin );
@@ -352,9 +359,9 @@ namespace
     const std::string discontinuity_line =
         text.substr( discontinuity_begin,
                      discontinuity_end - discontinuity_begin );
-    EXPECT_EQ( discontinuity_line.rfind( ",0,0,0,0" ),
+    EXPECT_EQ( discontinuity_line.rfind( ",0,0,0,0,0,0" ),
                discontinuity_line.size() -
-                   std::string{ ",0,0,0,0" }.size() );
+                   std::string{ ",0,0,0,0,0,0" }.size() );
     std::filesystem::remove( path );
   }
 

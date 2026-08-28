@@ -101,28 +101,30 @@ namespace phad::apps
   {
     std::int64_t  timestamp_ns = 0;
     std::string   status;
-    std::uint32_t num_observations           = 0;
-    std::uint32_t num_landmarks              = 0;
-    std::uint32_t num_shared                 = 0;
-    std::uint32_t num_disparity              = 0;  // Slice: obs with disparity_px > 0
-    bool          low_connectivity           = false;
-    std::uint32_t window_size                = 0;
-    std::uint64_t prior_key                  = 0;
-    double        reproj_rms_before_px       = 0.0;
-    double        reproj_rms_after_px        = 0.0;
-    std::uint32_t num_cheirality             = 0;
-    std::uint32_t lm_iterations              = 0;
-    double        max_window_pose_shift_m    = 0.0;
-    std::uint32_t segment_id                 = 0;
-    bool          pnp_success                = false;
-    std::uint32_t pnp_inliers                = 0;
-    std::uint32_t outliers_culled            = 0;
-    double        reproj_rms_after_cull_px   = 0.0;
-    bool          is_keyframe                = false;  // Slice ⑤
-    std::int64_t  unsupported_span_ns        = 0;
-    std::uint32_t num_retained_observations  = 0;
-    std::uint32_t num_seeded_landmarks       = 0;
-    std::uint32_t num_current_visual_factors = 0;
+    std::uint32_t num_observations                = 0;
+    std::uint32_t num_landmarks                   = 0;
+    std::uint32_t num_shared                      = 0;
+    std::uint32_t num_disparity                   = 0;  // Slice: obs with disparity_px > 0
+    bool          low_connectivity                = false;
+    std::uint32_t window_size                     = 0;
+    std::uint64_t prior_key                       = 0;
+    double        reproj_rms_before_px            = 0.0;
+    double        reproj_rms_after_px             = 0.0;
+    std::uint32_t num_cheirality                  = 0;
+    std::uint32_t lm_iterations                   = 0;
+    double        max_window_pose_shift_m         = 0.0;
+    std::uint32_t segment_id                      = 0;
+    bool          pnp_success                     = false;
+    std::uint32_t pnp_inliers                     = 0;
+    std::uint32_t outliers_culled                 = 0;
+    double        reproj_rms_after_cull_px        = 0.0;
+    bool          is_keyframe                     = false;  // Slice ⑤
+    std::int64_t  unsupported_span_ns             = 0;
+    std::uint32_t num_retained_observations       = 0;
+    std::uint32_t num_seeded_landmarks            = 0;
+    std::uint32_t num_current_visual_factors      = 0;
+    std::uint32_t num_mapped_observations         = 0;
+    std::uint32_t num_current_mono_visual_factors = 0;
   };
 
   struct FrameCounts

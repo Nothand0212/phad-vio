@@ -181,6 +181,14 @@ def _snapshot_path_is_excluded(path: PurePosixPath) -> bool:
     return False
 
 
+def _snapshot_diff_pathspecs() -> list[str]:
+    pathspecs = ["."]
+    for prefix in SNAPSHOT_EXCLUDED_PREFIXES:
+        value = prefix.as_posix()
+        pathspecs.extend((f":(exclude){value}", f":(exclude){value}/**"))
+    return pathspecs
+
+
 def _hash_snapshot_entry(path: Path) -> tuple[str, int, str]:
     metadata = path.lstat()
     mode = stat.S_IMODE(metadata.st_mode)
@@ -238,7 +246,16 @@ def build_source_manifest(root: Path) -> tuple[dict[str, Any], str]:
             included_untracked += 1
 
     dirty_result = run_command(
-        ["git", "-C", str(root), "diff", "--quiet", "HEAD", "--"],
+        [
+            "git",
+            "-C",
+            str(root),
+            "diff",
+            "--quiet",
+            "HEAD",
+            "--",
+            *_snapshot_diff_pathspecs(),
+        ],
         check=False,
     )
     if dirty_result.returncode not in (0, 1):
