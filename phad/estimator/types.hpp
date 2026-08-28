@@ -156,6 +156,7 @@ namespace phad::estimator
     std::int64_t  unsupported_span_ns        = 0;
     std::uint32_t num_landmarks              = 0;  // in the graph
     std::uint32_t num_shared                 = 0;  // new frame ∩ window landmark table
+    std::uint32_t num_mapped_observations    = 0;  // map membership, independent of disparity
     std::uint32_t num_disparity              = 0;  // obs with disparity_px > 0 (regardless of landmark table)
     std::uint32_t num_cheirality             = 0;
     std::uint32_t lm_iterations              = 0;

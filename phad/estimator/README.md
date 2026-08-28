@@ -112,6 +112,7 @@ reintegration、graph/solver、quality、support/span 与 diagnostics 受同一 
 
 | `UpdateDiagnostics` 字段 | 语义 |
 |---|---|
+| `num_mapped_observations` | 当前 validated packet 中，ID 在摄入前 committed map 的 observation 数；包含 positive-disparity 与 zero-disparity observation |
 | `num_retained_observations` | 现有 PnP mask 后写入当前 frame 的 observation 数 |
 | `num_seeded_landmarks` | 本 transaction 插入 map 的新 landmark 事件数；同 packet 后续 cull 不回写该事件数 |
 | `num_current_visual_factors` | 产生最终 committed optimized state 的最后一次成功 solve 中，属于当前 frame 的 stereo factor 数 |
@@ -303,15 +304,16 @@ window_size,prior_key,reproj_rms_before_px,reproj_rms_after_px,
 num_cheirality,lm_iterations,max_window_pose_shift_m,segment_id,
 pnp_success,pnp_inliers,outliers_culled,reproj_rms_after_cull_px,
 is_keyframe,num_disparity,unsupported_span_ns,num_retained_observations,
-num_seeded_landmarks,num_current_visual_factors
+num_seeded_landmarks,num_current_visual_factors,num_mapped_observations
 ```
 
-共 **24 列**（Slice ① 在 M2.3 的 13 列尾追加 `segment_id` → 14；Slice ③
+共 **25 列**（Slice ① 在 M2.3 的 13 列尾追加 `segment_id` → 14；Slice ③
 再追加 `pnp_success,pnp_inliers` → 16；Slice ④ 再追加
 `outliers_culled,reproj_rms_after_cull_px` → 18；Slice ⑤ 再追加
 `is_keyframe` → 19；随后追加 `num_disparity` → 20；M4 轨迹连续性在尾部追加
 `unsupported_span_ns,num_retained_observations,num_seeded_landmarks,`
-`num_current_visual_factors` → 24）。
+`num_current_visual_factors` → 24；mapped-bearing Q1 追加
+`num_mapped_observations` → 25）。
 `pnp_success` 为 `0/1` 整数，`is_keyframe` 为 `0/1` 整数。`status` 为
 `ok` / `rejected` / `failed`。accepted 非关键帧实际进入 graph/LM，因此优化相关列
 （`reproj_rms_before/after`、`num_cheirality`、`lm_iterations`、`outliers_culled`

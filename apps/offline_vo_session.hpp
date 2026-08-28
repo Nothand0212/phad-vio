@@ -123,6 +123,7 @@ namespace phad::apps
     std::uint32_t num_retained_observations  = 0;
     std::uint32_t num_seeded_landmarks       = 0;
     std::uint32_t num_current_visual_factors = 0;
+    std::uint32_t num_mapped_observations    = 0;
   };
 
   struct FrameCounts

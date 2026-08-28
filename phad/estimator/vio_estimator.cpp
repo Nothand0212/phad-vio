@@ -1938,10 +1938,18 @@ namespace phad::estimator
       return result;
     };
 
-    std::uint32_t num_shared    = 0;
-    std::uint32_t num_disparity = 0;
+    std::uint32_t num_shared              = 0;
+    std::uint32_t num_mapped_observations = 0;
+    std::uint32_t num_disparity           = 0;
     for ( const StereoObservation& observation : measurement.m_observations )
     {
+      const bool mapped =
+          m_impl->m_state->m_landmarks_w.find( observation.id ) !=
+          m_impl->m_state->m_landmarks_w.end();
+      if ( mapped )
+      {
+        ++num_mapped_observations;
+      }
       // E3 experiment: zero-disparity observations cannot constrain PnP or
       // BA, so exclude them from the shared-overlap accounting that gates PnP
       // and low-connectivity.
@@ -1949,15 +1957,15 @@ namespace phad::estimator
       {
         ++num_disparity;  // diag: frontend stereo matching health, independent
                           // of landmark-table overlap (num_shared below)
-        if ( m_impl->m_state->m_landmarks_w.find( observation.id ) !=
-             m_impl->m_state->m_landmarks_w.end() )
+        if ( mapped )
         {
           ++num_shared;
         }
       }
     }
-    result.diagnostics.num_shared    = num_shared;
-    result.diagnostics.num_disparity = num_disparity;
+    result.diagnostics.num_shared              = num_shared;
+    result.diagnostics.num_mapped_observations = num_mapped_observations;
+    result.diagnostics.num_disparity           = num_disparity;
 
     const bool active_segment = m_impl->m_state->m_initialized;
     const bool full_visual_support =
