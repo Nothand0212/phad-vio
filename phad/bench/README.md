@@ -97,17 +97,19 @@ M3.3 在 `summary.json` 追加段 / PnP / 剔点可观测性字段（`schema_ver
 
 `apps/phad_vo_bench` 通过 `OfflineVoSession` 写出逐 packet 的 `diag.csv`；该文件
 不是 `phad::bench` JSON schema 的一部分，也不参与 `config_hash`。当前 schema 为
-24 列，并在既有 20 列尾部追加：
+26 列，并在既有 20 列尾部追加：
 
 ```text
 unsupported_span_ns,num_retained_observations,num_seeded_landmarks,
-num_current_visual_factors
+num_current_visual_factors,num_mapped_observations,
+num_current_mono_visual_factors
 ```
 
-四列分别记录相对最近 committed full-support anchor 的 unsupported span、当前
-frame retained observations、本 transaction 新 seed 事件，以及产生最终 committed
-optimized state 的最后一次成功 solve 中当前 frame visual factors。full-support
-commit 将 span 归零；packet counters 只反映完整 commit 的摄入结果。
+这些列分别记录相对最近 committed full-support anchor 的 unsupported span、当前
+frame retained observations、本 transaction 新 seed 事件、最后一次成功 solve 中
+current frame 的 mixed visual factor total、摄入前 mapped observation population，
+以及 current mono factor breakdown。full-support commit 将 span 归零；packet
+counters 只反映完整 commit 的摄入结果。
 
 `config_hash` 在 M3.3 起纳入 `estimator.min_seed_observations` 与
 `estimator.enable_reanchor`；Slice ③ 再纳入 `estimator.enable_pnp_init` /

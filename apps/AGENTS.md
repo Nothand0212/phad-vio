@@ -89,9 +89,11 @@ num_shared 小）——V2_03 诊断链 A/B 的决定性指标。
 M4 active local continuity 在列尾追加 committed intake/factor 诊断，将合同扩为
 **24 列**。mapped-bearing Q1 再在列尾追加第 **25** 列
 `num_mapped_observations`：统计当前 validated packet 中 ID 已在摄入前 committed
-map 的 observation，不区分是否有 positive disparity。该列仅提供 observation
-population；support、low-connectivity、PnP、factor 与 lifecycle 在 Q1 仍使用
-既有判定。
+map 的 observation，不区分是否有 positive disparity。mapped-bearing Q4 再追加
+第 **26** 列 `num_current_mono_visual_factors`：记录产生最终 committed state 的
+最后一次成功 solve graph 中，连接 current frame 的 mono factor 数；它是
+`num_current_visual_factors` 的 breakdown。support、low-connectivity 与 PnP 在 Q4
+仍使用既有 positive-disparity population。
 
 pre-M4 小片（2026-08-07）**Census 实测否决**：`enable_census` 默认 **false**。
 实测(cbb4505 双路径, MH_01 + V2_03):V2_03 SAD-only ATE 3.628m/0 锚跳

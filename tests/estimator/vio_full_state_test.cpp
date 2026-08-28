@@ -185,6 +185,8 @@ namespace
                rhs.diagnostics.num_seeded_landmarks );
     EXPECT_EQ( lhs.diagnostics.num_current_visual_factors,
                rhs.diagnostics.num_current_visual_factors );
+    EXPECT_EQ( lhs.diagnostics.num_current_mono_visual_factors,
+               rhs.diagnostics.num_current_mono_visual_factors );
     EXPECT_EQ( lhs.diagnostics.unsupported_span_ns,
                rhs.diagnostics.unsupported_span_ns );
     EXPECT_EQ( lhs.diagnostics.outliers_culled,
@@ -221,6 +223,7 @@ namespace
     EXPECT_EQ( result.diagnostics.num_retained_observations, 0U );
     EXPECT_EQ( result.diagnostics.num_seeded_landmarks, 0U );
     EXPECT_EQ( result.diagnostics.num_current_visual_factors, 0U );
+    EXPECT_EQ( result.diagnostics.num_current_mono_visual_factors, 0U );
   }
 
   [[nodiscard]] EstimatorOptions transactionOptions()

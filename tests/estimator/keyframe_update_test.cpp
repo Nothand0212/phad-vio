@@ -258,6 +258,7 @@ TEST( KeyframeUpdateTest, LowSupportZeroDisparityRetainsLifetimeWithoutSeed )
   EXPECT_EQ( retained.diagnostics.num_retained_observations, 1U );
   EXPECT_EQ( retained.diagnostics.num_seeded_landmarks, 0U );
   EXPECT_EQ( retained.diagnostics.num_current_visual_factors, 0U );
+  EXPECT_EQ( retained.diagnostics.num_current_mono_visual_factors, 0U );
   ASSERT_EQ( estimator.observationTimestamps( zero_id ).size(), 1U );
 
   const auto stereo_return =

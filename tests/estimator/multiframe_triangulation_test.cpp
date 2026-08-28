@@ -141,11 +141,12 @@ namespace
 
 }  // namespace
 
-TEST( MultiFrameTriangulationTest, BuildGraphSkipsZeroDisparity )
+TEST( MultiFrameTriangulationTest,
+      ZeroDisparityDoesNotSeedButAttachesAfterStereoSeed )
 {
-  // The target's zero-disparity observations must not count toward
-  // min_landmark_observations: the landmark enters the BA graph only once it
-  // has two real stereo observations (frame 4), never earlier.
+  // Left-only history cannot create depth. Once a stereo keyframe seeds the
+  // target, the earlier left-only bearings become eligible in the rebuilt
+  // graph.
   Scene        scene;
   VioEstimator estimator( scene.calibration, phad::test_support::testImuParameters() );
 
@@ -159,22 +160,31 @@ TEST( MultiFrameTriangulationTest, BuildGraphSkipsZeroDisparity )
                               /*keyframe=*/true );
   EXPECT_EQ( r1.status, UpdateStatus::kOk );
 
-  // Zero-disparity observations only — never seeded, not in the graph.
+  // Left-only observations retain lifetime without seeding a landmark.
   auto r2 = estimator.update( scene.frame( translated( 1.0 ), 2, false ),
                               /*keyframe=*/true );
   EXPECT_EQ( r2.status, UpdateStatus::kOk );
   EXPECT_EQ( r2.diagnostics.num_landmarks, 12U );
+  EXPECT_EQ( r2.diagnostics.num_current_mono_visual_factors, 0U );
 
-  // One stereo observation: counts = 1 < 2 — still out of the graph (had
-  // zero-disparity observations been counted, this would already be 13).
+  // The first stereo return seeds from mature track history. Rebuild attaches
+  // both earlier mono bearings plus the current stereo factor.
   auto r3 = estimator.update( scene.frame( translated( 1.5 ), 3, true ),
                               /*keyframe=*/true );
   EXPECT_EQ( r3.status, UpdateStatus::kOk );
-  EXPECT_EQ( r3.diagnostics.num_landmarks, 12U );
+  EXPECT_EQ( r3.diagnostics.num_landmarks, 13U );
+  EXPECT_EQ( r3.diagnostics.num_seeded_landmarks, 1U );
+  EXPECT_EQ( r3.diagnostics.num_current_visual_factors, 13U );
+  EXPECT_EQ( r3.diagnostics.num_current_mono_visual_factors, 0U );
+  EXPECT_EQ( r3.diagnostics.m_vio.m_visual_factors, 51U );
 
-  // Second stereo observation: enters the graph with two real factors.
+  // A subsequent stereo observation keeps one mutually exclusive factor per
+  // observation while the earlier mono factors remain attached.
   auto r4 = estimator.update( scene.frame( translated( 2.0 ), 4, true ),
                               /*keyframe=*/true );
   EXPECT_EQ( r4.status, UpdateStatus::kOk );
   EXPECT_EQ( r4.diagnostics.num_landmarks, 13U );
+  EXPECT_EQ( r4.diagnostics.num_current_visual_factors, 13U );
+  EXPECT_EQ( r4.diagnostics.num_current_mono_visual_factors, 0U );
+  EXPECT_EQ( r4.diagnostics.m_vio.m_visual_factors, 64U );
 }

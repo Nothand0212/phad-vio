@@ -88,7 +88,7 @@ apps/stereo_vo_glue.hpp  ── filter kValid ──► KeyframeMeasurement
 | 层级 | 判定与作用 |
 |---|---|
 | observation retained | packet 通过现有校验与 PnP mask 后，observations 写入当前 transaction/window；`m_track_times` 按 normal path 更新，包含 zero-disparity observation |
-| graph visually constrained | 最终成功 solve 的 graph 含当前 frame 的既有 `GenericStereoFactor`；factor admission 继续要求 positive disparity、map membership 与 `min_landmark_observations` |
+| graph visually constrained | 最终成功 solve 的 graph 含当前 frame 的 mapped observation factor；positive disparity 建立 `GenericStereoFactor`，zero disparity 建立 `GenericProjectionFactor`，共同要求 map membership 与 `min_landmark_observations` |
 | full visual support | packet 摄入前的 committed map 上，positive-disparity `num_shared >= min_pnp_inliers` |
 
 低于 full visual support 的 accepted packet 仍可保留 observations、seed landmarks、
@@ -96,6 +96,11 @@ apps/stereo_vo_glue.hpp  ── filter kValid ──► KeyframeMeasurement
 landmark refresh/seed 继续遵守 keyframe、track age、positive disparity、
 cull/rebirth 与 backprojection 门。当前 packet 的新 seed 不回流到本 packet 的
 support 判定。
+
+每条 mapped observation 最多建立一个 visual factor。left-only bearing 复用左目
+`Cal3_S2`、body-to-left extrinsic、像素 sigma 与 Huber 配置；它不提供深度，也不
+参与 landmark seed、PnP 或 full-support 判定。stereo 与 mono factor 统一进入 RMS、
+Probe B、cheirality、mean-cull 和 optional reopt。
 
 full visual support 每个 packet 只在摄入前计算一次。只有摄入前已达门且整个
 primary transaction 成功 commit，才刷新 support anchor，并将
@@ -115,7 +120,8 @@ reintegration、graph/solver、quality、support/span 与 diagnostics 受同一 
 | `num_mapped_observations` | 当前 validated packet 中，ID 在摄入前 committed map 的 observation 数；包含 positive-disparity 与 zero-disparity observation |
 | `num_retained_observations` | 现有 PnP mask 后写入当前 frame 的 observation 数 |
 | `num_seeded_landmarks` | 本 transaction 插入 map 的新 landmark 事件数；同 packet 后续 cull 不回写该事件数 |
-| `num_current_visual_factors` | 产生最终 committed optimized state 的最后一次成功 solve 中，属于当前 frame 的 stereo factor 数 |
+| `num_current_visual_factors` | 产生最终 committed optimized state 的最后一次成功 solve 中，属于当前 frame 的 stereo + mono factor 总数 |
+| `num_current_mono_visual_factors` | 上述 current visual factor 中的 mono breakdown；必定不大于 total |
 | `unsupported_span_ns` | 当前 timestamp 相对最近 committed full-support anchor 的诊断 span；support commit 与 discontinuity row 为 `0` |
 
 primary solve 后 cull 而未成功 reopt 时，factor count 保留 primary graph 口径；
@@ -304,16 +310,18 @@ window_size,prior_key,reproj_rms_before_px,reproj_rms_after_px,
 num_cheirality,lm_iterations,max_window_pose_shift_m,segment_id,
 pnp_success,pnp_inliers,outliers_culled,reproj_rms_after_cull_px,
 is_keyframe,num_disparity,unsupported_span_ns,num_retained_observations,
-num_seeded_landmarks,num_current_visual_factors,num_mapped_observations
+num_seeded_landmarks,num_current_visual_factors,num_mapped_observations,
+num_current_mono_visual_factors
 ```
 
-共 **25 列**（Slice ① 在 M2.3 的 13 列尾追加 `segment_id` → 14；Slice ③
+共 **26 列**（Slice ① 在 M2.3 的 13 列尾追加 `segment_id` → 14；Slice ③
 再追加 `pnp_success,pnp_inliers` → 16；Slice ④ 再追加
 `outliers_culled,reproj_rms_after_cull_px` → 18；Slice ⑤ 再追加
 `is_keyframe` → 19；随后追加 `num_disparity` → 20；M4 轨迹连续性在尾部追加
 `unsupported_span_ns,num_retained_observations,num_seeded_landmarks,`
 `num_current_visual_factors` → 24；mapped-bearing Q1 追加
-`num_mapped_observations` → 25）。
+`num_mapped_observations` → 25；Q4 追加
+`num_current_mono_visual_factors` → 26）。
 `pnp_success` 为 `0/1` 整数，`is_keyframe` 为 `0/1` 整数。`status` 为
 `ok` / `rejected` / `failed`。accepted 非关键帧实际进入 graph/LM，因此优化相关列
 （`reproj_rms_before/after`、`num_cheirality`、`lm_iterations`、`outliers_culled`
