@@ -838,14 +838,15 @@ namespace phad::estimator
 
     struct PnpInitResult
     {
-      bool              success = false;
-      Eigen::Isometry3d T_W_B   = Eigen::Isometry3d::Identity();
-      std::vector<int>  inlier_indices;  // into shared correspondence list
+      bool                           success     = false;
+      Eigen::Isometry3d              T_W_B       = Eigen::Isometry3d::Identity();
+      std::uint32_t                  num_inliers = 0;
+      std::unordered_set<LandmarkId> inlier_ids;
     };
 
-    [[nodiscard]] std::optional<double> stereoRmsAtPose(
+    [[nodiscard]] std::optional<double> poseRmsAtPose(
         const Eigen::Isometry3d&                     T_W_B,
-        const std::vector<const StereoObservation*>& shared_observations,
+        const std::vector<const StereoObservation*>& mapped_observations,
         const std::vector<int>&                      inlier_indices ) const
     {
       if ( !isFinite( T_W_B ) || inlier_indices.empty() )
@@ -859,23 +860,17 @@ namespace phad::estimator
       for ( const int index : inlier_indices )
       {
         if ( index < 0 ||
-             static_cast<std::size_t>( index ) >= shared_observations.size() )
+             static_cast<std::size_t>( index ) >= mapped_observations.size() )
         {
           return std::nullopt;
         }
         const StereoObservation* observation =
-            shared_observations[ static_cast<std::size_t>( index ) ];
-        if ( observation == nullptr )
+            mapped_observations[ static_cast<std::size_t>( index ) ];
+        if ( observation == nullptr ||
+             !observation->left_pixel.allFinite() ||
+             !std::isfinite( observation->disparity_px ) )
         {
           return std::nullopt;
-        }
-        // Slice ⑦: a zero-disparity observation carries no stereo
-        // information — toStereoPoint would fabricate a right pixel equal to
-        // the left one and inflate this pose's RMS (it still supports the PnP
-        // correspondence itself via its left pixel).
-        if ( observation->disparity_px <= 0.0 )
-        {
-          continue;
         }
         const auto landmark_it = m_state->m_landmarks_w.find( observation->id );
         if ( landmark_it == m_state->m_landmarks_w.end() ||
@@ -893,22 +888,47 @@ namespace phad::estimator
           return std::nullopt;
         }
 
-        gtsam::StereoPoint2 projected;
-        try
+        double residual_sq = 0.0;
+        if ( observation->disparity_px > 0.0 )
         {
-          projected = camera.project( point_W );
+          gtsam::StereoPoint2 projected;
+          try
+          {
+            projected = camera.project( point_W );
+          }
+          catch ( const gtsam::StereoCheiralityException& )
+          {
+            return std::nullopt;
+          }
+          const gtsam::Vector residual =
+              ( projected - toStereoPoint( *observation ) ).vector();
+          if ( !residual.allFinite() )
+          {
+            return std::nullopt;
+          }
+          residual_sq = residual.squaredNorm();
         }
-        catch ( const gtsam::StereoCheiralityException& )
+        else
+        {
+          const double u = calibration.fxPixels() * point_left.x() /
+                               point_left.z() +
+                           calibration.cxPixels();
+          const double v = calibration.fyPixels() * point_left.y() /
+                               point_left.z() +
+                           calibration.cyPixels();
+          const Eigen::Vector2d residual =
+              Eigen::Vector2d( u, v ) - observation->left_pixel;
+          if ( !residual.allFinite() )
+          {
+            return std::nullopt;
+          }
+          residual_sq = residual.squaredNorm();
+        }
+        if ( !std::isfinite( residual_sq ) )
         {
           return std::nullopt;
         }
-        const gtsam::Vector residual =
-            ( projected - toStereoPoint( *observation ) ).vector();
-        if ( !residual.allFinite() )
-        {
-          return std::nullopt;
-        }
-        sum_sq += residual.squaredNorm();
+        sum_sq += residual_sq;
         if ( !std::isfinite( sum_sq ) )
         {
           return std::nullopt;
@@ -918,10 +938,10 @@ namespace phad::estimator
                         static_cast<double>( inlier_indices.size() ) );
     }
 
-    // Shared landmarks ∩ current left observations → solvePnPRansac.
+    // Mapped landmarks ∩ current left observations → solvePnPRansac.
     // A finite, sufficiently supported proposal is accepted only when its
-    // stereo RMS on the PnP inlier set is no more than one observation sigma
-    // worse than the existing guess.
+    // modality-aware RMS on the PnP inlier set is no more than one
+    // observation sigma worse than the existing guess.
     [[nodiscard]] PnpInitResult tryPnpInit(
         const VioMeasurement&    measurement,
         const Eigen::Isometry3d& guess_T_W_B ) const
@@ -930,10 +950,10 @@ namespace phad::estimator
 
       std::vector<cv::Point3d>              pts3d;
       std::vector<cv::Point2d>              pts2d;
-      std::vector<const StereoObservation*> shared_observations;
+      std::vector<const StereoObservation*> mapped_observations;
       pts3d.reserve( measurement.m_observations.size() );
       pts2d.reserve( measurement.m_observations.size() );
-      shared_observations.reserve( measurement.m_observations.size() );
+      mapped_observations.reserve( measurement.m_observations.size() );
       for ( const StereoObservation& observation : measurement.m_observations )
       {
         const auto landmark_it = m_state->m_landmarks_w.find( observation.id );
@@ -941,18 +961,11 @@ namespace phad::estimator
         {
           continue;
         }
-        // Slice ⑦: zero-disparity observations cannot constrain PnP — they
-        // have no stereo depth, and the stereo RMS acceptance gate cannot
-        // see them.
-        if ( observation.disparity_px <= 0.0 )
-        {
-          continue;
-        }
         const Eigen::Vector3d& point_W = landmark_it->second;
         pts3d.emplace_back( point_W.x(), point_W.y(), point_W.z() );
         pts2d.emplace_back( observation.left_pixel.x(),
                             observation.left_pixel.y() );
-        shared_observations.push_back( &observation );
+        mapped_observations.push_back( &observation );
       }
       if ( static_cast<int>( pts3d.size() ) < options.min_pnp_inliers )
       {
@@ -1039,23 +1052,35 @@ namespace phad::estimator
         return result;
       }
 
-      const std::optional<double> proposal_rms = stereoRmsAtPose(
-          T_W_B, shared_observations, inlier_indices );
+      const std::optional<double> proposal_rms = poseRmsAtPose(
+          T_W_B, mapped_observations, inlier_indices );
       if ( !proposal_rms.has_value() )
       {
         return result;
       }
-      const std::optional<double> guess_rms = stereoRmsAtPose(
-          guess_T_W_B, shared_observations, inlier_indices );
+      const std::optional<double> guess_rms = poseRmsAtPose(
+          guess_T_W_B, mapped_observations, inlier_indices );
       if ( guess_rms.has_value() &&
            *proposal_rms > *guess_rms + options.stereo_sigma_px )
       {
         return result;
       }
 
-      result.success        = true;
-      result.T_W_B          = T_W_B;
-      result.inlier_indices = std::move( inlier_indices );
+      result.inlier_ids.reserve( inlier_indices.size() );
+      for ( const int index : inlier_indices )
+      {
+        if ( index < 0 ||
+             static_cast<std::size_t>( index ) >= mapped_observations.size() )
+        {
+          return PnpInitResult{};
+        }
+        result.inlier_ids.insert(
+            mapped_observations[ static_cast<std::size_t>( index ) ]->id );
+      }
+      result.success = true;
+      result.T_W_B   = T_W_B;
+      result.num_inliers =
+          static_cast<std::uint32_t>( inlier_indices.size() );
       return result;
     }
 
@@ -1994,9 +2019,9 @@ namespace phad::estimator
       {
         ++num_mapped_observations;
       }
-      // E3 experiment: zero-disparity observations cannot constrain PnP or
-      // BA, so exclude them from the shared-overlap accounting that gates PnP
-      // and low-connectivity.
+      // Keep num_shared as the historical positive-disparity overlap. Mapped
+      // left-only observations have their own population for PnP, while
+      // support and low-connectivity still use num_shared until Q5b.
       if ( observation.disparity_px > 0.0 )
       {
         ++num_disparity;  // diag: frontend stereo matching health, independent
@@ -2206,7 +2231,7 @@ namespace phad::estimator
       candidate.m_imu = normalized_imu;
 
       if ( m_impl->options.enable_pnp_init &&
-           static_cast<int>( num_shared ) >=
+           static_cast<int>( num_mapped_observations ) >=
                m_impl->options.min_pnp_inliers )
       {
         const Impl::PnpInitResult pnp =
@@ -2215,46 +2240,19 @@ namespace phad::estimator
         {
           candidate.m_T_W_B = pnp.T_W_B;
 
-          // Map inlier indices → shared LandmarkIds (same scan order as
-          // tryPnpInit: zero-disparity observations skipped there), then drop
-          // shared outliers; keep new ids.
-          std::vector<LandmarkId> shared_ids;
-          shared_ids.reserve( static_cast<std::size_t>( num_shared ) );
-          for ( const StereoObservation& observation :
-                measurement.m_observations )
-          {
-            if ( observation.disparity_px > 0.0 &&
-                 m_impl->m_state->m_landmarks_w.find( observation.id ) !=
-                     m_impl->m_state->m_landmarks_w.end() )
-            {
-              shared_ids.push_back( observation.id );
-            }
-          }
-          std::unordered_set<LandmarkId> inlier_ids;
-          inlier_ids.reserve( pnp.inlier_indices.size() );
-          for ( const int index : pnp.inlier_indices )
-          {
-            if ( index < 0 ||
-                 static_cast<std::size_t>( index ) >= shared_ids.size() )
-            {
-              continue;
-            }
-            inlier_ids.insert(
-                shared_ids[ static_cast<std::size_t>( index ) ] );
-          }
+          // tryPnpInit maps the accepted RANSAC indices back to the exact
+          // pre-intake mapped-observation scan used to create correspondences.
           std::vector<StereoObservation> filtered;
           filtered.reserve( candidate.m_observations.size() );
           for ( const StereoObservation& observation :
                 candidate.m_observations )
           {
-            const bool is_shared =
+            const bool is_mapped =
                 m_impl->m_state->m_landmarks_w.find( observation.id ) !=
                 m_impl->m_state->m_landmarks_w.end();
-            // Slice ⑦: zero-disparity observations never enter the PnP
-            // inlier set, so never drop them here either — they stay in the
-            // window for when stereo returns.
-            if ( observation.disparity_px > 0.0 && is_shared &&
-                 inlier_ids.find( observation.id ) == inlier_ids.end() )
+            if ( is_mapped &&
+                 pnp.inlier_ids.find( observation.id ) ==
+                     pnp.inlier_ids.end() )
             {
               continue;
             }
@@ -2263,8 +2261,7 @@ namespace phad::estimator
           candidate.m_observations = std::move( filtered );
 
           result.diagnostics.pnp_success = true;
-          result.diagnostics.pnp_inliers =
-              static_cast<std::uint32_t>( pnp.inlier_indices.size() );
+          result.diagnostics.pnp_inliers = pnp.num_inliers;
         }
       }
 
@@ -2273,7 +2270,7 @@ namespace phad::estimator
         return finalizePostStagingHardResult(
             UpdateStatus::kFailed, "non-finite pose initial value" );
       }
-      // Track history uses the full validated measurement, including shared
+      // Track history uses the full validated measurement, including mapped
       // PnP outliers masked from candidate.m_observations.
       for ( const StereoObservation& observation :
             measurement.m_observations )

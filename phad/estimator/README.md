@@ -49,7 +49,7 @@ snake_case，transform 用 `m_T_target_source`。已有 public aggregate 旧成�
 | `GenericStereoFactor` + LM、最老帧 Prior gauge | 边缘化、smart factor；full IMU state、covariance propagation、IMU factor、gravity 与 accel residual |
 | 重叠断裂时 re-anchor（`enable_reanchor`） | 分段 TUM / Atlas 式多轨迹 |
 | 共视 / cheirality / 重投影 / `segment_id` / PnP 诊断 | ATE（`phad::eval`） |
-| 正常路径 `solvePnPRansac` proposal + stereo 一致性仲裁 + 本帧 inlier 掩码 | frontend track 生命周期 |
+| 正常路径 `solvePnPRansac` proposal + modality-aware 一致性仲裁 + 本帧 inlier 掩码 | frontend track 生命周期 |
 | BA 后 mean-reproj / cheirality 剔点 + 拒同 id 复生 | frontend track 生命周期（由 apps 回传 drop） |
 | `body_P_sensor = T_B_left_rectified` | 未校正左目外参 |
 
@@ -87,7 +87,7 @@ apps/stereo_vo_glue.hpp  ── filter kValid ──► KeyframeMeasurement
 
 | 层级 | 判定与作用 |
 |---|---|
-| observation retained | packet 通过现有校验与 PnP mask 后，observations 写入当前 transaction/window；`m_track_times` 按 normal path 更新，包含 zero-disparity observation |
+| observation retained | packet 通过现有校验与 mapped-observation PnP mask 后，observations 写入当前 transaction/window；`m_track_times` 按 normal path 更新，包含 zero-disparity observation |
 | graph visually constrained | 最终成功 solve 的 graph 含当前 frame 的 mapped observation factor；positive disparity 建立 `GenericStereoFactor`，zero disparity 建立 `GenericProjectionFactor`，共同要求 map membership 与 `min_landmark_observations` |
 | full visual support | packet 摄入前的 committed map 上，positive-disparity `num_shared >= min_pnp_inliers` |
 
@@ -99,8 +99,9 @@ support 判定。
 
 每条 mapped observation 最多建立一个 visual factor。left-only bearing 复用左目
 `Cal3_S2`、body-to-left extrinsic、像素 sigma 与 Huber 配置；它不提供深度，也不
-参与 landmark seed、PnP 或 full-support 判定。stereo 与 mono factor 统一进入 RMS、
-Probe B、cheirality、mean-cull 和 optional reopt。
+参与 landmark seed。Q5a 起，摄入前已 mapped 的 left-only observation 可参与 PnP；
+full-support 仍暂用 positive-disparity `num_shared`。stereo 与 mono factor 统一进入
+RMS、Probe B、cheirality、mean-cull 和 optional reopt。
 
 full visual support 每个 packet 只在摄入前计算一次。只有摄入前已达门且整个
 primary transaction 成功 commit，才刷新 support anchor，并将
@@ -166,7 +167,7 @@ VioUpdateResult update(const KeyframeMeasurement& measurement,
 | 触发 | apps/session `isKeyframe()` 返回 true | session `isKeyframe()` 返回 false |
 | 校验 | 共享 | 共享 |
 | reanchor/首帧 | 可 | **不可**（非关键帧 `shared=0` → `kRejected`） |
-| PnP + 仲裁 | 正常 | 正常（复用同一 `tryPnpInit` + stereo RMS 仲裁） |
+| PnP + 仲裁 | 正常 | 正常（复用同一 `tryPnpInit` + modality-aware RMS 仲裁） |
 | landmark backproject | new-id seeding；existing-id refresh 共用 | 不 seed new id；existing-id refresh/backproject 共用 |
 | 窗口 push/pop | 是 | 是；作为 temporal graph state 入窗，满窗时优先逐出最老 non-KF |
 | buildGraph + LM | 是 | 是；与窗口内 keyframe/non-KF 一起优化 |
@@ -216,34 +217,41 @@ bit-exact，不声称触达 public optimizer exception。
 - `kRejected` / `kFailed`：诊断里的 `segment_id` 反映**回滚后**的状态
   （seed 门限拒帧时不递增）。
 
-## PnP 初值与 stereo 一致性仲裁（M3.3 Slice ③）
+## PnP 初值与 modality-aware 一致性仲裁
 
-正常路径（`m_initialized && num_shared > 0`）在 `poseInitialValue()` guess 之上
-可选跑 `cv::solvePnPRansac`（PIMPL 内、`PRIVATE opencv_calib3d`）：
+正常路径在 `poseInitialValue()` guess 之上，使用摄入前 committed map 与当前
+left observation 的 overlap 可选跑 `cv::solvePnPRansac`（PIMPL 内、
+`PRIVATE opencv_calib3d`）。positive-disparity 与 left-only observation 均可建立
+3D–2D correspondence：
 
 | 条件 | 结果 |
 |---|---|
 | `enable_pnp_init == false` | `T_W_B = guess`，不 cull；复现 Slice ② |
-| `num_shared < min_pnp_inliers` 或 RANSAC 失败 / inliers 不足 | fallback：`T_W_B = guess`，**不** cull、**不**拒帧 |
-| proposal 的 stereo score 无效，或比 guess 差超过 `stereo_sigma_px` | fallback：`T_W_B = guess`，保留本帧全部观测，**不**应用 PnP mask |
-| proposal 有效，且 guess 无效或 proposal RMS ≤ guess RMS + `stereo_sigma_px` | `T_W_B` 取 PnP；从本帧观测去掉 shared 外点（新 id 保留） |
+| `num_mapped_observations < min_pnp_inliers` 或 RANSAC 失败 / inliers 不足 | fallback：`T_W_B = guess`，**不** cull、**不**拒帧 |
+| proposal 的 score 无效，或比有效 guess 差超过 `stereo_sigma_px` | fallback：`T_W_B = guess`，保留本帧全部观测，**不**应用 PnP mask |
+| proposal 有效，且 guess 无效或 proposal RMS ≤ guess RMS + `stereo_sigma_px` | `T_W_B` 取 PnP；从本帧观测去掉 mapped stereo / mono 外点，unmapped observation 保留 |
 
-首段 seed / re-anchor **不跑** PnP（`num_shared == 0`）。默认
-`pnp_reproj_px=2.0`、`pnp_confidence=0.99`、`min_pnp_inliers=10`。
+首段 seed / re-anchor **不跑** PnP。默认 `pnp_reproj_px=2.0`、
+`pnp_confidence=0.99`、`min_pnp_inliers=10`。
 
 PnP 成功只生成 proposal，不直接授权 pose 或 mask。proposal 与 guess 都在 PnP
-返回的同一 shared inlier 集上计算未白化 `(uL,uR,v)` RMS；非法 index、非有限投影
-或 cheirality 令候选 score 无效。`stereo_sigma_px` 是既有观测噪声，也作为统计
-等价带，不新增配置或 `config_hash` 输入。只有仲裁采用 proposal 后才应用其
-inlier mask；回退不修改 measurement。
+返回的同一 mapped RANSAC inlier 集上计分。stereo observation 使用未白化
+`(uL,uR,v)` residual 的 L2，mono observation 使用 `(u,v)` residual 的 L2；RMS 为
+`sqrt(sum(||r_i||^2) / N_inlier_observations)`，每条 inlier observation 只占一个
+分母单位。非法 index、非有限投影或 cheirality 令候选 score 无效；proposal 无效
+时回退，有效 proposal 可在 guess 无法计分时被采用。`stereo_sigma_px` 是既有观测
+噪声，也作为统计等价带，不新增配置或 `config_hash` 输入。只有仲裁采用 proposal
+后才应用其 inlier mask；回退不修改 measurement。
 
-**掩码语义**：被掩码的 shared 外点仍写入 `m_track_times` /
+**掩码语义**：被掩码的 mapped stereo / mono 外点仍写入 `m_track_times` /
 `observationTimestamps()`；`num_observations` 保持测量原值（不是入图观测数）。
-`m_landmarks_w` 与 frontend track 不动——伪永久生命周期见 Slice ④。
+unmapped observation 保留；`m_landmarks_w` 与 frontend track 不动——伪永久生命
+周期见 Slice ④。
 
 诊断：`UpdateDiagnostics.pnp_success` / `pnp_inliers`；session 汇总
-`pnp_successes` / `pnp_fallbacks`（仅正常路径；seed / re-anchor 不计
-fallback）。详见 `docs/research/2026-08-01-note-m3-3-slice3-pnp-design.md`、
+`pnp_successes` / `pnp_fallbacks`，fallback population 使用
+`num_mapped_observations`（仅正常路径；seed / re-anchor 不计 fallback）。详见
+`docs/research/2026-08-01-note-m3-3-slice3-pnp-design.md`、
 `docs/research/2026-08-04-note-m3-3-pnp-stereo-consistency-design.md` 与
 `docs/research/2026-08-04-note-m3-3-pnp-stereo-arbitration-results.md`。
 

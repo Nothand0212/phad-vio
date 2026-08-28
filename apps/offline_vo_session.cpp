@@ -838,7 +838,8 @@ namespace phad::apps
         {
           ++result.counts.pnp_successes;
         }
-        if ( options.estimator.enable_pnp_init && d.num_shared > 0U &&
+        if ( options.estimator.enable_pnp_init &&
+             d.num_mapped_observations > 0U &&
              !d.pnp_success && !is_new_segment )
         {
           ++result.counts.pnp_fallbacks;

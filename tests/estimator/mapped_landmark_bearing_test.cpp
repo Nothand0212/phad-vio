@@ -371,10 +371,11 @@ TEST( MappedLandmarkBearingQuality, MonoCheiralityCullsMappedLandmark )
   options.min_track_observations_for_seed = 1;
   options.min_landmark_observations       = 2;
   options.min_shared_landmarks            = 2;
-  options.enable_pnp_init                 = true;
-  options.enable_outlier_cull             = false;
-  options.enable_outlier_reopt            = false;
-  options.huber_k_px                      = 0.0;
+  // Isolate the backend cheirality path from PnP's observation mask.
+  options.enable_pnp_init      = false;
+  options.enable_outlier_cull  = false;
+  options.enable_outlier_reopt = false;
+  options.huber_k_px           = 0.0;
   VioEstimator estimator( makeCalibration(),
                           phad::test_support::testImuParameters(), options );
 
@@ -431,9 +432,20 @@ TEST( MappedLandmarkBearingQuality, MonoCheiralityCullsMappedLandmark )
       observations.push_back( *locked_near );
     }
 
-    const auto result = estimator.update( makeMeasurement(
+    auto measurement = makeMeasurement(
         static_cast<std::int64_t>( frame_index + 1U ) * 100'000'000,
-        std::move( observations ) ) );
+        std::move( observations ) );
+    if ( frame_index + 1U == camera_z.size() )
+    {
+      auto& imu = std::get<phad::sensor::RawImuInterval>( measurement.m_imu );
+      for ( phad::sensor::ImuMeasurement& sample : imu.m_samples )
+      {
+        // Seed the graph beyond the near landmark to trigger cheirality.
+        sample.accel_mps2[ 2 ] += 400.0;
+      }
+    }
+
+    const auto result = estimator.update( measurement );
     ASSERT_EQ( result.status, UpdateStatus::kOk ) << result.message;
     if ( frame_index + 1U == camera_z.size() )
     {
