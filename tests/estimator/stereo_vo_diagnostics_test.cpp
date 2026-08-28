@@ -317,7 +317,7 @@ TEST( StereoVoDiagnostics, ObservationTimestampsAccumulateById )
   EXPECT_EQ( times[ 2 ].nanoseconds(), 150'000'000 );
 }
 
-TEST( StereoVoDiagnostics, LowConnectivityFlagWhenSharedBelowThreshold )
+TEST( StereoVoDiagnostics, LowConnectivityFlagWhenMappedOverlapBelowThreshold )
 {
   const auto calibration = makeCalibration();
   const auto poses       = translatingPoses( 3, 0.05 );
@@ -338,7 +338,8 @@ TEST( StereoVoDiagnostics, LowConnectivityFlagWhenSharedBelowThreshold )
       makeFrame( calibration, poses[ 1 ], 100'000'000, kLandmarks, ids ) );
   ASSERT_EQ( second.status, UpdateStatus::kOk );
   EXPECT_TRUE( second.diagnostics.low_connectivity );
-  EXPECT_GT( second.diagnostics.num_shared, 0U );
+  EXPECT_EQ( second.diagnostics.num_mapped_observations,
+             kLandmarks.size() );
 }
 
 TEST( StereoVoExtrinsics, RecoversBodyPoseNotLeftCamera )

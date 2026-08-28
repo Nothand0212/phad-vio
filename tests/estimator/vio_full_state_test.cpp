@@ -93,6 +93,18 @@ namespace
     return observations;
   }
 
+  [[nodiscard]] std::vector<StereoObservation> makeLeftOnlyObservations(
+      std::size_t count = 10U )
+  {
+    std::vector<StereoObservation> observations = makeObservations();
+    observations.resize( count );
+    for ( StereoObservation& observation : observations )
+    {
+      observation.disparity_px = 0.0;
+    }
+    return observations;
+  }
+
   [[nodiscard]] ImuMeasurement makeImuWithAcc(
       std::int64_t timestamp_ns, const Eigen::Vector3d& acc_mps2 )
   {
@@ -762,6 +774,157 @@ TEST( VioFullState, VisualCoastRetainsFactorsAndRecoversInSegment )
   EXPECT_EQ( recovered.diagnostics.num_current_visual_factors, 10U );
   EXPECT_EQ( recovered.diagnostics.m_vio.m_visual_factors, 30U );
   EXPECT_EQ( recovered.diagnostics.m_vio.m_visual_coast_duration_ns, 0 );
+}
+
+TEST( VioFullState, MappedLeftOnlySupportRecoversActiveSegment )
+{
+  EstimatorOptions options = transactionOptions();
+  VioEstimator     estimator( makeCalibration(), makeImuParameters(), options );
+  primeSupportedCoast( estimator );
+
+  const auto recovered = estimator.update( makeMeasurementWithObservations(
+      4 * kFramePeriodNs,
+      stationaryInterval( 3 * kFramePeriodNs, 4 * kFramePeriodNs ),
+      makeLeftOnlyObservations() ) );
+
+  ASSERT_EQ( recovered.status, UpdateStatus::kOk ) << recovered.message;
+  ASSERT_TRUE( recovered.estimate.has_value() );
+  EXPECT_EQ( recovered.estimate->m_segment_id, 0U );
+  EXPECT_EQ( recovered.diagnostics.num_shared, 0U );
+  EXPECT_EQ( recovered.diagnostics.num_mapped_observations, 10U );
+  EXPECT_EQ( recovered.diagnostics.num_current_visual_factors, 10U );
+  EXPECT_EQ( recovered.diagnostics.num_current_mono_visual_factors, 10U );
+  EXPECT_EQ( recovered.diagnostics.m_vio.m_visual_coast_duration_ns, 0 );
+  EXPECT_EQ( recovered.diagnostics.unsupported_span_ns, 0 );
+}
+
+TEST( VioFullState, MappedOverlapClearsLowConnectivity )
+{
+  EstimatorOptions options     = transactionOptions();
+  options.min_pnp_inliers      = 4;
+  options.min_shared_landmarks = 8;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+  primeSupportedCoast( estimator );
+
+  const auto supported = estimator.update( makeMeasurementWithObservations(
+      4 * kFramePeriodNs,
+      stationaryInterval( 3 * kFramePeriodNs, 4 * kFramePeriodNs ),
+      makeLeftOnlyObservations() ) );
+
+  ASSERT_EQ( supported.status, UpdateStatus::kOk ) << supported.message;
+  EXPECT_EQ( supported.diagnostics.num_shared, 0U );
+  EXPECT_EQ( supported.diagnostics.num_mapped_observations, 10U );
+  EXPECT_FALSE( supported.diagnostics.low_connectivity );
+}
+
+TEST( VioFullState, MappedOverlapBelowThresholdKeepsCoastWithMixedFactors )
+{
+  EstimatorOptions options = transactionOptions();
+  VioEstimator     estimator( makeCalibration(), makeImuParameters(), options );
+  primeSupportedCoast( estimator );
+
+  std::vector<StereoObservation> mixed = makeLeftOnlyObservations( 9U );
+  mixed.front().disparity_px           = 12.0;
+  const auto coast                     = estimator.update( makeMeasurementWithObservations(
+      4 * kFramePeriodNs,
+      stationaryInterval( 3 * kFramePeriodNs, 4 * kFramePeriodNs ),
+      std::move( mixed ) ) );
+
+  ASSERT_EQ( coast.status, UpdateStatus::kOk ) << coast.message;
+  ASSERT_TRUE( coast.estimate.has_value() );
+  EXPECT_EQ( coast.estimate->m_segment_id, 0U );
+  EXPECT_EQ( coast.diagnostics.num_shared, 1U );
+  EXPECT_EQ( coast.diagnostics.num_mapped_observations, 9U );
+  EXPECT_EQ( coast.diagnostics.num_current_visual_factors, 9U );
+  EXPECT_EQ( coast.diagnostics.num_current_mono_visual_factors, 8U );
+  EXPECT_EQ( coast.diagnostics.m_vio.m_visual_coast_duration_ns,
+             2 * kFramePeriodNs );
+  EXPECT_EQ( coast.diagnostics.unsupported_span_ns,
+             2 * kFramePeriodNs );
+}
+
+TEST( VioFullState, CurrentStereoSeedDoesNotPromotePreIntakeMappedSupport )
+{
+  EstimatorOptions options                = transactionOptions();
+  options.min_track_observations_for_seed = 1;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+  primeSupportedCoast( estimator );
+
+  std::vector<StereoObservation> observations =
+      makeLeftOnlyObservations( 9U );
+  observations.push_back( makeUniqueObservation( 9'004U ) );
+  const auto coast = estimator.update( makeMeasurementWithObservations(
+      4 * kFramePeriodNs,
+      stationaryInterval( 3 * kFramePeriodNs, 4 * kFramePeriodNs ),
+      std::move( observations ) ) );
+
+  ASSERT_EQ( coast.status, UpdateStatus::kOk ) << coast.message;
+  EXPECT_EQ( coast.diagnostics.num_disparity, 1U );
+  EXPECT_EQ( coast.diagnostics.num_shared, 0U );
+  EXPECT_EQ( coast.diagnostics.num_mapped_observations, 9U );
+  EXPECT_EQ( coast.diagnostics.num_seeded_landmarks, 1U );
+  EXPECT_EQ( coast.diagnostics.num_current_visual_factors, 9U );
+  EXPECT_EQ( coast.diagnostics.num_current_mono_visual_factors, 9U );
+  EXPECT_EQ( coast.diagnostics.m_vio.m_visual_coast_duration_ns,
+             2 * kFramePeriodNs );
+  EXPECT_EQ( coast.diagnostics.unsupported_span_ns,
+             2 * kFramePeriodNs );
+}
+
+TEST( VioFullState, PnpFallbackDoesNotBlockMappedSupportRecovery )
+{
+  EstimatorOptions options = transactionOptions();
+  options.enable_pnp_init  = true;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+  primeSupportedCoast( estimator );
+
+  std::vector<StereoObservation> left_only = makeLeftOnlyObservations();
+  left_only.front().left_pixel.x() += 40.0;
+  const auto recovered = estimator.update( makeMeasurementWithObservations(
+      4 * kFramePeriodNs,
+      stationaryInterval( 3 * kFramePeriodNs, 4 * kFramePeriodNs ),
+      std::move( left_only ) ) );
+
+  ASSERT_EQ( recovered.status, UpdateStatus::kOk ) << recovered.message;
+  EXPECT_FALSE( recovered.diagnostics.pnp_success );
+  EXPECT_EQ( recovered.diagnostics.pnp_inliers, 0U );
+  EXPECT_EQ( recovered.diagnostics.num_shared, 0U );
+  EXPECT_EQ( recovered.diagnostics.num_mapped_observations, 10U );
+  EXPECT_EQ( recovered.diagnostics.num_current_visual_factors, 10U );
+  EXPECT_EQ( recovered.diagnostics.num_current_mono_visual_factors, 10U );
+  EXPECT_EQ( recovered.diagnostics.m_vio.m_visual_coast_duration_ns, 0 );
+  EXPECT_EQ( recovered.diagnostics.unsupported_span_ns, 0 );
+}
+
+TEST( VioFullState, MappedSupportRecoveryRequiresSuccessfulPrimaryCommit )
+{
+  EstimatorOptions options = transactionOptions();
+  VioEstimator     estimator( makeCalibration(), makeImuParameters(), options );
+  primeSupportedCoast( estimator );
+
+  std::vector<StereoObservation> explosive = makeLeftOnlyObservations();
+  explosive.front().left_pixel.x() =
+      std::numeric_limits<double>::max() / 4.0;
+  const auto failed = estimator.update( makeMeasurementWithObservations(
+      4 * kFramePeriodNs,
+      stationaryInterval( 3 * kFramePeriodNs, 4 * kFramePeriodNs ),
+      std::move( explosive ) ) );
+
+  ASSERT_EQ( failed.status, UpdateStatus::kFailed ) << failed.message;
+  EXPECT_FALSE( failed.estimate.has_value() );
+  EXPECT_EQ( failed.diagnostics.num_shared, 0U );
+  EXPECT_EQ( failed.diagnostics.num_mapped_observations, 10U );
+  EXPECT_EQ( failed.diagnostics.m_vio.m_visual_coast_duration_ns,
+             kFramePeriodNs );
+  EXPECT_EQ( failed.diagnostics.unsupported_span_ns, kFramePeriodNs );
+
+  const auto recovered = estimator.update( makeMeasurementWithObservations(
+      4 * kFramePeriodNs,
+      stationaryInterval( 3 * kFramePeriodNs, 4 * kFramePeriodNs ),
+      makeLeftOnlyObservations() ) );
+  ASSERT_EQ( recovered.status, UpdateStatus::kOk ) << recovered.message;
+  EXPECT_EQ( recovered.diagnostics.m_vio.m_visual_coast_duration_ns, 0 );
+  EXPECT_EQ( recovered.diagnostics.unsupported_span_ns, 0 );
 }
 
 TEST( VioFullState, ExactVisualCoastHorizonCommitsBeforeSegmentCompletion )

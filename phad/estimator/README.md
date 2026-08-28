@@ -89,7 +89,7 @@ apps/stereo_vo_glue.hpp  ── filter kValid ──► KeyframeMeasurement
 |---|---|
 | observation retained | packet 通过现有校验与 mapped-observation PnP mask 后，observations 写入当前 transaction/window；`m_track_times` 按 normal path 更新，包含 zero-disparity observation |
 | graph visually constrained | 最终成功 solve 的 graph 含当前 frame 的 mapped observation factor；positive disparity 建立 `GenericStereoFactor`，zero disparity 建立 `GenericProjectionFactor`，共同要求 map membership 与 `min_landmark_observations` |
-| full visual support | packet 摄入前的 committed map 上，positive-disparity `num_shared >= min_pnp_inliers` |
+| full visual support | packet 摄入前的 committed map 上，`num_mapped_observations >= min_pnp_inliers` |
 
 低于 full visual support 的 accepted packet 仍可保留 observations、seed landmarks、
 建立 visual factors 并运行既有 cheirality / mean-cull / optional-reopt 质量路径。
@@ -99,9 +99,9 @@ support 判定。
 
 每条 mapped observation 最多建立一个 visual factor。left-only bearing 复用左目
 `Cal3_S2`、body-to-left extrinsic、像素 sigma 与 Huber 配置；它不提供深度，也不
-参与 landmark seed。Q5a 起，摄入前已 mapped 的 left-only observation 可参与 PnP；
-full-support 仍暂用 positive-disparity `num_shared`。stereo 与 mono factor 统一进入
-RMS、Probe B、cheirality、mean-cull 和 optional reopt。
+参与 landmark seed。摄入前已 mapped 的 left-only observation 可参与 PnP、
+full visual support 与 low-connectivity 判定。stereo 与 mono factor 统一进入 RMS、
+Probe B、cheirality、mean-cull 和 optional reopt。
 
 full visual support 每个 packet 只在摄入前计算一次。只有摄入前已达门且整个
 primary transaction 成功 commit，才刷新 support anchor，并将

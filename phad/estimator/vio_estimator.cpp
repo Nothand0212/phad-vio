@@ -2019,9 +2019,8 @@ namespace phad::estimator
       {
         ++num_mapped_observations;
       }
-      // Keep num_shared as the historical positive-disparity overlap. Mapped
-      // left-only observations have their own population for PnP, while
-      // support and low-connectivity still use num_shared until Q5b.
+      // Keep num_shared as the historical positive-disparity overlap.
+      // PnP, full support, and low-connectivity use the mapped population.
       if ( observation.disparity_px > 0.0 )
       {
         ++num_disparity;  // diag: frontend stereo matching health, independent
@@ -2039,7 +2038,8 @@ namespace phad::estimator
     const bool active_segment = m_impl->m_state->m_initialized;
     const bool full_visual_support =
         !active_segment ||
-        static_cast<int>( num_shared ) >= m_impl->options.min_pnp_inliers;
+        static_cast<int>( num_mapped_observations ) >=
+            m_impl->options.min_pnp_inliers;
     const bool low_visual_support =
         active_segment && !full_visual_support;
     std::int64_t next_visual_coast_duration_ns = 0;
@@ -2122,7 +2122,8 @@ namespace phad::estimator
 
     result.diagnostics.low_connectivity =
         m_impl->m_state->m_initialized && full_visual_support &&
-        static_cast<int>( num_shared ) < m_impl->options.min_shared_landmarks;
+        static_cast<int>( num_mapped_observations ) <
+            m_impl->options.min_shared_landmarks;
 
     if ( !m_impl->m_state->m_initialized )
     {

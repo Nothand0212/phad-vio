@@ -280,8 +280,8 @@ TEST( StereoVoPnpTest, PnpSucceedsWithMappedLeftOnlyCorrespondences )
   EXPECT_EQ( recovered.diagnostics.pnp_inliers, ids.size() );
   EXPECT_EQ( recovered.diagnostics.num_current_mono_visual_factors,
              ids.size() );
-  EXPECT_EQ( recovered.diagnostics.m_vio.m_visual_coast_duration_ns,
-             50'000'000 );
+  EXPECT_EQ( recovered.diagnostics.m_vio.m_visual_coast_duration_ns, 0 );
+  EXPECT_EQ( recovered.diagnostics.unsupported_span_ns, 0 );
   EXPECT_LT( ( recovered.estimate->T_W_B.translation() -
                poses[ 1 ].translation() )
                  .norm(),
