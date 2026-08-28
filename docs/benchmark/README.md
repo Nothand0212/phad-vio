@@ -124,3 +124,5 @@ V2_01_easy V2_02_medium V2_03_difficult
 - [M3.3 checkpoints](m3.3/README.md)
 - [M4 checkpoints](m4/README.md)；当前全量锚点：
   [Minimal full-state VIO `c999f58/default_0337287b`](m4/minimal-full-state-vio_c999f58_0337287b.md)
+- [M5 checkpoints](m5/README.md)；current-path Observe：
+  [Cold-root Observe `6a193a8/default_0337287b`](m5/cold-root-current-path-observe_6a193a8_0337287b.md)

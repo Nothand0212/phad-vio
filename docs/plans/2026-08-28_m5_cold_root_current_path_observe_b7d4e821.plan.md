@@ -19,13 +19,13 @@ todos:
     status: completed
   - id: authorize-clean-candidate
     content: '定向门全绿后汇报 diff、实验问题、约 38 秒成本与停止条件，并单独取得 local candidate commit 授权'
-    status: in_progress
+    status: completed
   - id: run-v2-03-once
     content: '从授权后的本机 Release clean candidate 仅回放一次 V2_03_difficult，复用 frozen db22656 control'
-    status: pending
+    status: completed
   - id: reconcile-evidence
     content: '对账 289 个 terminal rows、旧行为投影与全部新诊断 invariant，记录可复现 Q1 Observe 证据并完成 red-team 审查'
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -33,8 +33,9 @@ isProject: false
 
 ## 0. 状态与 authority
 
-本计划已于 2026-08-28 完成分段确认，现按 TDD 进入实施；local commit、replay 与
-所有远端操作仍受 §7 的独立授权门约束。
+本计划已于 2026-08-28 完成分段确认、TDD 实施、local candidate、单次 replay 与
+证据对账；checkpoint 见
+[`cold-root-current-path-observe_6a193a8_0337287b.md`](../benchmark/m5/cold-root-current-path-observe_6a193a8_0337287b.md)。
 
 | 对齐段 | 状态 |
 |---|---|
