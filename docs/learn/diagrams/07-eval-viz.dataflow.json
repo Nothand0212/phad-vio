@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "第 07 章：评估与可视化",
+    "output": "docs/learn/diagrams/07-eval-viz.html",
+    "viewBox": [960, 560],
+    "quality_profile": "showcase"
+  },
+  "stages": [
+    { "label": "估计" },
+    { "label": "导出" },
+    { "label": "评估" }
+  ],
+  "nodes": [
+    {
+      "id": "est",
+      "type": "backend",
+      "label": "估计轨迹",
+      "sublabel": "T_W_B 序列",
+      "stage": 0,
+      "row": 1,
+      "tag": "estimator"
+    },
+    {
+      "id": "tum",
+      "type": "database",
+      "label": "TUM 文件",
+      "sublabel": "est.tum + gt.tum",
+      "stage": 1,
+      "row": 1,
+      "tag": "evo 兼容"
+    },
+    {
+      "id": "eval",
+      "type": "backend",
+      "label": "phad::eval",
+      "sublabel": "ATE / RPE",
+      "stage": 2,
+      "row": 1,
+      "tag": "Umeyama"
+    }
+  ],
+  "flows": [
+    {
+      "id": "write",
+      "from": "est",
+      "to": "tum",
+      "label": "writeTum",
+      "classification": "纳秒 → 秒"
+    },
+    {
+      "id": "metrics",
+      "from": "tum",
+      "to": "eval",
+      "label": "computeAte",
+      "classification": "associate + align",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "phad::eval",
+      "items": [
+        "readTum → associate → alignSe3 + ATE",
+        "RPE 固定 1 s 间隔；固定尺度不对齐 scale"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "phad::viz",
+      "items": [
+        "TrajectoryPanel → cv::Mat（可单测）",
+        "ImageWindow 仅 runner 人工确认"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "phad::bench",
+      "items": [
+        "config_hash + run 路径模板",
+        "meta.json / summary.json / 26 列 diag.csv"
+      ]
+    }
+  ]
+}

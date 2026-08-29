@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "第 05 章：从特征到 odom",
+    "output": "docs/learn/diagrams/05-tracks-to-odom.html",
+    "viewBox": [1080, 560],
+    "quality_profile": "showcase"
+  },
+  "stages": [
+    { "label": "前端" },
+    { "label": "编排" },
+    { "label": "组装" },
+    { "label": "估计" },
+    { "label": "位姿" }
+  ],
+  "nodes": [
+    {
+      "id": "tracks",
+      "type": "frontend",
+      "label": "FrameTracks",
+      "sublabel": "StereoTracker",
+      "stage": 0,
+      "row": 1,
+      "tag": "每帧"
+    },
+    {
+      "id": "kf",
+      "type": "backend",
+      "label": "isKeyframe",
+      "sublabel": "OfflineVoSession",
+      "stage": 1,
+      "row": 1,
+      "tag": "视差/时间/率"
+    },
+    {
+      "id": "glue",
+      "type": "backend",
+      "label": "toVioMeasurement",
+      "sublabel": "stereo_vo_glue",
+      "stage": 2,
+      "row": 1,
+      "tag": "kValid 过滤"
+    },
+    {
+      "id": "update",
+      "type": "backend",
+      "label": "VioEstimator",
+      "sublabel": "update()",
+      "stage": 3,
+      "row": 1,
+      "tag": "PIMPL + GTSAM"
+    },
+    {
+      "id": "pose",
+      "type": "messagebus",
+      "label": "T_W_B",
+      "sublabel": "VioUpdateResult",
+      "stage": 4,
+      "row": 1,
+      "tag": "轨迹点"
+    }
+  ],
+  "flows": [
+    {
+      "id": "gate",
+      "from": "tracks",
+      "to": "kf",
+      "label": "每帧",
+      "classification": "session 编排",
+      "labelAt": [208, 314]
+    },
+    {
+      "id": "assemble",
+      "from": "kf",
+      "to": "glue",
+      "label": "KF / non-KF",
+      "classification": "VioMeasurement",
+      "variant": "emphasis"
+    },
+    {
+      "id": "estimate",
+      "from": "glue",
+      "to": "update",
+      "label": "update()",
+      "classification": "factor graph"
+    },
+    {
+      "id": "emit",
+      "from": "update",
+      "to": "pose",
+      "label": "T_W_B",
+      "classification": "PnP + LM + cull",
+      "variant": "emphasis",
+      "labelAt": [948, 314]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "session：isKeyframe 规则",
+      "items": [
+        "前两帧强制 KF；观测 < min_pnp_inliers 强制 KF",
+        "> 0.5 s / 存活率 < 60% / 旋转补偿视差 > 30 px 触发 KF",
+        "cull 后 dropTracks 回传 frontend（composition root）"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "glue：观测过滤",
+      "items": [
+        "kValid → 带 disparity 的 StereoObservation",
+        "kNoRightMatch 且 track≥2 → disparity=0，保留窗口不 seed",
+        "estimator 不 include frontend；组装只在 apps/"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "VioEstimator::update 内部",
+      "items": [
+        "校验 → re-anchor/seed → PnP 仲裁 → 窗口 push → buildGraph + LM",
+        "mean-reproj cull + cheirality；可选多轮 reopt",
+        "完整字段与 diag.csv 见 phad/estimator/README.md"
+      ]
+    }
+  ]
+}
