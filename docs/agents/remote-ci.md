@@ -6,14 +6,31 @@ record-only benchmark。序列最多 8 路并行，单个失败不会取消其�
 
 ## 固定身份与安全合同
 
-- SSH 目标：`lin@192.168.110.119`。
-- ED25519 主机指纹：
-  `SHA256:gVOFWNnhMg035iardU+Z8GxRKunxHIp3ZQrjhgY/9XE`。
+SSH 机器身份读本机共享配置，供各仓库共用：
+
+- 路径：环境变量 `PHAD_REMOTE_CI_CONFIG`；否则
+  `$XDG_CONFIG_HOME/phad-remote-ci/config.json`；再否则
+  `~/.config/phad-remote-ci/config.json`。
+- 字段仅 `host`、`user`、`fingerprint`。缺文件、JSON 不合法或字段不对时
+  失败，并打印路径与示例。
+- `--help` 与远端 worker 子命令不读该文件。
+
+```json
+{
+  "host": "192.168.110.34",
+  "user": "lin",
+  "fingerprint": "SHA256:gVOFWNnhMg035iardU+Z8GxRKunxHIp3ZQrjhgY/9XE"
+}
+```
+
+本仓库远端路径：
+
 - 远端项目根：`/home/lin/Projects/tigerfish`。
 - 数据集：`/home/lin/data/euroc/native`。
 
-每次连接先用 `ssh-keyscan` 取得 ED25519 key，再用 `ssh-keygen -E sha256`
-比较完整指纹。只有精确匹配时，脚本才会通过临时 `known_hosts` 继续。
+每次连接先用 `ssh-keyscan` 取得当前 `host` 的 ED25519 key，再用
+`ssh-keygen -E sha256` 与配置中的 `fingerprint` 比较。只有精确匹配时，
+脚本才会通过临时 `known_hosts` 继续。
 SSH/SCP 固定使用 `StrictHostKeyChecking=yes`、`BatchMode=yes`、public-key-only；
 密码和 keyboard-interactive 被关闭，agent 不转发，也不依赖用户 SSH config。
 
