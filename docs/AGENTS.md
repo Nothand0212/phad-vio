@@ -39,6 +39,7 @@
 | [`plans/`](plans/) | 怎么执行 |
 | [`research/`](research/) | 查到了什么 |
 | [`benchmark/`](benchmark/) | 跑出了什么数字 |
+| [`learn/`](learn/) | 这一环怎么走通（教学叙事） |
 
 ## 禁止
 

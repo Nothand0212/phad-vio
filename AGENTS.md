@@ -79,14 +79,16 @@ C++ 命名 / 风格与 Git 工作流见上表「权威文档」与「硬约束�
 权威正文见 [`docs/agents/preferences.md`](docs/agents/preferences.md)。
 
 - 文档以中文为主；术语与 identifiers 保留英文。跨库规则在 `docs/agents/`，模块约定在各目录 `AGENTS.md`。
+- 教学叙事在 `docs/learn/`：按 pipeline 分章，须分解到代码与 spec 的模块内部；配图用 Archify。权威合同仍在 design/specs。
 - 开工前逐项对齐（一次一问、A/B/C + 推荐）；设计稿分段确认后再动手；写 spec/计划前先建 issue。
 - 重大设计先开源一手对照，笔记落 `docs/research/`；不擅自定稿。
-- EuRoC / milestone baseline 须含 `meta.json` 参数快照（与 `config_hash` 同源）；验收不够先诊断再扩序列。
+- EuRoC / milestone 数值、QA 与逐序列结果以 checkpoint / evidence JSON 为准，不用聊天摘要替代；baseline 须含 `meta.json` 参数快照（与 `config_hash` 同源）。已合入 ≠ formal gate 已通过。验收不够先诊断再扩序列；实验默认本机，先说明问题、成本与停止条件。
 
 ## 现行工作区事实
 
 - clangd：`.clangd` 中 `CompilationDatabase: build`；根 `compile_commands.json` → `build/compile_commands.json`（gitignore）。改 CMake/源后重新 `cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`。单一根 `CMakeLists.txt`，开启 `-Wconversion -Wsign-conversion -Wpedantic`。
 - 格式：根 `.clang-format`；命名/风格权威见上表。依赖细节见各模块 `AGENTS.md`。
-- M4 锚点：`c999f58` / `default_0337287b`；EuRoC 11/11 均值 ATE ≈0.579，段内加权 RMS ≈0.134（相对 ORB-SLAM3 stereo ≈1.6×）。主失败模式是视觉中断后 segment 重启把世界系重置到原点。产品合同：双目尺度已知、body≡IMU、单一 `VioEstimator::update()`、滑窗 10、视觉短时丢失最多 500 ms IMU coast。
+- 当前 main 基线：`#47` mapped-landmark bearing continuity（`db22656` / merge `34c3091`，`default_0337287b`）；EuRoC-11 算术均值 ATE ≈0.301。已合入但 formal gate 仍 FAIL（V2_03 endpoint coverage）；V2_03 末端长期 initializing、未建新 root。旧 1a NavState handoff 不可原样恢复。下一片 `#48` cold-root seed Observe（`#42` child），默认不改 active-map 语义。产品合同：双目尺度已知、body≡IMU、单一 `VioEstimator::update()`、滑窗 10、视觉短时丢失最多 500 ms IMU coast。M4 最小 full-state 历史锚点：`c999f58`。
 - `LandmarkId` 现为 frontend track 与 estimator map 共用身份；TrackId≠LandmarkId 为中期债。前端 OpenCV、后端 GTSAM，自研以调库版为对拍 oracle。
 - Issues：`origin` = `Nothand0212/phad-vio`；`GITHUB_TOKEN` 无 Issues 写权限时用 `env -u GITHUB_TOKEN gh ...`。
+- Remote CI SSH 身份读本机共享配置：`PHAD_REMOTE_CI_CONFIG`，否则 `$XDG_CONFIG_HOME/phad-remote-ci/config.json`，再否则 `~/.config/phad-remote-ci/config.json`；缺文件即失败。仓库只留 `REMOTE_ROOT` / 数据集路径。

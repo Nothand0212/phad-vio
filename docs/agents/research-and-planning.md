@@ -27,6 +27,7 @@
 | 这一片必须交付什么 | `docs/specs/` |
 | 怎么执行 | `docs/plans/` |
 | 跑出了什么数字 | `docs/benchmark/` |
+| 这一环怎么走通（教学） | `docs/learn/` |
 
 历史切片 `*-design.md` 留在 `research/`。数字账本权威在 `benchmark/`；research
 里的叙事 baseline / results 指回对应 checkpoint。
