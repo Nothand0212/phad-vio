@@ -27,6 +27,7 @@
 #include "phad/eval/error_stats.hpp"
 #include "phad/eval/rpe.hpp"
 #include "phad/eval/tum_io.hpp"
+#include "phad/io/dataset/euroc/euroc_dataset.hpp"
 #include "phad/io/dataset/euroc/euroc_groundtruth.hpp"
 
 /**
@@ -681,8 +682,7 @@ namespace
     }
 
     phad::apps::OfflineVoSessionOptions session_options;
-    session_options.sequence_root = arguments.sequence_root;
-    session_options.max_frames    = arguments.max_frames;
+    session_options.max_frames = arguments.max_frames;
     // Q1 Observe is a CLI-only side-channel and never enters flattenConfig.
     session_options.collect_gyro_observe = arguments.gyro_observe;
     if ( arguments.no_outlier_cull )
@@ -840,8 +840,18 @@ namespace
       return 1;
     }
 
-    phad::apps::OfflineVoSessionResult session =
-        phad::apps::runOfflineVoSession( session_options );
+    phad::apps::OfflineVoSessionResult session;
+    auto                               dataset = phad::io::dataset::euroc::open( arguments.sequence_root );
+    if ( !dataset )
+    {
+      session.error =
+          phad::apps::SessionError{ dataset.error().describe() };
+    }
+    else
+    {
+      session = phad::apps::runOfflineVoSession(
+          std::move( dataset ).value(), session_options );
+    }
 
     phad::bench::RunSummary summary;
     summary.sequence         = sequence;
@@ -920,6 +930,13 @@ namespace
       {
         summary.warnings.push_back( session.error->detail );
         std::cerr << session.error->detail << '\n';
+      }
+      else
+      {
+        constexpr std::string_view kNoAcceptedPoses =
+            "no accepted poses to write";
+        summary.warnings.emplace_back( kNoAcceptedPoses );
+        std::cerr << kNoAcceptedPoses << '\n';
       }
       exit_code = 1;
     }

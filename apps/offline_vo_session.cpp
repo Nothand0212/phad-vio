@@ -27,7 +27,6 @@
 #include "phad/common/landmark_id.hpp"
 #include "phad/estimator/vio_estimator.hpp"
 #include "phad/io/dataset/dataset_replay_source.hpp"
-#include "phad/io/dataset/euroc/euroc_dataset.hpp"
 #include "phad/sensor/stereo_frame.hpp"
 
 /**
@@ -355,19 +354,13 @@ namespace phad::apps
   }  // namespace
 
   OfflineVoSessionResult runOfflineVoSession(
+      io::dataset::StereoImuDataset  dataset,
       const OfflineVoSessionOptions& options )
   {
     OfflineVoSessionResult result;
 
-    auto opened = io::dataset::euroc::open( options.sequence_root );
-    if ( !opened )
-    {
-      result.error = SessionError{ opened.error().describe() };
-      return result;
-    }
-
-    auto rectifier =
-        camera::StereoRectifier::create( opened.value().calibration() );
+    const sensor::StereoImuCalibration calibration = dataset.calibration();
+    auto                               rectifier   = camera::StereoRectifier::create( calibration );
     if ( !rectifier )
     {
       result.error =
@@ -397,8 +390,7 @@ namespace phad::apps
       estimator_options.enable_probe_b = true;
     }
     estimator::VioEstimator estimator(
-        rectified_cal, opened.value().calibration().imu(),
-        estimator_options );
+        rectified_cal, calibration.imu(), estimator_options );
 
     // Probe: optional deferred top-K drop after skip (see defer_drop_topk).
     std::unordered_set<common::LandmarkId> pending_drop;
@@ -470,7 +462,7 @@ namespace phad::apps
     std::optional<std::uint32_t> last_segment_id;
 
     const auto                       wall_begin = std::chrono::steady_clock::now();
-    io::dataset::DatasetReplaySource source{ opened.value() };
+    io::dataset::DatasetReplaySource source{ dataset };
     StereoPairStream                 stream{
         source, sync::StereoPairSynchronizerOptions{
                                     .imu_continuity_limit_ns = kImuContinuityLimitNs } };
@@ -909,20 +901,17 @@ namespace phad::apps
     result.sync             = stream.diagnostics();
     finalizeSegmentsAndWarnings();
 
-    if ( poses.empty() )
+    if ( !poses.empty() )
     {
-      result.error = SessionError{ "no accepted poses to write" };
-      return result;
+      auto trajectory = common::Trajectory::create( std::move( poses ) );
+      if ( !trajectory )
+      {
+        result.error = SessionError{ "trajectory create failed: " +
+                                     trajectory.error().detail };
+        return result;
+      }
+      result.trajectory = std::move( trajectory.value() );
     }
-
-    auto trajectory = common::Trajectory::create( std::move( poses ) );
-    if ( !trajectory )
-    {
-      result.error = SessionError{ "trajectory create failed: " +
-                                   trajectory.error().detail };
-      return result;
-    }
-    result.trajectory = std::move( trajectory.value() );
 
     // Keyframe-only trajectory (kf.tum).
     if ( !kf_poses.empty() )

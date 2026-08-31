@@ -10,6 +10,7 @@
 #include "phad/common/trajectory.hpp"
 #include "phad/estimator/types.hpp"
 #include "phad/frontend/stereo_tracker.hpp"
+#include "phad/io/dataset/stereo_imu_dataset.hpp"
 #include "phad/sensor/stereo_imu_packet.hpp"
 #include "phad/sync/stereo_pair_synchronizer.hpp"
 
@@ -67,7 +68,6 @@ namespace phad::apps
 
   struct OfflineVoSessionOptions
   {
-    std::filesystem::path          sequence_root;
     frontend::StereoTrackerOptions tracker;
     estimator::EstimatorOptions    estimator;
     std::optional<std::uint64_t>   max_frames;
@@ -201,6 +201,7 @@ namespace phad::apps
   };
 
   [[nodiscard]] OfflineVoSessionResult runOfflineVoSession(
+      io::dataset::StereoImuDataset  dataset,
       const OfflineVoSessionOptions& options );
 
   [[nodiscard]] std::optional<SessionError> collectGyroObservePacket(

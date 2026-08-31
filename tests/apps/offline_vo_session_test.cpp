@@ -12,6 +12,9 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
+
+#include "phad/io/dataset/euroc/euroc_dataset.hpp"
 
 namespace
 {
@@ -157,19 +160,6 @@ namespace
     std::filesystem::path m_root;
   };
 
-  TEST( OfflineVoSessionTest, MissingSequenceReturnsError )
-  {
-    OfflineVoSessionOptions options;
-    options.sequence_root =
-        std::filesystem::temp_directory_path() / "phad_missing_euroc_seq";
-    std::filesystem::remove_all( options.sequence_root );
-
-    const auto result = runOfflineVoSession( options );
-    ASSERT_TRUE( result.error.has_value() );
-    EXPECT_FALSE( result.trajectory.has_value() );
-    EXPECT_EQ( result.counts.image_frames, 0U );
-  }
-
   TEST( OfflineVoSessionTest, FrameCountsDefaultsIncludeSegmentFields )
   {
     FrameCounts counts;
@@ -199,15 +189,47 @@ namespace
   }
 
   TEST( OfflineVoSessionTest,
+        InitializingPrefixCompletesWithoutTrajectoryOrSessionError )
+  {
+    TinyEurocFixture fixture{ "initializing_prefix" };
+
+    auto opened = phad::io::dataset::euroc::open( fixture.root() );
+    if ( !opened )
+    {
+      FAIL() << "failed to open tiny euroc fixture: "
+             << opened.error().describe();
+    }
+
+    OfflineVoSessionOptions options;
+    options.max_frames = 2U;
+
+    const auto result =
+        runOfflineVoSession( std::move( opened ).value(), options );
+    EXPECT_FALSE( result.error.has_value() );
+    EXPECT_FALSE( result.trajectory.has_value() );
+    EXPECT_EQ( result.counts.image_frames, 2U );
+    EXPECT_EQ( result.diag.size(), 2U );
+    EXPECT_EQ( result.counts.failed, 0U );
+    EXPECT_EQ( result.sync.emitted_stereo, 2U );
+    EXPECT_EQ( result.diag.at( 0 ).status, "initializing" );
+    EXPECT_EQ( result.diag.at( 1 ).status, "initializing" );
+  }
+
+  TEST( OfflineVoSessionTest,
         StreamErrorMidLoopFinalizesCountsWithoutSpuriousSummaryWarning )
   {
     TinyEurocFixture fixture{ "stream_error" };
     fixture.corruptSecondRightImage();
 
     OfflineVoSessionOptions options;
-    options.sequence_root = fixture.root();
+    auto                    opened = phad::io::dataset::euroc::open( fixture.root() );
+    if ( !opened )
+    {
+      FAIL() << "failed to open tiny euroc fixture: "
+             << opened.error().describe();
+    }
 
-    const auto result = runOfflineVoSession( options );
+    const auto result = runOfflineVoSession( std::move( opened ).value(), options );
     ASSERT_TRUE( result.error.has_value() );
     EXPECT_EQ( result.counts.image_frames, 1U );
     ASSERT_EQ( result.diag.size(), 1U );
@@ -247,10 +269,15 @@ namespace
     fixture.corruptSecondRightImage();
 
     OfflineVoSessionOptions options;
-    options.sequence_root        = fixture.root();
     options.collect_gyro_observe = true;
+    auto opened                  = phad::io::dataset::euroc::open( fixture.root() );
+    if ( !opened )
+    {
+      FAIL() << "failed to open tiny euroc fixture: "
+             << opened.error().describe();
+    }
 
-    const auto result = runOfflineVoSession( options );
+    const auto result = runOfflineVoSession( std::move( opened ).value(), options );
     ASSERT_TRUE( result.error.has_value() );
     ASSERT_EQ( result.gyro_observe.packets.size(), 1U );
     EXPECT_EQ( result.gyro_observe.packets.front().status,
@@ -380,12 +407,18 @@ namespace
     const auto probe_path = probe_dir / "probe_b.jsonl";
 
     OfflineVoSessionOptions options;
-    options.sequence_root = configured_path;
-    options.max_frames    = 5;
+    options.max_frames                          = 5;
+    options.estimator.m_enable_moving_bootstrap = true;
     // Default: probe_b_path empty → writer not constructed.
     ASSERT_TRUE( options.probe_b_path.empty() );
+    auto opened = phad::io::dataset::euroc::open( configured_path );
+    if ( !opened )
+    {
+      FAIL() << "failed to open Euroc fixture: "
+             << opened.error().describe();
+    }
 
-    const auto result = runOfflineVoSession( options );
+    const auto result = runOfflineVoSession( std::move( opened ).value(), options );
     ASSERT_FALSE( result.error.has_value() ) << result.error->detail;
     EXPECT_EQ( result.counts.image_frames, 5U );
     EXPECT_FALSE( std::filesystem::exists( probe_path ) );
@@ -409,11 +442,17 @@ namespace
     const auto probe_path = probe_dir / "probe_b.jsonl";
 
     OfflineVoSessionOptions options;
-    options.sequence_root = configured_path;
-    options.max_frames    = 5;
-    options.probe_b_path  = probe_path;
+    options.max_frames                          = 5;
+    options.probe_b_path                        = probe_path;
+    options.estimator.m_enable_moving_bootstrap = true;
+    auto opened                                 = phad::io::dataset::euroc::open( configured_path );
+    if ( !opened )
+    {
+      FAIL() << "failed to open Euroc fixture: "
+             << opened.error().describe();
+    }
 
-    const auto result = runOfflineVoSession( options );
+    const auto result = runOfflineVoSession( std::move( opened ).value(), options );
     ASSERT_FALSE( result.error.has_value() ) << result.error->detail;
     EXPECT_EQ( result.counts.image_frames, 5U );
     ASSERT_TRUE( std::filesystem::exists( probe_path ) );
@@ -451,11 +490,16 @@ namespace
     std::filesystem::remove_all( probe_path.parent_path().parent_path() );
 
     OfflineVoSessionOptions options;
-    options.sequence_root = fixture.root();
-    options.max_frames    = 5;
-    options.probe_b_path  = probe_path;
+    options.max_frames   = 5;
+    options.probe_b_path = probe_path;
+    auto opened          = phad::io::dataset::euroc::open( fixture.root() );
+    if ( !opened )
+    {
+      FAIL() << "failed to open tiny euroc fixture: "
+             << opened.error().describe();
+    }
 
-    const auto result = runOfflineVoSession( options );
+    const auto result = runOfflineVoSession( std::move( opened ).value(), options );
     ASSERT_TRUE( result.error.has_value() );
     EXPECT_NE( result.error->detail.find( "probe_b" ), std::string::npos );
     EXPECT_FALSE( std::filesystem::exists( probe_path ) );
@@ -470,10 +514,16 @@ namespace
     }
 
     OfflineVoSessionOptions options;
-    options.sequence_root = configured_path;
-    options.max_frames    = 5;
+    options.max_frames                          = 5;
+    options.estimator.m_enable_moving_bootstrap = true;
+    auto opened                                 = phad::io::dataset::euroc::open( configured_path );
+    if ( !opened )
+    {
+      FAIL() << "failed to open Euroc fixture: "
+             << opened.error().describe();
+    }
 
-    const auto result = runOfflineVoSession( options );
+    const auto result = runOfflineVoSession( std::move( opened ).value(), options );
     ASSERT_FALSE( result.error.has_value() ) << result.error->detail;
     ASSERT_TRUE( result.trajectory.has_value() );
     EXPECT_EQ( result.counts.image_frames, 5U );

@@ -8,9 +8,11 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 
 #include "apps/offline_vo_session.hpp"
 #include "phad/eval/tum_io.hpp"
+#include "phad/io/dataset/euroc/euroc_dataset.hpp"
 
 /**
  * @file phad_stereo_vo_probe.cpp
@@ -137,9 +139,8 @@ namespace
   [[nodiscard]] int run( const Arguments& arguments )
   {
     phad::apps::OfflineVoSessionOptions options;
-    options.sequence_root = arguments.sequence_root;
-    options.probe_b_path  = arguments.probe_b_path;
-    options.max_frames    = arguments.max_frames;
+    options.probe_b_path = arguments.probe_b_path;
+    options.max_frames   = arguments.max_frames;
     if ( arguments.defer_drop_topk.has_value() )
     {
       options.defer_drop_topk = *arguments.defer_drop_topk;
@@ -150,8 +151,17 @@ namespace
       options.zombie_drop_age = *arguments.zombie_drop_age;
     }
 
-    phad::apps::OfflineVoSessionResult result =
-        phad::apps::runOfflineVoSession( options );
+    phad::apps::OfflineVoSessionResult result;
+    auto                               dataset = phad::io::dataset::euroc::open( arguments.sequence_root );
+    if ( !dataset )
+    {
+      result.error = phad::apps::SessionError{ dataset.error().describe() };
+    }
+    else
+    {
+      result = phad::apps::runOfflineVoSession( std::move( dataset ).value(),
+                                                options );
+    }
     if ( !arguments.diag_csv.empty() )
     {
       if ( const auto write_error =

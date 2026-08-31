@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -7,6 +8,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #ifdef __linux__
 #include <sys/wait.h>
@@ -125,10 +127,42 @@ namespace
                observe_meta.at( "config_hash" ) );
     EXPECT_EQ( extractConfigHash( readFile( stdout_default ) ),
                extractConfigHash( readFile( stdout_observe ) ) );
+    const auto default_summary =
+        nlohmann::json::parse( readFile( out_default / "summary.json" ) );
+    const auto observe_summary =
+        nlohmann::json::parse( readFile( out_observe / "summary.json" ) );
+    EXPECT_EQ( default_summary.at( "status" ), "failed" );
+    EXPECT_EQ( observe_summary.at( "status" ), "failed" );
     EXPECT_FALSE( std::filesystem::exists( out_observe /
                                            "gyro_packets.csv" ) );
     EXPECT_FALSE( std::filesystem::exists( out_observe /
                                            "gyro_samples.csv" ) );
+    EXPECT_FALSE( std::filesystem::exists( out_default / "est.tum" ) );
+    EXPECT_FALSE( std::filesystem::exists( out_default / "diag.csv" ) );
+    EXPECT_FALSE( std::filesystem::exists( out_observe / "est.tum" ) );
+    EXPECT_FALSE( std::filesystem::exists( out_observe / "diag.csv" ) );
+    const auto default_stderr = readFile( stderr_default );
+    const auto observe_stderr = readFile( stderr_observe );
+    const auto default_warnings =
+        default_summary.at( "warnings" ).get<std::vector<std::string>>();
+    const auto observe_warnings =
+        observe_summary.at( "warnings" ).get<std::vector<std::string>>();
+    EXPECT_NE( default_stderr.find( "dataset error" ), std::string::npos );
+    EXPECT_NE( default_stderr.find( "/nonexistent/sequence" ),
+               std::string::npos );
+    EXPECT_NE( observe_stderr.find( "dataset error" ), std::string::npos );
+    EXPECT_NE( observe_stderr.find( "/nonexistent/sequence" ),
+               std::string::npos );
+    const auto has_dataset_error = []( const std::vector<std::string>& warnings ) {
+      return std::any_of(
+          warnings.begin(), warnings.end(), []( const std::string& warning ) {
+            return warning.find( "dataset error" ) != std::string::npos &&
+                   warning.find( "/nonexistent/sequence" ) !=
+                       std::string::npos;
+          } );
+    };
+    EXPECT_TRUE( has_dataset_error( default_warnings ) );
+    EXPECT_TRUE( has_dataset_error( observe_warnings ) );
 
     std::filesystem::remove_all( root );
   }
