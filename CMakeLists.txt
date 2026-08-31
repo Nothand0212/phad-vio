@@ -640,5 +640,18 @@ if(PHAD_BUILD_TESTS)
     gtest_discover_tests(phad_tumvi_corridor1_test
       PROPERTIES LABELS "tumvi-corridor1"
     )
+
+    add_executable(phad_tumvi_corridor1_product_test
+      tests/apps/tum_vi_corridor1_product_test.cpp
+    )
+    target_link_libraries(phad_tumvi_corridor1_product_test
+      PRIVATE phad::io_dataset phad_offline_vo_session GTest::gtest_main
+    )
+    target_compile_options(phad_tumvi_corridor1_product_test PRIVATE
+      $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+    )
+    gtest_discover_tests(phad_tumvi_corridor1_product_test
+      PROPERTIES LABELS "tumvi-corridor1"
+    )
   endif()
 endif()
