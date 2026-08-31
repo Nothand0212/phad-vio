@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "第 06 章：IMU 与 full-state VIO",
+    "output": "docs/learn/diagrams/06-imu-vio.html",
+    "viewBox": [1080, 560],
+    "quality_profile": "showcase"
+  },
+  "stages": [
+    { "label": "同步" },
+    { "label": "预积分" },
+    { "label": "状态" },
+    { "label": "因子" },
+    { "label": "输出" }
+  ],
+  "nodes": [
+    {
+      "id": "packet",
+      "type": "messagebus",
+      "label": "StereoImuPacket",
+      "sublabel": "帧 + IMU 段",
+      "stage": 0,
+      "row": 1,
+      "tag": "phad::sync"
+    },
+    {
+      "id": "pim",
+      "type": "backend",
+      "label": "PreintegratedImu",
+      "sublabel": "PIM 构造",
+      "stage": 1,
+      "row": 1,
+      "tag": "estimator 内"
+    },
+    {
+      "id": "state",
+      "type": "database",
+      "label": "X / V / B",
+      "sublabel": "NavState + bias",
+      "stage": 2,
+      "row": 1,
+      "tag": "GTSAM keys"
+    },
+    {
+      "id": "factors",
+      "type": "backend",
+      "label": "ImuFactor",
+      "sublabel": "+ stereo factors",
+      "stage": 3,
+      "row": 1,
+      "tag": "滑窗图"
+    },
+    {
+      "id": "result",
+      "type": "messagebus",
+      "label": "VioUpdateResult",
+      "sublabel": "full-state",
+      "stage": 4,
+      "row": 1,
+      "tag": "M4"
+    }
+  ],
+  "flows": [
+    {
+      "id": "integrate",
+      "from": "packet",
+      "to": "pim",
+      "label": "IMU 段",
+      "classification": "跳过 imu_gap",
+      "variant": "emphasis"
+    },
+    {
+      "id": "vars",
+      "from": "pim",
+      "to": "state",
+      "label": "X(k) V(k) B(k)",
+      "classification": "窗口变量"
+    },
+    {
+      "id": "graph",
+      "from": "state",
+      "to": "factors",
+      "label": "ImuFactor",
+      "classification": "视觉 + 惯性"
+    },
+    {
+      "id": "solve",
+      "from": "factors",
+      "to": "result",
+      "label": "LM 优化",
+      "classification": "T_W_B",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "sync 切段",
+      "items": [
+        "StereoImuPacket：帧 + [t_prev,t_cur] IMU",
+        "imu_gap 标记；apps 透传至 VioMeasurement"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "estimator IMU 路径",
+      "items": [
+        "静止 bootstrap → raw 规范化 → PIM → ImuFactor",
+        "X/V/B 与视觉 factor 同一 transaction + LM"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "视觉连续（M4）",
+      "items": [
+        "visual support / 500 ms coast / kVisualOutage",
+        "权威：M4 spec + phad/estimator/README.md"
+      ]
+    }
+  ]
+}

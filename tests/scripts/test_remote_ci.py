@@ -3,8 +3,10 @@ from __future__ import annotations
 import importlib.util
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -16,6 +18,7 @@ SPEC = importlib.util.spec_from_file_location(
 )
 assert SPEC is not None and SPEC.loader is not None
 remote_ci = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = remote_ci
 SPEC.loader.exec_module(remote_ci)
 
 
@@ -233,10 +236,6 @@ class InputSafetyTest(unittest.TestCase):
         client.known_hosts = Path("/tmp/remote-ci-known-hosts")
         options = client._options()
 
-        self.assertEqual(
-            remote_ci.REMOTE_FINGERPRINT,
-            "SHA256:gVOFWNnhMg035iardU+Z8GxRKunxHIp3ZQrjhgY/9XE",
-        )
         self.assertIn("StrictHostKeyChecking=yes", options)
         self.assertIn("BatchMode=yes", options)
         self.assertIn("PreferredAuthentications=publickey", options)
@@ -371,7 +370,7 @@ class StatusAndSummaryTest(unittest.TestCase):
                     "gtsam_archive_sha256": "2" * 64,
                     "versions": {"gtsam_commit": remote_ci.GTSAM_COMMIT},
                 },
-                "remote": {"target": remote_ci.REMOTE_TARGET},
+                "remote": {"target": "lin@192.168.110.34"},
                 "dataset_root": str(remote_ci.REMOTE_DATA_ROOT),
                 "run_root": "/home/lin/Projects/tigerfish/runs/run-1",
                 "build_parallelism": 16,
@@ -445,6 +444,126 @@ class StatusAndSummaryTest(unittest.TestCase):
                 ).read_text(encoding="utf-8"),
                 "second\n",
             )
+
+
+class RemoteIdentityConfigTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.saved_environ = {
+            key: os.environ.get(key)
+            for key in (
+                remote_ci.REMOTE_IDENTITY_CONFIG_ENV,
+                "XDG_CONFIG_HOME",
+            )
+        }
+        remote_ci.reset_remote_identity_cache()
+
+    def tearDown(self) -> None:
+        remote_ci.reset_remote_identity_cache()
+        for key, value in self.saved_environ.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        self.temporary.cleanup()
+
+    def write_config(self, path: Path, payload: object) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    def test_missing_file_reports_path_and_example(self) -> None:
+        missing = self.root / "missing.json"
+        os.environ[remote_ci.REMOTE_IDENTITY_CONFIG_ENV] = str(missing)
+
+        with self.assertRaises(remote_ci.RemoteCiError) as raised:
+            remote_ci.remote_identity()
+
+        message = str(raised.exception)
+        self.assertIn(str(missing), message)
+        self.assertIn("host", message)
+        self.assertIn("fingerprint", message)
+
+    def test_extra_keys_and_missing_fields_are_rejected(self) -> None:
+        extra = self.write_config(
+            self.root / "extra.json",
+            {
+                "host": "192.168.110.34",
+                "user": "lin",
+                "fingerprint": "SHA256:gVOFWNnhMg035iardU+Z8GxRKunxHIp3ZQrjhgY/9XE",
+                "root": "/tmp",
+            },
+        )
+        missing = self.write_config(
+            self.root / "partial.json",
+            {"host": "192.168.110.34", "user": "lin"},
+        )
+
+        with self.assertRaises(remote_ci.RemoteCiError):
+            remote_ci.load_remote_identity(extra)
+        with self.assertRaises(remote_ci.RemoteCiError):
+            remote_ci.load_remote_identity(missing)
+
+    def test_invalid_json_is_rejected(self) -> None:
+        path = self.root / "broken.json"
+        path.write_text("{not-json", encoding="utf-8")
+
+        with self.assertRaises(remote_ci.RemoteCiError) as raised:
+            remote_ci.load_remote_identity(path)
+
+        self.assertIn(str(path), str(raised.exception))
+
+    def test_env_override_reads_host_user_fingerprint(self) -> None:
+        path = self.write_config(
+            self.root / "identity.json",
+            {
+                "host": "192.168.110.34",
+                "user": "lin",
+                "fingerprint": "SHA256:gVOFWNnhMg035iardU+Z8GxRKunxHIp3ZQrjhgY/9XE",
+            },
+        )
+        os.environ[remote_ci.REMOTE_IDENTITY_CONFIG_ENV] = str(path)
+
+        identity = remote_ci.remote_identity()
+
+        self.assertEqual(identity.host, "192.168.110.34")
+        self.assertEqual(identity.user, "lin")
+        self.assertEqual(identity.target, "lin@192.168.110.34")
+        self.assertEqual(
+            identity.fingerprint,
+            "SHA256:gVOFWNnhMg035iardU+Z8GxRKunxHIp3ZQrjhgY/9XE",
+        )
+
+    def test_xdg_config_home_is_used_without_env_override(self) -> None:
+        os.environ.pop(remote_ci.REMOTE_IDENTITY_CONFIG_ENV, None)
+        os.environ["XDG_CONFIG_HOME"] = str(self.root)
+        self.write_config(
+            self.root / "phad-remote-ci" / "config.json",
+            {
+                "host": "10.0.0.8",
+                "user": "ci",
+                "fingerprint": "SHA256:abcdefghijklmnopqrstuvwxyz0123456789+/AB",
+            },
+        )
+
+        identity = remote_ci.load_remote_identity()
+
+        self.assertEqual(identity.target, "ci@10.0.0.8")
+
+    def test_help_does_not_require_identity_config(self) -> None:
+        os.environ[remote_ci.REMOTE_IDENTITY_CONFIG_ENV] = str(
+            self.root / "missing.json"
+        )
+        result = subprocess.run(
+            ["python3", str(REPO_ROOT / "scripts" / "remote_ci.py"), "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=os.environ.copy(),
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("doctor", result.stdout)
 
 
 if __name__ == "__main__":

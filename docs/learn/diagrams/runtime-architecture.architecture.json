@@ -1,0 +1,202 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "phad-vio 运行时架构",
+    "output": "docs/learn/diagrams/runtime-architecture.html",
+    "viewBox": [1200, 520],
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "dataset",
+      "type": "external",
+      "label": "EuRoC / TUM VI",
+      "sublabel": "离线 sequence_root",
+      "pos": [40, 220],
+      "size": [128, 64],
+      "tag": "不可信输入"
+    },
+    {
+      "id": "gt",
+      "type": "external",
+      "label": "Ground Truth",
+      "sublabel": "EuRoC state GT",
+      "pos": [40, 30],
+      "size": [128, 60],
+      "tag": "只读参考"
+    },
+    {
+      "id": "io",
+      "type": "backend",
+      "label": "phad::io",
+      "sublabel": "adapter + SensorSource",
+      "pos": [224, 220],
+      "size": [132, 64],
+      "tag": "M1"
+    },
+    {
+      "id": "sync",
+      "type": "backend",
+      "label": "phad::sync",
+      "sublabel": "StereoPairSynchronizer",
+      "pos": [412, 220],
+      "size": [132, 64]
+    },
+    {
+      "id": "camera",
+      "type": "backend",
+      "label": "phad::camera",
+      "sublabel": "StereoRectifier",
+      "pos": [600, 220],
+      "size": [132, 64]
+    },
+    {
+      "id": "frontend",
+      "type": "frontend",
+      "label": "phad::frontend",
+      "sublabel": "StereoTracker",
+      "pos": [788, 220],
+      "size": [132, 64]
+    },
+    {
+      "id": "estimator",
+      "type": "backend",
+      "label": "phad::estimator",
+      "sublabel": "VioEstimator / GTSAM",
+      "pos": [976, 220],
+      "size": [132, 64],
+      "tag": "deep module"
+    },
+    {
+      "id": "session",
+      "type": "backend",
+      "label": "OfflineVoSession",
+      "sublabel": "apps/ 编排",
+      "pos": [524, 75],
+      "size": [176, 56],
+      "tag": "composition root"
+    },
+    {
+      "id": "opencv",
+      "type": "external",
+      "label": "OpenCV",
+      "sublabel": "imgproc / calib3d",
+      "pos": [788, 400],
+      "size": [132, 60],
+      "tag": "PRIVATE"
+    },
+    {
+      "id": "gtsam",
+      "type": "external",
+      "label": "GTSAM 4.3",
+      "sublabel": "factor graph",
+      "pos": [976, 400],
+      "size": [132, 60],
+      "tag": "PRIVATE"
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "外部数据（离线输入）",
+      "wraps": ["dataset"],
+      "pad": 16
+    },
+    {
+      "kind": "region",
+      "label": "评估参考（不参与优化）",
+      "wraps": ["gt"],
+      "pad": 14
+    },
+    {
+      "kind": "security-group",
+      "label": "apps/ 编排与 VIO 主路径",
+      "wraps": ["session", "sync", "camera", "frontend", "estimator"],
+      "pad": 18
+    },
+    {
+      "kind": "security-group",
+      "label": "第三方库（PRIVATE 链接）",
+      "wraps": ["opencv", "gtsam"],
+      "pad": 14
+    }
+  ],
+  "connections": [
+    {
+      "id": "read-sequence",
+      "from": "dataset",
+      "to": "io",
+      "label": "open + replay",
+      "variant": "emphasis",
+      "labelAt": [196, 295]
+    },
+    {
+      "id": "sensor-events",
+      "from": "io",
+      "to": "sync",
+      "label": "SensorEvent",
+      "labelAt": [384, 295]
+    },
+    {
+      "id": "stereo-frame",
+      "from": "sync",
+      "to": "camera",
+      "label": "StereoFrame",
+      "labelAt": [572, 295]
+    },
+    {
+      "id": "rectified",
+      "from": "camera",
+      "to": "frontend",
+      "label": "校正帧",
+      "labelAt": [760, 295]
+    },
+    {
+      "id": "tracks-to-estimate",
+      "from": "frontend",
+      "to": "estimator",
+      "label": "VioMeasurement",
+      "variant": "emphasis",
+      "labelAt": [948, 295]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "phad::io / sync / camera",
+      "items": [
+        "io：EuRoC/TUM adapter → 统一 SensorEvent；open 全量校验",
+        "sync：StereoPairSynchronizer 左右配对；io ⊥ sync",
+        "camera：StereoRectifier + RectifiedStereoCalibration"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "frontend + apps/ 编排",
+      "items": [
+        "frontend：GFTT + LK + 1D SAD；只出 FrameTracks",
+        "session：isKeyframe（视差/时间/率）+ update 循环 + cull→dropTracks",
+        "glue：kValid / kNoRightMatch → VioMeasurement（无 frontend 依赖）"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "phad::estimator 内部",
+      "items": [
+        "update：校验 → PnP → 窗口 LM → cull/reopt → segment_id",
+        "GenericStereo/mono factor；visual support / coast（M4）",
+        "GTSAM PIMPL；26 列 diag — 见 phad/estimator/README.md"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "信任与旁路",
+      "items": [
+        "数据集不可信；GT 只读、不进因子图",
+        "eval / viz / bench 消费 Trajectory，不回写状态",
+        "OpenCV / GTSAM PRIVATE，不泄漏 public header"
+      ]
+    }
+  ]
+}

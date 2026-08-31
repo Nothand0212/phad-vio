@@ -12,6 +12,7 @@
 | [specs/](specs/) | 这一片必须交付什么（验收合同） | 开工时冻结口径 |
 | [plans/](plans/) | 怎么执行这一片（切片、commit、交接） | 做完可归档 |
 | [benchmark/](benchmark/) | 跑出了什么数字（行为 checkpoint） | 只追加，供进化对比 |
+| [learn/](learn/) | 这一环怎么走通（教学叙事） | 持续修订 |
 | [agents/](agents/) | agent 怎么工作 | 约定变化时回写 |
 
 `spec` 不是架构。活架构在 `design/`；里程碑 / 切片验收合同在 `specs/`。历史切片

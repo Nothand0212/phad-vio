@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "phad-vio 离线 VIO Pipeline",
+    "output": "docs/learn/diagrams/pipeline.html",
+    "viewBox": [1080, 600],
+    "quality_profile": "showcase"
+  },
+  "stages": [
+    { "label": "数据源" },
+    { "label": "读取" },
+    { "label": "同步与校正" },
+    { "label": "前端与组装" },
+    { "label": "估计与评估" }
+  ],
+  "nodes": [
+    {
+      "id": "dataset",
+      "type": "external",
+      "label": "EuRoC / TUM VI",
+      "sublabel": "sequence_root",
+      "stage": 0,
+      "row": 1,
+      "tag": "磁盘"
+    },
+    {
+      "id": "io",
+      "type": "backend",
+      "label": "phad::io",
+      "sublabel": "DatasetReplaySource",
+      "stage": 1,
+      "row": 1,
+      "tag": "SensorEvent"
+    },
+    {
+      "id": "sync_cam",
+      "type": "backend",
+      "label": "sync + camera",
+      "sublabel": "sync + camera",
+      "stage": 2,
+      "row": 1,
+      "tag": "StereoFrame"
+    },
+    {
+      "id": "frontend_glue",
+      "type": "frontend",
+      "label": "frontend + glue",
+      "sublabel": "跟踪 + glue",
+      "stage": 3,
+      "row": 1,
+      "tag": "FrameTracks"
+    },
+    {
+      "id": "est_eval",
+      "type": "backend",
+      "label": "estimator + eval",
+      "sublabel": "BA + eval",
+      "stage": 4,
+      "row": 1,
+      "tag": "Trajectory"
+    }
+  ],
+  "flows": [
+    {
+      "id": "raw-sequence",
+      "from": "dataset",
+      "to": "io",
+      "label": "CSV / PNG / YAML",
+      "classification": "离线序列"
+    },
+    {
+      "id": "sensor-events",
+      "from": "io",
+      "to": "sync_cam",
+      "label": "SensorEvent",
+      "classification": "IMU → Left → Right",
+      "variant": "emphasis"
+    },
+    {
+      "id": "rectified",
+      "from": "sync_cam",
+      "to": "frontend_glue",
+      "label": "校正帧",
+      "classification": "RectifiedStereoCalibration",
+      "labelAt": [638, 314]
+    },
+    {
+      "id": "keyframe",
+      "from": "frontend_glue",
+      "to": "est_eval",
+      "label": "KeyframeMeasurement",
+      "classification": "关键帧测量",
+      "variant": "emphasis"
+    }
+  ]
+}

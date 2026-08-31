@@ -45,6 +45,7 @@ M5 正式动态初始化排其后。未授权不得 push。
 | Skill | 何时读 | 文档 |
 |---|---|---|
 | Incremental development | 开 milestone / vertical slice | [`docs/agents/incremental-development.md`](docs/agents/incremental-development.md) |
+| Thin-honest slice | 选下一刀 / 切片规划 / 闭环失败后选刀 | [`docs/agents/thin-honest-slice.md`](docs/agents/thin-honest-slice.md) |
 | Evidence-gated integration | 接入会改变既有输出的传感器 / factor / 先验 | [`docs/agents/evidence-gated-integration.md`](docs/agents/evidence-gated-integration.md) |
 | Issue tracker | 建票、评论、关票（`gh`；必要时 `env -u GITHUB_TOKEN`） | [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md) |
 | Triage labels | 贴/改五个 canonical 标签 | [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md) |
@@ -79,9 +80,10 @@ C++ 命名 / 风格与 Git 工作流见上表「权威文档」与「硬约束�
 权威正文见 [`docs/agents/preferences.md`](docs/agents/preferences.md)。
 
 - 文档以中文为主；术语与 identifiers 保留英文。跨库规则在 `docs/agents/`，模块约定在各目录 `AGENTS.md`。
+- 教学叙事在 `docs/learn/`：按 pipeline 分章，须分解到代码与 spec 的模块内部；配图用 Archify。权威合同仍在 design/specs。
 - 开工前逐项对齐（一次一问、A/B/C + 推荐）；设计稿分段确认后再动手；写 spec/计划前先建 issue。
 - 重大设计先开源一手对照，笔记落 `docs/research/`；不擅自定稿。
-- EuRoC / milestone baseline 须含 `meta.json` 参数快照（与 `config_hash` 同源）；验收不够先诊断再扩序列。
+- EuRoC / milestone 数值、QA 与逐序列结果以 checkpoint / evidence JSON 为准，不用聊天摘要替代；baseline 须含 `meta.json` 参数快照（与 `config_hash` 同源）。已合入 ≠ formal gate 已通过。验收不够先诊断再扩序列；实验默认本机，先说明问题、成本与停止条件。
 
 ## 现行工作区事实
 
@@ -90,3 +92,4 @@ C++ 命名 / 风格与 Git 工作流见上表「权威文档」与「硬约束�
 - M4 锚点：`c999f58` / `default_0337287b`；EuRoC 11/11 均值 ATE ≈0.579，段内加权 RMS ≈0.134（相对 ORB-SLAM3 stereo ≈1.6×）。主失败模式是视觉中断后 segment 重启把世界系重置到原点。产品合同：双目尺度已知、body≡IMU、单一 `VioEstimator::update()`、滑窗 10、视觉短时丢失最多 500 ms IMU coast。
 - `LandmarkId` 现为 frontend track 与 estimator map 共用身份；TrackId≠LandmarkId 为中期债。前端 OpenCV、后端 GTSAM，自研以调库版为对拍 oracle。
 - Issues：`origin` = `Nothand0212/phad-vio`；`GITHUB_TOKEN` 无 Issues 写权限时用 `env -u GITHUB_TOKEN gh ...`。
+- Remote CI SSH 身份读本机共享配置：`PHAD_REMOTE_CI_CONFIG`，否则 `$XDG_CONFIG_HOME/phad-remote-ci/config.json`，再否则 `~/.config/phad-remote-ci/config.json`；缺文件即失败。仓库只留 `REMOTE_ROOT` / 数据集路径。

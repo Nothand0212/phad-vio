@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "第 02 章：传感器同步",
+    "output": "docs/learn/diagrams/02-synchronization.html",
+    "viewBox": [960, 560],
+    "quality_profile": "showcase"
+  },
+  "stages": [
+    { "label": "输入" },
+    { "label": "入队" },
+    { "label": "配对" },
+    { "label": "输出" }
+  ],
+  "nodes": [
+    {
+      "id": "event",
+      "type": "messagebus",
+      "label": "SensorEvent",
+      "sublabel": "IMU / Image",
+      "stage": 0,
+      "row": 1,
+      "tag": "replay"
+    },
+    {
+      "id": "push",
+      "type": "backend",
+      "label": "push 队列",
+      "sublabel": "单调性校验",
+      "stage": 1,
+      "row": 1,
+      "tag": "有界"
+    },
+    {
+      "id": "sync",
+      "type": "backend",
+      "label": "Synchronizer",
+      "sublabel": "B 族配对",
+      "stage": 2,
+      "row": 1,
+      "tag": "drain"
+    },
+    {
+      "id": "stereo",
+      "type": "backend",
+      "label": "StereoFrame",
+      "sublabel": "tryPop()",
+      "stage": 3,
+      "row": 1,
+      "tag": "→ camera"
+    }
+  ],
+  "flows": [
+    {
+      "id": "enqueue",
+      "from": "event",
+      "to": "push",
+      "label": "Left / Right / IMU",
+      "classification": "PushStatus"
+    },
+    {
+      "id": "pair",
+      "from": "push",
+      "to": "sync",
+      "label": "双队列",
+      "classification": "tol_ns=0",
+      "variant": "emphasis"
+    },
+    {
+      "id": "emit",
+      "from": "sync",
+      "to": "stereo",
+      "label": "StereoFrame",
+      "classification": "左右配对"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "三队列入队",
+      "items": [
+        "pushImage → left_q / right_q；pushImu → imu_q",
+        "PushStatus + 独立 sticky；有界 drop-oldest"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "B 族配对",
+      "items": [
+        "默认 tol_ns=0 exact；|tL−tR|≤tol 才 emit",
+        "orphan → dropped_left/right 计数"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "StereoImuPacket（M4）",
+      "items": [
+        "tryPopPacket：段 [t_prev,t_cur] 端点插值",
+        "imu_gap → estimator 跳过预积分；视觉照常"
+      ]
+    }
+  ]
+}

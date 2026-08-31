@@ -27,12 +27,14 @@ from typing import Any, Iterable, Sequence
 
 SCHEMA_VERSION = 1
 PROFILE = "ci-euroc11"
-REMOTE_HOST = "192.168.110.119"
-REMOTE_USER = "lin"
-REMOTE_TARGET = f"{REMOTE_USER}@{REMOTE_HOST}"
-REMOTE_FINGERPRINT = (
-    "SHA256:gVOFWNnhMg035iardU+Z8GxRKunxHIp3ZQrjhgY/9XE"
-)
+REMOTE_IDENTITY_CONFIG_ENV = "PHAD_REMOTE_CI_CONFIG"
+REMOTE_IDENTITY_RELATIVE = Path("phad-remote-ci") / "config.json"
+REMOTE_IDENTITY_FINGERPRINT = re.compile(r"^SHA256:[A-Za-z0-9+/]+$")
+REMOTE_IDENTITY_EXAMPLE = {
+    "host": "192.168.110.34",
+    "user": "lin",
+    "fingerprint": "SHA256:gVOFWNnhMg035iardU+Z8GxRKunxHIp3ZQrjhgY/9XE",
+}
 REMOTE_ROOT = Path("/home/lin/Projects/tigerfish")
 REMOTE_DATA_ROOT = Path("/home/lin/data/euroc/native")
 LOCAL_ARTIFACT_ROOT = Path("artifacts/remote-ci")
@@ -69,6 +71,88 @@ SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 class RemoteCiError(RuntimeError):
     """可向 operator 直接报告的 Remote CI 错误。"""
+
+
+class RemoteIdentity:
+    """本机共享的 SSH 机器身份。"""
+
+    def __init__(self, host: str, user: str, fingerprint: str) -> None:
+        self.host = host
+        self.user = user
+        self.fingerprint = fingerprint
+
+    @property
+    def target(self) -> str:
+        return f"{self.user}@{self.host}"
+
+
+_remote_identity: RemoteIdentity | None = None
+
+
+def remote_identity_config_path() -> Path:
+    override = os.environ.get(REMOTE_IDENTITY_CONFIG_ENV)
+    if override:
+        return Path(override).expanduser()
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg:
+        return Path(xdg).expanduser() / REMOTE_IDENTITY_RELATIVE
+    return Path.home() / ".config" / REMOTE_IDENTITY_RELATIVE
+
+
+def reset_remote_identity_cache() -> None:
+    global _remote_identity
+    _remote_identity = None
+
+
+def _identity_config_error(path: Path, reason: str) -> RemoteCiError:
+    example = json.dumps(REMOTE_IDENTITY_EXAMPLE, indent=2, ensure_ascii=False)
+    return RemoteCiError(
+        f"remote SSH identity config {reason}: {path}\n"
+        "expected JSON object with only host, user, fingerprint, for example:\n"
+        f"{example}"
+    )
+
+
+def load_remote_identity(path: Path | None = None) -> RemoteIdentity:
+    config_path = path if path is not None else remote_identity_config_path()
+    if not config_path.is_file():
+        raise _identity_config_error(config_path, "is missing")
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise _identity_config_error(config_path, f"is invalid ({error})") from error
+    if not isinstance(raw, dict):
+        raise _identity_config_error(config_path, "must be a JSON object")
+    extra = sorted(set(raw) - set(REMOTE_IDENTITY_EXAMPLE))
+    if extra:
+        raise _identity_config_error(config_path, f"has unsupported keys {extra}")
+    missing = [key for key in REMOTE_IDENTITY_EXAMPLE if key not in raw]
+    if missing:
+        raise _identity_config_error(config_path, f"is missing {missing}")
+    values: dict[str, str] = {}
+    for key in REMOTE_IDENTITY_EXAMPLE:
+        value = raw[key]
+        if not isinstance(value, str) or not value.strip():
+            raise _identity_config_error(
+                config_path, f"field {key} must be a non-empty string"
+            )
+        values[key] = value.strip()
+    if REMOTE_IDENTITY_FINGERPRINT.fullmatch(values["fingerprint"]) is None:
+        raise _identity_config_error(
+            config_path, "fingerprint must look like SHA256:<base64>"
+        )
+    return RemoteIdentity(
+        host=values["host"],
+        user=values["user"],
+        fingerprint=values["fingerprint"],
+    )
+
+
+def remote_identity() -> RemoteIdentity:
+    global _remote_identity
+    if _remote_identity is None:
+        _remote_identity = load_remote_identity()
+    return _remote_identity
 
 
 def utc_now() -> str:
@@ -760,7 +844,7 @@ class VerifiedSsh:
         self._temporary = tempfile.TemporaryDirectory(prefix="phad-remote-ci-ssh-")
         self.known_hosts = Path(self._temporary.name) / "known_hosts"
         scan = run_command(
-            ["ssh-keyscan", "-T", "5", "-t", "ed25519", REMOTE_HOST],
+            ["ssh-keyscan", "-T", "5", "-t", "ed25519", remote_identity().host],
             text=False,
         )
         lines = sorted(
@@ -780,10 +864,10 @@ class VerifiedSsh:
         found = set(
             re.findall(r"SHA256:[A-Za-z0-9+/]+", str(fingerprints.stdout))
         )
-        if found != {REMOTE_FINGERPRINT}:
+        if found != {remote_identity().fingerprint}:
             raise RemoteCiError(
                 "remote ED25519 fingerprint verification failed: "
-                f"expected {REMOTE_FINGERPRINT}, got {sorted(found)}"
+                f"expected {remote_identity().fingerprint}, got {sorted(found)}"
             )
         return self
 
@@ -833,7 +917,7 @@ class VerifiedSsh:
         command = [
             "ssh",
             *self._options(),
-            REMOTE_TARGET,
+            remote_identity().target,
             shlex.join(list(remote_command)),
         ]
         return run_command(
@@ -846,7 +930,7 @@ class VerifiedSsh:
                 "scp",
                 *self._options(),
                 str(local),
-                f"{REMOTE_TARGET}:{remote}",
+                f"{remote_identity().target}:{remote}",
             ],
             capture_output=False,
         )
@@ -857,7 +941,7 @@ class VerifiedSsh:
             [
                 "scp",
                 *self._options(),
-                f"{REMOTE_TARGET}:{remote}",
+                f"{remote_identity().target}:{remote}",
                 str(local),
             ],
             capture_output=False,
@@ -1300,8 +1384,8 @@ def start_remote_run(root: Path, profile: str) -> dict[str, Any]:
                     )
                 },
                 "remote": {
-                    "target": REMOTE_TARGET,
-                    "host_fingerprint": REMOTE_FINGERPRINT,
+                    "target": remote_identity().target,
+                    "host_fingerprint": remote_identity().fingerprint,
                     "uid": doctor["uid"],
                     "gid": doctor["gid"],
                     "architecture": doctor["architecture"],

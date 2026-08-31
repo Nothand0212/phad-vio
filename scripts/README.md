@@ -85,7 +85,9 @@ python3 scripts/remote_ci.py fetch <run-id>
 ```
 
 `wait` 默认每 30 秒读取一次并仅输出状态变化，进入终态后自动拉回结果。
-安全合同、远端目录与恢复流程见 [`docs/agents/remote-ci.md`](../docs/agents/remote-ci.md)。
+SSH 机器身份读本机 `~/.config/phad-remote-ci/config.json`（或
+`PHAD_REMOTE_CI_CONFIG`）。安全合同、远端目录与恢复流程见
+[`docs/agents/remote-ci.md`](../docs/agents/remote-ci.md)。
 
 ## `graphify.sh`
 

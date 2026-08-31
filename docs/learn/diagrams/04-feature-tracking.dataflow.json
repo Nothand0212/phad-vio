@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "第 04 章：特征跟踪",
+    "output": "docs/learn/diagrams/04-feature-tracking.html",
+    "viewBox": [960, 560],
+    "quality_profile": "showcase"
+  },
+  "stages": [
+    { "label": "输入" },
+    { "label": "左目" },
+    { "label": "右目" },
+    { "label": "输出" }
+  ],
+  "nodes": [
+    {
+      "id": "frame",
+      "type": "external",
+      "label": "StereoFrame",
+      "sublabel": "校正后",
+      "stage": 0,
+      "row": 1,
+      "tag": "灰度图对"
+    },
+    {
+      "id": "gftt",
+      "type": "frontend",
+      "label": "GFTT + LK",
+      "sublabel": "左目时序跟踪",
+      "stage": 1,
+      "row": 1,
+      "tag": "LandmarkId"
+    },
+    {
+      "id": "sad",
+      "type": "frontend",
+      "label": "1D SAD 匹配",
+      "sublabel": "视差 + 亚像素",
+      "stage": 2,
+      "row": 1,
+      "tag": "StereoStatus"
+    },
+    {
+      "id": "tracks",
+      "type": "messagebus",
+      "label": "FrameTracks",
+      "sublabel": "observations + stats",
+      "stage": 3,
+      "row": 1,
+      "tag": "→ glue"
+    }
+  ],
+  "flows": [
+    {
+      "id": "detect",
+      "from": "frame",
+      "to": "gftt",
+      "label": "process()",
+      "classification": "补点 + LK"
+    },
+    {
+      "id": "match",
+      "from": "gftt",
+      "to": "sad",
+      "label": "右目搜索",
+      "classification": "1D SAD 带",
+      "variant": "emphasis"
+    },
+    {
+      "id": "emit",
+      "from": "sad",
+      "to": "tracks",
+      "label": "FrameTracks",
+      "classification": "kValid / kNoRightMatch",
+      "labelAt": [638, 314]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "左目时序",
+      "items": [
+        "GFTT 补点 + track 长度 mask",
+        "LK + 前后向一致性 → LandmarkId 连续"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "右目 1D SAD",
+      "items": [
+        "水平带全局 SAD 峰 + uniq_ratio",
+        "亚像素 + 同行反向 SAD → disparity_px"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "StereoStatus",
+      "items": [
+        "kValid / kNoRightMatch → glue（第 05 章）",
+        "不做关键帧；cull 回传 dropTracks 在 apps/"
+      ]
+    }
+  ]
+}

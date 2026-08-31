@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "第 03 章：立体校正",
+    "output": "docs/learn/diagrams/03-rectification.html",
+    "viewBox": [960, 560],
+    "quality_profile": "showcase"
+  },
+  "stages": [
+    { "label": "输入" },
+    { "label": "校正" },
+    { "label": "输出" }
+  ],
+  "nodes": [
+    {
+      "id": "raw",
+      "type": "external",
+      "label": "StereoFrame",
+      "sublabel": "未校正",
+      "stage": 0,
+      "row": 1,
+      "tag": "sync"
+    },
+    {
+      "id": "rectifier",
+      "type": "backend",
+      "label": "StereoRectifier",
+      "sublabel": "标定 → remap",
+      "stage": 1,
+      "row": 1,
+      "tag": "create + rectify"
+    },
+    {
+      "id": "out",
+      "type": "frontend",
+      "label": "校正输出",
+      "sublabel": "RectifiedStereoCalibration",
+      "stage": 2,
+      "row": 1,
+      "tag": "frontend"
+    }
+  ],
+  "flows": [
+    {
+      "id": "rectify",
+      "from": "raw",
+      "to": "rectifier",
+      "label": "rectify()",
+      "classification": "逐帧 remap",
+      "variant": "emphasis"
+    },
+    {
+      "id": "emit",
+      "from": "rectifier",
+      "to": "out",
+      "label": "校正帧",
+      "classification": "极线对齐"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "CameraModel",
+      "items": [
+        "project / backProject；radtan + equidistant 工厂",
+        "域外 / 非有限 → CameraModelResult 错误码"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "StereoRectifier（PIMPL）",
+      "items": [
+        "create：stereoRectify + initUndistortRectifyMap",
+        "rectify：逐帧 remap；T_B_left_rectified 给 estimator"
+      ]
+    }
+  ]
+}

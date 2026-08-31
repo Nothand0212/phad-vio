@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "第 01 章：数据读取",
+    "output": "docs/learn/diagrams/01-dataset-io.html",
+    "viewBox": [1080, 560],
+    "quality_profile": "showcase"
+  },
+  "stages": [
+    { "label": "磁盘" },
+    { "label": "打开" },
+    { "label": "数据集" },
+    { "label": "回放" },
+    { "label": "输出" }
+  ],
+  "nodes": [
+    {
+      "id": "sequence",
+      "type": "external",
+      "label": "sequence_root",
+      "sublabel": "EuRoC / TUM VI 目录",
+      "stage": 0,
+      "row": 1,
+      "tag": "原生格式"
+    },
+    {
+      "id": "open",
+      "type": "backend",
+      "label": "euroc::open",
+      "sublabel": "tum_vi::open",
+      "stage": 1,
+      "row": 1,
+      "tag": "adapter"
+    },
+    {
+      "id": "handle",
+      "type": "database",
+      "label": "StereoImuDataset",
+      "sublabel": "不可变 handle",
+      "stage": 2,
+      "row": 0,
+      "tag": "标定 + summary"
+    },
+    {
+      "id": "reader",
+      "type": "backend",
+      "label": "DatasetReader",
+      "sublabel": "takeImu / takeImage",
+      "stage": 2,
+      "row": 2,
+      "tag": "惰性解码"
+    },
+    {
+      "id": "replay",
+      "type": "backend",
+      "label": "DatasetReplaySource",
+      "sublabel": "SensorSource",
+      "stage": 3,
+      "row": 1,
+      "tag": "时间归并"
+    },
+    {
+      "id": "event",
+      "type": "messagebus",
+      "label": "SensorEvent",
+      "sublabel": "IMU | ImageFrameEvent",
+      "stage": 4,
+      "row": 1,
+      "tag": "下游入口"
+    }
+  ],
+  "flows": [
+    {
+      "id": "parse",
+      "from": "sequence",
+      "to": "open",
+      "label": "目录 + 清单校验",
+      "classification": "CSV / YAML / PNG"
+    },
+    {
+      "id": "build-handle",
+      "from": "open",
+      "to": "handle",
+      "label": "StereoImuDataset",
+      "classification": "标定与 metadata",
+      "variant": "emphasis"
+    },
+    {
+      "id": "create-reader",
+      "from": "handle",
+      "to": "reader",
+      "label": "reader()",
+      "classification": "独立消费位置"
+    },
+    {
+      "id": "wrap-replay",
+      "from": "reader",
+      "to": "replay",
+      "label": "DatasetReplaySource",
+      "classification": "pull-based seam"
+    },
+    {
+      "id": "emit-event",
+      "from": "replay",
+      "to": "event",
+      "label": "next()",
+      "classification": "同 stamp：IMU → L → R",
+      "variant": "emphasis",
+      "labelAt": [853, 314]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "phad::sensor 类型层",
+      "items": [
+        "ImuMeasurement / ImageFrameEvent 等来源无关 POD",
+        "格式知识不得泄漏到 sync / frontend / estimator"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "open + reader",
+      "items": [
+        "euroc::open / tum_vi::open 全量校验 → StereoImuDataset",
+        "reader()：takeImu / peekImageTimestamp / takeImage 惰性解码"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "DatasetReplaySource",
+      "items": [
+        "SensorSource::next() 时间归并",
+        "同 stamp：IMU → Left → Right；不做左右配对"
+      ]
+    }
+  ]
+}
