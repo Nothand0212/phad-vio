@@ -12,7 +12,9 @@
 - 会参与状态更新、决策或反馈闭环的外部服务结果。
 
 本文补充[增量开发](incremental-development.md)：vertical slice 解决“本次贯通哪一个行为”，
-证据门控解决“新信息何时有资格影响既有行为”。
+证据门控解决“新信息何时有资格影响既有行为”。某 Q 阶段是否应进入当前关键路径，
+见 [`thin-honest-slice.md`](thin-honest-slice.md)；资格阶梯服务产品出口，Q 阶段
+本身不是 milestone 前进。
 
 ## 2. 核心原则
 

@@ -45,6 +45,7 @@ M5 正式动态初始化排其后。未授权不得 push。
 | Skill | 何时读 | 文档 |
 |---|---|---|
 | Incremental development | 开 milestone / vertical slice | [`docs/agents/incremental-development.md`](docs/agents/incremental-development.md) |
+| Thin-honest slice | 选下一刀 / 切片规划 / 闭环失败后选刀 | [`docs/agents/thin-honest-slice.md`](docs/agents/thin-honest-slice.md) |
 | Evidence-gated integration | 接入会改变既有输出的传感器 / factor / 先验 | [`docs/agents/evidence-gated-integration.md`](docs/agents/evidence-gated-integration.md) |
 | Issue tracker | 建票、评论、关票（`gh`；必要时 `env -u GITHUB_TOKEN`） | [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md) |
 | Triage labels | 贴/改五个 canonical 标签 | [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md) |

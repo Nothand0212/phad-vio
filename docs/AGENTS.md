@@ -32,6 +32,7 @@
 | [`agents/git-workflow.md`](agents/git-workflow.md) | Git 工作流（短分支、`--no-ff`、会话约定） |
 | [`agents/design-alignment.md`](agents/design-alignment.md) | 定稿标记、实现对齐、ADR 冲突 |
 | [`agents/research-and-planning.md`](agents/research-and-planning.md) | 调研纪律与计划落盘 |
+| [`agents/thin-honest-slice.md`](agents/thin-honest-slice.md) | 薄而诚实的 vertical slice：对准产品 RED |
 | [`agents/cpp-style.md`](agents/cpp-style.md) / [`cpp-naming.md`](agents/cpp-naming.md) | C++ 风格与命名 |
 | [`adr/`](adr/) | 为什么选 X |
 | [`design/`](design/) | 系统是什么 |
