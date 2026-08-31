@@ -34,9 +34,6 @@ namespace phad::estimator
         LandmarkId id ) const;
 
   private:
-    [[nodiscard]] VioUpdateResult updateUnchecked(
-        const VioMeasurement& measurement, bool keyframe );
-
     struct Impl;
     std::unique_ptr<Impl> m_impl;
   };

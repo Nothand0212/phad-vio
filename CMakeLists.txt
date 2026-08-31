@@ -194,7 +194,6 @@ target_compile_options(phad_viz PRIVATE
 )
 
 add_library(phad_estimator
-  phad/estimator/cold_root_observe.cpp
   phad/estimator/gyro_rotation_predictor.cpp
   phad/estimator/internal/gyro_interval_reducer.cpp
   phad/estimator/internal/imu_interval.cpp
@@ -481,7 +480,6 @@ if(PHAD_BUILD_TESTS)
     tests/estimator/stereo_vo_outlier_reopt_test.cpp
     tests/estimator/stereo_vo_cull_rebirth_test.cpp
     tests/estimator/keyframe_update_test.cpp
-    tests/estimator/cold_root_observe_test.cpp
     tests/estimator/multiframe_triangulation_test.cpp
     tests/estimator/vio_full_state_test.cpp
     tests/estimator/vio_eviction_test.cpp
