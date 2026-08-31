@@ -11,10 +11,10 @@ namespace phad::camera
 {
 
   /**
-   * @brief Whole-image stereo rectification for radtan calibrations.
+   * @brief Whole-image stereo rectification for radtan or equidistant pairs.
    *
    * Public headers stay OpenCV-free; remap tables live in the PIMPL.
-   * Equidistant models are rejected with `kOutsideModelDomain`.
+   * The left and right cameras must use the same supported model.
    */
   class StereoRectifier
   {

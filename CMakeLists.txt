@@ -432,6 +432,7 @@ if(PHAD_BUILD_TESTS)
   )
   target_link_libraries(phad_camera_tests PRIVATE
     phad::camera GTest::gtest_main
+    opencv_core opencv_imgproc opencv_calib3d
   )
   target_compile_options(phad_camera_tests PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
