@@ -40,7 +40,6 @@
 #include <variant>
 #include <vector>
 
-#include "phad/estimator/internal/cold_root_observe.hpp"
 #include "phad/estimator/internal/imu_interval.hpp"
 #include "phad/estimator/internal/vio_update_transaction.hpp"
 
@@ -648,7 +647,6 @@ namespace phad::estimator
     gtsam::SharedNoiseModel                      bias_prior_noise;
     std::shared_ptr<gtsam::PreintegrationParams> pim_params;
     std::unique_ptr<internal::VioUpdateState>    m_state;
-    std::uint64_t                                m_next_root_attempt_id = 1U;
 
     explicit Impl( camera::RectifiedStereoCalibration calibration_in,
                    sensor::ImuParameters              imu_in,
@@ -777,22 +775,14 @@ namespace phad::estimator
       return Eigen::Vector3d( point_W.x(), point_W.y(), point_W.z() );
     }
 
-    struct RootSeedOutcome
+    // 返回 false 表示 backproject 失败（调用方回滚并 kRejected）
+    bool seedRoot( const Eigen::Isometry3d& anchor_T_W_B,
+                   const Eigen::Vector3d&   v_W_B,
+                   const ImuBias&           bias,
+                   const VioMeasurement&    measurement,
+                   std::uint32_t&           probe_rejected_block_n,
+                   std::uint32_t&           probe_new_lm_n )
     {
-      bool                   m_accepted = false;
-      ColdRootGeometryResult m_geometry_result =
-          ColdRootGeometryResult::kEmptyAfterFilter;
-      std::uint64_t m_accepted_landmarks = 0U;
-    };
-
-    [[nodiscard]] RootSeedOutcome seedRoot(
-        const Eigen::Isometry3d& anchor_T_W_B,
-        const Eigen::Vector3d& v_W_B, const ImuBias& bias,
-        const VioMeasurement& measurement,
-        std::uint32_t&        probe_rejected_block_n,
-        std::uint32_t&        probe_new_lm_n )
-    {
-      RootSeedOutcome outcome;
       m_state->m_landmarks_w.clear();
 
       WindowFrame candidate;
@@ -825,36 +815,25 @@ namespace phad::estimator
             toPose3( candidate.m_T_W_B ) * body_P_sensor;
         const gtsam::Point3 point_left = T_W_left.transformTo( gtsam::Point3(
             point_W.x(), point_W.y(), point_W.z() ) );
-        if ( !isFinite( point_W ) )
+        if ( !isFinite( point_W ) || point_left.z() <= 0.0 )
         {
-          outcome.m_geometry_result =
-              ColdRootGeometryResult::kNonfiniteBackprojection;
-          return outcome;
-        }
-        if ( point_left.z() <= 0.0 )
-        {
-          outcome.m_geometry_result = ColdRootGeometryResult::kBehindCamera;
-          return outcome;
+          return false;
         }
         m_state->m_landmarks_w[ observation.id ] = point_W;
         m_state->m_track_times[ observation.id ].push_back(
             measurement.m_timestamp );
         ++probe_new_lm_n;
-        outcome.m_accepted_landmarks =
-            static_cast<std::uint64_t>( m_state->m_landmarks_w.size() );
       }
 
       if ( m_state->m_landmarks_w.empty() )
       {
-        return outcome;
+        return false;
       }
 
       m_state->m_window.clear();
       m_state->m_window.push_back( std::move( candidate ) );
       ++m_state->m_next_frame_index;
-      outcome.m_accepted        = true;
-      outcome.m_geometry_result = ColdRootGeometryResult::kAccepted;
-      return outcome;
+      return true;
     }
 
     struct PnpInitResult
@@ -1775,18 +1754,6 @@ namespace phad::estimator
   VioUpdateResult VioEstimator::update( const VioMeasurement& measurement,
                                         const bool            keyframe )
   {
-    VioUpdateResult result = updateUnchecked( measurement, keyframe );
-    if ( !internal::hasValidColdRootObserveResult( result ) )
-    {
-      throw std::logic_error(
-          "cold-root observe diagnostics violate the typed invariant" );
-    }
-    return result;
-  }
-
-  VioUpdateResult VioEstimator::updateUnchecked(
-      const VioMeasurement& measurement, const bool keyframe )
-  {
     VioUpdateResult result;
     result.diagnostics.culled_landmark_ids.clear();
     result.diagnostics.num_observations =
@@ -1889,7 +1856,6 @@ namespace phad::estimator
     NormalizedImuInterval normalized_imu =
         std::get<NormalizedImuInterval>( std::move( normalized_result ) );
 
-    std::uint64_t current_positive_disparity_count = 0U;
     // disparity_px == 0 is legal and represents unavailable stereo depth.
     for ( const StereoObservation& observation : measurement.m_observations )
     {
@@ -1900,10 +1866,6 @@ namespace phad::estimator
         return finalizePreStagingHardResult(
             UpdateStatus::kInvalidInput,
             "non-finite pixel or negative disparity" );
-      }
-      if ( observation.disparity_px > 0.0 )
-      {
-        ++current_positive_disparity_count;
       }
     }
 
@@ -1940,33 +1902,7 @@ namespace phad::estimator
             UpdateStatus::kInvalidInput,
             "static bootstrap timestamp span is not representable" );
       }
-      bootstrap_stats                       = bootstrapStats( bootstrap_nodes );
-      ColdRootObserveDiagnostics& cold_root = result.diagnostics.m_cold_root;
-      cold_root.m_current_positive_disparity_count =
-          current_positive_disparity_count;
-      cold_root.m_accumulated_seed_enabled =
-          m_impl->options.enable_accumulated_seed;
-      cold_root.m_bootstrap_sample_count =
-          static_cast<std::uint64_t>( bootstrap_nodes.size() );
-      cold_root.m_bootstrap_min_samples =
-          m_impl->options.m_bootstrap_min_samples;
-      cold_root.m_bootstrap_duration_ns = *bootstrap_duration_ns;
-      cold_root.m_bootstrap_min_duration_ns =
-          m_impl->options.m_bootstrap_min_duration_ns;
-      cold_root.m_bootstrap_acc_std_max_mps2 =
-          bootstrap_stats.m_acc_std.maxCoeff();
-      cold_root.m_bootstrap_acc_std_limit_mps2 =
-          m_impl->options.m_bootstrap_max_acc_std_mps2;
-      cold_root.m_bootstrap_gyr_std_max_radps =
-          bootstrap_stats.m_gyr_std.maxCoeff();
-      cold_root.m_bootstrap_gyr_std_limit_radps =
-          m_impl->options.m_bootstrap_max_gyr_std_radps;
-      cold_root.m_bootstrap_acc_norm_error_mps2 = std::abs(
-          bootstrap_stats.m_acc_mean.norm() - m_impl->options.m_gravity_mps2 );
-      cold_root.m_bootstrap_acc_norm_tolerance_mps2 =
-          m_impl->options.m_bootstrap_acc_norm_tol_mps2;
-      cold_root.m_bootstrap_timeout_ns =
-          m_impl->options.m_bootstrap_timeout_ns;
+      bootstrap_stats = bootstrapStats( bootstrap_nodes );
       const bool stationary =
           bootstrap_stats.m_acc_std.maxCoeff() <=
               m_impl->options.m_bootstrap_max_acc_std_mps2 &&
@@ -1982,69 +1918,38 @@ namespace phad::estimator
               m_impl->options.m_bootstrap_min_samples &&
           stationary;
       bool moving_bootstrap = false;
-      if ( static_ready )
+      if ( !static_ready &&
+           m_impl->options.m_enable_moving_bootstrap )
       {
-        cold_root.m_bootstrap_path = ColdRootBootstrapPath::kStatic;
-        cold_root.m_bootstrap_gate = ColdRootGateState::kPassed;
-      }
-      else
-      {
-        cold_root.m_moving_bootstrap_enabled =
-            m_impl->options.m_enable_moving_bootstrap;
-        if ( m_impl->options.m_enable_moving_bootstrap )
+        const std::optional<std::size_t> recent_begin = recentBootstrapBegin(
+            bootstrap_nodes, m_impl->options.m_bootstrap_min_duration_ns,
+            m_impl->options.m_bootstrap_min_samples );
+        if ( recent_begin.has_value() )
         {
-          const std::optional<std::size_t> recent_begin = recentBootstrapBegin(
-              bootstrap_nodes, m_impl->options.m_bootstrap_min_duration_ns,
-              m_impl->options.m_bootstrap_min_samples );
-          if ( recent_begin.has_value() )
+          const BootstrapStats recent_stats =
+              bootstrapStats( bootstrap_nodes, *recent_begin );
+          if ( recent_stats.m_acc_mean.norm() >
+               std::numeric_limits<double>::epsilon() )
           {
-            const BootstrapStats recent_stats =
-                bootstrapStats( bootstrap_nodes, *recent_begin );
-            const std::optional<std::int64_t> recent_duration_ns =
-                checkedPositiveDurationNs(
-                    bootstrap_nodes[ *recent_begin ].timestamp,
-                    bootstrap_nodes.back().timestamp );
-            cold_root.m_moving_suffix_sample_count =
-                static_cast<std::uint64_t>( bootstrap_nodes.size() -
-                                            *recent_begin );
-            if ( recent_duration_ns.has_value() )
-            {
-              cold_root.m_moving_suffix_duration_ns = *recent_duration_ns;
-            }
-            cold_root.m_moving_acc_mean_norm_mps2 =
-                recent_stats.m_acc_mean.norm();
-            cold_root.m_moving_acc_mean_norm_min_mps2 =
-                std::numeric_limits<double>::epsilon();
-            if ( recent_stats.m_acc_mean.norm() >
-                 std::numeric_limits<double>::epsilon() )
-            {
-              bootstrap_stats            = recent_stats;
-              moving_bootstrap           = true;
-              cold_root.m_bootstrap_path = ColdRootBootstrapPath::kMoving;
-              cold_root.m_bootstrap_gate = ColdRootGateState::kPassed;
-            }
+            bootstrap_stats  = recent_stats;
+            moving_bootstrap = true;
           }
         }
       }
       const bool ready = static_ready || moving_bootstrap;
       if ( !ready )
       {
-        cold_root.m_phase          = ColdRootPhase::kBootstrap;
-        cold_root.m_bootstrap_path = ColdRootBootstrapPath::kCollecting;
-        cold_root.m_bootstrap_gate = ColdRootGateState::kFailed;
         VioUpdateTransaction transaction( m_impl->m_state );
         m_impl->m_state->m_continuity_anchor = measurement.m_timestamp;
         if ( *bootstrap_duration_ns >=
              m_impl->options.m_bootstrap_timeout_ns )
         {
-          cold_root.m_reason = ColdRootReason::kTimedOut;
           m_impl->m_state->m_bootstrap_nodes.clear();
           result.status  = UpdateStatus::kFailed;
           result.message = "static bootstrap timed out";
         }
         else
         {
-          cold_root.m_reason                 = ColdRootReason::kEvidenceInsufficient;
           m_impl->m_state->m_bootstrap_nodes = std::move( bootstrap_nodes );
           result.status                      = UpdateStatus::kInitializing;
           result.message                     = "collecting static bootstrap evidence";
@@ -2067,14 +1972,6 @@ namespace phad::estimator
           minimalRotationToWorldUp( bootstrap_stats.m_acc_mean );
       if ( measurement.m_observations.empty() )
       {
-        cold_root.m_phase  = ColdRootPhase::kStereoPopulation;
-        cold_root.m_reason = ColdRootReason::kPopulationInsufficient;
-        cold_root.m_seed_input_origin =
-            ColdRootSeedInputOrigin::kCurrentPacket;
-        cold_root.m_stereo_population_gate = ColdRootGateState::kFailed;
-        cold_root.m_effective_seed_count   = 0U;
-        cold_root.m_min_seed_observations  = static_cast<std::uint32_t>(
-            m_impl->options.min_seed_observations );
         VioUpdateTransaction transaction( m_impl->m_state );
         m_impl->m_state->m_bootstrap_nodes   = std::move( bootstrap_nodes );
         m_impl->m_state->m_continuity_anchor = measurement.m_timestamp;
@@ -2189,10 +2086,6 @@ namespace phad::estimator
 
     if ( !m_impl->m_state->m_initialized && !keyframe )
     {
-      result.diagnostics.m_cold_root.m_phase = ColdRootPhase::kKeyframe;
-      result.diagnostics.m_cold_root.m_reason =
-          ColdRootReason::kKeyframeRequired;
-      result.diagnostics.m_cold_root.m_keyframe_gate = ColdRootGateState::kFailed;
       return retainBootstrapAndReturn(
           "static bootstrap ready; waiting for a keyframe visual seed" );
     }
@@ -2234,52 +2127,22 @@ namespace phad::estimator
 
     if ( !m_impl->m_state->m_initialized )
     {
-      ColdRootObserveDiagnostics& cold_root = result.diagnostics.m_cold_root;
-      cold_root.m_keyframe_gate             = ColdRootGateState::kPassed;
-      cold_root.m_min_seed_observations     = static_cast<std::uint32_t>(
-          m_impl->options.min_seed_observations );
-      const std::size_t current_stereo_population =
-          m_impl->countStereoObservations( measurement );
       const int stereo_count =
-          static_cast<int>( current_stereo_population );
-      cold_root.m_seed_input_origin =
-          ColdRootSeedInputOrigin::kCurrentPacket;
-      cold_root.m_effective_seed_count =
-          static_cast<std::uint64_t>( current_stereo_population );
+          static_cast<int>( m_impl->countStereoObservations( measurement ) );
       if ( stereo_count >= m_impl->options.min_seed_observations )
       {
-        cold_root.m_stereo_population_gate = ColdRootGateState::kPassed;
-        clear_pending_seed_obs             = true;
+        clear_pending_seed_obs = true;
       }
       else if ( m_impl->options.enable_accumulated_seed )
       {
         if ( !accumulate() )
         {
-          cold_root.m_phase  = ColdRootPhase::kStereoPopulation;
-          cold_root.m_reason = ColdRootReason::kPopulationAccumulating;
-          cold_root.m_seed_input_origin =
-              ColdRootSeedInputOrigin::kAccumulated;
-          cold_root.m_pending_unique_seed_count =
-              static_cast<std::uint64_t>( pending_seed_obs.size() );
-          cold_root.m_effective_seed_count =
-              static_cast<std::uint64_t>( pending_seed_obs.size() );
-          cold_root.m_stereo_population_gate = ColdRootGateState::kFailed;
           return retainBootstrapAndReturn(
               "accumulating seed observations (first segment)" );
         }
-        cold_root.m_seed_input_origin =
-            ColdRootSeedInputOrigin::kAccumulated;
-        cold_root.m_pending_unique_seed_count =
-            static_cast<std::uint64_t>( pending_seed_obs.size() );
-        cold_root.m_effective_seed_count =
-            static_cast<std::uint64_t>( pending_seed_obs.size() );
-        cold_root.m_stereo_population_gate = ColdRootGateState::kPassed;
       }
       else
       {
-        cold_root.m_phase                  = ColdRootPhase::kStereoPopulation;
-        cold_root.m_reason                 = ColdRootReason::kPopulationInsufficient;
-        cold_root.m_stereo_population_gate = ColdRootGateState::kFailed;
         return retainBootstrapAndReturn(
             "insufficient observations to seed first segment" );
       }
@@ -2287,7 +2150,6 @@ namespace phad::estimator
 
     std::vector<LandmarkId> frame_culled;
 
-    const bool           cold_root_entry = !active_segment;
     VioUpdateTransaction transaction( m_impl->m_state );
     m_impl->m_state->m_pending_seed_obs = pending_seed_obs;
     if ( clear_pending_seed_obs )
@@ -2311,19 +2173,6 @@ namespace phad::estimator
       result.diagnostics.m_vio     = m_impl->m_state->m_vio_diagnostics;
       result.diagnostics.culled_landmark_ids.clear();
       return result;
-    };
-    const auto finalize_current_graph_failure =
-        [ & ]( ColdRootReason reason,
-               std::string    message ) -> VioUpdateResult {
-      if ( cold_root_entry )
-      {
-        result.diagnostics.m_cold_root.m_phase  = ColdRootPhase::kCurrentGraph;
-        result.diagnostics.m_cold_root.m_reason = reason;
-        result.diagnostics.m_cold_root.m_current_graph_gate =
-            ColdRootGateState::kFailed;
-      }
-      return finalizePostStagingHardResult( UpdateStatus::kFailed,
-                                            std::move( message ) );
     };
     Eigen::Isometry3d propagated_T_W_B = bootstrap_T_W_B;
     Eigen::Vector3d   propagated_v_W_B = Eigen::Vector3d::Zero();
@@ -2353,27 +2202,15 @@ namespace phad::estimator
 
     if ( !m_impl->m_state->m_initialized )
     {
-      ColdRootObserveDiagnostics& cold_root = result.diagnostics.m_cold_root;
-      cold_root.m_geometry_min_landmarks    = 1U;
-      cold_root.m_attempt_id                = m_impl->m_next_root_attempt_id++;
-      const Impl::RootSeedOutcome root_seed = m_impl->seedRoot(
-          bootstrap_T_W_B, Eigen::Vector3d::Zero(), bootstrap_bias,
-          *effective_measurement,
-          result.diagnostics.probe_rejected_block_n,
-          result.diagnostics.probe_new_lm_n );
-      cold_root.m_geometry_result = root_seed.m_geometry_result;
-      cold_root.m_geometry_accepted_landmarks =
-          root_seed.m_accepted_landmarks;
-      if ( !root_seed.m_accepted )
+      if ( !m_impl->seedRoot( bootstrap_T_W_B, Eigen::Vector3d::Zero(),
+                              bootstrap_bias, *effective_measurement,
+                              result.diagnostics.probe_rejected_block_n,
+                              result.diagnostics.probe_new_lm_n ) )
       {
-        cold_root.m_phase              = ColdRootPhase::kRootGeometry;
-        cold_root.m_reason             = ColdRootReason::kGeometryRejected;
-        cold_root.m_root_geometry_gate = ColdRootGateState::kFailed;
         return finalizePostStagingHardResult(
             UpdateStatus::kRejected,
             "failed to backproject landmark on first frame" );
       }
-      cold_root.m_root_geometry_gate = ColdRootGateState::kPassed;
       m_impl->m_state->m_pending_seed_obs.clear();
       m_impl->m_state->m_bootstrap_nodes.clear();
       m_impl->m_state->m_continuity_anchor.reset();
@@ -2585,8 +2422,8 @@ namespace phad::estimator
     }
     catch ( const std::exception& exception )
     {
-      return finalize_current_graph_failure(
-          ColdRootReason::kGraphBuildFailed,
+      return finalizePostStagingHardResult(
+          UpdateStatus::kFailed,
           std::string( "navigation eviction reintegration failed: " ) +
               exception.what() );
     }
@@ -2604,8 +2441,8 @@ namespace phad::estimator
     }
     catch ( const std::exception& exception )
     {
-      return finalize_current_graph_failure(
-          ColdRootReason::kGraphBuildFailed,
+      return finalizePostStagingHardResult(
+          UpdateStatus::kFailed,
           std::string( "graph build failed: " ) + exception.what() );
     }
     result.diagnostics.num_landmarks = num_landmarks;
@@ -2616,8 +2453,8 @@ namespace phad::estimator
         visualReprojRms( graph, values );
     if ( !std::isfinite( result.diagnostics.reproj_rms_before_px ) )
     {
-      return finalize_current_graph_failure(
-          ColdRootReason::kGraphBuildFailed,
+      return finalizePostStagingHardResult(
+          UpdateStatus::kFailed,
           "initial graph reprojection error is non-finite" );
     }
     const bool graph_has_visual_factors =
@@ -2644,17 +2481,17 @@ namespace phad::estimator
       switch ( error.m_code )
       {
         case GraphSolveErrorCode::kIndeterminant:
-          return finalize_current_graph_failure(
-              ColdRootReason::kGraphSolveFailed,
+          return finalizePostStagingHardResult(
+              UpdateStatus::kFailed,
               std::string( "indeterminant linear system: " ) +
                   error.m_detail );
         case GraphSolveErrorCode::kOptimizer:
-          return finalize_current_graph_failure(
-              ColdRootReason::kGraphSolveFailed,
+          return finalizePostStagingHardResult(
+              UpdateStatus::kFailed,
               std::string( "optimizer exception: " ) + error.m_detail );
       }
-      return finalize_current_graph_failure(
-          ColdRootReason::kGraphSolveFailed, "unknown graph solve error" );
+      return finalizePostStagingHardResult(
+          UpdateStatus::kFailed, "unknown graph solve error" );
     }
     GraphSolveSuccess solve_success =
         std::get<GraphSolveSuccess>( std::move( solved ) );
@@ -2667,8 +2504,8 @@ namespace phad::estimator
            !optimized.exists( V( frame.m_frame_index ) ) ||
            !optimized.exists( B( frame.m_frame_index ) ) )
       {
-        return finalize_current_graph_failure(
-            ColdRootReason::kGraphValidationFailed,
+        return finalizePostStagingHardResult(
+            UpdateStatus::kFailed,
             "optimized values missing a navigation state" );
       }
       const Eigen::Isometry3d T_W_B =
@@ -2681,9 +2518,8 @@ namespace phad::estimator
       if ( !isFinite( T_W_B ) || !v_W_B.allFinite() ||
            !bias.vector().allFinite() )
       {
-        return finalize_current_graph_failure(
-            ColdRootReason::kGraphValidationFailed,
-            "non-finite optimized navigation state" );
+        return finalizePostStagingHardResult(
+            UpdateStatus::kFailed, "non-finite optimized navigation state" );
       }
     }
 
@@ -2754,9 +2590,8 @@ namespace phad::estimator
       point_W                   = Eigen::Vector3d( point.x(), point.y(), point.z() );
       if ( !isFinite( point_W ) )
       {
-        return finalize_current_graph_failure(
-            ColdRootReason::kGraphValidationFailed,
-            "non-finite optimized landmark" );
+        return finalizePostStagingHardResult(
+            UpdateStatus::kFailed, "non-finite optimized landmark" );
       }
     }
 
@@ -2809,8 +2644,8 @@ namespace phad::estimator
       }
       catch ( const std::exception& exception )
       {
-        return finalize_current_graph_failure(
-            ColdRootReason::kGraphBuildFailed,
+        return finalizePostStagingHardResult(
+            UpdateStatus::kFailed,
             std::string( "reopt graph build failed: " ) +
                 exception.what() );
       }
@@ -2930,8 +2765,8 @@ namespace phad::estimator
       }
       catch ( const std::exception& exception )
       {
-        return finalize_current_graph_failure(
-            ColdRootReason::kGraphBuildFailed,
+        return finalizePostStagingHardResult(
+            UpdateStatus::kFailed,
             std::string( "probe graph build failed: " ) +
                 exception.what() );
       }
@@ -2960,8 +2795,8 @@ namespace phad::estimator
     }
     else if ( !stageUnsupportedSpanForCurrentTimestamp() )
     {
-      return finalize_current_graph_failure(
-          ColdRootReason::kGraphValidationFailed,
+      return finalizePostStagingHardResult(
+          UpdateStatus::kFailed,
           "unsupported visual span is not representable" );
     }
     result.diagnostics.unsupported_span_ns =
@@ -2976,15 +2811,6 @@ namespace phad::estimator
                           .m_segment_id = m_impl->m_state->m_segment_id };
     result.diagnostics.m_vio           = m_impl->makeVioDiagnostics( vio_graph_info );
     m_impl->m_state->m_vio_diagnostics = result.diagnostics.m_vio;
-    if ( cold_root_entry )
-    {
-      result.diagnostics.m_cold_root.m_phase  = ColdRootPhase::kCommit;
-      result.diagnostics.m_cold_root.m_reason = ColdRootReason::kCommitted;
-      result.diagnostics.m_cold_root.m_current_graph_gate =
-          ColdRootGateState::kPassed;
-      result.diagnostics.m_cold_root.m_commit_gate =
-          ColdRootGateState::kPassed;
-    }
     transaction.commit();
     return result;
   }

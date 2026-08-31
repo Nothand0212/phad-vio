@@ -41,41 +41,6 @@ namespace phad::apps
   {
     constexpr std::int64_t kImuContinuityLimitNs = 20'000'000;
 
-    template <typename T>
-    void writeOptionalCsvValue( std::ostream&           out,
-                                const std::optional<T>& value )
-    {
-      if ( value.has_value() )
-      {
-        out << *value;
-      }
-    }
-
-    void writeOptionalCsvValue( std::ostream&              out,
-                                const std::optional<bool>& value )
-    {
-      if ( value.has_value() )
-      {
-        out << ( *value ? 1 : 0 );
-      }
-    }
-
-    void writeOptionalCsvValue( std::ostream&                out,
-                                const std::optional<double>& value )
-    {
-      if ( !value.has_value() )
-      {
-        return;
-      }
-      const std::ios::fmtflags flags     = out.flags();
-      const std::streamsize    precision = out.precision();
-      out << std::defaultfloat
-          << std::setprecision( std::numeric_limits<double>::max_digits10 )
-          << *value;
-      out.flags( flags );
-      out.precision( precision );
-    }
-
     [[nodiscard]] std::optional<SessionError> gyroObserveError(
         std::string_view code )
     {
@@ -883,7 +848,6 @@ namespace phad::apps
         last_segment_id = segment_id;
       }
 
-      const estimator::ColdRootObserveDiagnostics& cold_root = d.m_cold_root;
       result.diag.push_back( VoDiagRow{
           .timestamp_ns               = tracks.timestamp.nanoseconds(),
           .status                     = updateStatusName( update.status ),
@@ -912,70 +876,6 @@ namespace phad::apps
           .num_mapped_observations    = d.num_mapped_observations,
           .num_current_mono_visual_factors =
               d.num_current_mono_visual_factors,
-          .m_cold_root_phase             = cold_root.m_phase,
-          .m_cold_root_reason            = cold_root.m_reason,
-          .m_cold_root_bootstrap_path    = cold_root.m_bootstrap_path,
-          .m_cold_root_seed_input_origin = cold_root.m_seed_input_origin,
-          .m_cold_root_geometry_result   = cold_root.m_geometry_result,
-          .m_cold_root_attempt_id        = cold_root.m_attempt_id,
-          .m_cold_root_bootstrap_gate    = cold_root.m_bootstrap_gate,
-          .m_cold_root_keyframe_gate     = cold_root.m_keyframe_gate,
-          .m_cold_root_stereo_population_gate =
-              cold_root.m_stereo_population_gate,
-          .m_cold_root_geometry_gate = cold_root.m_root_geometry_gate,
-          .m_cold_root_imu_excitation_gate =
-              cold_root.m_imu_excitation_gate,
-          .m_cold_root_conditioning_gate = cold_root.m_conditioning_gate,
-          .m_cold_root_initialization_solve_gate =
-              cold_root.m_initialization_solve_gate,
-          .m_cold_root_current_graph_gate = cold_root.m_current_graph_gate,
-          .m_cold_root_commit_gate        = cold_root.m_commit_gate,
-          .m_cold_root_bootstrap_sample_count =
-              cold_root.m_bootstrap_sample_count,
-          .m_cold_root_bootstrap_min_samples =
-              cold_root.m_bootstrap_min_samples,
-          .m_cold_root_bootstrap_duration_ns =
-              cold_root.m_bootstrap_duration_ns,
-          .m_cold_root_bootstrap_min_duration_ns =
-              cold_root.m_bootstrap_min_duration_ns,
-          .m_cold_root_bootstrap_acc_std_max_mps2 =
-              cold_root.m_bootstrap_acc_std_max_mps2,
-          .m_cold_root_bootstrap_acc_std_limit_mps2 =
-              cold_root.m_bootstrap_acc_std_limit_mps2,
-          .m_cold_root_bootstrap_gyr_std_max_radps =
-              cold_root.m_bootstrap_gyr_std_max_radps,
-          .m_cold_root_bootstrap_gyr_std_limit_radps =
-              cold_root.m_bootstrap_gyr_std_limit_radps,
-          .m_cold_root_bootstrap_acc_norm_error_mps2 =
-              cold_root.m_bootstrap_acc_norm_error_mps2,
-          .m_cold_root_bootstrap_acc_norm_tolerance_mps2 =
-              cold_root.m_bootstrap_acc_norm_tolerance_mps2,
-          .m_cold_root_bootstrap_timeout_ns =
-              cold_root.m_bootstrap_timeout_ns,
-          .m_cold_root_moving_bootstrap_enabled =
-              cold_root.m_moving_bootstrap_enabled,
-          .m_cold_root_moving_suffix_sample_count =
-              cold_root.m_moving_suffix_sample_count,
-          .m_cold_root_moving_suffix_duration_ns =
-              cold_root.m_moving_suffix_duration_ns,
-          .m_cold_root_moving_acc_mean_norm_mps2 =
-              cold_root.m_moving_acc_mean_norm_mps2,
-          .m_cold_root_moving_acc_mean_norm_min_mps2 =
-              cold_root.m_moving_acc_mean_norm_min_mps2,
-          .m_cold_root_current_positive_disparity_count =
-              cold_root.m_current_positive_disparity_count,
-          .m_cold_root_accumulated_seed_enabled =
-              cold_root.m_accumulated_seed_enabled,
-          .m_cold_root_pending_unique_seed_count =
-              cold_root.m_pending_unique_seed_count,
-          .m_cold_root_effective_seed_count =
-              cold_root.m_effective_seed_count,
-          .m_cold_root_min_seed_observations =
-              cold_root.m_min_seed_observations,
-          .m_cold_root_geometry_accepted_landmarks =
-              cold_root.m_geometry_accepted_landmarks,
-          .m_cold_root_geometry_min_landmarks =
-              cold_root.m_geometry_min_landmarks,
       } );
 
       if ( options.collect_timing )
@@ -1209,38 +1109,7 @@ namespace phad::apps
            "reproj_rms_after_cull_px,is_keyframe,num_disparity,"
            "unsupported_span_ns,num_retained_observations,"
            "num_seeded_landmarks,num_current_visual_factors,"
-           "num_mapped_observations,num_current_mono_visual_factors,"
-           "cold_root_phase,cold_root_reason,cold_root_bootstrap_path,"
-           "cold_root_seed_input_origin,cold_root_geometry_result,"
-           "cold_root_attempt_id,cold_root_bootstrap_gate,"
-           "cold_root_keyframe_gate,cold_root_stereo_population_gate,"
-           "cold_root_geometry_gate,cold_root_imu_excitation_gate,"
-           "cold_root_conditioning_gate,"
-           "cold_root_initialization_solve_gate,"
-           "cold_root_current_graph_gate,cold_root_commit_gate,"
-           "cold_root_bootstrap_sample_count,"
-           "cold_root_bootstrap_min_samples,"
-           "cold_root_bootstrap_duration_ns,"
-           "cold_root_bootstrap_min_duration_ns,"
-           "cold_root_bootstrap_acc_std_max_mps2,"
-           "cold_root_bootstrap_acc_std_limit_mps2,"
-           "cold_root_bootstrap_gyr_std_max_radps,"
-           "cold_root_bootstrap_gyr_std_limit_radps,"
-           "cold_root_bootstrap_acc_norm_error_mps2,"
-           "cold_root_bootstrap_acc_norm_tolerance_mps2,"
-           "cold_root_bootstrap_timeout_ns,"
-           "cold_root_moving_bootstrap_enabled,"
-           "cold_root_moving_suffix_sample_count,"
-           "cold_root_moving_suffix_duration_ns,"
-           "cold_root_moving_acc_mean_norm_mps2,"
-           "cold_root_moving_acc_mean_norm_min_mps2,"
-           "cold_root_current_positive_disparity_count,"
-           "cold_root_accumulated_seed_enabled,"
-           "cold_root_pending_unique_seed_count,"
-           "cold_root_effective_seed_count,"
-           "cold_root_min_seed_observations,"
-           "cold_root_geometry_accepted_landmarks,"
-           "cold_root_geometry_min_landmarks\n";
+           "num_mapped_observations,num_current_mono_visual_factors\n";
 
     for ( const VoDiagRow& row : rows )
     {
@@ -1262,108 +1131,7 @@ namespace phad::apps
           << row.num_seeded_landmarks << ','
           << row.num_current_visual_factors << ','
           << row.num_mapped_observations << ','
-          << row.num_current_mono_visual_factors << ','
-          << estimator::coldRootPhaseToken( row.m_cold_root_phase ) << ','
-          << estimator::coldRootReasonToken( row.m_cold_root_reason ) << ','
-          << estimator::coldRootBootstrapPathToken(
-                 row.m_cold_root_bootstrap_path )
-          << ','
-          << estimator::coldRootSeedInputOriginToken(
-                 row.m_cold_root_seed_input_origin )
-          << ','
-          << estimator::coldRootGeometryResultToken(
-                 row.m_cold_root_geometry_result )
-          << ',';
-      writeOptionalCsvValue( out, row.m_cold_root_attempt_id );
-      out << ','
-          << estimator::coldRootGateStateToken(
-                 row.m_cold_root_bootstrap_gate )
-          << ','
-          << estimator::coldRootGateStateToken(
-                 row.m_cold_root_keyframe_gate )
-          << ','
-          << estimator::coldRootGateStateToken(
-                 row.m_cold_root_stereo_population_gate )
-          << ','
-          << estimator::coldRootGateStateToken(
-                 row.m_cold_root_geometry_gate )
-          << ','
-          << estimator::coldRootGateStateToken(
-                 row.m_cold_root_imu_excitation_gate )
-          << ','
-          << estimator::coldRootGateStateToken(
-                 row.m_cold_root_conditioning_gate )
-          << ','
-          << estimator::coldRootGateStateToken(
-                 row.m_cold_root_initialization_solve_gate )
-          << ','
-          << estimator::coldRootGateStateToken(
-                 row.m_cold_root_current_graph_gate )
-          << ','
-          << estimator::coldRootGateStateToken( row.m_cold_root_commit_gate )
-          << ',';
-      writeOptionalCsvValue( out, row.m_cold_root_bootstrap_sample_count );
-      out << ',';
-      writeOptionalCsvValue( out, row.m_cold_root_bootstrap_min_samples );
-      out << ',';
-      writeOptionalCsvValue( out, row.m_cold_root_bootstrap_duration_ns );
-      out << ',';
-      writeOptionalCsvValue( out,
-                             row.m_cold_root_bootstrap_min_duration_ns );
-      out << ',';
-      writeOptionalCsvValue( out,
-                             row.m_cold_root_bootstrap_acc_std_max_mps2 );
-      out << ',';
-      writeOptionalCsvValue( out,
-                             row.m_cold_root_bootstrap_acc_std_limit_mps2 );
-      out << ',';
-      writeOptionalCsvValue( out,
-                             row.m_cold_root_bootstrap_gyr_std_max_radps );
-      out << ',';
-      writeOptionalCsvValue( out,
-                             row.m_cold_root_bootstrap_gyr_std_limit_radps );
-      out << ',';
-      writeOptionalCsvValue( out,
-                             row.m_cold_root_bootstrap_acc_norm_error_mps2 );
-      out << ',';
-      writeOptionalCsvValue(
-          out, row.m_cold_root_bootstrap_acc_norm_tolerance_mps2 );
-      out << ',';
-      writeOptionalCsvValue( out, row.m_cold_root_bootstrap_timeout_ns );
-      out << ',';
-      writeOptionalCsvValue( out,
-                             row.m_cold_root_moving_bootstrap_enabled );
-      out << ',';
-      writeOptionalCsvValue( out,
-                             row.m_cold_root_moving_suffix_sample_count );
-      out << ',';
-      writeOptionalCsvValue( out,
-                             row.m_cold_root_moving_suffix_duration_ns );
-      out << ',';
-      writeOptionalCsvValue( out,
-                             row.m_cold_root_moving_acc_mean_norm_mps2 );
-      out << ',';
-      writeOptionalCsvValue(
-          out, row.m_cold_root_moving_acc_mean_norm_min_mps2 );
-      out << ',';
-      writeOptionalCsvValue(
-          out, row.m_cold_root_current_positive_disparity_count );
-      out << ',';
-      writeOptionalCsvValue( out,
-                             row.m_cold_root_accumulated_seed_enabled );
-      out << ',';
-      writeOptionalCsvValue( out,
-                             row.m_cold_root_pending_unique_seed_count );
-      out << ',';
-      writeOptionalCsvValue( out, row.m_cold_root_effective_seed_count );
-      out << ',';
-      writeOptionalCsvValue( out, row.m_cold_root_min_seed_observations );
-      out << ',';
-      writeOptionalCsvValue(
-          out, row.m_cold_root_geometry_accepted_landmarks );
-      out << ',';
-      writeOptionalCsvValue( out, row.m_cold_root_geometry_min_landmarks );
-      out << '\n';
+          << row.num_current_mono_visual_factors << '\n';
     }
 
     if ( !out )
