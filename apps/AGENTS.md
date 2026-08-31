@@ -6,6 +6,8 @@
 
 - 编排与落盘放在 app / 薄静态库，不反向注入 `frontend` / `estimator`
 - `OfflineVoSession`（target `phad_offline_vo_session`）只跑 pipeline，不算 ATE/RPE、不落盘；不链接 `phad_eval`
+- composition root 显式选择 concrete dataset adapter（如 `euroc::open`、`tum_vi::open`），再将已打开的 immutable `StereoImuDataset` **按值**传给 `runOfflineVoSession()`；session 只编排格式中立 pipeline
+- bounded prefix 全程处于 `kInitializing` 时，`OfflineVoSessionResult` 返回 `error = nullopt` 与 `trajectory = nullopt`；需要轨迹的 caller 在 session 返回后显式检查 `trajectory.has_value()` 并走自身失败路径
 - `StereoPairStream` 组合 `SensorSource` + `phad::sync`；`io` 与 `sync` 互不依赖
 - `FrameTracks` → `KeyframeMeasurement` 经 `stereo_vo_glue.hpp` 组装
 - `phad_stereo_vo_probe` 与 `phad_vo_bench` 共用 session，保证 diag 列合同一致

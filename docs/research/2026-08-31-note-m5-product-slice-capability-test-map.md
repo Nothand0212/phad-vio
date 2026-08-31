@@ -295,7 +295,7 @@ Issue topology 已落地：#42 保持 M4→M5 trajectory-continuity wayfinding m
 后续执行顺序：
 
 1. [x] 为 #53 冻结 Slice A spec 与 implementation plan；
-2. [ ] 实现并验收 TUM VI product input seam，形成 #53 checkpoint；
+2. [x] 实现并验收 TUM VI product input seam，形成 #53 checkpoint；
 3. [ ] 从 latest main 与 confirmed map 派生 #51 的 estimator-owned staged initialization ADR/design、spec 与 plan；
 4. [ ] 实施 Slice B，并在 #53 checkpoint 后完成 TUM VI product verification。
 
@@ -319,7 +319,35 @@ Issue topology 已落地：#42 保持 M4→M5 trajectory-continuity wayfinding m
 14. `UpdateDiagnostics` 新增 nested `InitializationDiagnostics` project-owned POD/enums，作为 `VioUpdateResult` 的 typed in-memory interface；首片不扩现有 CSV/JSON 持久 schema，也不提升其 version。
 15. `InitializationDiagnostics` 使用 lifecycle、evidence、visual support / fit、observability、joint consistency、current graph 与 transaction 的最小 gate-summary 字段；新成员遵守 `m_` + snake_case，enum values 遵守 `k` + PascalCase。Visual support 为独立 optional actual/required summary，cheirality 有独立 typed reason；未评估 whole groups 使用 `std::optional`，不使用 NaN 或 sentinel。
 
-## 12. Evidence index
+## 12. #53 实施与验证回填
+
+#53 已在 clean code commit `ba607c5738b3c5d9bc9cb0423199eee67648b0b3`
+（tree `7950f03a1125280169170513aad0a399198d0e76`）完成 Slice A。camera
+实现来自 `bc07ff8`，session/composition 实现来自 `f41fe64`。实际交付保持本图
+定义的边界：composition root 显式调用 `euroc::open()` 或 `tum_vi::open()`，把
+已打开的 `StereoImuDataset` 传入共同 `OfflineVoSession`；camera path 支持 equidistant
+raw `uint16` 经 native-depth remap 后以 high-byte mapping 产出 rectified `uint8`。
+
+实测配置与结果已记录于
+[M5 TUM VI product-input checkpoint](../benchmark/m5/tum-vi-product-input-seam_ba607c5_noconfig.md)：
+
+| 层级 | 实际命令 / 证据 | 结果 |
+|---|---|---|
+| unit regression | clean clone，`RelWithDebInfo`，指定八个 test targets 后 `ctest --test-dir build-unit --output-on-failure -L unit` | 357/357 passed；3 个 opt-in MH 环境测试 skipped |
+| deterministic camera + EuRoC frontend control | `ctest --output-on-failure -L mh01` 中 `phad_camera_mh01_test` 与 `phad_frontend_mh01_test` | 2/2 passed，累计 `225.18 s` |
+| EuRoC session control | `PHAD_EUROC_MH01_PATH=... ./build-mh01/phad_apps_tests --gtest_filter='OfflineVoSessionTest.*'` | 10/10 passed |
+| bounded TUM VI product gate | `PHAD_TUMVI_CORRIDOR1_PATH` opt-in，固定 `corridor1_512_16` 首 100 个 stereo frames | loader + product 2/2 passed；structural predicate 无 error，100 frames/diag/emitted，drop/overflow/failed 均为 0 |
+
+`phad_apps_mh01_test` 未作为 #53 formal PASS：本次发现它在当前树与
+`main@46a84b5` 都使用同一静态 timeout / 旧 control，属于实施前已存在的陈旧
+gate。它不改变 camera/frontend control 和 TUM VI product gate 的实测结论，但不能
+作为 apps MH_01 回归已经验证的证据。
+
+#53 未执行 TUM VI trajectory、ATE/RPE 或 full-sequence benchmark；`counts.ok=100`
+仅作为 observe-only 结果，非本片 gate。#51 的 initial moving root、其实现或验证
+仍未在本回填中声明完成。
+
+## 13. Evidence index
 
 ### Main authority
 

@@ -697,6 +697,11 @@ initialization 或默认 IMU，必须在 Q1–Q5 证据之后重新设计并单�
 在静止初始化的局限被真实序列暴露后再开始。双目尺度已知，核心是 gyro
 bias、重力方向与初始速度。
 
+当前进度：
+
+- **Slice A 产品输入 seam（[#53](https://github.com/Nothand0212/phad-vio/issues/53)，checkpoint `ba607c5`）**：
+  TUM VI `equidistant uint16 raw stereo → rectified uint8` 已经通过固定 100-frame 产品门，形成 initial moving root（[#51](https://github.com/Nothand0212/phad-vio/issues/51)）的真实输入前置条件。
+
 范围（择一，决定时补 ADR）：
 
 - 视觉 SfM → 顺序惯性对齐（VINS-Fusion 路线）；

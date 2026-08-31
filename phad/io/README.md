@@ -19,7 +19,7 @@ ROS 等来源转成与格式无关的 `phad::sensor` 测量与标定。数据集
 | 解析 EuRoC / TUM VI 目录与标定，产出 `StereoImuDataset` | ATE / RPE / TUM 轨迹评估（归 `phad::eval`） |
 | 加载 EuRoC 真值为 `common::Trajectory`（`T_W_B`） | 左右配对、IMU 分段、边界插值、`StereoImuPacket`（归 `phad::sync`） |
 | `SensorSource` / `DatasetReplaySource` 按时间拉**单路**事件 | 特征跟踪、估计、可视化 |
-| 单位、轴、外参方向规范化到 `docs/design/conventions.md` | 猜测序列格式；调用方显式选 `euroc::open` 或 `tum_vi::open` |
+| 单位、轴、外参方向规范化到 `docs/design/conventions.md` | 猜测序列格式；app composition root 显式选择 concrete `euroc::open` 或 `tum_vi::open` |
 
 测量与标定类型本身在 `phad::sensor`；本目录只负责「从磁盘/设备读出并适配」。
 
@@ -97,6 +97,9 @@ auto gt = phad::io::dataset::euroc::openGroundtruth(sequence_root);
   策略；配对在 `phad::sync`。
 - `Image` 保留原始无符号灰度深度（EuRoC：`uint8_t`；TUM VI：`uint16_t`），
   调用方须用与 `PixelType` 一致的 typed view，禁止静默截断。
+- `StereoImuDataset`、`DatasetReplaySource` 与 `phad::sync` 传递 native raw
+  depth；由 `phad::camera::StereoRectifier` 在校正时完成输出 `uint8` 的
+  canonicalization。
 
 ### `SensorSource`
 
@@ -135,8 +138,10 @@ EuRoC / TUM VI 的 YAML、CSV **列名与字段按原文**读写（完整拼写�
 
 ### TUM VI
 
-当前 adapter 加载双目 + IMU + 标定。`mocap0` 是 `T_W_marker` 而非 `T_W_B`，
-真值导出延后；评估请用 EuRoC 真值或已是 `T_W_B` 的 TUM 文件。
+当前 adapter 加载双目 + IMU + 标定，并产出 native `uint16` 灰度图像。app
+composition root 通过 `tum_vi::open(sequence_root)` 显式选择该 adapter，取得
+格式中立的 `StereoImuDataset` 后交给产品 pipeline。`mocap0` 是 `T_W_marker`
+而非 `T_W_B`，真值导出延后；评估请用 EuRoC 真值或已是 `T_W_B` 的 TUM 文件。
 
 ## 相关入口
 
