@@ -17,7 +17,7 @@ sensor synchronizer ----> StereoImuPacket
 visual-inertial frontend
         |
         v
-KeyframeMeasurement
+VioMeasurement + keyframe policy
         |
         v
 GTSAM VIO estimator ----> VioEstimate
@@ -32,10 +32,10 @@ GTSAM VIO estimator ----> VioEstimate
 - 不同时维护 g2o、Ceres 和 GTSAM 三套后端。
 
 本文档描述的是**完整 VIO 的目标形态**。按
-[实现里程碑与验收标准](roadmap.md)，第一条打通的闭环（M2）是它的纯视觉
-子集：不经过 sensor synchronizer，`KeyframeMeasurement` 不携带
-preintegration，估计器状态只有 `X(k)` 与 `L(j)`。M4 接入 IMU 时补齐
-synchronizer 与 `V/B` 状态，视觉侧的数据合同不变。
+[实现里程碑与验收标准](roadmap.md)，M2 先打通 `X(k)`/`L(j)` 纯视觉闭环；
+M4 将 synchronizer、raw IMU interval 与 `V/B` 状态接入逐图像
+`VioMeasurement` seam。Keyframe policy 继续控制 map growth 与 eviction
+priority，但 estimator 在每个图像时刻接收规范化 measurement。
 
 ## 2. 核心数据合同
 
@@ -71,24 +71,27 @@ struct StereoImuPacket {
 同步模块产生的边界测量。首帧没有前一区间，应以独立的初始化事件表达，
 而不是传入空 segment 后让下游猜测语义。
 
-### 2.4 `KeyframeMeasurement`
+### 2.4 `VioMeasurement`
 
-frontend 只在产生关键帧时向 estimator 提交：
+`OfflineVoSession` 在每个 rectified image timestamp 向 estimator 提交一次
+规范化测量：
 
 ```cpp
-struct KeyframeMeasurement {
-  Timestamp timestamp;
-  std::vector<StereoObservation> observations;
-  PreintegratedImu pim;
-  TrackingQuality tracking_quality;
+struct VioMeasurement {
+  Timestamp m_timestamp;
+  std::vector<StereoObservation> m_observations;
+  ImuPayload m_imu;
 };
 ```
 
-这是 frontend 与 estimator 之间的主要 seam。调用方不负责分配 GTSAM
-keys、添加 factor、维护 `Values` 或重置 bias。
+关键帧判断通过同一次 `update(measurement, keyframe)` 调用的 policy bit
+传入；non-keyframe 仍是具有独立 timestamp、visual observations 与相邻 raw
+IMU interval 的 estimator packet。调用方不负责分配 GTSAM keys、添加 factor、
+维护 `Values`、预积分或重置 bias。
 
-M2 的纯视觉闭环中不存在 `pim` 字段；它在 M4 接入 IMU 时加入，其余字段
-保持不变。
+这是 frontend/session 与 estimator 之间的主要 measurement seam。M4 将同步
+后的 raw IMU payload 接入该 seam；M5 initialization 继续复用它，不增加
+keyframe-only 或 initializer-specific 接口。
 
 ### 2.5 `VioEstimate`
 
@@ -188,18 +191,19 @@ void flush();                            // 剩余全部计入 dropped_*
 - 维护稳定的 `LandmarkId`；
 - 使用 IMU rotation prediction 辅助视觉跟踪；
 - 关键帧判断；
-- 累积关键帧间预积分；
-- 形成 `KeyframeMeasurement`。
+- 为每个图像时刻形成具有稳定 `LandmarkId` 的 observations；
+- 将 keyframe policy 与逐图像 measurement 一并交给 composition root。
 
 frontend 可以使用 estimator 最近返回的 bias 和状态预测，但不拥有最终
 导航状态，也不执行紧耦合图优化。
 
 ### 3.4 GTSAM VIO estimator
 
-外部 interface 以一次关键帧更新为中心：
+外部 interface 以一次图像时刻更新为中心：
 
 ```cpp
-VioUpdateResult update(const KeyframeMeasurement& measurement);
+VioUpdateResult update(const VioMeasurement& measurement,
+                       bool keyframe = true);
 ```
 
 模块内部拥有：
@@ -236,6 +240,12 @@ VioUpdateResult update(const KeyframeMeasurement& measurement);
 M2 的纯视觉闭环使用视觉初始化（首帧建立 gauge-fixing prior 并三角化初始
 landmark）。上述惯性初始化在 M4 加入，M5 用更鲁棒的方案替换起始静止假设。
 
+M5 initial moving root 继续由同一 estimator state machine 私有拥有：
+static-ready 保持 fast path；否则以 verified connected metric-stereo evidence、
+相邻 raw IMU intervals、gyro bias、fixed-scale gravity/velocity closure 与
+existing graph validation 原子建立 latest `X/V/B`。详细合同见
+[M5 initial moving root](m5-initial-moving-root.md)。
+
 ### 3.6 评估与可视化
 
 评估模块是估计链路之外的独立模块，只消费不可变结果，不参与优化：
@@ -252,7 +262,7 @@ landmark）。上述惯性初始化在 M4 加入，M5 用更鲁棒的方案替�
 
 ## 4. 第一版因子图
 
-关键帧状态：
+Bounded window 中的 navigation state（包含 retained keyframe 与 non-keyframe）：
 
 ```text
 X(k): body pose in world
@@ -316,7 +326,7 @@ shutdown、队列溢出和后台异常都必须是可观察事件。
 - 输入错误：传感器、时间戳、字段和值；
 - 同步错误：缺失的时间区间和已有样本范围；
 - frontend 错误：track 数、内点数和几何检查结果；
-- estimator 错误：关键帧 id、factor 类型、初值状态和 GTSAM 原始原因。
+- estimator 错误：frame id、factor 类型、初值状态和 GTSAM 原始原因。
 
 核心诊断至少记录：
 

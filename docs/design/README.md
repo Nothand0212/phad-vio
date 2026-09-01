@@ -14,5 +14,6 @@
 | [roadmap.md](roadmap.md) | 里程碑顺序、出口条件、全序列基准 |
 | [architecture.md](architecture.md) | 模块职责、数据流、目标架构 |
 | [conventions.md](conventions.md) | 坐标系、时间、单位合同 |
+| [m5-initial-moving-root.md](m5-initial-moving-root.md) | M5 initial moving root 的 state ownership、evidence、solve、transaction 与 diagnostics |
 
 文档地图见 [`../README.md`](../README.md)。

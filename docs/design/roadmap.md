@@ -700,18 +700,32 @@ bias、重力方向与初始速度。
 当前进度：
 
 - **Slice A 产品输入 seam（[#53](https://github.com/Nothand0212/phad-vio/issues/53)，checkpoint `ba607c5`）**：
-  TUM VI `equidistant uint16 raw stereo → rectified uint8` 已经通过固定 100-frame 产品门，形成 initial moving root（[#51](https://github.com/Nothand0212/phad-vio/issues/51)）的真实输入前置条件。
+  TUM VI `equidistant uint16 raw stereo → rectified uint8` 已经通过固定 100-frame
+  产品门，形成 initial moving root（[#51](https://github.com/Nothand0212/phad-vio/issues/51)）
+  的真实输入前置条件。
+- **Slice B initial moving root（[#51](https://github.com/Nothand0212/phad-vio/issues/51)，已定稿、待实现）**：
+  由单一 `VioEstimator::update()` 私有积累 verified connected stereo evidence
+  与相邻 raw IMU intervals，经 gyro bias、fresh PIM、fixed-scale
+  gravity/velocity、joint consistency 与 existing graph validation 原子提交
+  latest `X/V/B`。设计见 [M5 initial moving root](m5-initial-moving-root.md)，
+  决策见 [ADR-0003](../adr/0003-estimator-owned-initial-moving-root.md)，验收见
+  [Slice B spec](../specs/2026-09-01-m5-initial-moving-root.md)，实施见
+  [plan `51a1b7e2`](../plans/2026-09-01_m5_initial_moving_root_51a1b7e2.plan.md)。
 
-范围（择一，决定时补 ADR）：
+Slice B 出口：
 
-- 视觉 SfM → 顺序惯性对齐（VINS-Fusion 路线）；
-- MAP-based inertial-only 优化（ORB-SLAM3 路线，更稳但更重）。
+- deterministic private math 与 public `update()` sequence oracles 覆盖 exact
+  6-frame/250 ms success、最早 typed rejection、evidence commit 与 fatal rollback；
+- `V1_02_medium` 首118帧证明 moving root 的外部 cadence、单段 trajectory 与
+  bounded ATE/RPE/coverage health；
+- exact `ba607c5` fresh MH_01 control 证明 static precedence 与
+  full-sequence regression；
+- TUM VI `corridor1_512_16` 首100帧在 Slice A 输入门上增加 root availability
+  与持续 trajectory；
+- bounded formal matrix 全部通过后形成 checkpoint 并停止该切片。
 
-出口：
-
-- TUM VI room 等手持起步、无静止段的序列可完成初始化；
-- 初始化失败返回原因与所需的下一步数据，不返回 identity pose 冒充成功；
-- 初始化后 ATE 不劣于静止初始化在 `MH_*` 上的结果。
+更宽的 EuRoC/TUM VI 序列、outage 后 cold-root、跨 root world-frame
+continuity、posterior precision 与 default-on 作为后续独立切片推进。
 
 ## M6：边缘化与 fixed-lag
 
