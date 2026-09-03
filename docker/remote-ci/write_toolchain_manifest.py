@@ -20,6 +20,7 @@ PACKAGES = (
     "nlohmann-json3-dev",
     "python3",
     "python3-numpy",
+    "zstd",
 )
 
 

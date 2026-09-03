@@ -38,6 +38,7 @@ RUN sed -i \
         python3 \
         python3-pip \
         python3-venv \
+        zstd \
     && rm -rf /var/lib/apt/lists/*
 
 ARG GTSAM_ARCHIVE_SHA256=50bd99ddbb363f03f145d814995df234c83ad38f867080fba5b60f6c151b348a
