@@ -9,6 +9,11 @@
 namespace phad::io::dataset
 {
 
+  namespace internal
+  {
+    class DatasetReplaySourceTestAccess;
+  }
+
   class DatasetReplaySource final : public io::SensorSource
   {
   public:
@@ -25,6 +30,8 @@ namespace phad::io::dataset
     [[nodiscard]] io::SensorReadResult next() override;
 
   private:
+    friend class internal::DatasetReplaySourceTestAccess;
+
     using TerminalState = std::variant<io::EndOfStream, io::SensorSourceError>;
 
     [[nodiscard]] io::SensorReadResult fail(

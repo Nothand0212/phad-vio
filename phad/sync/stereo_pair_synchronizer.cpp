@@ -3,9 +3,19 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <stdexcept>
 #include <utility>
+
+#ifdef PHAD_REPLAY_DIAGNOSTIC_TESTING
+#include <array>
+#include <bit>
+#include <nlohmann/json.hpp>
+#include <string>
+
+#include "phad/sync/internal/stereo_pair_synchronizer_test_access.hpp"
+#endif
 
 namespace phad::sync
 {
@@ -31,6 +41,252 @@ namespace phad::sync
       return current < 0 &&
              next > std::numeric_limits<std::int64_t>::max() + current;
     }
+
+#ifdef PHAD_REPLAY_DIAGNOSTIC_TESTING
+    template <typename UInt>
+    void appendUnsignedHex( std::string& result, UInt value,
+                            std::size_t width )
+    {
+      constexpr std::array<char, 16> kHexDigits{
+          '0', '1', '2', '3', '4', '5', '6', '7',
+          '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
+      const std::size_t offset = result.size();
+      result.resize( offset + width, '0' );
+      for ( std::size_t i = width; i > 0U; --i )
+      {
+        result[ offset + i - 1U ] =
+            kHexDigits[ static_cast<std::size_t>( value & UInt{ 0xFU } ) ];
+        value >>= 4U;
+      }
+    }
+
+    template <typename UInt>
+    [[nodiscard]] std::string unsignedHex( UInt value, std::size_t width )
+    {
+      std::string result;
+      result.reserve( width );
+      appendUnsignedHex( result, value, width );
+      return result;
+    }
+
+    [[nodiscard]] std::string doubleBitsHex( double value )
+    {
+      return unsignedHex( std::bit_cast<std::uint64_t>( value ), 16U );
+    }
+
+    [[nodiscard]] const char* cameraName( sensor::CameraId camera ) noexcept
+    {
+      switch ( camera )
+      {
+        case sensor::CameraId::kLeft:
+          return "left";
+        case sensor::CameraId::kRight:
+          return "right";
+      }
+      return "unknown";
+    }
+
+    [[nodiscard]] const char* pixelTypeName(
+        sensor::PixelType pixel_type ) noexcept
+    {
+      switch ( pixel_type )
+      {
+        case sensor::PixelType::kUint8:
+          return "uint8";
+        case sensor::PixelType::kUint16:
+          return "uint16";
+      }
+      return "unknown";
+    }
+
+    [[nodiscard]] const char* pushStatusName( PushStatus status ) noexcept
+    {
+      switch ( status )
+      {
+        case PushStatus::kOk:
+          return "ok";
+        case PushStatus::kOutOfOrder:
+          return "out_of_order";
+        case PushStatus::kDuplicate:
+          return "duplicate";
+        case PushStatus::kInvalidStamp:
+          return "invalid_stamp";
+        case PushStatus::kInvalidValue:
+          return "invalid_value";
+      }
+      return "unknown";
+    }
+
+    [[nodiscard]] nlohmann::ordered_json optionalTimestampJson(
+        const std::optional<common::Timestamp>& timestamp )
+    {
+      if ( !timestamp.has_value() )
+      {
+        return nullptr;
+      }
+      return timestamp->nanoseconds();
+    }
+
+    [[nodiscard]] nlohmann::ordered_json optionalPushStatusJson(
+        const std::optional<PushStatus>& status )
+    {
+      if ( !status.has_value() )
+      {
+        return nullptr;
+      }
+      return pushStatusName( *status );
+    }
+
+    [[nodiscard]] nlohmann::ordered_json imuMeasurementJson(
+        const sensor::ImuMeasurement& measurement )
+    {
+      nlohmann::ordered_json value;
+      value[ "timestamp_ns" ] = measurement.timestamp.nanoseconds();
+      auto accel              = nlohmann::ordered_json::array();
+      auto gyro               = nlohmann::ordered_json::array();
+      for ( std::size_t axis = 0; axis < 3U; ++axis )
+      {
+        accel.push_back( doubleBitsHex( measurement.accel_mps2[ axis ] ) );
+        gyro.push_back( doubleBitsHex( measurement.gyro_radps[ axis ] ) );
+      }
+      value[ "accel_mps2_f64_bits_hex" ] = std::move( accel );
+      value[ "gyro_radps_f64_bits_hex" ] = std::move( gyro );
+      return value;
+    }
+
+    [[nodiscard]] std::string imagePixelsHex( const sensor::Image& image )
+    {
+      std::string result;
+      if ( image.pixelType() == sensor::PixelType::kUint8 )
+      {
+        const auto pixels = image.pixels<std::uint8_t>();
+        if ( !pixels.has_value() )
+        {
+          throw std::logic_error( "uint8 image has no uint8 pixel view" );
+        }
+        result.reserve( pixels->size() * 2U );
+        for ( std::uint8_t pixel : *pixels )
+        {
+          appendUnsignedHex( result, pixel, 2U );
+        }
+        return result;
+      }
+
+      const auto pixels = image.pixels<std::uint16_t>();
+      if ( !pixels.has_value() )
+      {
+        throw std::logic_error( "uint16 image has no uint16 pixel view" );
+      }
+      result.reserve( pixels->size() * 4U );
+      for ( std::uint16_t pixel : *pixels )
+      {
+        appendUnsignedHex( result, pixel, 4U );
+      }
+      return result;
+    }
+
+    [[nodiscard]] nlohmann::ordered_json imageJson(
+        const sensor::Image& image, sensor::CameraId camera,
+        common::Timestamp timestamp )
+    {
+      nlohmann::ordered_json value;
+      value[ "timestamp_ns" ]     = timestamp.nanoseconds();
+      value[ "camera" ]           = cameraName( camera );
+      value[ "width" ]            = image.width();
+      value[ "height" ]           = image.height();
+      value[ "channels" ]         = image.channels();
+      value[ "pixel_type" ]       = pixelTypeName( image.pixelType() );
+      value[ "pixel_byte_order" ] = "big_endian_per_pixel";
+      value[ "pixel_bytes_hex" ]  = imagePixelsHex( image );
+      return value;
+    }
+
+    [[nodiscard]] nlohmann::ordered_json imageEventJson(
+        const sensor::ImageFrameEvent& event )
+    {
+      return imageJson( event.image, event.camera, event.timestamp );
+    }
+
+    [[nodiscard]] nlohmann::ordered_json stereoFrameJson(
+        const sensor::StereoFrame& frame )
+    {
+      nlohmann::ordered_json value;
+      value[ "timestamp_ns" ] = frame.timestamp.nanoseconds();
+      value[ "left" ]         = imageJson( frame.left, sensor::CameraId::kLeft,
+                                           frame.timestamp );
+      value[ "right" ]        = imageJson( frame.right, sensor::CameraId::kRight,
+                                           frame.timestamp );
+      return value;
+    }
+
+    [[nodiscard]] nlohmann::ordered_json imuPayloadJson(
+        const sensor::ImuPayload& payload )
+    {
+      nlohmann::ordered_json value;
+      if ( const auto* raw = std::get_if<sensor::RawImuInterval>( &payload ) )
+      {
+        value[ "kind" ]       = "raw";
+        value[ "t_begin_ns" ] = raw->m_t_begin.nanoseconds();
+        value[ "t_end_ns" ]   = raw->m_t_end.nanoseconds();
+        auto samples          = nlohmann::ordered_json::array();
+        for ( const auto& sample : raw->m_samples )
+        {
+          samples.push_back( imuMeasurementJson( sample ) );
+        }
+        value[ "samples" ] = std::move( samples );
+        return value;
+      }
+
+      const auto& discontinuity =
+          std::get<sensor::MeasurementDiscontinuity>( payload );
+      value[ "kind" ]       = "measurement_discontinuity";
+      value[ "t_begin_ns" ] = discontinuity.m_t_begin.nanoseconds();
+      value[ "t_end_ns" ]   = discontinuity.m_t_end.nanoseconds();
+      return value;
+    }
+
+    [[nodiscard]] nlohmann::ordered_json packetJson(
+        const sensor::StereoImuPacket& packet )
+    {
+      nlohmann::ordered_json value;
+      value[ "frame" ] = stereoFrameJson( packet.m_frame );
+      value[ "imu" ]   = imuPayloadJson( packet.m_imu );
+      return value;
+    }
+
+    template <typename Range, typename Encoder>
+    [[nodiscard]] nlohmann::ordered_json orderedArrayJson(
+        const Range& range, Encoder encode )
+    {
+      auto values = nlohmann::ordered_json::array();
+      for ( const auto& item : range )
+      {
+        values.push_back( encode( item ) );
+      }
+      return values;
+    }
+
+    [[nodiscard]] nlohmann::ordered_json diagnosticsJson(
+        const StereoPairDiagnostics& diag )
+    {
+      nlohmann::ordered_json value;
+      value[ "pushed_left" ]             = diag.pushed_left;
+      value[ "pushed_right" ]            = diag.pushed_right;
+      value[ "emitted_stereo" ]          = diag.emitted_stereo;
+      value[ "dropped_left" ]            = diag.dropped_left;
+      value[ "dropped_right" ]           = diag.dropped_right;
+      value[ "dropped_left_overflow" ]   = diag.dropped_left_overflow;
+      value[ "dropped_right_overflow" ]  = diag.dropped_right_overflow;
+      value[ "max_left_queue" ]          = diag.max_left_queue;
+      value[ "max_right_queue" ]         = diag.max_right_queue;
+      value[ "pushed_imu" ]              = diag.pushed_imu;
+      value[ "dropped_imu" ]             = diag.dropped_imu;
+      value[ "dropped_imu_overflow" ]    = diag.dropped_imu_overflow;
+      value[ "imu_discontinuity_count" ] = diag.imu_discontinuity_count;
+      value[ "max_imu_queue" ]           = diag.max_imu_queue;
+      return value;
+    }
+#endif
 
   }  // namespace
 
@@ -434,5 +690,70 @@ namespace phad::sync
       m_diag.max_right_queue = std::max( m_diag.max_right_queue, m_right.size() );
     }
   }
+
+#ifdef PHAD_REPLAY_DIAGNOSTIC_TESTING
+  std::string internal::StereoPairSynchronizerTestAccess::canonicalStateJson(
+      const StereoPairSynchronizer& synchronizer )
+  {
+    nlohmann::ordered_json root;
+    root[ "schema" ] = "phad.replay.stereo_pair_synchronizer_state.v1";
+
+    nlohmann::ordered_json state;
+    nlohmann::ordered_json options;
+    options[ "tol_ns" ]        = synchronizer.m_options.tol_ns;
+    options[ "max_queue" ]     = synchronizer.m_options.max_queue;
+    options[ "max_imu_queue" ] = synchronizer.m_options.max_imu_queue;
+    options[ "imu_continuity_limit_ns" ] =
+        synchronizer.m_options.imu_continuity_limit_ns;
+    state[ "options" ] = std::move( options );
+    state[ "left" ]    = orderedArrayJson(
+        synchronizer.m_left,
+        []( const sensor::ImageFrameEvent& event ) {
+          return imageEventJson( event );
+        } );
+    state[ "right" ] = orderedArrayJson(
+        synchronizer.m_right,
+        []( const sensor::ImageFrameEvent& event ) {
+          return imageEventJson( event );
+        } );
+    state[ "paired" ] = orderedArrayJson(
+        synchronizer.m_paired,
+        []( const sensor::StereoFrame& frame ) {
+          return stereoFrameJson( frame );
+        } );
+    state[ "ready" ] = orderedArrayJson(
+        synchronizer.m_ready,
+        []( const sensor::StereoImuPacket& packet ) {
+          return packetJson( packet );
+        } );
+    state[ "imu" ] = orderedArrayJson(
+        synchronizer.m_imu,
+        []( const sensor::ImuMeasurement& measurement ) {
+          return imuMeasurementJson( measurement );
+        } );
+    state[ "diagnostics" ] = diagnosticsJson( synchronizer.m_diag );
+    state[ "sticky" ]      = optionalPushStatusJson( synchronizer.m_sticky );
+    state[ "last_left_ns" ] =
+        optionalTimestampJson( synchronizer.m_last_left );
+    state[ "last_right_ns" ] =
+        optionalTimestampJson( synchronizer.m_last_right );
+    state[ "imu_sticky" ] =
+        optionalPushStatusJson( synchronizer.m_imu_sticky );
+    state[ "last_imu_ns" ] =
+        optionalTimestampJson( synchronizer.m_last_imu );
+    state[ "last_emitted_left_ns" ] =
+        optionalTimestampJson( synchronizer.m_last_emitted_left );
+    if ( synchronizer.m_packet_mode.has_value() )
+    {
+      state[ "packet_mode" ] = *synchronizer.m_packet_mode;
+    }
+    else
+    {
+      state[ "packet_mode" ] = nullptr;
+    }
+    root[ "state" ] = std::move( state );
+    return root.dump();
+  }
+#endif
 
 }  // namespace phad::sync

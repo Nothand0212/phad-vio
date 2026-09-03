@@ -108,6 +108,12 @@ target_link_libraries(phad_sync PUBLIC phad::sensor phad::common)
 target_compile_options(phad_sync PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
+if(PHAD_BUILD_TESTS)
+  target_compile_definitions(phad_sync PRIVATE
+    PHAD_REPLAY_DIAGNOSTIC_TESTING
+  )
+  target_link_libraries(phad_sync PRIVATE nlohmann_json::nlohmann_json)
+endif()
 
 add_library(phad_camera
   phad/camera/camera_model.cpp
@@ -150,6 +156,12 @@ target_link_libraries(phad_io_dataset
 target_compile_options(phad_io_dataset PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
+if(PHAD_BUILD_TESTS)
+  target_compile_definitions(phad_io_dataset PRIVATE
+    PHAD_REPLAY_DIAGNOSTIC_TESTING
+  )
+  target_link_libraries(phad_io_dataset PRIVATE nlohmann_json::nlohmann_json)
+endif()
 
 add_library(phad_eval
   phad/eval/align.cpp
@@ -180,6 +192,12 @@ target_link_libraries(phad_frontend
 target_compile_options(phad_frontend PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
+if(PHAD_BUILD_TESTS)
+  target_compile_definitions(phad_frontend PRIVATE PHAD_FRONTEND_TESTING)
+  target_link_libraries(phad_frontend PRIVATE
+    nlohmann_json::nlohmann_json OpenSSL::Crypto
+  )
+endif()
 
 add_library(phad_viz
   phad/viz/image_window.cpp
@@ -221,6 +239,7 @@ target_compile_options(phad_estimator PRIVATE
 )
 if(PHAD_BUILD_TESTS)
   target_compile_definitions(phad_estimator PRIVATE PHAD_ESTIMATOR_TESTING)
+  target_link_libraries(phad_estimator PRIVATE nlohmann_json::nlohmann_json)
 endif()
 
 add_library(phad_bench
@@ -258,6 +277,14 @@ target_link_libraries(phad_stereo_pair_stream
 target_compile_options(phad_stereo_pair_stream PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
+if(PHAD_BUILD_TESTS)
+  target_compile_definitions(phad_stereo_pair_stream PRIVATE
+    PHAD_REPLAY_DIAGNOSTIC_TESTING
+  )
+  target_link_libraries(phad_stereo_pair_stream PRIVATE
+    nlohmann_json::nlohmann_json
+  )
+endif()
 
 add_library(phad_vo_bench_dataset STATIC
   apps/internal/vo_bench_dataset.cpp
@@ -276,6 +303,11 @@ add_library(phad_offline_vo_session STATIC
   apps/offline_vo_session.cpp
   apps/probe_b_writer.cpp
 )
+if(PHAD_BUILD_TESTS)
+  target_sources(phad_offline_vo_session PRIVATE
+    apps/internal/m5_51_prefix_diagnostic.cpp
+  )
+endif()
 target_compile_features(phad_offline_vo_session PUBLIC cxx_std_20)
 target_include_directories(phad_offline_vo_session PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -286,6 +318,16 @@ target_link_libraries(phad_offline_vo_session
 target_compile_options(phad_offline_vo_session PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
+if(PHAD_BUILD_TESTS)
+  target_compile_definitions(phad_offline_vo_session PRIVATE
+    PHAD_REPLAY_DIAGNOSTIC_TESTING
+    PHAD_ESTIMATOR_TESTING
+    PHAD_FRONTEND_TESTING
+  )
+  target_link_libraries(phad_offline_vo_session PRIVATE
+    nlohmann_json::nlohmann_json OpenSSL::Crypto
+  )
+endif()
 
 get_target_property( _phad_session_link_libs phad_offline_vo_session
   LINK_LIBRARIES )
@@ -403,6 +445,14 @@ target_link_libraries(phad_vo_bench
 target_compile_definitions(phad_vo_bench PRIVATE
   PHAD_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
+if(PHAD_BUILD_TESTS)
+  target_compile_definitions(phad_vo_bench PRIVATE
+    PHAD_REPLAY_DIAGNOSTIC_TESTING
+  )
+  target_link_libraries(phad_vo_bench PRIVATE
+    nlohmann_json::nlohmann_json OpenSSL::Crypto
+  )
+endif()
 target_compile_options(phad_vo_bench PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
@@ -565,6 +615,7 @@ if(PHAD_BUILD_TESTS)
   )
   target_compile_definitions(phad_apps_tests PRIVATE
     PHAD_VO_BENCH_PATH="$<TARGET_FILE:phad_vo_bench>"
+    PHAD_REPLAY_DIAGNOSTIC_TESTING
   )
   add_dependencies(phad_apps_tests phad_vo_bench)
   target_compile_options(phad_apps_tests PRIVATE

@@ -60,6 +60,7 @@ namespace phad::io::dataset
     class StereoImuDatasetBuilder;
     class StereoImuDatasetImpl;
     class StereoImuDatasetReaderImpl;
+    class StereoImuDatasetReaderTestAccess;
   }  // namespace internal
 
   class StereoImuDatasetReader
@@ -80,6 +81,7 @@ namespace phad::io::dataset
 
   private:
     friend class StereoImuDataset;
+    friend class internal::StereoImuDatasetReaderTestAccess;
 
     explicit StereoImuDatasetReader(
         std::shared_ptr<const internal::StereoImuDatasetImpl> impl );

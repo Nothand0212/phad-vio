@@ -23,6 +23,11 @@
 namespace phad::sync
 {
 
+  namespace internal
+  {
+    class StereoPairSynchronizerTestAccess;
+  }
+
   enum class PushStatus : std::uint8_t
   {
     kOk           = 0,
@@ -80,6 +85,8 @@ namespace phad::sync
     [[nodiscard]] std::optional<PushStatus> imuStickyError() const noexcept;
 
   private:
+    friend class internal::StereoPairSynchronizerTestAccess;
+
     void                                                 drainStereo();
     void                                                 drainPackets( bool source_exhausted );
     void                                                 updateMaxQueue( sensor::CameraId camera );

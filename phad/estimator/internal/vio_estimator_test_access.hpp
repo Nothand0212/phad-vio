@@ -5,6 +5,7 @@
 #endif
 
 #include <cstddef>
+#include <string>
 
 #include "phad/estimator/internal/initial_moving_root_math.hpp"
 #include "phad/estimator/types.hpp"
@@ -41,6 +42,9 @@ namespace phad::estimator
           VioEstimator& estimator, PnpGuessRetryOutcome outcome );
 
       [[nodiscard]] static std::size_t lastInitialVisualSolveWindowSize(
+          const VioEstimator& estimator );
+
+      [[nodiscard]] static std::string canonicalStateJson(
           const VioEstimator& estimator );
     };
 

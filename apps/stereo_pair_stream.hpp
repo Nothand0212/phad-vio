@@ -19,6 +19,11 @@
 namespace phad::apps
 {
 
+  namespace internal
+  {
+    class StereoPairStreamTestAccess;
+  }
+
   struct StreamError
   {
     std::string detail;
@@ -46,6 +51,8 @@ namespace phad::apps
     [[nodiscard]] const std::vector<std::string>& warnings() const noexcept;
 
   private:
+    friend class internal::StereoPairStreamTestAccess;
+
     void noteDiagnosticsWarnings();
 
     io::SensorSource&            m_source;

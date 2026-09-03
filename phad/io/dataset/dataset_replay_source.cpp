@@ -7,9 +7,85 @@
 #include <variant>
 
 #include "phad/sensor/camera_id.hpp"
+#ifdef PHAD_REPLAY_DIAGNOSTIC_TESTING
+#include <array>
+#include <bit>
+#include <nlohmann/json.hpp>
+
+#include "phad/io/dataset/internal/dataset_replay_source_test_access.hpp"
+#include "phad/io/dataset/internal/stereo_imu_dataset_reader_test_access.hpp"
+#endif
 
 namespace phad::io::dataset
 {
+
+#ifdef PHAD_REPLAY_DIAGNOSTIC_TESTING
+  namespace
+  {
+
+    [[nodiscard]] std::string doubleBitsHex( double value )
+    {
+      constexpr std::array<char, 16> kHexDigits{
+          '0', '1', '2', '3', '4', '5', '6', '7',
+          '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
+      std::uint64_t bits = std::bit_cast<std::uint64_t>( value );
+      std::string   result( 16U, '0' );
+      for ( std::size_t i = result.size(); i > 0U; --i )
+      {
+        result[ i - 1U ] = kHexDigits[ bits & 0xFU ];
+        bits >>= 4U;
+      }
+      return result;
+    }
+
+    [[nodiscard]] nlohmann::ordered_json imuMeasurementJson(
+        const sensor::ImuMeasurement& measurement )
+    {
+      nlohmann::ordered_json value;
+      value[ "timestamp_ns" ] = measurement.timestamp.nanoseconds();
+      auto accel              = nlohmann::ordered_json::array();
+      auto gyro               = nlohmann::ordered_json::array();
+      for ( std::size_t axis = 0; axis < 3U; ++axis )
+      {
+        accel.push_back( doubleBitsHex( measurement.accel_mps2[ axis ] ) );
+        gyro.push_back( doubleBitsHex( measurement.gyro_radps[ axis ] ) );
+      }
+      value[ "accel_mps2_f64_bits_hex" ] = std::move( accel );
+      value[ "gyro_radps_f64_bits_hex" ] = std::move( gyro );
+      return value;
+    }
+
+    [[nodiscard]] nlohmann::ordered_json optionalImuMeasurementJson(
+        const std::optional<sensor::ImuMeasurement>& measurement )
+    {
+      if ( !measurement.has_value() )
+      {
+        return nullptr;
+      }
+      return imuMeasurementJson( *measurement );
+    }
+
+    [[nodiscard]] nlohmann::ordered_json sourceErrorJson(
+        const io::SensorSourceError& error )
+    {
+      nlohmann::ordered_json value;
+      value[ "kind" ]      = "sensor_source_error";
+      value[ "code" ]      = "read_failed";
+      value[ "source_id" ] = error.source_id;
+      if ( error.timestamp.has_value() )
+      {
+        value[ "timestamp_ns" ] = error.timestamp->nanoseconds();
+      }
+      else
+      {
+        value[ "timestamp_ns" ] = nullptr;
+      }
+      value[ "cause" ] = error.cause;
+      return value;
+    }
+
+  }  // namespace
+#endif
 
   DatasetReplaySource::DatasetReplaySource( const StereoImuDataset& dataset )
       : m_calibration( dataset.calibration() ),
@@ -162,5 +238,38 @@ namespace phad::io::dataset
         },
         *m_terminal_state );
   }
+
+#ifdef PHAD_REPLAY_DIAGNOSTIC_TESTING
+  std::string internal::DatasetReplaySourceTestAccess::canonicalStateJson(
+      const DatasetReplaySource& source )
+  {
+    nlohmann::ordered_json root;
+    root[ "schema" ]            = "phad.replay.dataset_replay_source_state.v1";
+    root[ "immutable_dataset" ] = "content_addressed_input_manifest";
+
+    nlohmann::ordered_json state;
+    state[ "reader" ] = nlohmann::ordered_json::parse(
+        internal::canonicalStateJson( source.m_reader ) );
+    state[ "imu_lookahead" ] =
+        optionalImuMeasurementJson( source.m_imu_lookahead );
+    if ( !source.m_terminal_state.has_value() )
+    {
+      state[ "terminal" ] = nullptr;
+    }
+    else if ( std::holds_alternative<io::EndOfStream>(
+                  *source.m_terminal_state ) )
+    {
+      state[ "terminal" ] = nlohmann::ordered_json{ { "kind",
+                                                      "end_of_stream" } };
+    }
+    else
+    {
+      state[ "terminal" ] = sourceErrorJson(
+          std::get<io::SensorSourceError>( *source.m_terminal_state ) );
+    }
+    root[ "state" ] = std::move( state );
+    return root.dump();
+  }
+#endif
 
 }  // namespace phad::io::dataset

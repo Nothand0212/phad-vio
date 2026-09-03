@@ -13,6 +13,17 @@
 #include <utility>
 #include <vector>
 
+#ifdef PHAD_FRONTEND_TESTING
+#include <openssl/evp.h>
+
+#include <array>
+#include <bit>
+#include <nlohmann/json.hpp>
+#include <string>
+
+#include "phad/frontend/internal/stereo_tracker_test_access.hpp"
+#endif
+
 namespace phad::frontend
 {
   namespace
@@ -137,9 +148,9 @@ namespace phad::frontend
       // 左右 patch 各自去均值后的 SAD, 对单调整亮度差(offset)不变。与帧级
       // ③(cv::add 饱和偏移)的关键区别: 不改写像素, 无饱和裁剪毁对比度。
       // 代价 ~2×(两遍扫描); 仅当 enable_zero_mean_sad 打开时走此路径。
-      const int   n     = ( 2 * half + 1 ) * ( 2 * half + 1 );
-      long long   sum_l = 0;
-      long long   sum_r = 0;
+      const int n     = ( 2 * half + 1 ) * ( 2 * half + 1 );
+      long long sum_l = 0;
+      long long sum_r = 0;
       for ( int dy = -half; dy <= half; ++dy )
       {
         const auto* lrow = left.ptr<std::uint8_t>( v_l + dy );
@@ -221,11 +232,11 @@ namespace phad::frontend
       // 平坦邻域(全零描述子)在 Census 下与任何平坦区域 Hamming 0, 无判别
       // 力 → 反向搜索同样退回 SAD(与 matchRight 的 per-track 规则一致)。
       const bool census_effective = use_census && desc_l != 0;
-      const auto cost = [&]( int u_r, int v_r ) {
+      const auto cost             = [ & ]( int u_r, int v_r ) {
         return census_effective
-                   ? hammingDist( desc_l, census5x5( right, u_r, v_r ) )
-                   : sadPatch( left, right, u_l, v_l, u_r, v_r, half,
-                               zero_mean );
+                               ? hammingDist( desc_l, census5x5( right, u_r, v_r ) )
+                               : sadPatch( left, right, u_l, v_l, u_r, v_r, half,
+                                           zero_mean );
       };
 
       int  best_u       = u_lo;
@@ -404,7 +415,7 @@ namespace phad::frontend
           }
         }
         std::sort( evictable_ids.begin(), evictable_ids.end() );
-        const auto drop_n = static_cast<std::size_t>( std::min(
+        const auto                           drop_n = static_cast<std::size_t>( std::min(
             need_evict, static_cast<int>( evictable_ids.size() ) ) );
         const std::unordered_set<LandmarkId> drop_set(
             evictable_ids.begin(),
@@ -479,7 +490,7 @@ namespace phad::frontend
 
         // Global minimum over the epipolar band (single peak; no cascade).
         // Uniqueness 比较 ±1 px 之外的对手峰。
-        const bool left_in_bounds = patchInBounds( left, u_l, v_l, half );
+        const bool          left_in_bounds = patchInBounds( left, u_l, v_l, half );
         const std::uint32_t desc_l =
             options.enable_census && left_in_bounds
                 ? census5x5( left, u_l, v_l )
@@ -491,17 +502,17 @@ namespace phad::frontend
         const bool census_available =
             options.enable_census && left_in_bounds && desc_l != 0;
 
-        int  best_u     = 0;
-        int  best_v     = v_l;
-        double u_r_sub  = 0.0;
-        bool  used_census = false;
+        int    best_u      = 0;
+        int    best_v      = v_l;
+        double u_r_sub     = 0.0;
+        bool   used_census = false;
         // 一次带验收的匹配尝试。
         // census=false → 非归一化 SAD(主路径, 原行为: 选择+相对裕度唯一性+
         // SAD 抛物线子像素)。census=true → Census 选择 + SAD tiebreak +
         // Hamming 唯一性 + 同样的 SAD 抛物线子像素(offset 在 ±1px 内
         // 局部常数, 抛物线拟合不受影响)。
-        const auto try_match = [&]( bool census, int& out_u, int& out_v,
-                                    double& out_sub ) -> bool {
+        const auto try_match = [ & ]( bool census, int& out_u, int& out_v,
+                                      double& out_sub ) -> bool {
           int  best_cost    = std::numeric_limits<int>::max();
           int  best_tie_sad = std::numeric_limits<int>::max();
           bool found_peak   = false;
@@ -570,7 +581,7 @@ namespace phad::frontend
                   }
                   const int h = hammingDist( desc_l,
                                              census5x5( right, u_r, v_r ) );
-                  second = std::min( second, h );
+                  second      = std::min( second, h );
                 }
               }
               if ( second == std::numeric_limits<int>::max() ||
@@ -643,21 +654,21 @@ namespace phad::frontend
         }
 
 
-          // Reverse 1D search on the same row; do not touch
-          // forward_backward_rejected (temporal FB only).
-          // 反搜必须与主路径同一 mode: Census 命中(暗帧)时反搜的右图
-          // 暗 patch 描述子同样对曝光不变;若暗 patch 平坦(desc=0),
-          // searchRow 内部自动退回 SAD。
-          if ( options.stereo_check_bidir )
-          {
-            const int back_lo =
-                best_u + static_cast<int>( std::ceil( d_min ) );
-            const int back_hi =
-                best_u + static_cast<int>( std::floor( d_max ) );
-            const SadPeak back =
-                searchRow( right, left, best_u, best_v, best_v, back_lo,
-                           back_hi, half, used_census,
-                           options.enable_zero_mean_sad );
+        // Reverse 1D search on the same row; do not touch
+        // forward_backward_rejected (temporal FB only).
+        // 反搜必须与主路径同一 mode: Census 命中(暗帧)时反搜的右图
+        // 暗 patch 描述子同样对曝光不变;若暗 patch 平坦(desc=0),
+        // searchRow 内部自动退回 SAD。
+        if ( options.stereo_check_bidir )
+        {
+          const int back_lo =
+              best_u + static_cast<int>( std::ceil( d_min ) );
+          const int back_hi =
+              best_u + static_cast<int>( std::floor( d_max ) );
+          const SadPeak back =
+              searchRow( right, left, best_u, best_v, best_v, back_lo,
+                         back_hi, half, used_census,
+                         options.enable_zero_mean_sad );
           if ( !back.ok ||
                std::abs( static_cast<double>( back.u - u_l ) ) >
                    options.stereo_bidir_px )
@@ -731,6 +742,230 @@ namespace phad::frontend
       return output;
     }
   };
+
+#ifdef PHAD_FRONTEND_TESTING
+  namespace
+  {
+
+    [[nodiscard]] std::string fixedHex( std::uint64_t value,
+                                        std::size_t   digits )
+    {
+      constexpr char kHex[] = "0123456789abcdef";
+      std::string    result( digits, '0' );
+      for ( std::size_t index = 0U; index < digits; ++index )
+      {
+        const std::size_t shift = ( digits - index - 1U ) * 4U;
+        result[ index ]         = kHex[ ( value >> shift ) & 0x0fU ];
+      }
+      return result;
+    }
+
+    [[nodiscard]] std::string floatBits( float value )
+    {
+      return fixedHex( std::bit_cast<std::uint32_t>( value ), 8U );
+    }
+
+    [[nodiscard]] std::string doubleBits( double value )
+    {
+      return fixedHex( std::bit_cast<std::uint64_t>( value ), 16U );
+    }
+
+    [[nodiscard]] std::string logicalPixelBytes( const cv::Mat& image )
+    {
+      const std::size_t row_bytes =
+          static_cast<std::size_t>( image.cols ) * image.elemSize();
+      std::string bytes;
+      bytes.reserve( static_cast<std::size_t>( image.rows ) * row_bytes );
+      for ( int row = 0; row < image.rows; ++row )
+      {
+        bytes.append(
+            reinterpret_cast<const char*>( image.ptr<std::uint8_t>( row ) ),
+            row_bytes );
+      }
+      return bytes;
+    }
+
+    [[nodiscard]] std::string sha256LogicalPixels( const cv::Mat& image )
+    {
+      const std::string bytes = logicalPixelBytes( image );
+
+      std::array<unsigned char, EVP_MAX_MD_SIZE> digest{};
+      std::size_t                                digest_size = digest.size();
+      if ( EVP_Q_digest( nullptr, "SHA256", nullptr, bytes.data(),
+                         bytes.size(), digest.data(), &digest_size ) != 1 ||
+           digest_size != 32U )
+      {
+        throw std::runtime_error(
+            "StereoTracker state pixel SHA-256 computation failed" );
+      }
+
+      std::string result;
+      result.reserve( digest_size * 2U );
+      for ( std::size_t index = 0U; index < digest_size; ++index )
+      {
+        result += fixedHex( digest[ index ], 2U );
+      }
+      return result;
+    }
+
+    [[nodiscard]] std::string logicalPixelsHex( const cv::Mat& image )
+    {
+      const std::string bytes = logicalPixelBytes( image );
+      std::string       result;
+      result.reserve( bytes.size() * 2U );
+      for ( const char raw_byte : bytes )
+      {
+        result += fixedHex( static_cast<unsigned char>( raw_byte ), 2U );
+      }
+      return result;
+    }
+
+    [[nodiscard]] nlohmann::ordered_json calibrationJson(
+        const camera::RectifiedStereoCalibration& calibration )
+    {
+      nlohmann::ordered_json value;
+      value[ "fx_pixels_bits" ]  = doubleBits( calibration.fxPixels() );
+      value[ "fy_pixels_bits" ]  = doubleBits( calibration.fyPixels() );
+      value[ "cx_pixels_bits" ]  = doubleBits( calibration.cxPixels() );
+      value[ "cy_pixels_bits" ]  = doubleBits( calibration.cyPixels() );
+      value[ "baseline_m_bits" ] = doubleBits( calibration.baselineM() );
+      value[ "image_width" ]     = calibration.imageWidth();
+      value[ "image_height" ]    = calibration.imageHeight();
+
+      const Eigen::Matrix3d rotation =
+          calibration.T_B_left_rectified().rotation();
+      auto rotation_bits = nlohmann::ordered_json::array();
+      for ( Eigen::Index row = 0; row < rotation.rows(); ++row )
+      {
+        auto row_bits = nlohmann::ordered_json::array();
+        for ( Eigen::Index col = 0; col < rotation.cols(); ++col )
+        {
+          row_bits.push_back( doubleBits( rotation( row, col ) ) );
+        }
+        rotation_bits.push_back( std::move( row_bits ) );
+      }
+      value[ "T_B_left_rectified_rotation_bits" ] =
+          std::move( rotation_bits );
+
+      const Eigen::Vector3d translation =
+          calibration.T_B_left_rectified().translation();
+      auto translation_bits = nlohmann::ordered_json::array();
+      for ( Eigen::Index index = 0; index < translation.size(); ++index )
+      {
+        translation_bits.push_back( doubleBits( translation( index ) ) );
+      }
+      value[ "T_B_left_rectified_translation_bits" ] =
+          std::move( translation_bits );
+      return value;
+    }
+
+    [[nodiscard]] nlohmann::ordered_json optionsJson(
+        const StereoTrackerOptions& options )
+    {
+      nlohmann::ordered_json value;
+      value[ "max_tracks" ]         = options.max_tracks;
+      value[ "quality_level_bits" ] = doubleBits( options.quality_level );
+      value[ "min_distance_px_bits" ] =
+          doubleBits( options.min_distance_px );
+      value[ "mask_radius_px" ]    = options.mask_radius_px;
+      value[ "lk_window_px" ]      = options.lk_window_px;
+      value[ "lk_pyramid_levels" ] = options.lk_pyramid_levels;
+      value[ "forward_backward_px_bits" ] =
+          doubleBits( options.forward_backward_px );
+      value[ "max_epipolar_px_bits" ] =
+          doubleBits( options.max_epipolar_px );
+      value[ "min_disparity_px_bits" ] =
+          doubleBits( options.min_disparity_px );
+      value[ "min_depth_m_bits" ]       = doubleBits( options.min_depth_m );
+      value[ "max_depth_m_bits" ]       = doubleBits( options.max_depth_m );
+      value[ "stereo_sad_half_win_px" ] = options.stereo_sad_half_win_px;
+      value[ "stereo_row_tol_px" ]      = options.stereo_row_tol_px;
+      value[ "stereo_bidir_px_bits" ] =
+          doubleBits( options.stereo_bidir_px );
+      value[ "stereo_uniq_ratio_bits" ] =
+          doubleBits( options.stereo_uniq_ratio );
+      value[ "stereo_check_bidir" ] = options.stereo_check_bidir;
+      value[ "enable_census" ]      = options.enable_census;
+      value[ "enable_exposure_normalize" ] =
+          options.enable_exposure_normalize;
+      value[ "enable_zero_mean_sad" ] = options.enable_zero_mean_sad;
+      value[ "enable_clahe" ]         = options.enable_clahe;
+      value[ "enable_median_flow" ]   = options.enable_median_flow;
+      value[ "enable_fransac" ]       = options.enable_fransac;
+      return value;
+    }
+
+  }  // namespace
+
+  std::string internal::StereoTrackerTestAccess::canonicalStateJson(
+      const StereoTracker& tracker )
+  {
+    if ( tracker.m_impl == nullptr )
+    {
+      throw std::logic_error(
+          "cannot encode state of a moved-from StereoTracker" );
+    }
+
+    const StereoTracker::Impl& impl = *tracker.m_impl;
+    nlohmann::ordered_json     root;
+    root[ "schema" ]      = "stereo_tracker_state_v1";
+    root[ "calibration" ] = calibrationJson( impl.calibration );
+    root[ "options" ]     = optionsJson( impl.options );
+
+    nlohmann::ordered_json prev_left;
+    prev_left[ "rows" ] = impl.prev_left.rows;
+    prev_left[ "cols" ] = impl.prev_left.cols;
+    prev_left[ "type" ] = impl.prev_left.type();
+    prev_left[ "logical_pixel_bytes_sha256" ] =
+        sha256LogicalPixels( impl.prev_left );
+    prev_left[ "logical_pixel_bytes_hex" ] =
+        logicalPixelsHex( impl.prev_left );
+    root[ "prev_left" ] = std::move( prev_left );
+
+    std::vector<const LiveTrack*> sorted_tracks;
+    sorted_tracks.reserve( impl.tracks.size() );
+    for ( const LiveTrack& track : impl.tracks )
+    {
+      sorted_tracks.push_back( &track );
+    }
+    std::sort( sorted_tracks.begin(), sorted_tracks.end(),
+               []( const LiveTrack* lhs, const LiveTrack* rhs ) {
+                 return lhs->id < rhs->id;
+               } );
+
+    auto tracks = nlohmann::ordered_json::array();
+    for ( const LiveTrack* track : sorted_tracks )
+    {
+      nlohmann::ordered_json value;
+      value[ "id" ]     = track->id;
+      value[ "length" ] = track->length;
+      nlohmann::ordered_json pixel_bits;
+      pixel_bits[ "x" ]            = floatBits( track->pixel.x );
+      pixel_bits[ "y" ]            = floatBits( track->pixel.y );
+      value[ "pixel_bits" ]        = std::move( pixel_bits );
+      value[ "disparity_px_bits" ] = doubleBits( track->disparity_px );
+      value[ "status" ] =
+          static_cast<std::uint32_t>( track->status );
+      value[ "evictable" ] = track->evictable;
+      tracks.push_back( std::move( value ) );
+    }
+    root[ "tracks" ]   = std::move( tracks );
+    root[ "next_id" ]  = impl.next_id;
+    root[ "has_prev" ] = impl.has_prev;
+
+    nlohmann::ordered_json median_flow;
+    median_flow[ "present" ] = impl.median_flow.has_value();
+    if ( impl.median_flow.has_value() )
+    {
+      median_flow[ "x_bits" ] = floatBits( impl.median_flow->x );
+      median_flow[ "y_bits" ] = floatBits( impl.median_flow->y );
+    }
+    root[ "median_flow" ] = std::move( median_flow );
+
+    return root.dump( -1, ' ', false,
+                      nlohmann::ordered_json::error_handler_t::strict );
+  }
+#endif
 
   StereoTracker::StereoTracker( camera::RectifiedStereoCalibration calibration,
                                 StereoTrackerOptions               options )
@@ -820,8 +1055,8 @@ namespace phad::frontend
     // offset, frame-level form). Saturation is safe: cv::add clamps [0,255].
     if ( m_impl->options.enable_exposure_normalize )
     {
-      const double mean_l = cv::mean( left )[0];
-      const double mean_r = cv::mean( right )[0];
+      const double mean_l = cv::mean( left )[ 0 ];
+      const double mean_r = cv::mean( right )[ 0 ];
       const double offset = mean_l - mean_r;
       // Threshold 20 px: only correct systematic large exposure mismatch.
       // Measured on all 11 EuRoC sequences (2026-08-07): healthy sequences
@@ -944,9 +1179,9 @@ namespace phad::frontend
         if ( !geo_status.empty() &&
              geo_status.size() == survivor_indices.size() )
         {
-          std::vector<LiveTrack>       geo_survivors;
-          std::vector<std::size_t>     geo_indices;
-          std::vector<cv::Point2f>     geo_flows;
+          std::vector<LiveTrack>   geo_survivors;
+          std::vector<std::size_t> geo_indices;
+          std::vector<cv::Point2f> geo_flows;
           geo_survivors.reserve( survivors.size() );
           geo_indices.reserve( survivor_indices.size() );
           geo_flows.reserve( flows.size() );
@@ -961,9 +1196,9 @@ namespace phad::frontend
             geo_indices.push_back( survivor_indices[ i ] );
             geo_flows.push_back( flows[ i ] );
           }
-          survivors         = std::move( geo_survivors );
-          survivor_indices  = std::move( geo_indices );
-          flows             = std::move( geo_flows );
+          survivors        = std::move( geo_survivors );
+          survivor_indices = std::move( geo_indices );
+          flows            = std::move( geo_flows );
         }
       }
 

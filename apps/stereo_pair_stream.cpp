@@ -4,6 +4,15 @@
 #include <variant>
 
 #include "phad/sensor/camera_id.hpp"
+#ifdef PHAD_REPLAY_DIAGNOSTIC_TESTING
+#include <nlohmann/json.hpp>
+#include <stdexcept>
+
+#include "apps/internal/stereo_pair_stream_test_access.hpp"
+#include "phad/io/dataset/dataset_replay_source.hpp"
+#include "phad/io/dataset/internal/dataset_replay_source_test_access.hpp"
+#include "phad/sync/internal/stereo_pair_synchronizer_test_access.hpp"
+#endif
 
 /**
  * @file stereo_pair_stream.cpp
@@ -155,5 +164,44 @@ namespace phad::apps
       m_warned_overflow = true;
     }
   }
+
+#ifdef PHAD_REPLAY_DIAGNOSTIC_TESTING
+  std::string internal::StereoPairStreamTestAccess::canonicalStateJson(
+      const StereoPairStream& stream )
+  {
+    const auto* source = dynamic_cast<const io::dataset::DatasetReplaySource*>(
+        &stream.m_source );
+    if ( source == nullptr )
+    {
+      throw std::logic_error(
+          "replay state requires DatasetReplaySource" );
+    }
+
+    nlohmann::ordered_json root;
+    root[ "schema" ] = "phad.replay.stereo_pair_stream_state.v1";
+
+    nlohmann::ordered_json state;
+    state[ "source" ] = nlohmann::ordered_json::parse(
+        io::dataset::internal::canonicalStateJson( *source ) );
+    state[ "synchronizer" ] = nlohmann::ordered_json::parse(
+        sync::internal::canonicalStateJson( stream.m_sync ) );
+    state[ "warnings" ]        = stream.m_warnings;
+    state[ "warned_drop" ]     = stream.m_warned_drop;
+    state[ "warned_overflow" ] = stream.m_warned_overflow;
+    state[ "flushed" ]         = stream.m_flushed;
+    if ( stream.m_terminal_error.has_value() )
+    {
+      nlohmann::ordered_json terminal;
+      terminal[ "detail" ]      = stream.m_terminal_error->detail;
+      state[ "terminal_error" ] = std::move( terminal );
+    }
+    else
+    {
+      state[ "terminal_error" ] = nullptr;
+    }
+    root[ "state" ] = std::move( state );
+    return root.dump();
+  }
+#endif
 
 }  // namespace phad::apps

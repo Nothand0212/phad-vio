@@ -11,6 +11,11 @@
 
 #include "phad/io/dataset/dataset_error.hpp"
 #include "phad/io/dataset/internal/stereo_imu_dataset_builder.hpp"
+#ifdef PHAD_REPLAY_DIAGNOSTIC_TESTING
+#include <nlohmann/json.hpp>
+
+#include "phad/io/dataset/internal/stereo_imu_dataset_reader_test_access.hpp"
+#endif
 
 namespace phad::io::dataset
 {
@@ -170,6 +175,43 @@ namespace phad::io::dataset
     {
       return camera == sensor::CameraId::kLeft;
     }
+
+#ifdef PHAD_REPLAY_DIAGNOSTIC_TESTING
+    [[nodiscard]] const char* readerErrorCodeName(
+        DatasetReaderErrorCode code ) noexcept
+    {
+      switch ( code )
+      {
+        case DatasetReaderErrorCode::kImageDecodeFailed:
+          return "image_decode_failed";
+        case DatasetReaderErrorCode::kImageFormatMismatch:
+          return "image_format_mismatch";
+      }
+      return "unknown";
+    }
+
+    [[nodiscard]] nlohmann::ordered_json readerErrorJson(
+        const DatasetReaderError& error )
+    {
+      nlohmann::ordered_json value;
+      value[ "code" ]          = readerErrorCodeName( error.code );
+      value[ "sensor_id" ]     = error.sensor_id;
+      value[ "timestamp_ns" ]  = error.timestamp.nanoseconds();
+      value[ "record_number" ] = error.record_number;
+      value[ "cause" ]         = error.cause;
+      return value;
+    }
+
+    [[nodiscard]] nlohmann::ordered_json optionalReaderErrorJson(
+        const std::optional<DatasetReaderError>& error )
+    {
+      if ( !error.has_value() )
+      {
+        return nullptr;
+      }
+      return readerErrorJson( *error );
+    }
+#endif
 
   }  // namespace
 
@@ -340,5 +382,27 @@ namespace phad::io::dataset
     return sensor::ImageFrameEvent{ camera, reference.timestamp,
                                     std::move( decoded ).value() };
   }
+
+#ifdef PHAD_REPLAY_DIAGNOSTIC_TESTING
+  std::string internal::StereoImuDatasetReaderTestAccess::canonicalStateJson(
+      const StereoImuDatasetReader& reader )
+  {
+    nlohmann::ordered_json root;
+    root[ "schema" ] =
+        "phad.replay.stereo_imu_dataset_reader_state.v1";
+    root[ "immutable_dataset" ] = "content_addressed_input_manifest";
+
+    nlohmann::ordered_json state;
+    state[ "next_imu_index" ]   = reader.m_impl->m_next_imu_index;
+    state[ "next_left_index" ]  = reader.m_impl->m_next_left_index;
+    state[ "next_right_index" ] = reader.m_impl->m_next_right_index;
+    state[ "terminal_left" ] =
+        optionalReaderErrorJson( reader.m_impl->m_terminal_left );
+    state[ "terminal_right" ] =
+        optionalReaderErrorJson( reader.m_impl->m_terminal_right );
+    root[ "state" ] = std::move( state );
+    return root.dump();
+  }
+#endif
 
 }  // namespace phad::io::dataset

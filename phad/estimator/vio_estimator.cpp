@@ -47,6 +47,11 @@
 #include "phad/estimator/internal/initialization_diagnostics.hpp"
 #include "phad/estimator/internal/vio_update_transaction.hpp"
 #ifdef PHAD_ESTIMATOR_TESTING
+#include <bit>
+#include <type_traits>
+
+#include <nlohmann/json.hpp>
+
 #include "phad/estimator/internal/vio_estimator_test_access.hpp"
 #endif
 
@@ -85,6 +90,344 @@ namespace phad::estimator
     using internal::VioUpdateTransaction;
     using internal::VisualPoseSeed;
     using internal::WindowFrame;
+
+#ifdef PHAD_ESTIMATOR_TESTING
+    using OrderedJson = nlohmann::ordered_json;
+
+    [[nodiscard]] std::string doubleBitsHex( const double value )
+    {
+      constexpr char      kHexDigits[] = "0123456789abcdef";
+      const std::uint64_t bits         = std::bit_cast<std::uint64_t>( value );
+      std::string         result( 16U, '0' );
+      for ( std::size_t index = 0U; index < result.size(); ++index )
+      {
+        const std::size_t shift = index * 4U;
+        result[ result.size() - 1U - index ] =
+            kHexDigits[ ( bits >> shift ) & 0xFU ];
+      }
+      return result;
+    }
+
+    template <typename Derived>
+    [[nodiscard]] OrderedJson eigenJson(
+        const Eigen::MatrixBase<Derived>& value )
+    {
+      OrderedJson result = OrderedJson::array();
+      for ( Eigen::Index row = 0; row < value.rows(); ++row )
+      {
+        for ( Eigen::Index column = 0; column < value.cols(); ++column )
+        {
+          result.push_back( doubleBitsHex( value( row, column ) ) );
+        }
+      }
+      return result;
+    }
+
+    template <typename Enum>
+    [[nodiscard]] unsigned enumJson( const Enum value )
+    {
+      static_assert( std::is_enum_v<Enum> );
+      using Underlying = std::underlying_type_t<Enum>;
+      using Unsigned   = std::make_unsigned_t<Underlying>;
+      return static_cast<unsigned>( static_cast<Unsigned>( value ) );
+    }
+
+    [[nodiscard]] OrderedJson imuMeasurementJson(
+        const sensor::ImuMeasurement& measurement )
+    {
+      OrderedJson result       = OrderedJson::object();
+      result[ "timestamp_ns" ] = measurement.timestamp.nanoseconds();
+      result[ "accel_mps2" ]   = OrderedJson::array();
+      result[ "gyro_radps" ]   = OrderedJson::array();
+      for ( const double value : measurement.accel_mps2 )
+      {
+        result[ "accel_mps2" ].push_back( doubleBitsHex( value ) );
+      }
+      for ( const double value : measurement.gyro_radps )
+      {
+        result[ "gyro_radps" ].push_back( doubleBitsHex( value ) );
+      }
+      return result;
+    }
+
+    [[nodiscard]] OrderedJson rawImuIntervalJson(
+        const sensor::RawImuInterval& interval )
+    {
+      OrderedJson result     = OrderedJson::object();
+      result[ "t_begin_ns" ] = interval.m_t_begin.nanoseconds();
+      result[ "t_end_ns" ]   = interval.m_t_end.nanoseconds();
+      result[ "samples" ]    = OrderedJson::array();
+      for ( const sensor::ImuMeasurement& sample : interval.m_samples )
+      {
+        result[ "samples" ].push_back( imuMeasurementJson( sample ) );
+      }
+      return result;
+    }
+
+    [[nodiscard]] OrderedJson normalizedImuIntervalJson(
+        const NormalizedImuInterval& interval )
+    {
+      OrderedJson result = OrderedJson::object();
+      result[ "raw" ]    = rawImuIntervalJson( interval.m_raw );
+      result[ "nodes" ]  = OrderedJson::array();
+      for ( const sensor::ImuMeasurement& node : interval.m_nodes )
+      {
+        result[ "nodes" ].push_back( imuMeasurementJson( node ) );
+      }
+      result[ "steps" ] = OrderedJson::array();
+      for ( const ImuIntervalStep& step : interval.m_steps )
+      {
+        OrderedJson encoded_step        = OrderedJson::object();
+        encoded_step[ "acc_mean_mps2" ] = eigenJson( step.m_acc_mean_mps2 );
+        encoded_step[ "gyr_mean_radps" ] =
+            eigenJson( step.m_gyr_mean_radps );
+        encoded_step[ "dt_ns" ] = step.m_dt_ns;
+        encoded_step[ "dt_s" ]  = doubleBitsHex( step.m_dt_s );
+        result[ "steps" ].push_back( std::move( encoded_step ) );
+      }
+      result[ "duration_ns" ] = interval.m_duration_ns;
+      return result;
+    }
+
+    [[nodiscard]] OrderedJson navigationStateJson(
+        const NavigationState& navigation )
+    {
+      OrderedJson result = OrderedJson::object();
+      result[ "T_W_B" ]  = eigenJson( navigation.m_T_W_B.matrix() );
+      result[ "v_W_B" ]  = eigenJson( navigation.m_v_W_B );
+      result[ "bias" ]   = OrderedJson::object();
+      result[ "bias" ][ "acc_mps2" ] =
+          eigenJson( navigation.m_bias.m_acc_mps2 );
+      result[ "bias" ][ "gyr_radps" ] =
+          eigenJson( navigation.m_bias.m_gyr_radps );
+      return result;
+    }
+
+    [[nodiscard]] OrderedJson windowFrameJson( const WindowFrame& frame )
+    {
+      OrderedJson result       = OrderedJson::object();
+      result[ "frame_index" ]  = frame.m_frame_index;
+      result[ "timestamp_ns" ] = frame.m_timestamp.nanoseconds();
+      result[ "observations" ] = OrderedJson::array();
+      for ( const StereoObservation& observation : frame.m_observations )
+      {
+        OrderedJson encoded_observation = OrderedJson::object();
+        encoded_observation[ "id" ]     = observation.id;
+        encoded_observation[ "left_pixel" ] =
+            eigenJson( observation.left_pixel );
+        encoded_observation[ "disparity_px" ] =
+            doubleBitsHex( observation.disparity_px );
+        result[ "observations" ].push_back(
+            std::move( encoded_observation ) );
+      }
+      result[ "is_keyframe" ] = frame.m_is_keyframe;
+      result[ "predecessor_frame_index" ] =
+          frame.m_predecessor_frame_index.has_value()
+              ? OrderedJson( *frame.m_predecessor_frame_index )
+              : OrderedJson( nullptr );
+      result[ "imu" ] =
+          frame.m_imu.has_value()
+              ? normalizedImuIntervalJson( *frame.m_imu )
+              : OrderedJson( nullptr );
+      if ( frame.m_visual_seed.has_value() )
+      {
+        result[ "visual_seed" ] = OrderedJson::object();
+        result[ "visual_seed" ][ "T_W_B" ] =
+            eigenJson( frame.m_visual_seed->m_T_W_B.matrix() );
+      }
+      else
+      {
+        result[ "visual_seed" ] = nullptr;
+      }
+      if ( frame.m_verified_visual.has_value() )
+      {
+        OrderedJson verified = OrderedJson::object();
+        verified[ "T_W_B" ] =
+            eigenJson( frame.m_verified_visual->m_T_W_B.matrix() );
+        verified[ "stereo_factors" ] = OrderedJson::array();
+        for ( const VerifiedVisualPose::RetainedStereoFactor& factor :
+              frame.m_verified_visual->m_stereo_factors )
+        {
+          OrderedJson encoded_factor      = OrderedJson::object();
+          encoded_factor[ "landmark_id" ] = factor.m_landmark_id;
+          encoded_factor[ "observation_index" ] =
+              static_cast<std::uint64_t>( factor.m_observation_index );
+          verified[ "stereo_factors" ].push_back(
+              std::move( encoded_factor ) );
+        }
+        result[ "verified_visual" ] = std::move( verified );
+      }
+      else
+      {
+        result[ "verified_visual" ] = nullptr;
+      }
+      result[ "navigation" ] =
+          frame.m_navigation.has_value()
+              ? navigationStateJson( *frame.m_navigation )
+              : OrderedJson( nullptr );
+      return result;
+    }
+
+    [[nodiscard]] OrderedJson vioDiagnosticsJson(
+        const VioDiagnostics& diagnostics )
+    {
+      OrderedJson result            = OrderedJson::object();
+      result[ "nav_states" ]        = diagnostics.m_nav_states;
+      result[ "imu_factors" ]       = diagnostics.m_imu_factors;
+      result[ "bias_rw_factors" ]   = diagnostics.m_bias_rw_factors;
+      result[ "visual_factors" ]    = diagnostics.m_visual_factors;
+      result[ "root_prior_sets" ]   = diagnostics.m_root_prior_sets;
+      result[ "integration_steps" ] = diagnostics.m_integration_steps;
+      result[ "integrated_duration_ns" ] =
+          diagnostics.m_integrated_duration_ns;
+      result[ "visual_coast_duration_ns" ] =
+          diagnostics.m_visual_coast_duration_ns;
+      result[ "non_keyframe_evictions" ] =
+          diagnostics.m_non_keyframe_evictions;
+      result[ "imu_reintegrations" ] = diagnostics.m_imu_reintegrations;
+      result[ "acc_cov_diag" ]       = eigenJson( diagnostics.m_acc_cov_diag );
+      result[ "gyr_cov_diag" ]       = eigenJson( diagnostics.m_gyr_cov_diag );
+      result[ "integration_cov_diag" ] =
+          eigenJson( diagnostics.m_integration_cov_diag );
+      result[ "bias_rw_sigmas" ] = eigenJson( diagnostics.m_bias_rw_sigmas );
+      result[ "completed_segment_id" ] =
+          diagnostics.m_completed_segment_id.has_value()
+              ? OrderedJson( *diagnostics.m_completed_segment_id )
+              : OrderedJson( nullptr );
+      return result;
+    }
+
+    [[nodiscard]] OrderedJson linearFailureJson(
+        const internal::InitialMovingLinearFailure& failure )
+    {
+      OrderedJson result        = OrderedJson::object();
+      result[ "code" ]          = enumJson( failure.m_code );
+      result[ "rank" ]          = failure.m_rank;
+      result[ "required_rank" ] = failure.m_required_rank;
+      result[ "normalized_condition" ] =
+          failure.m_normalized_condition.has_value()
+              ? OrderedJson( doubleBitsHex(
+                    *failure.m_normalized_condition ) )
+              : OrderedJson( nullptr );
+      return result;
+    }
+
+    [[nodiscard]] OrderedJson jointFitJson(
+        const internal::InitialMovingJointFit& fit )
+    {
+      OrderedJson result        = OrderedJson::object();
+      result[ "statistic" ]     = doubleBitsHex( fit.m_statistic );
+      result[ "residual_rank" ] = fit.m_residual_rank;
+      result[ "fitted_rank" ]   = fit.m_fitted_rank;
+      result[ "effective_dof" ] = fit.m_effective_dof;
+      return result;
+    }
+
+    [[nodiscard]] OrderedJson gyroSolutionJson(
+        const internal::InitialMovingGyroSolution& solution )
+    {
+      OrderedJson result   = OrderedJson::object();
+      result[ "bg_radps" ] = eigenJson( solution.m_bg_radps );
+      result[ "rank" ]     = solution.m_rank;
+      result[ "normalized_condition" ] =
+          solution.m_normalized_condition.has_value()
+              ? OrderedJson( doubleBitsHex(
+                    *solution.m_normalized_condition ) )
+              : OrderedJson( nullptr );
+      return result;
+    }
+
+    [[nodiscard]] OrderedJson gravityVelocitySolutionJson(
+        const internal::InitialMovingGravityVelocitySolution& solution )
+    {
+      OrderedJson result = OrderedJson::object();
+      result[ "g_W" ]    = eigenJson( solution.m_g_W );
+      result[ "v_W" ]    = OrderedJson::array();
+      for ( const Eigen::Vector3d& velocity : solution.m_v_W )
+      {
+        result[ "v_W" ].push_back( eigenJson( velocity ) );
+      }
+      result[ "rank" ] = solution.m_rank;
+      result[ "normalized_condition" ] =
+          solution.m_normalized_condition.has_value()
+              ? OrderedJson( doubleBitsHex(
+                    *solution.m_normalized_condition ) )
+              : OrderedJson( nullptr );
+      return result;
+    }
+
+    [[nodiscard]] OrderedJson movingCandidateJson(
+        const internal::InitialMovingCandidate& candidate )
+    {
+      OrderedJson result   = OrderedJson::object();
+      result[ "bg_radps" ] = eigenJson( candidate.m_bg_radps );
+      result[ "g_W" ]      = eigenJson( candidate.m_g_W );
+      result[ "v_W" ]      = OrderedJson::array();
+      for ( const Eigen::Vector3d& velocity : candidate.m_v_W )
+      {
+        result[ "v_W" ].push_back( eigenJson( velocity ) );
+      }
+      return result;
+    }
+
+    [[nodiscard]] OrderedJson movingCandidateResultJson(
+        const InitialMovingCandidateResult& candidate_result )
+    {
+      return std::visit(
+          []( const auto& value ) -> OrderedJson {
+            using Value        = std::decay_t<decltype( value )>;
+            OrderedJson result = OrderedJson::object();
+            if constexpr ( std::is_same_v<
+                               Value, InitialMovingCandidateSolution> )
+            {
+              result[ "kind" ]              = "solution";
+              result[ "candidate" ]         = movingCandidateJson( value.m_candidate );
+              result[ "joint_fit" ]         = jointFitJson( value.m_joint_fit );
+              result[ "joint_limit" ]       = doubleBitsHex( value.m_joint_limit );
+              result[ "refinement_rounds" ] = value.m_refinement_rounds;
+              result[ "gyro" ]              = gyroSolutionJson( value.m_gyro );
+              result[ "gravity_velocity" ] =
+                  gravityVelocitySolutionJson( value.m_gravity_velocity );
+            }
+            else if constexpr ( std::is_same_v<
+                                    Value, InitialMovingCandidateFailure> )
+            {
+              result[ "kind" ] = "failure";
+              result[ "code" ] = enumJson( value.m_code );
+              result[ "linear_failure" ] =
+                  value.m_linear_failure.has_value()
+                      ? linearFailureJson( *value.m_linear_failure )
+                      : OrderedJson( nullptr );
+              result[ "joint_fit" ] =
+                  value.m_joint_fit.has_value()
+                      ? jointFitJson( *value.m_joint_fit )
+                      : OrderedJson( nullptr );
+              result[ "joint_limit" ] =
+                  value.m_joint_limit.has_value()
+                      ? OrderedJson(
+                            doubleBitsHex( *value.m_joint_limit ) )
+                      : OrderedJson( nullptr );
+              result[ "gyro" ] =
+                  value.m_gyro.has_value()
+                      ? gyroSolutionJson( *value.m_gyro )
+                      : OrderedJson( nullptr );
+              result[ "gravity_velocity" ] =
+                  value.m_gravity_velocity.has_value()
+                      ? gravityVelocitySolutionJson(
+                            *value.m_gravity_velocity )
+                      : OrderedJson( nullptr );
+            }
+            else
+            {
+              result[ "kind" ]   = "math_error";
+              result[ "code" ]   = enumJson( value.m_code );
+              result[ "detail" ] = value.m_detail;
+            }
+            return result;
+          },
+          candidate_result );
+    }
+#endif
 
     using StereoVisualFactor =
         gtsam::GenericStereoFactor<gtsam::Pose3, gtsam::Point3>;
@@ -5332,6 +5675,159 @@ namespace phad::estimator
           "test access requires a live VioEstimator" );
     }
     return estimator.m_impl->m_test_last_initial_visual_solve_window_size;
+  }
+
+  std::string internal::VioEstimatorTestAccess::canonicalStateJson(
+      const VioEstimator& estimator )
+  {
+    if ( !estimator.m_impl || !estimator.m_impl->m_state )
+    {
+      throw std::invalid_argument(
+          "test access requires a live VioEstimator" );
+    }
+
+    const VioEstimator::Impl&       impl  = *estimator.m_impl;
+    const internal::VioUpdateState& state = *impl.m_state;
+
+    OrderedJson root           = OrderedJson::object();
+    root[ "schema" ]           = "vio_estimator_state_v1";
+    root[ "state" ]            = OrderedJson::object();
+    OrderedJson& encoded_state = root[ "state" ];
+    encoded_state[ "window" ]  = OrderedJson::array();
+    for ( const WindowFrame& frame : state.m_window )
+    {
+      encoded_state[ "window" ].push_back( windowFrameJson( frame ) );
+    }
+
+    std::vector<LandmarkId> landmark_ids;
+    landmark_ids.reserve( state.m_landmarks_w.size() );
+    for ( const auto& [ id, point_W ] : state.m_landmarks_w )
+    {
+      static_cast<void>( point_W );
+      landmark_ids.push_back( id );
+    }
+    std::sort( landmark_ids.begin(), landmark_ids.end() );
+    encoded_state[ "landmarks_w" ] = OrderedJson::array();
+    for ( const LandmarkId id : landmark_ids )
+    {
+      OrderedJson landmark = OrderedJson::object();
+      landmark[ "id" ]     = id;
+      landmark[ "p_W" ]    = eigenJson( state.m_landmarks_w.at( id ) );
+      encoded_state[ "landmarks_w" ].push_back( std::move( landmark ) );
+    }
+
+    std::vector<LandmarkId> track_ids;
+    track_ids.reserve( state.m_track_times.size() );
+    for ( const auto& [ id, timestamps ] : state.m_track_times )
+    {
+      static_cast<void>( timestamps );
+      track_ids.push_back( id );
+    }
+    std::sort( track_ids.begin(), track_ids.end() );
+    encoded_state[ "track_times" ] = OrderedJson::array();
+    for ( const LandmarkId id : track_ids )
+    {
+      OrderedJson track        = OrderedJson::object();
+      track[ "id" ]            = id;
+      track[ "timestamps_ns" ] = OrderedJson::array();
+      for ( const common::Timestamp timestamp : state.m_track_times.at( id ) )
+      {
+        track[ "timestamps_ns" ].push_back( timestamp.nanoseconds() );
+      }
+      encoded_state[ "track_times" ].push_back( std::move( track ) );
+    }
+
+    std::vector<LandmarkId> last_stereo_ids;
+    last_stereo_ids.reserve( state.m_T_W_B_last_stereo.size() );
+    for ( const auto& [ id, T_W_B ] : state.m_T_W_B_last_stereo )
+    {
+      static_cast<void>( T_W_B );
+      last_stereo_ids.push_back( id );
+    }
+    std::sort( last_stereo_ids.begin(), last_stereo_ids.end() );
+    encoded_state[ "T_W_B_last_stereo" ] = OrderedJson::array();
+    for ( const LandmarkId id : last_stereo_ids )
+    {
+      OrderedJson pose = OrderedJson::object();
+      pose[ "id" ]     = id;
+      pose[ "T_W_B" ] =
+          eigenJson( state.m_T_W_B_last_stereo.at( id ).matrix() );
+      encoded_state[ "T_W_B_last_stereo" ].push_back( std::move( pose ) );
+    }
+
+    encoded_state[ "next_frame_index" ] = state.m_next_frame_index;
+    encoded_state[ "initialized" ]      = state.m_initialized;
+    encoded_state[ "segment_id" ]       = state.m_segment_id;
+    std::vector<LandmarkId> culled_ids( state.m_culled_ids.begin(),
+                                        state.m_culled_ids.end() );
+    std::sort( culled_ids.begin(), culled_ids.end() );
+    encoded_state[ "culled_ids" ]      = culled_ids;
+    encoded_state[ "bootstrap_nodes" ] = OrderedJson::array();
+    for ( const sensor::ImuMeasurement& node : state.m_bootstrap_nodes )
+    {
+      encoded_state[ "bootstrap_nodes" ].push_back(
+          imuMeasurementJson( node ) );
+    }
+    encoded_state[ "static_candidate_ended" ] =
+        state.m_static_candidate_ended;
+    encoded_state[ "evidence_revision" ] = state.m_evidence_revision;
+    encoded_state[ "last_attempted_evidence_revision" ] =
+        state.m_last_attempted_evidence_revision;
+    encoded_state[ "continuity_anchor_ns" ] =
+        state.m_continuity_anchor.has_value()
+            ? OrderedJson( state.m_continuity_anchor->nanoseconds() )
+            : OrderedJson( nullptr );
+    encoded_state[ "last_visual_support_timestamp_ns" ] =
+        state.m_last_visual_support_timestamp.has_value()
+            ? OrderedJson(
+                  state.m_last_visual_support_timestamp->nanoseconds() )
+            : OrderedJson( nullptr );
+    encoded_state[ "unsupported_span_ns" ] = state.m_unsupported_span_ns;
+    encoded_state[ "visual_coast_duration_ns" ] =
+        state.m_visual_coast_duration_ns;
+    encoded_state[ "non_keyframe_evictions" ] =
+        state.m_non_keyframe_evictions;
+    encoded_state[ "imu_reintegrations" ] = state.m_imu_reintegrations;
+    encoded_state[ "vio_diagnostics" ] =
+        vioDiagnosticsJson( state.m_vio_diagnostics );
+
+    root[ "next_attempt_id" ]  = impl.m_next_attempt_id;
+    root[ "test_one_shot" ]    = OrderedJson::object();
+    OrderedJson& test_one_shot = root[ "test_one_shot" ];
+    test_one_shot[ "next_moving_candidate_result" ] =
+        impl.m_test_next_moving_candidate_result.has_value()
+            ? movingCandidateResultJson(
+                  *impl.m_test_next_moving_candidate_result )
+            : OrderedJson( nullptr );
+    test_one_shot[ "next_current_graph_result" ] =
+        impl.m_test_next_current_graph_result.has_value()
+            ? OrderedJson(
+                  enumJson( *impl.m_test_next_current_graph_result ) )
+            : OrderedJson( nullptr );
+    test_one_shot[ "next_current_graph_contract_error" ] =
+        impl.m_test_next_current_graph_contract_error;
+    test_one_shot[ "next_initial_visual_depth" ] =
+        impl.m_test_next_initial_visual_depth.has_value()
+            ? OrderedJson( doubleBitsHex(
+                  *impl.m_test_next_initial_visual_depth ) )
+            : OrderedJson( nullptr );
+    test_one_shot[ "next_initial_visual_whitening_error" ] =
+        impl.m_test_next_initial_visual_whitening_error;
+    test_one_shot[ "last_initial_visual_solve_window_size" ] =
+        static_cast<std::uint64_t>(
+            impl.m_test_last_initial_visual_solve_window_size );
+    test_one_shot[ "next_pnp_proposal_failure" ] =
+        impl.m_test_next_pnp_proposal_failure.has_value()
+            ? OrderedJson(
+                  enumJson( *impl.m_test_next_pnp_proposal_failure ) )
+            : OrderedJson( nullptr );
+    test_one_shot[ "next_pnp_guess_retry_outcome" ] =
+        impl.m_test_next_pnp_guess_retry_outcome.has_value()
+            ? OrderedJson(
+                  enumJson( *impl.m_test_next_pnp_guess_retry_outcome ) )
+            : OrderedJson( nullptr );
+
+    return root.dump();
   }
 #endif
 

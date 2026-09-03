@@ -23,6 +23,11 @@
 namespace phad::frontend
 {
 
+  namespace internal
+  {
+    class StereoTrackerTestAccess;
+  }
+
   /**
    * @brief 立体匹配跟踪器选项。
    *
@@ -132,6 +137,7 @@ namespace phad::frontend
     void markEvictable( std::span<const LandmarkId> ids );
 
   private:
+    friend class internal::StereoTrackerTestAccess;
     struct Impl;
     std::unique_ptr<Impl> m_impl;
   };
