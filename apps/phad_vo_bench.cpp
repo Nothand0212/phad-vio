@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "apps/gyro_observe_writer.hpp"
+#include "apps/internal/vo_bench_dataset.hpp"
 #include "apps/offline_vo_session.hpp"
 #include "phad/bench/code_identity.hpp"
 #include "phad/bench/config_snapshot.hpp"
@@ -27,8 +28,6 @@
 #include "phad/eval/error_stats.hpp"
 #include "phad/eval/rpe.hpp"
 #include "phad/eval/tum_io.hpp"
-#include "phad/io/dataset/euroc/euroc_dataset.hpp"
-#include "phad/io/dataset/euroc/euroc_groundtruth.hpp"
 
 /**
  * @file phad_vo_bench.cpp
@@ -38,11 +37,15 @@
 namespace
 {
 
+  using DatasetFormat = phad::apps::internal::VoBenchDatasetFormat;
+
   constexpr std::string_view kUsage =
       "usage: phad_vo_bench <sequence-root>\n"
       "                     [--bench-root <dir> | --out <dir>]\n"
       "                     [--sequence-name <name>] [--config-label <name>]\n"
-      "                     [--gt-euroc <sequence-root>] [--max-dt-ms <v>]\n"
+      "                     [--dataset-format <euroc|tum-vi>]\n"
+      "                     [--gt-euroc <root> | --gt-tum-vi <root>]\n"
+      "                     [--max-dt-ms <v>]\n"
       "                     [--min-match-rate <v>] [--rpe-delta-s <v>]\n"
       "                     [--errors-csv] [--gyro-observe] [--repo <dir>]\n"
       "                     [--max-frames <n>] [--force]\n"
@@ -61,6 +64,7 @@ namespace
       "                     [--tracker-enable-census]\n"
       "                     [--tracker-disable-exposure-norm]\n"
       "                     [--estimator-enable-moving-bootstrap]\n"
+      "                     [--estimator-enable-pnp-cheirality-retry]\n"
       "                     [--min-seed-observations <n>]\n";
 
 #ifndef PHAD_SOURCE_DIR
@@ -73,7 +77,9 @@ namespace
     std::filesystem::path        bench_root;
     std::filesystem::path        out_dir;
     std::filesystem::path        gt_euroc;
-    std::filesystem::path        repo = PHAD_SOURCE_DIR;
+    std::filesystem::path        gt_tum_vi;
+    std::filesystem::path        repo           = PHAD_SOURCE_DIR;
+    DatasetFormat                dataset_format = DatasetFormat::kEuroc;
     std::string                  sequence_name;
     std::string                  config_label   = "default";
     double                       max_dt_ms      = 2.5;
@@ -112,11 +118,11 @@ namespace
     // 零均值 SAD 默认关 (enable_zero_mean_sad=false), --tracker-enable-
     // zero-mean-sad 打开 (A/B)。
     bool enable_zero_mean_sad = false;
-    // 首段累积播种默认关 (实测否决全量版, 残存首段专用版);
-    // --estimator-enable-accumulated-seed 打开 (A/B)。
-    bool enable_accumulated_seed = false;
     // Explicit product option; enters flattenConfig / config_hash.
     bool enable_moving_bootstrap = false;
+    // Explicit default-off product-candidate option; enters identity only
+    // when enabled so the established default hash remains stable.
+    bool enable_pnp_cheirality_retry = false;
   };
 
   [[nodiscard]] bool parseDouble( std::string_view text, double& value )
@@ -133,6 +139,24 @@ namespace
         std::from_chars( text.data(), text.data() + text.size(), value );
     return parsed.ec == std::errc{} &&
            parsed.ptr == text.data() + text.size();
+  }
+
+  [[nodiscard]] constexpr bool optionTakesValue( std::string_view option )
+  {
+    return option == "--bench-root" || option == "--out" ||
+           option == "--sequence-name" || option == "--config-label" ||
+           option == "--dataset-format" || option == "--gt-euroc" ||
+           option == "--gt-tum-vi" || option == "--repo" ||
+           option == "--max-dt-ms" || option == "--min-match-rate" ||
+           option == "--rpe-delta-s" || option == "--max-frames" ||
+           option == "--outlier-avg-reproj-px" ||
+           option == "--max-outlier-reopts" ||
+           option == "--skip-drop-min-culled" || option == "--probe-b" ||
+           option == "--defer-drop-topk" || option == "--zombie-drop-age" ||
+           option == "--hanging-gate-m" || option == "--far-refresh-px" ||
+           option == "--min-seed-observations" ||
+           option == "--tracker-quality-level" ||
+           option == "--tracker-lk-pyramid-levels";
   }
 
   [[nodiscard]] bool parseArguments( int argc, char** argv,
@@ -218,15 +242,20 @@ namespace
         arguments.enable_zero_mean_sad = true;
         continue;
       }
-      if ( flag == "--estimator-enable-accumulated-seed" )
-      {
-        arguments.enable_accumulated_seed = true;
-        continue;
-      }
       if ( flag == "--estimator-enable-moving-bootstrap" )
       {
         arguments.enable_moving_bootstrap = true;
         continue;
+      }
+      if ( flag == "--estimator-enable-pnp-cheirality-retry" )
+      {
+        arguments.enable_pnp_cheirality_retry = true;
+        continue;
+      }
+      if ( !optionTakesValue( flag ) )
+      {
+        std::cerr << "unknown option: " << flag << '\n';
+        return false;
       }
       if ( index + 1 >= argc )
       {
@@ -251,9 +280,29 @@ namespace
       {
         arguments.config_label = std::string( value );
       }
+      else if ( flag == "--dataset-format" )
+      {
+        if ( value == "euroc" )
+        {
+          arguments.dataset_format = DatasetFormat::kEuroc;
+        }
+        else if ( value == "tum-vi" )
+        {
+          arguments.dataset_format = DatasetFormat::kTumVi;
+        }
+        else
+        {
+          std::cerr << "--dataset-format expects euroc or tum-vi\n";
+          return false;
+        }
+      }
       else if ( flag == "--gt-euroc" )
       {
         arguments.gt_euroc = value;
+      }
+      else if ( flag == "--gt-tum-vi" )
+      {
+        arguments.gt_tum_vi = value;
       }
       else if ( flag == "--repo" )
       {
@@ -423,7 +472,7 @@ namespace
       }
       else
       {
-        std::cerr << "unknown flag " << flag << '\n';
+        std::cerr << "unknown option: " << flag << '\n';
         return false;
       }
     }
@@ -431,6 +480,33 @@ namespace
     if ( arguments.sequence_root.empty() )
     {
       return false;
+    }
+    if ( arguments.dataset_format == DatasetFormat::kEuroc )
+    {
+      if ( !arguments.gt_tum_vi.empty() )
+      {
+        std::cerr << "groundtruth option --gt-tum-vi requires "
+                     "--dataset-format tum-vi\n";
+        return false;
+      }
+      if ( arguments.gt_euroc.empty() )
+      {
+        arguments.gt_euroc = arguments.sequence_root;
+      }
+    }
+    else
+    {
+      if ( !arguments.gt_euroc.empty() )
+      {
+        std::cerr << "groundtruth option --gt-euroc is incompatible with "
+                     "--dataset-format tum-vi\n";
+        return false;
+      }
+      if ( arguments.gt_tum_vi.empty() )
+      {
+        std::cerr << "--dataset-format tum-vi requires --gt-tum-vi\n";
+        return false;
+      }
     }
     if ( arguments.bench_root.empty() )
     {
@@ -449,10 +525,6 @@ namespace
     {
       std::cerr << "--config-label must be non-empty\n";
       return false;
-    }
-    if ( arguments.gt_euroc.empty() )
-    {
-      arguments.gt_euroc = arguments.sequence_root;
     }
     return true;
   }
@@ -573,10 +645,16 @@ namespace
               estimator.far_return_refresh_px );
     snap.set( "estimator.enable_moving_bootstrap",
               estimator.m_enable_moving_bootstrap );
+    if ( estimator.enable_pnp_cheirality_retry )
+    {
+      snap.set( "estimator.enable_pnp_cheirality_retry", true );
+    }
     snap.set( "estimator.velocity_prior_sigma_mps",
               estimator.m_velocity_prior_sigma_mps );
 
-    snap.set( "session.dataset_format", std::string( "euroc" ) );
+    snap.set( "session.dataset_format",
+              std::string( phad::apps::internal::voBenchDatasetConfigToken(
+                  arguments.dataset_format ) ) );
     snap.set( "session.drop_culled_tracks", session.drop_culled_tracks );
     snap.set( "session.skip_drop_min_culled",
               static_cast<std::int64_t>( session.skip_drop_min_culled ) );
@@ -726,10 +804,10 @@ namespace
         arguments.enable_exposure_norm;
     session_options.tracker.enable_zero_mean_sad =
         arguments.enable_zero_mean_sad;
-    session_options.estimator.enable_accumulated_seed =
-        arguments.enable_accumulated_seed;
     session_options.estimator.m_enable_moving_bootstrap =
         arguments.enable_moving_bootstrap;
+    session_options.estimator.enable_pnp_cheirality_retry =
+        arguments.enable_pnp_cheirality_retry;
     if ( arguments.min_seed_observations.has_value() )
     {
       session_options.estimator.min_seed_observations =
@@ -841,7 +919,8 @@ namespace
     }
 
     phad::apps::OfflineVoSessionResult session;
-    auto                               dataset = phad::io::dataset::euroc::open( arguments.sequence_root );
+    auto                               dataset = phad::apps::internal::openVoBenchDataset(
+        arguments.dataset_format, arguments.sequence_root );
     if ( !dataset )
     {
       session.error =
@@ -922,8 +1001,70 @@ namespace
       summary.timing.rtf = image_span_s / session.wall_s;
     }
 
+    const bool terminal_estimator_error =
+        session.error.has_value() &&
+        session.error->estimator_status.has_value() &&
+        ( *session.error->estimator_status ==
+              phad::estimator::UpdateStatus::kInvalidInput ||
+          *session.error->estimator_status ==
+              phad::estimator::UpdateStatus::kFailed );
+
     int exit_code = 0;
-    if ( session.error.has_value() || !session.trajectory.has_value() )
+    if ( terminal_estimator_error )
+    {
+      summary.status = phad::bench::RunStatus::kFailed;
+      summary.warnings.push_back( session.error->detail );
+      std::cerr << session.error->detail << '\n';
+      exit_code = 1;
+
+      const auto write_partial_trajectory =
+          [ &summary ]( const std::filesystem::path&                   path,
+                        const std::optional<phad::common::Trajectory>& trajectory ) {
+            if ( trajectory.has_value() )
+            {
+              if ( const auto error = phad::eval::writeTum( path, *trajectory ) )
+              {
+                summary.warnings.push_back( error->describe() );
+                std::cerr << "write partial tum failed: "
+                          << error->describe() << '\n';
+                return false;
+              }
+              return true;
+            }
+            if ( !writeTextFile( path, "" ) )
+            {
+              const std::string detail =
+                  "failed to write empty trajectory: " + path.string();
+              summary.warnings.push_back( detail );
+              std::cerr << detail << '\n';
+              return false;
+            }
+            return true;
+          };
+
+      const bool est_written = write_partial_trajectory(
+          output_dir / "est.tum", session.trajectory );
+      bool diag_written = false;
+      if ( est_written )
+      {
+        if ( const auto error = phad::apps::writeDiagCsv(
+                 output_dir / "diag.csv", session.diag ) )
+        {
+          summary.warnings.push_back( error->detail );
+          std::cerr << error->detail << '\n';
+        }
+        else
+        {
+          diag_written = true;
+        }
+      }
+      if ( diag_written )
+      {
+        static_cast<void>( write_partial_trajectory(
+            output_dir / "kf.tum", session.kf_trajectory ) );
+      }
+    }
+    else if ( session.error.has_value() || !session.trajectory.has_value() )
     {
       summary.status = phad::bench::RunStatus::kFailed;
       if ( session.error.has_value() )
@@ -960,8 +1101,12 @@ namespace
       }
       else
       {
-        auto gt = phad::io::dataset::euroc::openGroundtruth(
-            arguments.gt_euroc );
+        const auto& groundtruth_root =
+            arguments.dataset_format == DatasetFormat::kEuroc
+                ? arguments.gt_euroc
+                : arguments.gt_tum_vi;
+        auto gt = phad::apps::internal::openVoBenchGroundtruth(
+            arguments.dataset_format, groundtruth_root );
         if ( !gt )
         {
           summary.status = phad::bench::RunStatus::kEvalFailed;

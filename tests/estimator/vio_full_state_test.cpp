@@ -11,11 +11,13 @@
 #include <vector>
 
 #include "phad/camera/rectified_stereo_calibration.hpp"
+#include "phad/estimator/internal/vio_estimator_test_access.hpp"
 #include "phad/estimator/vio_estimator.hpp"
 #include "phad/sensor/imu_measurement.hpp"
 #include "phad/sensor/imu_parameters.hpp"
 #include "phad/sensor/rigid_transform.hpp"
 #include "phad/sensor/stereo_imu_packet.hpp"
+#include "tests/estimator/initial_moving_root_fixture.hpp"
 
 namespace
 {
@@ -282,6 +284,51 @@ namespace
     return observation;
   }
 
+  struct InjectedMovingAttempt
+  {
+    VioUpdateResult rejected;
+    VioUpdateResult recovered;
+  };
+
+  [[nodiscard]] InjectedMovingAttempt runInjectedMovingCandidateResult(
+      phad::estimator::internal::InitialMovingCandidateResult injected )
+  {
+    namespace fixture                 = phad::test_support::initial_moving;
+    namespace internal                = phad::estimator::internal;
+    EstimatorOptions options          = makeOptions();
+    options.m_enable_moving_bootstrap = true;
+    options.m_bootstrap_timeout_ns    = 2 * fixture::kFramePeriodNs;
+    options.window_size               = 8;
+    VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+    internal::VioEstimatorTestAccess::setNextMovingCandidateResult(
+        estimator, std::move( injected ) );
+
+    VioUpdateResult rejected;
+    for ( std::int64_t index = 0; index < 6; ++index )
+    {
+      const std::int64_t timestamp_ns =
+          fixture::kRootTimestampNs + index * fixture::kFramePeriodNs;
+      rejected = estimator.update( VioMeasurement{
+          .m_timestamp    = Timestamp{ timestamp_ns },
+          .m_observations = fixture::observations( timestamp_ns ),
+          .m_imu          = fixture::rawInterval(
+              timestamp_ns - fixture::kFramePeriodNs, timestamp_ns ) } );
+    }
+
+    constexpr std::int64_t kRecoveryIndex = 6;
+    const std::int64_t     recovery_timestamp_ns =
+        fixture::kRootTimestampNs +
+        kRecoveryIndex * fixture::kFramePeriodNs;
+    VioUpdateResult recovered = estimator.update( VioMeasurement{
+        .m_timestamp    = Timestamp{ recovery_timestamp_ns },
+        .m_observations = fixture::observations( recovery_timestamp_ns ),
+        .m_imu          = fixture::rawInterval(
+            recovery_timestamp_ns - fixture::kFramePeriodNs,
+            recovery_timestamp_ns ) } );
+    return InjectedMovingAttempt{ .rejected  = std::move( rejected ),
+                                  .recovered = std::move( recovered ) };
+  }
+
 }  // namespace
 
 TEST( VioFullState, StaticRootAndInterpolatedSuccessorCommitXVB )
@@ -301,6 +348,22 @@ TEST( VioFullState, StaticRootAndInterpolatedSuccessorCommitXVB )
   EXPECT_TRUE(
       root.estimate->m_bias.m_gyr_radps.isApprox( kGyroBiasRadps, 1e-12 ) );
   EXPECT_EQ( root.estimate->m_segment_id, 0U );
+
+  const auto& initialization = root.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_path,
+             phad::estimator::InitializationPath::kStatic );
+  EXPECT_EQ( initialization.m_phase,
+             phad::estimator::InitializationPhase::kCommit );
+  EXPECT_EQ( initialization.m_reason,
+             phad::estimator::InitializationReason::kNone );
+  EXPECT_EQ( initialization.m_outcome,
+             phad::estimator::InitializationOutcome::kCommitted );
+  EXPECT_FALSE( initialization.m_attempt_id.has_value() );
+  EXPECT_EQ( initialization.m_current_graph,
+             phad::estimator::InitializationGraphResult::kValidated );
+  EXPECT_EQ(
+      initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kRootCommitted );
 
   const auto& root_vio = root.diagnostics.m_vio;
   EXPECT_EQ( root_vio.m_nav_states, 1U );
@@ -348,6 +411,148 @@ TEST( VioFullState, StaticRootAndInterpolatedSuccessorCommitXVB )
   }
 }
 
+TEST( VioInitialization, MovingEnabledKeepsStaticReadyPrecedence )
+{
+  EstimatorOptions static_options          = makeOptions();
+  EstimatorOptions moving_options          = static_options;
+  moving_options.m_enable_moving_bootstrap = true;
+
+  VioEstimator         static_only( makeCalibration(), makeImuParameters(),
+                                    static_options );
+  VioEstimator         moving_enabled( makeCalibration(), makeImuParameters(),
+                                       moving_options );
+  const VioMeasurement measurement = makeMeasurement(
+      kFramePeriodNs, stationaryInterval( 0, kFramePeriodNs ) );
+
+  const VioUpdateResult control   = static_only.update( measurement );
+  const VioUpdateResult candidate = moving_enabled.update( measurement );
+  expectSameCommittedUpdate( candidate, control );
+  EXPECT_EQ( candidate.diagnostics.m_initialization.m_path,
+             phad::estimator::InitializationPath::kStatic );
+  EXPECT_EQ( candidate.diagnostics.m_initialization.m_outcome,
+             phad::estimator::InitializationOutcome::kCommitted );
+  EXPECT_FALSE(
+      candidate.diagnostics.m_initialization.m_attempt_id.has_value() );
+}
+
+TEST( VioInitialization,
+      MovingEnabledRetainsStaticReadySparseEvidenceForLaterAttempt )
+{
+  namespace internal = phad::estimator::internal;
+
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 10 * kFramePeriodNs;
+  options.min_pnp_inliers           = 4;
+  options.window_size               = 8;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  internal::VioEstimatorTestAccess::setNextMovingCandidateResult(
+      estimator,
+      internal::InitialMovingCandidateFailure{
+          .m_code = internal::InitialMovingCandidateFailureCode::
+              kRankDeficient,
+          .m_linear_failure = internal::InitialMovingLinearFailure{
+              .m_code =
+                  internal::InitialMovingLinearFailureCode::kRankDeficient,
+              .m_rank                 = 2U,
+              .m_required_rank        = 3U,
+              .m_normalized_condition = std::nullopt },
+          .m_joint_fit        = std::nullopt,
+          .m_joint_limit      = std::nullopt,
+          .m_gyro             = std::nullopt,
+          .m_gravity_velocity = std::nullopt } );
+
+  std::vector<StereoObservation> sparse = makeObservations();
+  sparse.resize( 5U );
+  for ( std::int64_t frame_index = 1; frame_index <= 2; ++frame_index )
+  {
+    const std::int64_t begin_ns = ( frame_index - 1 ) * kFramePeriodNs;
+    const std::int64_t end_ns   = frame_index * kFramePeriodNs;
+    const auto         pending  = estimator.update( makeMeasurementWithObservations(
+        end_ns, stationaryInterval( begin_ns, end_ns ), sparse ) );
+
+    ASSERT_EQ( pending.status, UpdateStatus::kInitializing )
+        << "frame_index=" << frame_index << " message=" << pending.message;
+    EXPECT_FALSE( pending.estimate.has_value() );
+    const auto& initialization = pending.diagnostics.m_initialization;
+    EXPECT_EQ( initialization.m_path,
+               phad::estimator::InitializationPath::kStatic );
+    EXPECT_EQ( initialization.m_phase,
+               phad::estimator::InitializationPhase::kCollectingEvidence );
+    EXPECT_EQ(
+        initialization.m_reason,
+        phad::estimator::InitializationReason::kStaticEvidenceInsufficient );
+    EXPECT_EQ( initialization.m_outcome,
+               phad::estimator::InitializationOutcome::kPending );
+    EXPECT_FALSE( initialization.m_attempt_id.has_value() );
+    EXPECT_EQ( initialization.m_current_graph,
+               phad::estimator::InitializationGraphResult::kNotEvaluated );
+    EXPECT_EQ(
+        initialization.m_transaction,
+        phad::estimator::InitializationTransactionResult::kEvidenceCommitted );
+    EXPECT_EQ( pending.diagnostics.num_disparity, 5U );
+    EXPECT_EQ( estimator.observationTimestamps( 1U ).size(),
+               static_cast<std::size_t>( frame_index ) );
+  }
+
+  const auto moving_interval = []( const std::int64_t frame_index ) {
+    const std::int64_t begin_ns   = ( frame_index - 1 ) * kFramePeriodNs;
+    const std::int64_t end_ns     = frame_index * kFramePeriodNs;
+    const double       begin_acc  = frame_index % 2 == 0 ? 2.0 : 0.0;
+    const double       end_acc    = frame_index % 2 == 0 ? 0.0 : 2.0;
+    const double       middle_acc = frame_index % 2 == 0 ? -1.0 : 1.0;
+    return RawImuInterval{
+        .m_t_begin = Timestamp{ begin_ns },
+        .m_t_end   = Timestamp{ end_ns },
+        .m_samples = { makeImu( begin_ns, begin_acc ),
+                       makeImu( begin_ns + kFramePeriodNs / 2, middle_acc ),
+                       makeImu( end_ns, end_acc ) } };
+  };
+
+  VioUpdateResult attempted;
+  for ( std::int64_t frame_index = 3; frame_index <= 6; ++frame_index )
+  {
+    attempted = estimator.update( makeMeasurement(
+        frame_index * kFramePeriodNs, moving_interval( frame_index ) ) );
+    ASSERT_EQ( attempted.status, UpdateStatus::kInitializing )
+        << "frame_index=" << frame_index
+        << " message=" << attempted.message;
+    EXPECT_EQ( attempted.diagnostics.m_initialization.m_path,
+               phad::estimator::InitializationPath::kMoving );
+    if ( frame_index < 6 )
+    {
+      EXPECT_EQ(
+          attempted.diagnostics.m_initialization.m_reason,
+          phad::estimator::InitializationReason::kPoseCountInsufficient );
+      EXPECT_EQ( attempted.diagnostics.m_initialization.m_outcome,
+                 phad::estimator::InitializationOutcome::kPending );
+      EXPECT_FALSE( attempted.diagnostics.m_initialization.m_attempt_id
+                        .has_value() );
+      EXPECT_EQ(
+          attempted.diagnostics.m_initialization.m_transaction,
+          phad::estimator::InitializationTransactionResult::
+              kEvidenceCommitted );
+    }
+  }
+
+  const auto& initialization = attempted.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_phase,
+             phad::estimator::InitializationPhase::kGyroAlignment );
+  EXPECT_EQ( initialization.m_reason,
+             phad::estimator::InitializationReason::kRankDeficient );
+  EXPECT_EQ( initialization.m_outcome,
+             phad::estimator::InitializationOutcome::kRecoverableRejected );
+  EXPECT_TRUE( initialization.m_attempt_id.has_value() );
+  EXPECT_EQ( initialization.m_connected_poses.m_actual, 6U );
+  EXPECT_EQ( initialization.m_duration.m_actual_ns, 250'000'000 );
+  EXPECT_EQ(
+      initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kEvidenceCommitted );
+  EXPECT_EQ( attempted.diagnostics.num_disparity, 10U );
+  EXPECT_EQ( estimator.observationTimestamps( 1U ).size(), 6U );
+}
+
 TEST( VioFullState, TiltedStaticBootstrapMapsMeanAccelerationToWorldUp )
 {
   VioEstimator          estimator( makeCalibration(), makeImuParameters(),
@@ -370,6 +575,1748 @@ TEST( VioFullState, TiltedStaticBootstrapMapsMeanAccelerationToWorldUp )
   EXPECT_TRUE( mapped.isApprox( Eigen::Vector3d::UnitZ(), 1e-12 ) );
   EXPECT_NEAR( Eigen::AngleAxisd( result.estimate->T_W_B.rotation() ).angle(),
                std::numbers::pi / 4.0, 1e-12 );
+}
+
+TEST( VioFullState, StaticTimeoutRollsBackCurrentPacket )
+{
+  EstimatorOptions options       = makeOptions();
+  options.m_bootstrap_timeout_ns = 2 * kFramePeriodNs;
+  VioEstimator subject( makeCalibration(), makeImuParameters(), options );
+  VioEstimator control( makeCalibration(), makeImuParameters(), options );
+
+  const VioMeasurement first = makeMeasurement(
+      kFramePeriodNs,
+      RawImuInterval{
+          .m_t_begin = Timestamp{ 0 },
+          .m_t_end   = Timestamp{ kFramePeriodNs },
+          .m_samples = { makeImu( 0, 0.0 ),
+                         makeImu( kFramePeriodNs / 2, 1.0 ),
+                         makeImu( kFramePeriodNs, 2.0 ) } } );
+  for ( VioEstimator* estimator : { &subject, &control } )
+  {
+    const auto collecting = estimator->update( first );
+    ASSERT_EQ( collecting.status, UpdateStatus::kInitializing );
+    EXPECT_EQ( collecting.diagnostics.m_initialization.m_path,
+               phad::estimator::InitializationPath::kStatic );
+    EXPECT_EQ( collecting.diagnostics.m_initialization.m_outcome,
+               phad::estimator::InitializationOutcome::kPending );
+  }
+
+  const VioMeasurement timeout_packet = makeMeasurement(
+      2 * kFramePeriodNs,
+      RawImuInterval{
+          .m_t_begin = Timestamp{ kFramePeriodNs },
+          .m_t_end   = Timestamp{ 2 * kFramePeriodNs },
+          .m_samples = { makeImu( kFramePeriodNs, 2.0 ),
+                         makeImu( 3 * kFramePeriodNs / 2, -1.0 ),
+                         makeImu( 2 * kFramePeriodNs, 0.0 ) } } );
+  const auto timed_out = subject.update( timeout_packet );
+  ASSERT_EQ( timed_out.status, UpdateStatus::kFailed );
+  EXPECT_FALSE( timed_out.estimate.has_value() );
+  EXPECT_EQ( timed_out.diagnostics.num_disparity, 10U );
+  const auto& initialization = timed_out.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_path,
+             phad::estimator::InitializationPath::kStatic );
+  EXPECT_EQ( initialization.m_phase,
+             phad::estimator::InitializationPhase::kCollectingEvidence );
+  EXPECT_EQ( initialization.m_reason,
+             phad::estimator::InitializationReason::kStaticTimeout );
+  EXPECT_EQ( initialization.m_outcome,
+             phad::estimator::InitializationOutcome::kFatalError );
+  EXPECT_EQ(
+      initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kRolledBack );
+
+  const auto after_timeout = subject.update( timeout_packet );
+  const auto direct        = control.update( timeout_packet );
+  EXPECT_EQ( after_timeout.status, direct.status );
+  EXPECT_EQ( after_timeout.message, direct.message );
+  EXPECT_EQ( after_timeout.diagnostics.window_size,
+             direct.diagnostics.window_size );
+  EXPECT_EQ( after_timeout.diagnostics.prior_key,
+             direct.diagnostics.prior_key );
+  EXPECT_EQ( after_timeout.diagnostics.m_initialization.m_reason,
+             direct.diagnostics.m_initialization.m_reason );
+  EXPECT_EQ( after_timeout.diagnostics.m_initialization.m_transaction,
+             direct.diagnostics.m_initialization.m_transaction );
+}
+
+TEST( VioFullState, StaticReadyWithoutVisualSeedRemainsTypedPending )
+{
+  VioEstimator estimator( makeCalibration(), makeImuParameters(),
+                          makeOptions() );
+  const auto   result = estimator.update( makeMeasurementWithObservations(
+      kFramePeriodNs, stationaryInterval( 0, kFramePeriodNs ), {} ) );
+
+  ASSERT_EQ( result.status, UpdateStatus::kInitializing );
+  EXPECT_FALSE( result.estimate.has_value() );
+  EXPECT_EQ( result.diagnostics.num_disparity, 0U );
+  const auto& initialization = result.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_path,
+             phad::estimator::InitializationPath::kStatic );
+  EXPECT_EQ( initialization.m_phase,
+             phad::estimator::InitializationPhase::kCollectingEvidence );
+  EXPECT_EQ( initialization.m_reason,
+             phad::estimator::InitializationReason::kStaticEvidenceInsufficient );
+  EXPECT_EQ( initialization.m_outcome,
+             phad::estimator::InitializationOutcome::kPending );
+  EXPECT_EQ(
+      initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kEvidenceCommitted );
+}
+
+TEST( VioFullState, StaticReadyWithSparseVisualSeedRemainsTypedPending )
+{
+  VioEstimator                   estimator( makeCalibration(), makeImuParameters(),
+                                            makeOptions() );
+  std::vector<StereoObservation> sparse = makeObservations();
+  sparse.resize( 5U );
+  const auto result = estimator.update( makeMeasurementWithObservations(
+      kFramePeriodNs, stationaryInterval( 0, kFramePeriodNs ),
+      std::move( sparse ) ) );
+
+  ASSERT_EQ( result.status, UpdateStatus::kInitializing );
+  EXPECT_FALSE( result.estimate.has_value() );
+  EXPECT_EQ( result.diagnostics.num_disparity, 5U );
+  const auto& initialization = result.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_path,
+             phad::estimator::InitializationPath::kStatic );
+  EXPECT_EQ( initialization.m_reason,
+             phad::estimator::InitializationReason::kStaticEvidenceInsufficient );
+  EXPECT_EQ( initialization.m_outcome,
+             phad::estimator::InitializationOutcome::kPending );
+  EXPECT_EQ(
+      initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kEvidenceCommitted );
+}
+
+TEST( VioFullState, MovingInitializationDoesNotPublishShortcutRoot )
+{
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 10 * kFramePeriodNs;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  const auto result = estimator.update( makeMeasurement(
+      kFramePeriodNs,
+      RawImuInterval{
+          .m_t_begin = Timestamp{ 0 },
+          .m_t_end   = Timestamp{ kFramePeriodNs },
+          .m_samples = { makeImu( 0, 0.0 ),
+                         makeImu( kFramePeriodNs / 2, 1.0 ),
+                         makeImu( kFramePeriodNs, 2.0 ) } } ) );
+
+  EXPECT_EQ( result.status, UpdateStatus::kInitializing );
+  EXPECT_NE( result.status, UpdateStatus::kRejected );
+  EXPECT_FALSE( result.estimate.has_value() );
+  EXPECT_EQ( result.diagnostics.num_disparity, 10U );
+  const auto& initialization = result.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_path,
+             phad::estimator::InitializationPath::kMoving );
+  EXPECT_EQ( initialization.m_phase,
+             phad::estimator::InitializationPhase::kCollectingEvidence );
+  EXPECT_EQ( initialization.m_reason,
+             phad::estimator::InitializationReason::kPoseCountInsufficient );
+  EXPECT_EQ( initialization.m_outcome,
+             phad::estimator::InitializationOutcome::kPending );
+  EXPECT_FALSE( initialization.m_attempt_id.has_value() );
+  EXPECT_EQ( initialization.m_connected_poses.m_actual, 1U );
+  EXPECT_EQ( initialization.m_connected_poses.m_required, 6U );
+  EXPECT_EQ( initialization.m_duration.m_actual_ns, 0 );
+  EXPECT_EQ( initialization.m_duration.m_required_ns, 250'000'000 );
+  EXPECT_EQ( initialization.m_connected_landmarks.m_actual, 10U );
+  EXPECT_EQ( initialization.m_connected_landmarks.m_required, 10U );
+  EXPECT_EQ(
+      initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kEvidenceCommitted );
+}
+
+TEST( VioInitialization, MovingTimeoutEndsStaticCandidate )
+{
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = kFramePeriodNs;
+  options.window_size               = 3;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  const auto sample = []( const std::int64_t timestamp_ns,
+                          const double       extra_gyr_x ) {
+    return ImuMeasurement{
+        .timestamp  = Timestamp{ timestamp_ns },
+        .accel_mps2 = std::array<double, 3>{ 0.0, 0.0, 9.81 },
+        .gyro_radps = std::array<double, 3>{
+            kGyroBiasRadps.x() + extra_gyr_x,
+            kGyroBiasRadps.y(),
+            kGyroBiasRadps.z() } };
+  };
+
+  for ( std::int64_t frame_index = 1; frame_index <= 10; ++frame_index )
+  {
+    const std::int64_t begin_ns     = ( frame_index - 1 ) * kFramePeriodNs;
+    const std::int64_t end_ns       = frame_index * kFramePeriodNs;
+    const double       middle_extra = frame_index == 1 ? 0.02 : 0.0;
+    const auto         update       = estimator.update( makeMeasurementWithObservations(
+        end_ns,
+        RawImuInterval{
+                          .m_t_begin = Timestamp{ begin_ns },
+                          .m_t_end   = Timestamp{ end_ns },
+                          .m_samples = { sample( begin_ns, 0.0 ),
+                                         sample( begin_ns + kFramePeriodNs / 2,
+                                                 middle_extra ),
+                                         sample( end_ns, 0.0 ) } },
+        {} ) );
+    ASSERT_EQ( update.status, UpdateStatus::kInitializing )
+        << "frame_index=" << frame_index << " message=" << update.message;
+    EXPECT_EQ( update.diagnostics.m_initialization.m_path,
+               phad::estimator::InitializationPath::kMoving )
+        << "frame_index=" << frame_index;
+  }
+}
+
+TEST( VioInitialization, MovingEvidenceCountsKeyframeAndNonKeyframe )
+{
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 10 * kFramePeriodNs;
+  options.window_size               = 6;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  const auto first = estimator.update( makeMeasurement(
+      kFramePeriodNs,
+      RawImuInterval{
+          .m_t_begin = Timestamp{ 0 },
+          .m_t_end   = Timestamp{ kFramePeriodNs },
+          .m_samples = { makeImu( 0, 0.0 ),
+                         makeImu( kFramePeriodNs / 2, 1.0 ),
+                         makeImu( kFramePeriodNs, 2.0 ) } } ) );
+  ASSERT_EQ( first.status, UpdateStatus::kInitializing ) << first.message;
+  EXPECT_FALSE( first.estimate.has_value() );
+  EXPECT_EQ( first.diagnostics.m_initialization.m_connected_poses.m_actual,
+             1U );
+  EXPECT_FALSE(
+      first.diagnostics.m_initialization.m_attempt_id.has_value() );
+
+  const auto second = estimator.update(
+      makeMeasurement(
+          2 * kFramePeriodNs,
+          RawImuInterval{
+              .m_t_begin = Timestamp{ kFramePeriodNs },
+              .m_t_end   = Timestamp{ 2 * kFramePeriodNs },
+              .m_samples = { makeImu( kFramePeriodNs, 2.0 ),
+                             makeImu( 3 * kFramePeriodNs / 2, -1.0 ),
+                             makeImu( 2 * kFramePeriodNs, 0.0 ) } } ),
+      false );
+  ASSERT_EQ( second.status, UpdateStatus::kInitializing ) << second.message;
+  EXPECT_FALSE( second.estimate.has_value() );
+  const auto& initialization = second.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_path,
+             phad::estimator::InitializationPath::kMoving );
+  EXPECT_EQ( initialization.m_reason,
+             phad::estimator::InitializationReason::kPoseCountInsufficient );
+  EXPECT_EQ( initialization.m_connected_poses.m_actual, 2U );
+  EXPECT_EQ( initialization.m_connected_poses.m_required, 6U );
+  EXPECT_EQ( initialization.m_duration.m_actual_ns, kFramePeriodNs );
+  EXPECT_EQ( initialization.m_duration.m_required_ns, 250'000'000 );
+  EXPECT_EQ( initialization.m_connected_landmarks.m_actual, 10U );
+  EXPECT_EQ( initialization.m_connected_landmarks.m_required, 10U );
+  ASSERT_TRUE( initialization.m_visual_support.has_value() );
+  EXPECT_EQ( initialization.m_visual_support->m_actual, 10U );
+  EXPECT_EQ( initialization.m_visual_support->m_required, 10U );
+  EXPECT_FALSE( initialization.m_attempt_id.has_value() );
+  EXPECT_EQ(
+      initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kEvidenceCommitted );
+  EXPECT_EQ( estimator.observationTimestamps( 1U ).size(), 2U );
+}
+
+TEST( VioInitialization, MovingVisualSeedDoesNotCountWithoutStereoFactors )
+{
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 10 * kFramePeriodNs;
+  options.window_size               = 6;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  const auto first = estimator.update( makeMeasurement(
+      kFramePeriodNs,
+      RawImuInterval{
+          .m_t_begin = Timestamp{ 0 },
+          .m_t_end   = Timestamp{ kFramePeriodNs },
+          .m_samples = { makeImu( 0, 0.0 ),
+                         makeImu( kFramePeriodNs / 2, 1.0 ),
+                         makeImu( kFramePeriodNs, 2.0 ) } } ) );
+  ASSERT_EQ( first.status, UpdateStatus::kInitializing ) << first.message;
+  ASSERT_EQ( first.diagnostics.m_initialization.m_connected_poses.m_actual,
+             1U );
+
+  const auto second = estimator.update( makeMeasurementWithObservations(
+      2 * kFramePeriodNs,
+      RawImuInterval{
+          .m_t_begin = Timestamp{ kFramePeriodNs },
+          .m_t_end   = Timestamp{ 2 * kFramePeriodNs },
+          .m_samples = { makeImu( kFramePeriodNs, 2.0 ),
+                         makeImu( 3 * kFramePeriodNs / 2, -1.0 ),
+                         makeImu( 2 * kFramePeriodNs, 0.0 ) } },
+      makeLeftOnlyObservations() ) );
+  ASSERT_EQ( second.status, UpdateStatus::kInitializing ) << second.message;
+  EXPECT_FALSE( second.estimate.has_value() );
+  const auto& initialization = second.diagnostics.m_initialization;
+  EXPECT_EQ(
+      initialization.m_phase,
+      phad::estimator::InitializationPhase::kVisualSolve );
+  EXPECT_EQ(
+      initialization.m_reason,
+      phad::estimator::InitializationReason::kVisualConnectivityInsufficient );
+  EXPECT_EQ( initialization.m_connected_poses.m_actual, 0U );
+  EXPECT_FALSE( initialization.m_visual_support.has_value() );
+  EXPECT_FALSE( initialization.m_attempt_id.has_value() );
+  EXPECT_EQ(
+      initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kEvidenceCommitted );
+  EXPECT_EQ( estimator.observationTimestamps( 1U ).size(), 2U );
+}
+
+TEST( VioInitialization, MovingEvidenceDoesNotPoolDisconnectedComponents )
+{
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 10 * kFramePeriodNs;
+  options.window_size               = 6;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  const auto first = estimator.update( makeMeasurement(
+      kFramePeriodNs,
+      RawImuInterval{
+          .m_t_begin = Timestamp{ 0 },
+          .m_t_end   = Timestamp{ kFramePeriodNs },
+          .m_samples = { makeImu( 0, 0.0 ),
+                         makeImu( kFramePeriodNs / 2, 1.0 ),
+                         makeImu( kFramePeriodNs, 2.0 ) } } ) );
+  ASSERT_EQ( first.status, UpdateStatus::kInitializing ) << first.message;
+  ASSERT_EQ( first.diagnostics.m_initialization.m_connected_poses.m_actual,
+             1U );
+
+  const auto second = estimator.update( makeMeasurementWithObservations(
+      2 * kFramePeriodNs,
+      RawImuInterval{
+          .m_t_begin = Timestamp{ kFramePeriodNs },
+          .m_t_end   = Timestamp{ 2 * kFramePeriodNs },
+          .m_samples = { makeImu( kFramePeriodNs, 2.0 ),
+                         makeImu( 3 * kFramePeriodNs / 2, -1.0 ),
+                         makeImu( 2 * kFramePeriodNs, 0.0 ) } },
+      makeUnmappedObservations() ) );
+  ASSERT_EQ( second.status, UpdateStatus::kInitializing ) << second.message;
+  EXPECT_FALSE( second.estimate.has_value() );
+  const auto& initialization = second.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_connected_poses.m_actual, 1U );
+  EXPECT_EQ( initialization.m_connected_landmarks.m_actual, 10U );
+  EXPECT_EQ( initialization.m_duration.m_actual_ns, 0 );
+  EXPECT_FALSE( initialization.m_visual_support.has_value() );
+  EXPECT_FALSE( initialization.m_attempt_id.has_value() );
+  EXPECT_EQ( estimator.observationTimestamps( 1U ).size(), 1U );
+  EXPECT_EQ( estimator.observationTimestamps( 1'001U ).size(), 1U );
+
+  const auto reconnected = estimator.update(
+      makeMeasurement(
+          3 * kFramePeriodNs,
+          RawImuInterval{
+              .m_t_begin = Timestamp{ 2 * kFramePeriodNs },
+              .m_t_end   = Timestamp{ 3 * kFramePeriodNs },
+              .m_samples = { makeImu( 2 * kFramePeriodNs, 0.0 ),
+                             makeImu( 5 * kFramePeriodNs / 2, 1.0 ),
+                             makeImu( 3 * kFramePeriodNs, 2.0 ) } } ),
+      false );
+  ASSERT_EQ( reconnected.status, UpdateStatus::kInitializing )
+      << reconnected.message;
+  const auto& reconnected_initialization =
+      reconnected.diagnostics.m_initialization;
+  EXPECT_EQ( reconnected_initialization.m_connected_poses.m_actual, 2U );
+  EXPECT_EQ( reconnected_initialization.m_duration.m_actual_ns,
+             2 * kFramePeriodNs );
+  EXPECT_EQ( reconnected_initialization.m_connected_landmarks.m_actual,
+             10U );
+  ASSERT_TRUE( reconnected_initialization.m_visual_support.has_value() );
+  EXPECT_EQ( reconnected_initialization.m_visual_support->m_actual, 10U );
+  EXPECT_EQ( estimator.observationTimestamps( 1U ).size(), 2U );
+  EXPECT_EQ( estimator.observationTimestamps( 1'001U ).size(), 1U );
+}
+
+TEST( VioInitialization, MovingEvidenceEvictionSplicesImuIntervals )
+{
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 20 * kFramePeriodNs;
+  options.window_size               = 3;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  const auto moving_interval = []( const std::int64_t frame_index ) {
+    const std::int64_t begin_ns   = ( frame_index - 1 ) * kFramePeriodNs;
+    const std::int64_t end_ns     = frame_index * kFramePeriodNs;
+    const double       begin_acc  = frame_index % 2 == 0 ? 2.0 : 0.0;
+    const double       end_acc    = frame_index % 2 == 0 ? 0.0 : 2.0;
+    const double       middle_acc = frame_index % 2 == 0 ? -1.0 : 1.0;
+    return RawImuInterval{
+        .m_t_begin = Timestamp{ begin_ns },
+        .m_t_end   = Timestamp{ end_ns },
+        .m_samples = { makeImu( begin_ns, begin_acc ),
+                       makeImu( begin_ns + kFramePeriodNs / 2, middle_acc ),
+                       makeImu( end_ns, end_acc ) } };
+  };
+
+  VioUpdateResult           fourth;
+  const std::array<bool, 4> keyframes{ true, false, true, true };
+  for ( std::int64_t frame_index = 1; frame_index <= 4; ++frame_index )
+  {
+    VioUpdateResult update = estimator.update(
+        makeMeasurement( frame_index * kFramePeriodNs,
+                         moving_interval( frame_index ) ),
+        keyframes[ static_cast<std::size_t>( frame_index - 1 ) ] );
+    ASSERT_EQ( update.status, UpdateStatus::kInitializing )
+        << update.message;
+    fourth = std::move( update );
+  }
+
+  EXPECT_EQ( fourth.diagnostics.m_initialization.m_connected_poses.m_actual,
+             3U );
+  EXPECT_EQ( fourth.diagnostics.m_initialization.m_duration.m_actual_ns,
+             3 * kFramePeriodNs );
+  EXPECT_EQ( fourth.diagnostics.m_vio.m_non_keyframe_evictions, 1U );
+  EXPECT_EQ( fourth.diagnostics.m_vio.m_imu_reintegrations, 1U );
+  EXPECT_EQ(
+      phad::estimator::internal::VioEstimatorTestAccess::
+          lastInitialVisualSolveWindowSize( estimator ),
+      3U );
+
+  const auto fifth = estimator.update(
+      makeMeasurement( 5 * kFramePeriodNs, moving_interval( 5 ) ), true );
+  ASSERT_EQ( fifth.status, UpdateStatus::kInitializing ) << fifth.message;
+  EXPECT_EQ( fifth.diagnostics.m_initialization.m_connected_poses.m_actual,
+             3U );
+  EXPECT_EQ( fifth.diagnostics.m_initialization.m_duration.m_actual_ns,
+             2 * kFramePeriodNs );
+  EXPECT_EQ( fifth.diagnostics.m_vio.m_non_keyframe_evictions, 1U );
+  EXPECT_EQ( fifth.diagnostics.m_vio.m_imu_reintegrations, 1U );
+  EXPECT_EQ( estimator.observationTimestamps( 1U ).size(), 5U );
+}
+
+TEST( VioInitialization,
+      MovingEvictionPrunesProvisionalHangingLandmarkWithoutNavigation )
+{
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 10 * kFramePeriodNs;
+  options.window_size               = 2;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  const auto interval = []( const std::int64_t begin_ns,
+                            const std::int64_t end_ns ) {
+    return RawImuInterval{
+        .m_t_begin = Timestamp{ begin_ns },
+        .m_t_end   = Timestamp{ end_ns },
+        .m_samples = { makeImu( begin_ns, 0.0 ),
+                       makeImu( begin_ns + ( end_ns - begin_ns ) / 2, 1.0 ),
+                       makeImu( end_ns, 0.0 ) } };
+  };
+  ASSERT_EQ( estimator
+                 .update( makeMeasurement(
+                     kFramePeriodNs, interval( 0, kFramePeriodNs ) ) )
+                 .status,
+             UpdateStatus::kInitializing );
+  ASSERT_EQ(
+      estimator
+          .update( makeMeasurementWithObservations(
+              2 * kFramePeriodNs,
+              interval( kFramePeriodNs, 2 * kFramePeriodNs ),
+              makeUnmappedObservations() ) )
+          .status,
+      UpdateStatus::kInitializing );
+
+  const auto pruned = estimator.update( makeMeasurementWithObservations(
+      3 * kFramePeriodNs,
+      interval( 2 * kFramePeriodNs, 3 * kFramePeriodNs ),
+      makeLeftOnlyObservations() ) );
+  ASSERT_EQ( pruned.status, UpdateStatus::kInitializing ) << pruned.message;
+  EXPECT_FALSE( pruned.estimate.has_value() );
+  EXPECT_EQ( pruned.diagnostics.window_size, 2U );
+  EXPECT_EQ( pruned.diagnostics.m_initialization.m_path,
+             phad::estimator::InitializationPath::kMoving );
+  EXPECT_EQ(
+      pruned.diagnostics.m_initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kEvidenceCommitted );
+}
+
+TEST( VioInitialization, MovingEvidenceReportsVisualPopulationInsufficient )
+{
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 10 * kFramePeriodNs;
+  VioEstimator                   estimator( makeCalibration(), makeImuParameters(), options );
+  std::vector<StereoObservation> sparse = makeObservations();
+  sparse.resize( 9U );
+
+  const auto result = estimator.update( makeMeasurementWithObservations(
+      kFramePeriodNs,
+      RawImuInterval{
+          .m_t_begin = Timestamp{ 0 },
+          .m_t_end   = Timestamp{ kFramePeriodNs },
+          .m_samples = { makeImu( 0, 0.0 ),
+                         makeImu( kFramePeriodNs / 2, 1.0 ),
+                         makeImu( kFramePeriodNs, 2.0 ) } },
+      std::move( sparse ) ) );
+  ASSERT_EQ( result.status, UpdateStatus::kInitializing ) << result.message;
+  EXPECT_FALSE( result.estimate.has_value() );
+  const auto& initialization = result.diagnostics.m_initialization;
+  EXPECT_EQ(
+      initialization.m_phase,
+      phad::estimator::InitializationPhase::kVisualSolve );
+  EXPECT_EQ(
+      initialization.m_reason,
+      phad::estimator::InitializationReason::kVisualPopulationInsufficient );
+  EXPECT_EQ( initialization.m_connected_poses.m_actual, 0U );
+  EXPECT_EQ( initialization.m_connected_landmarks.m_actual, 9U );
+  EXPECT_EQ( initialization.m_connected_landmarks.m_required, 10U );
+  EXPECT_FALSE( initialization.m_visual_support.has_value() );
+  EXPECT_FALSE( initialization.m_attempt_id.has_value() );
+  EXPECT_EQ(
+      initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kEvidenceCommitted );
+}
+
+TEST( VioInitialization, MovingEvidenceReportsVisualSupportInsufficient )
+{
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 10 * kFramePeriodNs;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  const auto first = estimator.update( makeMeasurement(
+      kFramePeriodNs,
+      RawImuInterval{
+          .m_t_begin = Timestamp{ 0 },
+          .m_t_end   = Timestamp{ kFramePeriodNs },
+          .m_samples = { makeImu( 0, 0.0 ),
+                         makeImu( kFramePeriodNs / 2, 1.0 ),
+                         makeImu( kFramePeriodNs, 2.0 ) } } ) );
+  ASSERT_EQ( first.status, UpdateStatus::kInitializing ) << first.message;
+
+  std::vector<StereoObservation> weak = makeObservations();
+  weak.resize( 9U );
+  const auto second = estimator.update( makeMeasurementWithObservations(
+      2 * kFramePeriodNs,
+      RawImuInterval{
+          .m_t_begin = Timestamp{ kFramePeriodNs },
+          .m_t_end   = Timestamp{ 2 * kFramePeriodNs },
+          .m_samples = { makeImu( kFramePeriodNs, 2.0 ),
+                         makeImu( 3 * kFramePeriodNs / 2, -1.0 ),
+                         makeImu( 2 * kFramePeriodNs, 0.0 ) } },
+      std::move( weak ) ) );
+  ASSERT_EQ( second.status, UpdateStatus::kInitializing ) << second.message;
+  EXPECT_FALSE( second.estimate.has_value() );
+  const auto& initialization = second.diagnostics.m_initialization;
+  EXPECT_EQ(
+      initialization.m_reason,
+      phad::estimator::InitializationReason::kVisualSupportInsufficient );
+  EXPECT_EQ( initialization.m_connected_poses.m_actual, 0U );
+  EXPECT_EQ( initialization.m_connected_landmarks.m_actual, 10U );
+  ASSERT_TRUE( initialization.m_visual_support.has_value() );
+  EXPECT_EQ( initialization.m_visual_support->m_actual, 9U );
+  EXPECT_EQ( initialization.m_visual_support->m_required, 10U );
+  EXPECT_FALSE( initialization.m_attempt_id.has_value() );
+}
+
+TEST( VioInitialization, MovingEvidenceReportsSecondSolveVisualFit )
+{
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 10 * kFramePeriodNs;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  const auto result = estimator.update( makeMeasurement(
+      kFramePeriodNs,
+      RawImuInterval{
+          .m_t_begin = Timestamp{ 0 },
+          .m_t_end   = Timestamp{ kFramePeriodNs },
+          .m_samples = { makeImu( 0, 0.0 ),
+                         makeImu( kFramePeriodNs / 2, 1.0 ),
+                         makeImu( kFramePeriodNs, 2.0 ) } } ) );
+  ASSERT_EQ( result.status, UpdateStatus::kInitializing ) << result.message;
+  const auto& initialization = result.diagnostics.m_initialization;
+  ASSERT_TRUE( initialization.m_visual_fit.has_value() );
+  EXPECT_NEAR( initialization.m_visual_fit->m_statistic, 0.0, 1e-20 );
+  EXPECT_DOUBLE_EQ( initialization.m_visual_fit->m_limit,
+                    11.344866730144373 );
+  EXPECT_EQ( initialization.m_visual_fit->m_effective_dof, 3 );
+}
+
+TEST( VioInitialization, MovingPopulationIsComponentWideNotGaugeSupport )
+{
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 10 * kFramePeriodNs;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  std::vector<StereoObservation> gauge_observations = makeObservations();
+  gauge_observations.resize( 1U );
+  const auto first = estimator.update( makeMeasurementWithObservations(
+      kFramePeriodNs,
+      RawImuInterval{
+          .m_t_begin = Timestamp{ 0 },
+          .m_t_end   = Timestamp{ kFramePeriodNs },
+          .m_samples = { makeImu( 0, 0.0 ),
+                         makeImu( kFramePeriodNs / 2, 1.0 ),
+                         makeImu( kFramePeriodNs, 2.0 ) } },
+      std::move( gauge_observations ) ) );
+  ASSERT_EQ( first.status, UpdateStatus::kInitializing ) << first.message;
+
+  const auto second = estimator.update( makeMeasurement(
+      2 * kFramePeriodNs,
+      RawImuInterval{
+          .m_t_begin = Timestamp{ kFramePeriodNs },
+          .m_t_end   = Timestamp{ 2 * kFramePeriodNs },
+          .m_samples = { makeImu( kFramePeriodNs, 2.0 ),
+                         makeImu( 3 * kFramePeriodNs / 2, -1.0 ),
+                         makeImu( 2 * kFramePeriodNs, 0.0 ) } } ) );
+  ASSERT_EQ( second.status, UpdateStatus::kInitializing ) << second.message;
+  const auto& initialization = second.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_reason,
+             phad::estimator::InitializationReason::kPoseCountInsufficient );
+  EXPECT_EQ( initialization.m_connected_poses.m_actual, 2U );
+  EXPECT_EQ( initialization.m_connected_landmarks.m_actual, 10U );
+  ASSERT_TRUE( initialization.m_visual_support.has_value() );
+  EXPECT_EQ( initialization.m_visual_support->m_actual, 10U );
+  EXPECT_EQ( initialization.m_visual_support->m_required, 10U );
+}
+
+TEST( VioInitialization, MovingSixPosesBelowDurationReportsDurationGate )
+{
+  constexpr std::int64_t kShortPeriodNs = 40'000'000;
+  EstimatorOptions       options        = makeOptions();
+  options.m_enable_moving_bootstrap     = true;
+  options.m_bootstrap_timeout_ns        = 20 * kShortPeriodNs;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  VioUpdateResult sixth;
+  for ( std::int64_t frame_index = 1; frame_index <= 6; ++frame_index )
+  {
+    const std::int64_t begin_ns   = ( frame_index - 1 ) * kShortPeriodNs;
+    const std::int64_t end_ns     = frame_index * kShortPeriodNs;
+    const double       begin_acc  = frame_index % 2 == 0 ? 2.0 : 0.0;
+    const double       end_acc    = frame_index % 2 == 0 ? 0.0 : 2.0;
+    const double       middle_acc = frame_index % 2 == 0 ? -1.0 : 1.0;
+    VioUpdateResult    update     = estimator.update( makeMeasurement(
+        end_ns,
+        RawImuInterval{
+                   .m_t_begin = Timestamp{ begin_ns },
+                   .m_t_end   = Timestamp{ end_ns },
+                   .m_samples = { makeImu( begin_ns, begin_acc ),
+                                  makeImu( begin_ns + kShortPeriodNs / 2,
+                                           middle_acc ),
+                                  makeImu( end_ns, end_acc ) } } ) );
+    ASSERT_EQ( update.status, UpdateStatus::kInitializing )
+        << update.message;
+    sixth = std::move( update );
+  }
+
+  const auto& initialization = sixth.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_connected_poses.m_actual, 6U );
+  EXPECT_EQ( initialization.m_duration.m_actual_ns,
+             5 * kShortPeriodNs );
+  EXPECT_EQ(
+      initialization.m_reason,
+      phad::estimator::InitializationReason::kDurationInsufficient );
+  EXPECT_FALSE( initialization.m_attempt_id.has_value() );
+}
+
+TEST( VioInitialization, MovingSecondSolveRejectsFixedMaskWithoutRemasking )
+{
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 10 * kFramePeriodNs;
+  options.window_size               = 2;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  const auto first = estimator.update( makeMeasurement(
+      kFramePeriodNs,
+      RawImuInterval{
+          .m_t_begin = Timestamp{ 0 },
+          .m_t_end   = Timestamp{ kFramePeriodNs },
+          .m_samples = { makeImu( 0, 0.0 ),
+                         makeImu( kFramePeriodNs / 2, 1.0 ),
+                         makeImu( kFramePeriodNs, 2.0 ) } } ) );
+  ASSERT_EQ( first.status, UpdateStatus::kInitializing ) << first.message;
+
+  std::vector<StereoObservation> corrupted = makeObservations();
+  for ( std::size_t index = 0U; index < corrupted.size(); ++index )
+  {
+    corrupted[ index ].left_pixel.x() += index % 2U == 0U ? 500.0 : -500.0;
+    corrupted[ index ].left_pixel.y() += index % 3U == 0U ? 350.0 : -350.0;
+  }
+  const auto second = estimator.update(
+      makeMeasurementWithObservations(
+          2 * kFramePeriodNs,
+          RawImuInterval{
+              .m_t_begin = Timestamp{ kFramePeriodNs },
+              .m_t_end   = Timestamp{ 2 * kFramePeriodNs },
+              .m_samples = { makeImu( kFramePeriodNs, 2.0 ),
+                             makeImu( 3 * kFramePeriodNs / 2, -1.0 ),
+                             makeImu( 2 * kFramePeriodNs, 0.0 ) } },
+          std::move( corrupted ) ),
+      false );
+  ASSERT_EQ( second.status, UpdateStatus::kInitializing ) << second.message;
+  EXPECT_FALSE( second.estimate.has_value() );
+  const auto& initialization = second.diagnostics.m_initialization;
+  EXPECT_EQ(
+      initialization.m_reason,
+      phad::estimator::InitializationReason::kVisualFitRejected );
+  EXPECT_EQ( initialization.m_connected_poses.m_actual, 0U );
+  EXPECT_EQ( initialization.m_connected_landmarks.m_actual, 5U );
+  EXPECT_FALSE( initialization.m_visual_support.has_value() );
+  ASSERT_TRUE( initialization.m_visual_fit.has_value() );
+  EXPECT_GT( initialization.m_visual_fit->m_statistic,
+             initialization.m_visual_fit->m_limit );
+  EXPECT_DOUBLE_EQ( initialization.m_visual_fit->m_limit,
+                    11.344866730144373 );
+  EXPECT_EQ( estimator.observationTimestamps( 1U ).size(), 2U );
+
+  const auto after_rejection = estimator.update( makeMeasurement(
+      3 * kFramePeriodNs,
+      RawImuInterval{
+          .m_t_begin = Timestamp{ 2 * kFramePeriodNs },
+          .m_t_end   = Timestamp{ 3 * kFramePeriodNs },
+          .m_samples = { makeImu( 2 * kFramePeriodNs, 0.0 ),
+                         makeImu( 5 * kFramePeriodNs / 2, 1.0 ),
+                         makeImu( 3 * kFramePeriodNs, 2.0 ) } } ) );
+  ASSERT_EQ( after_rejection.status, UpdateStatus::kInitializing )
+      << after_rejection.message;
+  EXPECT_EQ(
+      after_rejection.diagnostics.m_vio.m_non_keyframe_evictions, 1U );
+
+  const auto recovered = estimator.update( makeMeasurement(
+      4 * kFramePeriodNs,
+      RawImuInterval{
+          .m_t_begin = Timestamp{ 3 * kFramePeriodNs },
+          .m_t_end   = Timestamp{ 4 * kFramePeriodNs },
+          .m_samples = { makeImu( 3 * kFramePeriodNs, 2.0 ),
+                         makeImu( 7 * kFramePeriodNs / 2, -1.0 ),
+                         makeImu( 4 * kFramePeriodNs, 0.0 ) } } ) );
+  ASSERT_EQ( recovered.status, UpdateStatus::kInitializing )
+      << recovered.message;
+  EXPECT_EQ(
+      recovered.diagnostics.m_initialization.m_reason,
+      phad::estimator::InitializationReason::kPoseCountInsufficient );
+  EXPECT_EQ(
+      recovered.diagnostics.m_initialization.m_connected_poses.m_actual,
+      2U );
+  EXPECT_EQ(
+      recovered.diagnostics.m_initialization.m_connected_landmarks.m_actual,
+      10U );
+  ASSERT_TRUE(
+      recovered.diagnostics.m_initialization.m_visual_support.has_value() );
+  EXPECT_EQ(
+      recovered.diagnostics.m_initialization.m_visual_support->m_actual,
+      10U );
+}
+
+TEST( VioInitialization, InitialMovingRootCommitsExactLatestState )
+{
+  namespace fixture                 = phad::test_support::initial_moving;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 2 * fixture::kFramePeriodNs;
+  options.window_size               = 7;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  for ( std::int64_t index = 0; index < 5; ++index )
+  {
+    const std::int64_t timestamp_ns =
+        fixture::kRootTimestampNs + index * fixture::kFramePeriodNs;
+    const auto update = estimator.update( VioMeasurement{
+        .m_timestamp    = Timestamp{ timestamp_ns },
+        .m_observations = fixture::observations( timestamp_ns ),
+        .m_imu          = fixture::rawInterval(
+            timestamp_ns - fixture::kFramePeriodNs, timestamp_ns ) } );
+    ASSERT_EQ( update.status, UpdateStatus::kInitializing )
+        << "index=" << index << " message=" << update.message;
+    EXPECT_FALSE( update.estimate.has_value() );
+    EXPECT_FALSE(
+        update.diagnostics.m_initialization.m_attempt_id.has_value() );
+    EXPECT_EQ( update.diagnostics.m_initialization.m_path,
+               phad::estimator::InitializationPath::kMoving );
+    if ( index == 4 )
+    {
+      EXPECT_EQ(
+          update.diagnostics.m_initialization.m_reason,
+          phad::estimator::InitializationReason::kPoseCountInsufficient );
+      EXPECT_EQ(
+          update.diagnostics.m_initialization.m_connected_poses.m_actual,
+          5U );
+      EXPECT_EQ(
+          update.diagnostics.m_initialization.m_duration.m_actual_ns,
+          200'000'000 );
+    }
+  }
+
+  constexpr std::int64_t kLatestIndex = 5;
+  const std::int64_t     latest_timestamp_ns =
+      fixture::kRootTimestampNs +
+      kLatestIndex * fixture::kFramePeriodNs;
+  const auto root = estimator.update( VioMeasurement{
+      .m_timestamp    = Timestamp{ latest_timestamp_ns },
+      .m_observations = fixture::observations( latest_timestamp_ns ),
+      .m_imu          = fixture::rawInterval(
+          latest_timestamp_ns - fixture::kFramePeriodNs,
+          latest_timestamp_ns ) } );
+  ASSERT_EQ( root.status, UpdateStatus::kOk ) << root.message;
+  ASSERT_TRUE( root.estimate.has_value() );
+  EXPECT_EQ( root.diagnostics.num_disparity, 20U );
+  const auto& initialization = root.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_path,
+             phad::estimator::InitializationPath::kMoving );
+  EXPECT_EQ( initialization.m_outcome,
+             phad::estimator::InitializationOutcome::kCommitted );
+  ASSERT_TRUE( initialization.m_attempt_id.has_value() );
+  EXPECT_EQ( initialization.m_current_graph,
+             phad::estimator::InitializationGraphResult::kValidated );
+  EXPECT_EQ(
+      initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kRootCommitted );
+  EXPECT_EQ( root.diagnostics.window_size, 6U );
+  EXPECT_EQ( root.diagnostics.num_landmarks, 20U );
+  EXPECT_EQ( root.diagnostics.num_current_visual_factors, 20U );
+  const auto& root_graph = root.diagnostics.m_vio;
+  EXPECT_EQ( root_graph.m_nav_states, 6U );
+  EXPECT_EQ( root_graph.m_root_prior_sets, 1U );
+  EXPECT_EQ( root_graph.m_imu_factors, 5U );
+  EXPECT_EQ( root_graph.m_bias_rw_factors, 5U );
+  EXPECT_EQ( root_graph.m_visual_factors, 120U );
+  EXPECT_EQ( root_graph.m_integrated_duration_ns, 250'000'000 );
+
+  const Eigen::Isometry3d truth =
+      fixture::poseWb( latest_timestamp_ns );
+  EXPECT_LT(
+      ( root.estimate->T_W_B.translation() - truth.translation() ).norm(),
+      1e-3 );
+  EXPECT_LT(
+      Eigen::AngleAxisd( root.estimate->T_W_B.rotation().transpose() *
+                         truth.rotation() )
+          .angle(),
+      1e-4 );
+  EXPECT_LT(
+      ( root.estimate->m_v_W_B -
+        fixture::velocityW( latest_timestamp_ns ) )
+          .norm(),
+      1e-3 );
+  EXPECT_LT(
+      ( root.estimate->m_bias.m_gyr_radps - fixture::kGyroBias ).norm(),
+      1e-4 );
+
+  const std::int64_t next_timestamp_ns =
+      latest_timestamp_ns + fixture::kFramePeriodNs;
+  const auto continued = estimator.update( VioMeasurement{
+      .m_timestamp    = Timestamp{ next_timestamp_ns },
+      .m_observations = fixture::observations( next_timestamp_ns ),
+      .m_imu          = fixture::rawInterval(
+          latest_timestamp_ns, next_timestamp_ns ) } );
+  EXPECT_EQ( continued.status, UpdateStatus::kOk ) << continued.message;
+  EXPECT_TRUE( continued.estimate.has_value() );
+}
+
+TEST( VioInitialization,
+      InitialMovingRootAlignsNonZVisualGravityToNavigationFrame )
+{
+  namespace fixture                 = phad::test_support::initial_moving;
+  namespace tilted                  = fixture::non_z_gravity;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 2 * fixture::kFramePeriodNs;
+  options.window_size               = 7;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  for ( std::int64_t index = 0; index < 5; ++index )
+  {
+    const std::int64_t timestamp_ns =
+        fixture::kRootTimestampNs + index * fixture::kFramePeriodNs;
+    const auto update = estimator.update( VioMeasurement{
+        .m_timestamp    = Timestamp{ timestamp_ns },
+        .m_observations = fixture::observations( timestamp_ns ),
+        .m_imu          = tilted::rawInterval(
+            timestamp_ns - fixture::kFramePeriodNs, timestamp_ns ) } );
+    ASSERT_EQ( update.status, UpdateStatus::kInitializing )
+        << "index=" << index << " message=" << update.message;
+    EXPECT_FALSE( update.estimate.has_value() );
+    EXPECT_EQ( update.diagnostics.m_initialization.m_path,
+               phad::estimator::InitializationPath::kMoving );
+    EXPECT_FALSE(
+        update.diagnostics.m_initialization.m_attempt_id.has_value() );
+  }
+
+  constexpr std::int64_t kRootIndex = 5;
+  const std::int64_t     root_timestamp_ns =
+      fixture::kRootTimestampNs + kRootIndex * fixture::kFramePeriodNs;
+  const auto root = estimator.update( VioMeasurement{
+      .m_timestamp    = Timestamp{ root_timestamp_ns },
+      .m_observations = fixture::observations( root_timestamp_ns ),
+      .m_imu          = tilted::rawInterval(
+          root_timestamp_ns - fixture::kFramePeriodNs,
+          root_timestamp_ns ) } );
+  ASSERT_EQ( root.status, UpdateStatus::kOk ) << root.message;
+  ASSERT_TRUE( root.estimate.has_value() );
+  const auto& initialization = root.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_path,
+             phad::estimator::InitializationPath::kMoving );
+  EXPECT_EQ( initialization.m_phase,
+             phad::estimator::InitializationPhase::kCommit );
+  EXPECT_EQ( initialization.m_reason,
+             phad::estimator::InitializationReason::kNone );
+  EXPECT_EQ( initialization.m_outcome,
+             phad::estimator::InitializationOutcome::kCommitted );
+  ASSERT_TRUE( initialization.m_attempt_id.has_value() );
+  EXPECT_EQ( initialization.m_current_graph,
+             phad::estimator::InitializationGraphResult::kValidated );
+  EXPECT_EQ(
+      initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kRootCommitted );
+  EXPECT_EQ( root.diagnostics.window_size, 6U );
+  EXPECT_EQ( root.diagnostics.num_cheirality, 0U );
+  EXPECT_EQ( root.diagnostics.num_current_visual_factors, 20U );
+  EXPECT_EQ( root.diagnostics.m_vio.m_nav_states, 6U );
+  EXPECT_EQ( root.diagnostics.m_vio.m_root_prior_sets, 1U );
+  EXPECT_EQ( root.diagnostics.m_vio.m_imu_factors, 5U );
+  EXPECT_EQ( root.diagnostics.m_vio.m_bias_rw_factors, 5U );
+  EXPECT_EQ( root.diagnostics.m_vio.m_visual_factors, 120U );
+
+  const Eigen::Isometry3d expected_root = tilted::poseNb( root_timestamp_ns );
+  EXPECT_LT( ( root.estimate->T_W_B.translation() -
+               expected_root.translation() )
+                 .norm(),
+             1e-3 );
+  EXPECT_LT(
+      Eigen::AngleAxisd( root.estimate->T_W_B.rotation().transpose() *
+                         expected_root.rotation() )
+          .angle(),
+      1e-4 );
+  EXPECT_LT(
+      ( root.estimate->m_v_W_B - tilted::velocityN( root_timestamp_ns ) )
+          .norm(),
+      1e-3 );
+  EXPECT_LT(
+      ( root.estimate->m_bias.m_gyr_radps - fixture::kGyroBias ).norm(),
+      1e-4 );
+
+  constexpr std::int64_t kContinuedIndex = 6;
+  const std::int64_t     continued_timestamp_ns =
+      fixture::kRootTimestampNs +
+      kContinuedIndex * fixture::kFramePeriodNs;
+  const auto continued = estimator.update( VioMeasurement{
+      .m_timestamp    = Timestamp{ continued_timestamp_ns },
+      .m_observations = fixture::observations( continued_timestamp_ns ),
+      .m_imu          = tilted::rawInterval( root_timestamp_ns,
+                                             continued_timestamp_ns ) } );
+  ASSERT_EQ( continued.status, UpdateStatus::kOk ) << continued.message;
+  ASSERT_TRUE( continued.estimate.has_value() );
+  EXPECT_EQ( continued.diagnostics.num_cheirality, 0U );
+  EXPECT_EQ( continued.diagnostics.num_current_visual_factors, 20U );
+  EXPECT_EQ( continued.diagnostics.m_vio.m_nav_states, 7U );
+  EXPECT_EQ( continued.diagnostics.m_vio.m_imu_factors, 6U );
+  EXPECT_EQ( continued.diagnostics.m_vio.m_bias_rw_factors, 6U );
+  EXPECT_EQ( continued.diagnostics.m_vio.m_visual_factors, 140U );
+
+  const Eigen::Isometry3d expected_continued =
+      tilted::poseNb( continued_timestamp_ns );
+  EXPECT_LT( ( continued.estimate->T_W_B.translation() -
+               expected_continued.translation() )
+                 .norm(),
+             1e-3 );
+  EXPECT_LT(
+      Eigen::AngleAxisd( continued.estimate->T_W_B.rotation().transpose() *
+                         expected_continued.rotation() )
+          .angle(),
+      1e-4 );
+  EXPECT_LT( ( continued.estimate->m_v_W_B -
+               tilted::velocityN( continued_timestamp_ns ) )
+                 .norm(),
+             1e-3 );
+}
+
+TEST( VioInitialization, FivePosesAtExactDurationRemainPending )
+{
+  namespace fixture                 = phad::test_support::initial_moving;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 10 * fixture::kFramePeriodNs;
+  options.window_size               = 7;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  constexpr std::array<std::int64_t, 5> kTimestamps{
+      50'000'000, 100'000'000, 150'000'000, 200'000'000, 300'000'000 };
+  VioUpdateResult latest;
+  std::int64_t    previous_timestamp_ns = 0;
+  for ( const std::int64_t timestamp_ns : kTimestamps )
+  {
+    latest = estimator.update( VioMeasurement{
+        .m_timestamp    = Timestamp{ timestamp_ns },
+        .m_observations = fixture::observations( timestamp_ns ),
+        .m_imu          = fixture::rawInterval(
+            previous_timestamp_ns, timestamp_ns ) } );
+    ASSERT_EQ( latest.status, UpdateStatus::kInitializing )
+        << latest.message;
+    previous_timestamp_ns = timestamp_ns;
+  }
+
+  EXPECT_FALSE( latest.estimate.has_value() );
+  const auto& initialization = latest.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_reason,
+             phad::estimator::InitializationReason::kPoseCountInsufficient );
+  EXPECT_EQ( initialization.m_connected_poses.m_actual, 5U );
+  EXPECT_EQ( initialization.m_connected_poses.m_required, 6U );
+  EXPECT_EQ( initialization.m_duration.m_actual_ns, 250'000'000 );
+  EXPECT_EQ( initialization.m_duration.m_required_ns, 250'000'000 );
+  EXPECT_FALSE( initialization.m_attempt_id.has_value() );
+  EXPECT_EQ(
+      initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kEvidenceCommitted );
+}
+
+TEST( VioInitialization, CurrentGraphRejectsUntilVisualFactorsAreAdmitted )
+{
+  namespace fixture                 = phad::test_support::initial_moving;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 2 * fixture::kFramePeriodNs;
+  options.window_size               = 8;
+  options.min_landmark_observations = 7;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  VioUpdateResult sixth;
+  for ( std::int64_t index = 0; index < 6; ++index )
+  {
+    const std::int64_t timestamp_ns =
+        fixture::kRootTimestampNs + index * fixture::kFramePeriodNs;
+    sixth = estimator.update( VioMeasurement{
+        .m_timestamp    = Timestamp{ timestamp_ns },
+        .m_observations = fixture::observations( timestamp_ns ),
+        .m_imu          = fixture::rawInterval(
+            timestamp_ns - fixture::kFramePeriodNs, timestamp_ns ) } );
+  }
+
+  ASSERT_EQ( sixth.status, UpdateStatus::kInitializing ) << sixth.message;
+  EXPECT_FALSE( sixth.estimate.has_value() );
+  const auto& rejected = sixth.diagnostics.m_initialization;
+  EXPECT_EQ( rejected.m_phase,
+             phad::estimator::InitializationPhase::kCurrentGraph );
+  EXPECT_EQ( rejected.m_reason,
+             phad::estimator::InitializationReason::kCurrentGraphRejected );
+  EXPECT_EQ( rejected.m_outcome,
+             phad::estimator::InitializationOutcome::kRecoverableRejected );
+  ASSERT_TRUE( rejected.m_attempt_id.has_value() );
+  EXPECT_EQ( rejected.m_current_graph,
+             phad::estimator::InitializationGraphResult::kRejected );
+  EXPECT_EQ(
+      rejected.m_transaction,
+      phad::estimator::InitializationTransactionResult::kEvidenceCommitted );
+  ASSERT_TRUE( rejected.m_gyro_rank.has_value() );
+  EXPECT_EQ( rejected.m_gyro_rank->m_actual, 3U );
+  EXPECT_EQ( rejected.m_gyro_rank->m_required, 3U );
+  ASSERT_TRUE( rejected.m_gravity_velocity_rank.has_value() );
+  EXPECT_EQ( rejected.m_gravity_velocity_rank->m_actual, 20U );
+  EXPECT_EQ( rejected.m_gravity_velocity_rank->m_required, 20U );
+  ASSERT_TRUE( rejected.m_joint_fit.has_value() );
+  EXPECT_GT( rejected.m_joint_fit->m_effective_dof, 0 );
+  EXPECT_LE( rejected.m_joint_fit->m_statistic,
+             rejected.m_joint_fit->m_limit );
+
+  constexpr std::int64_t kRecoveryIndex = 6;
+  const std::int64_t     recovery_timestamp_ns =
+      fixture::kRootTimestampNs +
+      kRecoveryIndex * fixture::kFramePeriodNs;
+  const auto recovered = estimator.update( VioMeasurement{
+      .m_timestamp    = Timestamp{ recovery_timestamp_ns },
+      .m_observations = fixture::observations( recovery_timestamp_ns ),
+      .m_imu          = fixture::rawInterval(
+          recovery_timestamp_ns - fixture::kFramePeriodNs,
+          recovery_timestamp_ns ) } );
+  ASSERT_EQ( recovered.status, UpdateStatus::kOk ) << recovered.message;
+  ASSERT_TRUE( recovered.estimate.has_value() );
+  ASSERT_TRUE(
+      recovered.diagnostics.m_initialization.m_attempt_id.has_value() );
+  EXPECT_GT(
+      *recovered.diagnostics.m_initialization.m_attempt_id,
+      *rejected.m_attempt_id );
+}
+
+TEST( VioInitialization, GyroRankDeficiencyCommitsEvidenceAndRecovers )
+{
+  namespace fixture                 = phad::test_support::initial_moving;
+  namespace internal                = phad::estimator::internal;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 2 * fixture::kFramePeriodNs;
+  options.window_size               = 8;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  internal::VioEstimatorTestAccess::setNextMovingCandidateResult(
+      estimator,
+      internal::InitialMovingCandidateFailure{
+          .m_code = internal::InitialMovingCandidateFailureCode::
+              kRankDeficient,
+          .m_linear_failure = internal::InitialMovingLinearFailure{
+              .m_code =
+                  internal::InitialMovingLinearFailureCode::kRankDeficient,
+              .m_rank                 = 2U,
+              .m_required_rank        = 3U,
+              .m_normalized_condition = std::nullopt },
+          .m_joint_fit        = std::nullopt,
+          .m_joint_limit      = std::nullopt,
+          .m_gyro             = std::nullopt,
+          .m_gravity_velocity = std::nullopt } );
+
+  VioUpdateResult rejected;
+  for ( std::int64_t index = 0; index < 6; ++index )
+  {
+    const std::int64_t timestamp_ns =
+        fixture::kRootTimestampNs + index * fixture::kFramePeriodNs;
+    rejected = estimator.update( VioMeasurement{
+        .m_timestamp    = Timestamp{ timestamp_ns },
+        .m_observations = fixture::observations( timestamp_ns ),
+        .m_imu          = fixture::rawInterval(
+            timestamp_ns - fixture::kFramePeriodNs, timestamp_ns ) } );
+  }
+
+  ASSERT_EQ( rejected.status, UpdateStatus::kInitializing )
+      << rejected.message;
+  EXPECT_FALSE( rejected.estimate.has_value() );
+  EXPECT_EQ( rejected.diagnostics.num_disparity, 20U );
+  const auto& initialization = rejected.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_phase,
+             phad::estimator::InitializationPhase::kGyroAlignment );
+  EXPECT_EQ( initialization.m_reason,
+             phad::estimator::InitializationReason::kRankDeficient );
+  EXPECT_EQ( initialization.m_outcome,
+             phad::estimator::InitializationOutcome::kRecoverableRejected );
+  ASSERT_TRUE( initialization.m_attempt_id.has_value() );
+  ASSERT_TRUE( initialization.m_gyro_rank.has_value() );
+  EXPECT_EQ( initialization.m_gyro_rank->m_actual, 2U );
+  EXPECT_EQ( initialization.m_gyro_rank->m_required, 3U );
+  EXPECT_EQ(
+      initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kEvidenceCommitted );
+  EXPECT_EQ( initialization.m_connected_poses.m_actual, 6U );
+  EXPECT_EQ( initialization.m_duration.m_actual_ns, 250'000'000 );
+  EXPECT_EQ( initialization.m_connected_landmarks.m_actual, 20U );
+  ASSERT_TRUE( initialization.m_visual_fit.has_value() );
+  EXPECT_LE( initialization.m_visual_fit->m_statistic,
+             initialization.m_visual_fit->m_limit );
+
+  constexpr std::int64_t kRecoveryIndex = 6;
+  const std::int64_t     recovery_timestamp_ns =
+      fixture::kRootTimestampNs +
+      kRecoveryIndex * fixture::kFramePeriodNs;
+  const auto recovered = estimator.update( VioMeasurement{
+      .m_timestamp    = Timestamp{ recovery_timestamp_ns },
+      .m_observations = fixture::observations( recovery_timestamp_ns ),
+      .m_imu          = fixture::rawInterval(
+          recovery_timestamp_ns - fixture::kFramePeriodNs,
+          recovery_timestamp_ns ) } );
+  ASSERT_EQ( recovered.status, UpdateStatus::kOk ) << recovered.message;
+  ASSERT_TRUE( recovered.estimate.has_value() );
+  ASSERT_TRUE(
+      recovered.diagnostics.m_initialization.m_attempt_id.has_value() );
+  EXPECT_GT( *recovered.diagnostics.m_initialization.m_attempt_id,
+             *initialization.m_attempt_id );
+}
+
+TEST( VioInitialization,
+      GravityVelocityRankDeficiencyKeepsGyroMarginAndRecovers )
+{
+  namespace fixture                 = phad::test_support::initial_moving;
+  namespace internal                = phad::estimator::internal;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 2 * fixture::kFramePeriodNs;
+  options.window_size               = 8;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  internal::VioEstimatorTestAccess::setNextMovingCandidateResult(
+      estimator,
+      internal::InitialMovingCandidateFailure{
+          .m_code = internal::InitialMovingCandidateFailureCode::
+              kRankDeficient,
+          .m_linear_failure = internal::InitialMovingLinearFailure{
+              .m_code =
+                  internal::InitialMovingLinearFailureCode::kRankDeficient,
+              .m_rank                 = 19U,
+              .m_required_rank        = 20U,
+              .m_normalized_condition = std::nullopt },
+          .m_joint_fit        = std::nullopt,
+          .m_joint_limit      = std::nullopt,
+          .m_gyro             = internal::InitialMovingGyroSolution{ .m_bg_radps = fixture::kGyroBias, .m_rank = 3U, .m_normalized_condition = 1.0 },
+          .m_gravity_velocity = std::nullopt } );
+
+  VioUpdateResult rejected;
+  for ( std::int64_t index = 0; index < 6; ++index )
+  {
+    const std::int64_t timestamp_ns =
+        fixture::kRootTimestampNs + index * fixture::kFramePeriodNs;
+    rejected = estimator.update( VioMeasurement{
+        .m_timestamp    = Timestamp{ timestamp_ns },
+        .m_observations = fixture::observations( timestamp_ns ),
+        .m_imu          = fixture::rawInterval(
+            timestamp_ns - fixture::kFramePeriodNs, timestamp_ns ) } );
+  }
+
+  ASSERT_EQ( rejected.status, UpdateStatus::kInitializing )
+      << rejected.message;
+  EXPECT_FALSE( rejected.estimate.has_value() );
+  const auto& initialization = rejected.diagnostics.m_initialization;
+  EXPECT_EQ(
+      initialization.m_phase,
+      phad::estimator::InitializationPhase::kGravityVelocitySolve );
+  EXPECT_EQ( initialization.m_reason,
+             phad::estimator::InitializationReason::kRankDeficient );
+  ASSERT_TRUE( initialization.m_attempt_id.has_value() );
+  ASSERT_TRUE( initialization.m_gyro_rank.has_value() );
+  EXPECT_EQ( initialization.m_gyro_rank->m_actual, 3U );
+  EXPECT_EQ( initialization.m_gyro_rank->m_required, 3U );
+  ASSERT_TRUE( initialization.m_gravity_velocity_rank.has_value() );
+  EXPECT_EQ( initialization.m_gravity_velocity_rank->m_actual, 19U );
+  EXPECT_EQ( initialization.m_gravity_velocity_rank->m_required, 20U );
+  EXPECT_EQ(
+      initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kEvidenceCommitted );
+
+  constexpr std::int64_t kRecoveryIndex = 6;
+  const std::int64_t     recovery_timestamp_ns =
+      fixture::kRootTimestampNs +
+      kRecoveryIndex * fixture::kFramePeriodNs;
+  const auto recovered = estimator.update( VioMeasurement{
+      .m_timestamp    = Timestamp{ recovery_timestamp_ns },
+      .m_observations = fixture::observations( recovery_timestamp_ns ),
+      .m_imu          = fixture::rawInterval(
+          recovery_timestamp_ns - fixture::kFramePeriodNs,
+          recovery_timestamp_ns ) } );
+  ASSERT_EQ( recovered.status, UpdateStatus::kOk ) << recovered.message;
+  ASSERT_TRUE(
+      recovered.diagnostics.m_initialization.m_attempt_id.has_value() );
+  EXPECT_GT( *recovered.diagnostics.m_initialization.m_attempt_id,
+             *initialization.m_attempt_id );
+}
+
+TEST( VioInitialization, FullRankIllConditionedGyroRecoversNextRevision )
+{
+  namespace internal              = phad::estimator::internal;
+  const double rejected_condition = std::nextafter(
+      internal::kInitialMovingNormalizedConditionLimit,
+      std::numeric_limits<double>::infinity() );
+  const InjectedMovingAttempt attempt = runInjectedMovingCandidateResult(
+      internal::InitialMovingCandidateFailure{
+          .m_code =
+              internal::InitialMovingCandidateFailureCode::kIllConditioned,
+          .m_linear_failure = internal::InitialMovingLinearFailure{
+              .m_code =
+                  internal::InitialMovingLinearFailureCode::kIllConditioned,
+              .m_rank                 = 3U,
+              .m_required_rank        = 3U,
+              .m_normalized_condition = rejected_condition },
+          .m_joint_fit        = std::nullopt,
+          .m_joint_limit      = std::nullopt,
+          .m_gyro             = std::nullopt,
+          .m_gravity_velocity = std::nullopt } );
+
+  ASSERT_EQ( attempt.rejected.status, UpdateStatus::kInitializing )
+      << attempt.rejected.message;
+  EXPECT_FALSE( attempt.rejected.estimate.has_value() );
+  const auto& initialization =
+      attempt.rejected.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_phase,
+             phad::estimator::InitializationPhase::kGyroAlignment );
+  EXPECT_EQ( initialization.m_reason,
+             phad::estimator::InitializationReason::kIllConditioned );
+  ASSERT_TRUE( initialization.m_gyro_rank.has_value() );
+  EXPECT_EQ( initialization.m_gyro_rank->m_actual, 3U );
+  EXPECT_EQ( initialization.m_gyro_rank->m_required, 3U );
+  ASSERT_TRUE( initialization.m_gyro_normalized_condition.has_value() );
+  EXPECT_DOUBLE_EQ(
+      initialization.m_gyro_normalized_condition->m_value,
+      rejected_condition );
+  EXPECT_DOUBLE_EQ(
+      initialization.m_gyro_normalized_condition->m_limit,
+      internal::kInitialMovingNormalizedConditionLimit );
+  EXPECT_EQ(
+      initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kEvidenceCommitted );
+  ASSERT_TRUE( initialization.m_attempt_id.has_value() );
+  ASSERT_EQ( attempt.recovered.status, UpdateStatus::kOk )
+      << attempt.recovered.message;
+  ASSERT_TRUE(
+      attempt.recovered.diagnostics.m_initialization.m_attempt_id.has_value() );
+  EXPECT_GT(
+      *attempt.recovered.diagnostics.m_initialization.m_attempt_id,
+      *initialization.m_attempt_id );
+}
+
+TEST( VioInitialization, JointNoConvergenceKeepsEarlierMarginsAndRecovers )
+{
+  namespace fixture                   = phad::test_support::initial_moving;
+  namespace internal                  = phad::estimator::internal;
+  const InjectedMovingAttempt attempt = runInjectedMovingCandidateResult(
+      internal::InitialMovingCandidateFailure{
+          .m_code =
+              internal::InitialMovingCandidateFailureCode::kNoConvergence,
+          .m_linear_failure = std::nullopt,
+          .m_joint_fit      = std::nullopt,
+          .m_joint_limit    = std::nullopt,
+          .m_gyro           = internal::InitialMovingGyroSolution{
+                        .m_bg_radps             = fixture::kGyroBias,
+                        .m_rank                 = 3U,
+                        .m_normalized_condition = 1.0 },
+          .m_gravity_velocity = internal::InitialMovingGravityVelocitySolution{ .m_g_W = fixture::kGravityW, .m_v_W = {}, .m_rank = 20U, .m_normalized_condition = 1.0 } } );
+
+  ASSERT_EQ( attempt.rejected.status, UpdateStatus::kInitializing )
+      << attempt.rejected.message;
+  EXPECT_FALSE( attempt.rejected.estimate.has_value() );
+  const auto& initialization =
+      attempt.rejected.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_phase,
+             phad::estimator::InitializationPhase::kJointConsistency );
+  EXPECT_EQ( initialization.m_reason,
+             phad::estimator::InitializationReason::kNoConvergence );
+  ASSERT_TRUE( initialization.m_gyro_rank.has_value() );
+  EXPECT_EQ( initialization.m_gyro_rank->m_actual, 3U );
+  ASSERT_TRUE( initialization.m_gravity_velocity_rank.has_value() );
+  EXPECT_EQ( initialization.m_gravity_velocity_rank->m_actual, 20U );
+  EXPECT_FALSE( initialization.m_joint_fit.has_value() );
+  EXPECT_EQ(
+      initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kEvidenceCommitted );
+  ASSERT_TRUE( initialization.m_attempt_id.has_value() );
+  ASSERT_EQ( attempt.recovered.status, UpdateStatus::kOk )
+      << attempt.recovered.message;
+  ASSERT_TRUE(
+      attempt.recovered.diagnostics.m_initialization.m_attempt_id.has_value() );
+  EXPECT_GT(
+      *attempt.recovered.diagnostics.m_initialization.m_attempt_id,
+      *initialization.m_attempt_id );
+}
+
+TEST( VioInitialization, JointZeroDofCommitsEvidenceAndRecovers )
+{
+  namespace fixture                   = phad::test_support::initial_moving;
+  namespace internal                  = phad::estimator::internal;
+  const InjectedMovingAttempt attempt = runInjectedMovingCandidateResult(
+      internal::InitialMovingCandidateFailure{
+          .m_code = internal::InitialMovingCandidateFailureCode::
+              kJointDofInsufficient,
+          .m_linear_failure = std::nullopt,
+          .m_joint_fit      = internal::InitialMovingJointFit{
+                   .m_statistic     = 0.0,
+                   .m_residual_rank = 5,
+                   .m_fitted_rank   = 5,
+                   .m_effective_dof = 0 },
+          .m_joint_limit      = std::nullopt,
+          .m_gyro             = internal::InitialMovingGyroSolution{ .m_bg_radps = fixture::kGyroBias, .m_rank = 3U, .m_normalized_condition = 1.0 },
+          .m_gravity_velocity = internal::InitialMovingGravityVelocitySolution{ .m_g_W = fixture::kGravityW, .m_v_W = {}, .m_rank = 20U, .m_normalized_condition = 1.0 } } );
+
+  ASSERT_EQ( attempt.rejected.status, UpdateStatus::kInitializing )
+      << attempt.rejected.message;
+  const auto& initialization =
+      attempt.rejected.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_phase,
+             phad::estimator::InitializationPhase::kJointConsistency );
+  EXPECT_EQ(
+      initialization.m_reason,
+      phad::estimator::InitializationReason::kJointDofInsufficient );
+  ASSERT_TRUE( initialization.m_gyro_rank.has_value() );
+  ASSERT_TRUE( initialization.m_gravity_velocity_rank.has_value() );
+  ASSERT_TRUE( initialization.m_joint_fit.has_value() );
+  EXPECT_EQ( initialization.m_joint_fit->m_effective_dof, 0 );
+  EXPECT_DOUBLE_EQ( initialization.m_joint_fit->m_statistic, 0.0 );
+  EXPECT_EQ(
+      initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kEvidenceCommitted );
+  ASSERT_TRUE( initialization.m_attempt_id.has_value() );
+  ASSERT_EQ( attempt.recovered.status, UpdateStatus::kOk )
+      << attempt.recovered.message;
+  ASSERT_TRUE(
+      attempt.recovered.diagnostics.m_initialization.m_attempt_id.has_value() );
+  EXPECT_GT(
+      *attempt.recovered.diagnostics.m_initialization.m_attempt_id,
+      *initialization.m_attempt_id );
+}
+
+TEST( VioInitialization, JointInconsistencyCommitsEvidenceAndRecovers )
+{
+  namespace fixture                       = phad::test_support::initial_moving;
+  namespace internal                      = phad::estimator::internal;
+  constexpr double            kJointLimit = 9.21034037197618;
+  const InjectedMovingAttempt attempt     = runInjectedMovingCandidateResult(
+      internal::InitialMovingCandidateFailure{
+              .m_code =
+              internal::InitialMovingCandidateFailureCode::kJointInconsistent,
+              .m_linear_failure = std::nullopt,
+              .m_joint_fit      = internal::InitialMovingJointFit{
+                       .m_statistic     = 10'000.0,
+                       .m_residual_rank = 5,
+                       .m_fitted_rank   = 3,
+                       .m_effective_dof = 2 },
+              .m_joint_limit      = kJointLimit,
+              .m_gyro             = internal::InitialMovingGyroSolution{ .m_bg_radps = fixture::kGyroBias, .m_rank = 3U, .m_normalized_condition = 1.0 },
+              .m_gravity_velocity = internal::InitialMovingGravityVelocitySolution{ .m_g_W = fixture::kGravityW, .m_v_W = {}, .m_rank = 20U, .m_normalized_condition = 1.0 } } );
+
+  ASSERT_EQ( attempt.rejected.status, UpdateStatus::kInitializing )
+      << attempt.rejected.message;
+  EXPECT_FALSE( attempt.rejected.estimate.has_value() );
+  const auto& initialization =
+      attempt.rejected.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_phase,
+             phad::estimator::InitializationPhase::kJointConsistency );
+  EXPECT_EQ( initialization.m_reason,
+             phad::estimator::InitializationReason::kJointInconsistent );
+  ASSERT_TRUE( initialization.m_gyro_rank.has_value() );
+  ASSERT_TRUE( initialization.m_gravity_velocity_rank.has_value() );
+  ASSERT_TRUE( initialization.m_joint_fit.has_value() );
+  EXPECT_EQ( initialization.m_joint_fit->m_effective_dof, 2 );
+  EXPECT_DOUBLE_EQ( initialization.m_joint_fit->m_limit, kJointLimit );
+  EXPECT_GT( initialization.m_joint_fit->m_statistic,
+             initialization.m_joint_fit->m_limit );
+  EXPECT_EQ(
+      initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kEvidenceCommitted );
+  ASSERT_TRUE( initialization.m_attempt_id.has_value() );
+  ASSERT_EQ( attempt.recovered.status, UpdateStatus::kOk )
+      << attempt.recovered.message;
+  ASSERT_TRUE(
+      attempt.recovered.diagnostics.m_initialization.m_attempt_id.has_value() );
+  EXPECT_GT(
+      *attempt.recovered.diagnostics.m_initialization.m_attempt_id,
+      *initialization.m_attempt_id );
+}
+
+TEST( VioInitialization,
+      CurrentGraphUnderconstraintCommitsEvidenceAndRecovers )
+{
+  namespace fixture                 = phad::test_support::initial_moving;
+  namespace internal                = phad::estimator::internal;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 2 * fixture::kFramePeriodNs;
+  options.window_size               = 8;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  internal::VioEstimatorTestAccess::setNextCurrentGraphResult(
+      estimator,
+      phad::estimator::InitializationReason::kCurrentGraphUnderconstrained );
+
+  VioUpdateResult rejected;
+  for ( std::int64_t index = 0; index < 6; ++index )
+  {
+    const std::int64_t timestamp_ns =
+        fixture::kRootTimestampNs + index * fixture::kFramePeriodNs;
+    rejected = estimator.update( VioMeasurement{
+        .m_timestamp    = Timestamp{ timestamp_ns },
+        .m_observations = fixture::observations( timestamp_ns ),
+        .m_imu          = fixture::rawInterval(
+            timestamp_ns - fixture::kFramePeriodNs, timestamp_ns ) } );
+  }
+
+  ASSERT_EQ( rejected.status, UpdateStatus::kInitializing )
+      << rejected.message;
+  EXPECT_FALSE( rejected.estimate.has_value() );
+  const auto& initialization = rejected.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_phase,
+             phad::estimator::InitializationPhase::kCurrentGraph );
+  EXPECT_EQ(
+      initialization.m_reason,
+      phad::estimator::InitializationReason::kCurrentGraphUnderconstrained );
+  EXPECT_EQ( initialization.m_outcome,
+             phad::estimator::InitializationOutcome::kRecoverableRejected );
+  ASSERT_TRUE( initialization.m_attempt_id.has_value() );
+  EXPECT_EQ( initialization.m_current_graph,
+             phad::estimator::InitializationGraphResult::kRejected );
+  EXPECT_EQ(
+      initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kEvidenceCommitted );
+  ASSERT_TRUE( initialization.m_gyro_rank.has_value() );
+  EXPECT_EQ( initialization.m_gyro_rank->m_actual, 3U );
+  ASSERT_TRUE( initialization.m_gravity_velocity_rank.has_value() );
+  EXPECT_EQ( initialization.m_gravity_velocity_rank->m_actual, 20U );
+  ASSERT_TRUE( initialization.m_joint_fit.has_value() );
+  EXPECT_GT( initialization.m_joint_fit->m_effective_dof, 0 );
+
+  constexpr std::int64_t kRecoveryIndex = 6;
+  const std::int64_t     recovery_timestamp_ns =
+      fixture::kRootTimestampNs +
+      kRecoveryIndex * fixture::kFramePeriodNs;
+  const auto recovered = estimator.update( VioMeasurement{
+      .m_timestamp    = Timestamp{ recovery_timestamp_ns },
+      .m_observations = fixture::observations( recovery_timestamp_ns ),
+      .m_imu          = fixture::rawInterval(
+          recovery_timestamp_ns - fixture::kFramePeriodNs,
+          recovery_timestamp_ns ) } );
+  ASSERT_EQ( recovered.status, UpdateStatus::kOk ) << recovered.message;
+  ASSERT_TRUE(
+      recovered.diagnostics.m_initialization.m_attempt_id.has_value() );
+  EXPECT_GT( *recovered.diagnostics.m_initialization.m_attempt_id,
+             *initialization.m_attempt_id );
+}
+
+TEST( VioInitialization, CurrentGraphContractErrorRollsBackExactly )
+{
+  namespace fixture                 = phad::test_support::initial_moving;
+  namespace internal                = phad::estimator::internal;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 2 * fixture::kFramePeriodNs;
+  options.window_size               = 8;
+  VioEstimator subject( makeCalibration(), makeImuParameters(), options );
+  VioEstimator control( makeCalibration(), makeImuParameters(), options );
+
+  internal::VioEstimatorTestAccess::setNextCurrentGraphContractError(
+      subject );
+  for ( std::int64_t index = 0; index < 5; ++index )
+  {
+    const std::int64_t timestamp_ns =
+        fixture::kRootTimestampNs + index * fixture::kFramePeriodNs;
+    const VioMeasurement measurement{
+        .m_timestamp    = Timestamp{ timestamp_ns },
+        .m_observations = fixture::observations( timestamp_ns ),
+        .m_imu          = fixture::rawInterval(
+            timestamp_ns - fixture::kFramePeriodNs, timestamp_ns ) };
+    ASSERT_EQ( subject.update( measurement ).status,
+               UpdateStatus::kInitializing );
+    ASSERT_EQ( control.update( measurement ).status,
+               UpdateStatus::kInitializing );
+  }
+
+  constexpr std::int64_t kAttemptIndex = 5;
+  const std::int64_t     attempt_timestamp_ns =
+      fixture::kRootTimestampNs +
+      kAttemptIndex * fixture::kFramePeriodNs;
+  const VioMeasurement attempt{
+      .m_timestamp    = Timestamp{ attempt_timestamp_ns },
+      .m_observations = fixture::observations( attempt_timestamp_ns ),
+      .m_imu          = fixture::rawInterval(
+          attempt_timestamp_ns - fixture::kFramePeriodNs,
+          attempt_timestamp_ns ) };
+  const auto fatal           = subject.update( attempt );
+  const auto control_success = control.update( attempt );
+
+  ASSERT_EQ( fatal.status, UpdateStatus::kFailed ) << fatal.message;
+  EXPECT_FALSE( fatal.estimate.has_value() );
+  EXPECT_EQ( fatal.diagnostics.num_disparity, 20U );
+  const auto& initialization = fatal.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_path,
+             phad::estimator::InitializationPath::kMoving );
+  EXPECT_EQ( initialization.m_phase,
+             phad::estimator::InitializationPhase::kCurrentGraph );
+  EXPECT_EQ( initialization.m_reason,
+             phad::estimator::InitializationReason::kContractError );
+  EXPECT_EQ( initialization.m_outcome,
+             phad::estimator::InitializationOutcome::kFatalError );
+  ASSERT_TRUE( initialization.m_attempt_id.has_value() );
+  EXPECT_EQ( initialization.m_current_graph,
+             phad::estimator::InitializationGraphResult::kNotEvaluated );
+  EXPECT_EQ( initialization.m_transaction,
+             phad::estimator::InitializationTransactionResult::kRolledBack );
+  EXPECT_EQ( fatal.diagnostics.window_size, 5U );
+
+  const auto recovered = subject.update( attempt );
+  expectSameCommittedUpdate( recovered, control_success );
+  ASSERT_TRUE(
+      recovered.diagnostics.m_initialization.m_attempt_id.has_value() );
+  EXPECT_GT( *recovered.diagnostics.m_initialization.m_attempt_id,
+             *initialization.m_attempt_id );
+}
+
+TEST( VioInitialization, CandidateMathErrorRollsBackExactly )
+{
+  namespace fixture                 = phad::test_support::initial_moving;
+  namespace internal                = phad::estimator::internal;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 2 * fixture::kFramePeriodNs;
+  options.window_size               = 8;
+  VioEstimator subject( makeCalibration(), makeImuParameters(), options );
+  VioEstimator control( makeCalibration(), makeImuParameters(), options );
+
+  internal::VioEstimatorTestAccess::setNextMovingCandidateResult(
+      subject,
+      internal::InitialMovingMathError{
+          .m_code   = internal::InitialMovingMathErrorCode::kNumerical,
+          .m_detail = "injected non-finite whitening" } );
+  for ( std::int64_t index = 0; index < 5; ++index )
+  {
+    const std::int64_t timestamp_ns =
+        fixture::kRootTimestampNs + index * fixture::kFramePeriodNs;
+    const VioMeasurement measurement{
+        .m_timestamp    = Timestamp{ timestamp_ns },
+        .m_observations = fixture::observations( timestamp_ns ),
+        .m_imu          = fixture::rawInterval(
+            timestamp_ns - fixture::kFramePeriodNs, timestamp_ns ) };
+    ASSERT_EQ( subject.update( measurement ).status,
+               UpdateStatus::kInitializing );
+    ASSERT_EQ( control.update( measurement ).status,
+               UpdateStatus::kInitializing );
+  }
+
+  constexpr std::int64_t kAttemptIndex = 5;
+  const std::int64_t     attempt_timestamp_ns =
+      fixture::kRootTimestampNs +
+      kAttemptIndex * fixture::kFramePeriodNs;
+  const VioMeasurement attempt{
+      .m_timestamp    = Timestamp{ attempt_timestamp_ns },
+      .m_observations = fixture::observations( attempt_timestamp_ns ),
+      .m_imu          = fixture::rawInterval(
+          attempt_timestamp_ns - fixture::kFramePeriodNs,
+          attempt_timestamp_ns ) };
+  const auto fatal           = subject.update( attempt );
+  const auto control_success = control.update( attempt );
+
+  ASSERT_EQ( fatal.status, UpdateStatus::kFailed ) << fatal.message;
+  EXPECT_FALSE( fatal.estimate.has_value() );
+  const auto& initialization = fatal.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_phase,
+             phad::estimator::InitializationPhase::kJointConsistency );
+  EXPECT_EQ( initialization.m_reason,
+             phad::estimator::InitializationReason::kContractError );
+  EXPECT_EQ( initialization.m_outcome,
+             phad::estimator::InitializationOutcome::kFatalError );
+  ASSERT_TRUE( initialization.m_attempt_id.has_value() );
+  EXPECT_EQ( initialization.m_current_graph,
+             phad::estimator::InitializationGraphResult::kNotEvaluated );
+  EXPECT_EQ( initialization.m_transaction,
+             phad::estimator::InitializationTransactionResult::kRolledBack );
+  EXPECT_EQ( fatal.diagnostics.window_size, 5U );
+
+  const auto recovered = subject.update( attempt );
+  expectSameCommittedUpdate( recovered, control_success );
+  ASSERT_TRUE(
+      recovered.diagnostics.m_initialization.m_attempt_id.has_value() );
+  EXPECT_GT( *recovered.diagnostics.m_initialization.m_attempt_id,
+             *initialization.m_attempt_id );
+}
+
+TEST( VioInitialization, VisualCheiralityRejectionRecoversNextRevision )
+{
+  namespace fixture                 = phad::test_support::initial_moving;
+  namespace internal                = phad::estimator::internal;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 2 * fixture::kFramePeriodNs;
+  options.window_size               = 8;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+
+  for ( std::int64_t index = 0; index < 5; ++index )
+  {
+    const std::int64_t timestamp_ns =
+        fixture::kRootTimestampNs + index * fixture::kFramePeriodNs;
+    const auto pending = estimator.update( VioMeasurement{
+        .m_timestamp    = Timestamp{ timestamp_ns },
+        .m_observations = fixture::observations( timestamp_ns ),
+        .m_imu          = fixture::rawInterval(
+            timestamp_ns - fixture::kFramePeriodNs, timestamp_ns ) } );
+    ASSERT_EQ( pending.status, UpdateStatus::kInitializing );
+  }
+  internal::VioEstimatorTestAccess::setNextInitialVisualDepth(
+      estimator, 0.0 );
+
+  constexpr std::int64_t kRejectedIndex = 5;
+  const std::int64_t     rejected_timestamp_ns =
+      fixture::kRootTimestampNs +
+      kRejectedIndex * fixture::kFramePeriodNs;
+  const auto rejected = estimator.update( VioMeasurement{
+      .m_timestamp    = Timestamp{ rejected_timestamp_ns },
+      .m_observations = fixture::observations( rejected_timestamp_ns ),
+      .m_imu          = fixture::rawInterval(
+          rejected_timestamp_ns - fixture::kFramePeriodNs,
+          rejected_timestamp_ns ) } );
+  ASSERT_EQ( rejected.status, UpdateStatus::kInitializing )
+      << rejected.message;
+  EXPECT_FALSE( rejected.estimate.has_value() );
+  const auto& initialization = rejected.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_phase,
+             phad::estimator::InitializationPhase::kVisualSolve );
+  EXPECT_EQ( initialization.m_reason,
+             phad::estimator::InitializationReason::kCheiralityRejected );
+  EXPECT_EQ( initialization.m_outcome,
+             phad::estimator::InitializationOutcome::kPending );
+  EXPECT_FALSE( initialization.m_attempt_id.has_value() );
+  EXPECT_EQ(
+      initialization.m_transaction,
+      phad::estimator::InitializationTransactionResult::kEvidenceCommitted );
+
+  constexpr std::int64_t kRecoveryIndex = 6;
+  const std::int64_t     recovery_timestamp_ns =
+      fixture::kRootTimestampNs +
+      kRecoveryIndex * fixture::kFramePeriodNs;
+  const auto recovered = estimator.update( VioMeasurement{
+      .m_timestamp    = Timestamp{ recovery_timestamp_ns },
+      .m_observations = fixture::observations( recovery_timestamp_ns ),
+      .m_imu          = fixture::rawInterval(
+          recovery_timestamp_ns - fixture::kFramePeriodNs,
+          recovery_timestamp_ns ) } );
+  ASSERT_EQ( recovered.status, UpdateStatus::kOk ) << recovered.message;
+  ASSERT_TRUE( recovered.estimate.has_value() );
+  EXPECT_TRUE(
+      recovered.diagnostics.m_initialization.m_attempt_id.has_value() );
+}
+
+TEST( VioInitialization, VisualWhiteningErrorRollsBackExactly )
+{
+  namespace fixture                 = phad::test_support::initial_moving;
+  namespace internal                = phad::estimator::internal;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.m_bootstrap_timeout_ns    = 2 * fixture::kFramePeriodNs;
+  options.window_size               = 8;
+  VioEstimator subject( makeCalibration(), makeImuParameters(), options );
+  VioEstimator control( makeCalibration(), makeImuParameters(), options );
+
+  for ( std::int64_t index = 0; index < 5; ++index )
+  {
+    const std::int64_t timestamp_ns =
+        fixture::kRootTimestampNs + index * fixture::kFramePeriodNs;
+    const VioMeasurement measurement{
+        .m_timestamp    = Timestamp{ timestamp_ns },
+        .m_observations = fixture::observations( timestamp_ns ),
+        .m_imu          = fixture::rawInterval(
+            timestamp_ns - fixture::kFramePeriodNs, timestamp_ns ) };
+    ASSERT_EQ( subject.update( measurement ).status,
+               UpdateStatus::kInitializing );
+    ASSERT_EQ( control.update( measurement ).status,
+               UpdateStatus::kInitializing );
+  }
+  internal::VioEstimatorTestAccess::setNextInitialVisualWhiteningError(
+      subject );
+
+  constexpr std::int64_t kAttemptIndex = 5;
+  const std::int64_t     attempt_timestamp_ns =
+      fixture::kRootTimestampNs +
+      kAttemptIndex * fixture::kFramePeriodNs;
+  const VioMeasurement attempt{
+      .m_timestamp    = Timestamp{ attempt_timestamp_ns },
+      .m_observations = fixture::observations( attempt_timestamp_ns ),
+      .m_imu          = fixture::rawInterval(
+          attempt_timestamp_ns - fixture::kFramePeriodNs,
+          attempt_timestamp_ns ) };
+  const auto fatal           = subject.update( attempt );
+  const auto control_success = control.update( attempt );
+
+  ASSERT_EQ( fatal.status, UpdateStatus::kFailed ) << fatal.message;
+  EXPECT_FALSE( fatal.estimate.has_value() );
+  const auto& initialization = fatal.diagnostics.m_initialization;
+  EXPECT_EQ( initialization.m_phase,
+             phad::estimator::InitializationPhase::kVisualSolve );
+  EXPECT_EQ( initialization.m_reason,
+             phad::estimator::InitializationReason::kContractError );
+  EXPECT_EQ( initialization.m_outcome,
+             phad::estimator::InitializationOutcome::kFatalError );
+  EXPECT_FALSE( initialization.m_attempt_id.has_value() );
+  EXPECT_EQ( initialization.m_transaction,
+             phad::estimator::InitializationTransactionResult::kRolledBack );
+  EXPECT_EQ( fatal.diagnostics.window_size, 5U );
+
+  const auto recovered = subject.update( attempt );
+  expectSameCommittedUpdate( recovered, control_success );
 }
 
 TEST( VioFullState, InvalidRawIntervalPreservesNextTransaction )
@@ -450,6 +2397,31 @@ TEST( VioFullState, InvalidObservationPreservesCoastAndTrackState )
   EXPECT_EQ( subject.observationTimestamps( kUniqueId ),
              control.observationTimestamps( kUniqueId ) );
   ASSERT_EQ( subject.observationTimestamps( kUniqueId ).size(), 1U );
+}
+
+TEST( VioFullState, DuplicateLandmarkIdIsInvalidWithoutStaging )
+{
+  VioEstimator                   subject( makeCalibration(), makeImuParameters(),
+                                          makeOptions() );
+  VioEstimator                   control( makeCalibration(), makeImuParameters(),
+                                          makeOptions() );
+  std::vector<StereoObservation> duplicate = makeObservations();
+  duplicate.push_back( duplicate.front() );
+
+  const auto invalid = subject.update( makeMeasurementWithObservations(
+      kFramePeriodNs, stationaryInterval( 0, kFramePeriodNs ),
+      std::move( duplicate ) ) );
+  EXPECT_EQ( invalid.status, UpdateStatus::kInvalidInput );
+  EXPECT_FALSE( invalid.estimate.has_value() );
+  EXPECT_NE( invalid.message.find( "duplicate landmark id" ),
+             std::string::npos );
+  EXPECT_TRUE( subject.observationTimestamps( 1U ).empty() );
+
+  const auto legal = makeMeasurement(
+      kFramePeriodNs, stationaryInterval( 0, kFramePeriodNs ) );
+  const auto after_invalid = subject.update( legal );
+  const auto direct        = control.update( legal );
+  expectSameCommittedUpdate( after_invalid, direct );
 }
 
 TEST( VioFullState, NonFinitePropagationRollsBackIntakeAndSpan )
@@ -561,66 +2533,6 @@ TEST( VioFullState, PrimaryGraphFailureRollsBackIntakeSeedAndSpan )
   EXPECT_EQ( subject.observationTimestamps( kUniqueId ),
              control.observationTimestamps( kUniqueId ) );
   ASSERT_EQ( subject.observationTimestamps( kUniqueId ).size(), 2U );
-}
-
-TEST( VioFullState, AccumulatedRootFailureDoesNotLeakPendingObservations )
-{
-  EstimatorOptions options        = transactionOptions();
-  options.enable_accumulated_seed = true;
-  options.min_seed_observations   = 10;
-  VioEstimator subject( makeCalibration(), makeImuParameters(), options );
-  VioEstimator control( makeCalibration(), makeImuParameters(), options );
-
-  std::vector<StereoObservation> first = makeObservations();
-  first.resize( 5U );
-  for ( VioEstimator* estimator : { &subject, &control } )
-  {
-    const auto initializing = estimator->update(
-        makeMeasurementWithObservations(
-            kFramePeriodNs,
-            stationaryInterval( 0, kFramePeriodNs ), first ) );
-    ASSERT_EQ( initializing.status, UpdateStatus::kInitializing )
-        << initializing.message;
-  }
-
-  std::vector<StereoObservation> rejected_only = makeObservations();
-  rejected_only.erase( rejected_only.begin(),
-                       rejected_only.begin() + 5 );
-  for ( StereoObservation& observation : rejected_only )
-  {
-    observation.id += 100U;
-  }
-  rejected_only.front().left_pixel.x() =
-      std::numeric_limits<double>::max() / 4.0;
-  const auto rejected = subject.update( makeMeasurementWithObservations(
-      2 * kFramePeriodNs,
-      stationaryInterval( kFramePeriodNs, 2 * kFramePeriodNs ),
-      rejected_only ) );
-  ASSERT_EQ( rejected.status, UpdateStatus::kRejected )
-      << rejected.message;
-  EXPECT_FALSE( rejected.estimate.has_value() );
-  expectZeroPacketCounters( rejected );
-
-  std::vector<StereoObservation> legal = makeObservations();
-  legal.resize( 4U );
-  for ( StereoObservation& observation : legal )
-  {
-    observation.id += 200U;
-  }
-  const auto after_rejected = subject.update( makeMeasurementWithObservations(
-      2 * kFramePeriodNs,
-      stationaryInterval( kFramePeriodNs, 2 * kFramePeriodNs ), legal ) );
-  const auto direct         = control.update( makeMeasurementWithObservations(
-      2 * kFramePeriodNs,
-      stationaryInterval( kFramePeriodNs, 2 * kFramePeriodNs ), legal ) );
-  EXPECT_EQ( after_rejected.status, UpdateStatus::kInitializing )
-      << after_rejected.message;
-  EXPECT_EQ( direct.status, UpdateStatus::kInitializing ) << direct.message;
-  for ( const StereoObservation& observation : rejected_only )
-  {
-    EXPECT_TRUE( subject.observationTimestamps( observation.id ).empty() );
-    EXPECT_TRUE( control.observationTimestamps( observation.id ).empty() );
-  }
 }
 
 TEST( VioFullState, BootstrapTimestampOverflowIsInvalidInputWithoutAdvancingAnchor )

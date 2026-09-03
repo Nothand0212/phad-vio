@@ -43,11 +43,64 @@ namespace phad::apps
         {
           out += ',';
         }
-        out += "{\"key\":" + std::to_string( entries[ index ].key ) + ",\"dt_m\":"
-               + formatDouble( entries[ index ].dt_m ) + '}';
+        out += "{\"key\":" + std::to_string( entries[ index ].key ) + ",\"dt_m\":" + formatDouble( entries[ index ].dt_m ) + '}';
       }
       out += ']';
       return out;
+    }
+
+    [[nodiscard]] const char* pnpProbeResultName(
+        const estimator::PnpProbeResult result )
+    {
+      switch ( result )
+      {
+        case estimator::PnpProbeResult::kNotAttempted:
+          return "not_attempted";
+        case estimator::PnpProbeResult::kRansacFailed:
+          return "ransac_failed";
+        case estimator::PnpProbeResult::kInsufficientInliers:
+          return "insufficient_inliers";
+        case estimator::PnpProbeResult::kProposalPoseNonFinite:
+          return "proposal_pose_nonfinite";
+        case estimator::PnpProbeResult::kProposalRmsInvalidCorrespondence:
+          return "proposal_rms_invalid_correspondence";
+        case estimator::PnpProbeResult::kProposalRmsCheirality:
+          return "proposal_rms_cheirality";
+        case estimator::PnpProbeResult::kProposalRmsNonFinite:
+          return "proposal_rms_nonfinite";
+        case estimator::PnpProbeResult::kProposalRmsRejected:
+          return "proposal_rms_rejected";
+        case estimator::PnpProbeResult::kAccepted:
+          return "accepted";
+        case estimator::PnpProbeResult::kAcceptedAfterGuessRetry:
+          return "accepted_after_guess_retry";
+      }
+      throw std::logic_error( "unknown PnP probe result" );
+    }
+
+    [[nodiscard]] const char* pnpGuessRetryOutcomeName(
+        const estimator::PnpGuessRetryOutcome outcome )
+    {
+      switch ( outcome )
+      {
+        case estimator::PnpGuessRetryOutcome::kNotAttempted:
+          return "not_attempted";
+        case estimator::PnpGuessRetryOutcome::kSolveFailed:
+          return "solve_failed";
+        case estimator::PnpGuessRetryOutcome::kProposalPoseNonFinite:
+          return "proposal_pose_nonfinite";
+        case estimator::PnpGuessRetryOutcome::kProposalRmsInvalidCorrespondence:
+          return "proposal_rms_invalid_correspondence";
+        case estimator::PnpGuessRetryOutcome::kProposalRmsCheirality:
+          return "proposal_rms_cheirality";
+        case estimator::PnpGuessRetryOutcome::kProposalRmsNonFinite:
+          return "proposal_rms_nonfinite";
+        case estimator::PnpGuessRetryOutcome::kProposalRmsRejected:
+          return "proposal_rms_rejected";
+        case estimator::PnpGuessRetryOutcome::kWouldPassExistingPnpGates:
+          return "would_pass_existing_pnp_gates";
+      }
+      throw std::logic_error( "unknown PnP guess retry outcome" );
     }
 
     void appendCommaIfNeeded( std::string& json, bool& first )
@@ -61,7 +114,7 @@ namespace phad::apps
 
     [[nodiscard]] std::string serializeProbeBFrame( const ProbeBFrame& frame )
     {
-      std::string json = "{";
+      std::string json  = "{";
       bool        first = true;
 
       json += "\"i\":" + std::to_string( frame.i );
@@ -69,6 +122,185 @@ namespace phad::apps
 
       appendCommaIfNeeded( json, first );
       json += "\"ts_ns\":" + std::to_string( frame.ts_ns );
+
+      if ( frame.pnp_attempted.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"pnp_attempted\":" +
+                std::string( *frame.pnp_attempted ? "true" : "false" );
+      }
+      if ( frame.pnp_result.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"pnp_result\":\"" +
+                std::string( pnpProbeResultName( *frame.pnp_result ) ) + '"';
+      }
+      if ( frame.pnp_correspondences.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"pnp_correspondences\":" +
+                std::to_string( *frame.pnp_correspondences );
+      }
+      if ( frame.pnp_inliers.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"pnp_inliers\":" + std::to_string( *frame.pnp_inliers );
+      }
+      if ( frame.pnp_proposal_rms_px.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"pnp_proposal_rms_px\":" +
+                formatDouble( *frame.pnp_proposal_rms_px );
+      }
+      if ( frame.pnp_guess_rms_px.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"pnp_guess_rms_px\":" +
+                formatDouble( *frame.pnp_guess_rms_px );
+      }
+      if ( frame.pnp_proposal_inlier_count.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"pnp_proposal_inlier_count\":" +
+                std::to_string( *frame.pnp_proposal_inlier_count );
+      }
+      if ( frame.pnp_proposal_cheiral_inlier_count.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"pnp_proposal_cheiral_inlier_count\":" +
+                std::to_string(
+                    *frame.pnp_proposal_cheiral_inlier_count );
+      }
+      if ( frame.pnp_proposal_min_inlier_depth_m.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"pnp_proposal_min_inlier_depth_m\":" +
+                formatDouble(
+                    *frame.pnp_proposal_min_inlier_depth_m );
+      }
+      if ( frame.pnp_proposal_min_inlier_landmark_id.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"pnp_proposal_min_inlier_landmark_id\":" +
+                std::to_string(
+                    *frame.pnp_proposal_min_inlier_landmark_id );
+      }
+      if ( frame.pnp_proposal_guess_translation_delta_m.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"pnp_proposal_guess_translation_delta_m\":" +
+                formatDouble(
+                    *frame.pnp_proposal_guess_translation_delta_m );
+      }
+      if ( frame.pnp_proposal_guess_rotation_delta_rad.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"pnp_proposal_guess_rotation_delta_rad\":" +
+                formatDouble(
+                    *frame.pnp_proposal_guess_rotation_delta_rad );
+      }
+      if ( frame.pnp_guess_retry_outcome.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"pnp_guess_retry_outcome\":\"" +
+                std::string( pnpGuessRetryOutcomeName(
+                    *frame.pnp_guess_retry_outcome ) ) +
+                '"';
+      }
+      if ( frame.pnp_guess_retry_proposal_rms_px.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"pnp_guess_retry_proposal_rms_px\":" +
+                formatDouble( *frame.pnp_guess_retry_proposal_rms_px );
+      }
+      if ( frame.pnp_guess_retry_guess_rms_px.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"pnp_guess_retry_guess_rms_px\":" +
+                formatDouble( *frame.pnp_guess_retry_guess_rms_px );
+      }
+      if ( frame.pnp_guess_retry_cheiral_inlier_count.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"pnp_guess_retry_cheiral_inlier_count\":" +
+                std::to_string(
+                    *frame.pnp_guess_retry_cheiral_inlier_count );
+      }
+      if ( frame.pnp_guess_retry_min_inlier_depth_m.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"pnp_guess_retry_min_inlier_depth_m\":" +
+                formatDouble(
+                    *frame.pnp_guess_retry_min_inlier_depth_m );
+      }
+      if ( frame.pnp_guess_retry_translation_delta_m.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"pnp_guess_retry_translation_delta_m\":" +
+                formatDouble(
+                    *frame.pnp_guess_retry_translation_delta_m );
+      }
+      if ( frame.pnp_guess_retry_rotation_delta_rad.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"pnp_guess_retry_rotation_delta_rad\":" +
+                formatDouble(
+                    *frame.pnp_guess_retry_rotation_delta_rad );
+      }
+      if ( frame.current_pose_translation_delta_m.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"current_pose_translation_delta_m\":" +
+                formatDouble( *frame.current_pose_translation_delta_m );
+      }
+      if ( frame.current_pose_rotation_delta_rad.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"current_pose_rotation_delta_rad\":" +
+                formatDouble( *frame.current_pose_rotation_delta_rad );
+      }
+      if ( frame.current_velocity_delta_mps.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"current_velocity_delta_mps\":" +
+                formatDouble( *frame.current_velocity_delta_mps );
+      }
+      if ( frame.current_acc_bias_delta_mps2.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"current_acc_bias_delta_mps2\":" +
+                formatDouble( *frame.current_acc_bias_delta_mps2 );
+      }
+      if ( frame.current_gyr_bias_delta_radps.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"current_gyr_bias_delta_radps\":" +
+                formatDouble( *frame.current_gyr_bias_delta_radps );
+      }
+      if ( frame.primary_graph_error_seed.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"primary_graph_error_seed\":" +
+                formatDouble( *frame.primary_graph_error_seed );
+      }
+      if ( frame.primary_graph_error_optimized.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"primary_graph_error_optimized\":" +
+                formatDouble( *frame.primary_graph_error_optimized );
+      }
+      if ( frame.primary_imu_factor_error_seed.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"primary_imu_factor_error_seed\":" +
+                formatDouble( *frame.primary_imu_factor_error_seed );
+      }
+      if ( frame.primary_imu_factor_error_optimized.has_value() )
+      {
+        appendCommaIfNeeded( json, first );
+        json += "\"primary_imu_factor_error_optimized\":" +
+                formatDouble( *frame.primary_imu_factor_error_optimized );
+      }
 
       if ( frame.culled_ids.has_value() )
       {
@@ -78,14 +310,12 @@ namespace phad::apps
       if ( frame.zombie_track_n.has_value() )
       {
         appendCommaIfNeeded( json, first );
-        json += "\"zombie_track_n\":"
-                + std::to_string( frame.zombie_track_n.value() );
+        json += "\"zombie_track_n\":" + std::to_string( frame.zombie_track_n.value() );
       }
       if ( frame.rejected_block_n.has_value() )
       {
         appendCommaIfNeeded( json, first );
-        json += "\"rejected_block_n\":"
-                + std::to_string( frame.rejected_block_n.value() );
+        json += "\"rejected_block_n\":" + std::to_string( frame.rejected_block_n.value() );
       }
       if ( frame.new_lm.has_value() )
       {
@@ -105,8 +335,7 @@ namespace phad::apps
       if ( frame.lm_iterations.has_value() )
       {
         appendCommaIfNeeded( json, first );
-        json += "\"lm_iterations\":"
-                + std::to_string( frame.lm_iterations.value() );
+        json += "\"lm_iterations\":" + std::to_string( frame.lm_iterations.value() );
       }
       if ( frame.shift_m.has_value() )
       {
@@ -136,9 +365,8 @@ namespace phad::apps
       if ( frame.drops_skipped_this_frame.has_value() )
       {
         appendCommaIfNeeded( json, first );
-        json += "\"drops_skipped_this_frame\":"
-                + std::string( frame.drops_skipped_this_frame.value() ? "true"
-                                                                        : "false" );
+        json += "\"drops_skipped_this_frame\":" + std::string( frame.drops_skipped_this_frame.value() ? "true"
+                                                                                                      : "false" );
       }
 
       json += "}\n";

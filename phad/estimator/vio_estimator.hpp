@@ -11,6 +11,11 @@
 namespace phad::estimator
 {
 
+  namespace internal
+  {
+    class VioEstimatorTestAccess;
+  }
+
   class VioEstimator
   {
   public:
@@ -34,6 +39,7 @@ namespace phad::estimator
         LandmarkId id ) const;
 
   private:
+    friend class internal::VioEstimatorTestAccess;
     struct Impl;
     std::unique_ptr<Impl> m_impl;
   };

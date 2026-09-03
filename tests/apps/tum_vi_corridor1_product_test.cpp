@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -29,7 +31,7 @@ namespace
 
     phad::apps::OfflineVoSessionOptions options;
     options.max_frames = 100U;
-    // M4 canonical product config; this gate reuses the existing bootstrap.
+    // M5 Slice B product activation remains opt-in.
     options.estimator.m_enable_moving_bootstrap = true;
     const auto result                           = phad::apps::runOfflineVoSession(
         std::move( opened ).value(), options );
@@ -70,6 +72,9 @@ namespace
           << "; dropped_right_overflow="
           << result.sync.dropped_right_overflow
           << "; failed=" << result.counts.failed
+          << "; rejected=" << result.counts.rejected
+          << "; segments=" << result.counts.segments
+          << "; reanchors=" << result.counts.reanchors
           << "; observations=" << observations
           << "; disparities=" << disparities
           << "; status_histogram=" << status_histogram.str();
@@ -85,8 +90,51 @@ namespace
     EXPECT_EQ( result.sync.dropped_left_overflow, 0U );
     EXPECT_EQ( result.sync.dropped_right_overflow, 0U );
     EXPECT_EQ( result.counts.failed, 0U );
+    EXPECT_EQ( result.counts.rejected, 0U );
+    EXPECT_EQ( result.counts.segments, 1U );
+    EXPECT_EQ( result.counts.reanchors, 0U );
     EXPECT_GT( observations, 0U );
     EXPECT_GT( disparities, 0U );
+    ASSERT_TRUE( result.trajectory.has_value() );
+    EXPECT_EQ( result.counts.ok, result.trajectory->size() );
+
+    const auto first_ok = std::find_if(
+        result.diag.begin(), result.diag.end(),
+        []( const phad::apps::VoDiagRow& row ) {
+          return row.status == "ok";
+        } );
+    ASSERT_NE( first_ok, result.diag.end() );
+    const auto first_ok_index = static_cast<std::size_t>(
+        std::distance( result.diag.begin(), first_ok ) );
+    EXPECT_GE( first_ok_index, 5U );
+    EXPECT_GE( first_ok->timestamp_ns - result.diag.front().timestamp_ns,
+               250'000'000 );
+    for ( std::size_t index = 0U; index < result.diag.size(); ++index )
+    {
+      EXPECT_EQ( result.diag[ index ].status,
+                 index < first_ok_index ? "initializing" : "ok" )
+          << "diag_index=" << index;
+    }
+
+    const auto& poses      = result.trajectory->poses();
+    std::size_t pose_index = 0U;
+    for ( const auto& row : result.diag )
+    {
+      if ( row.status != "ok" )
+      {
+        continue;
+      }
+      ASSERT_LT( pose_index, poses.size() );
+      EXPECT_EQ( poses[ pose_index ].timestamp.nanoseconds(),
+                 row.timestamp_ns );
+      EXPECT_TRUE( poses[ pose_index ].T_W_B.matrix().allFinite() );
+      ++pose_index;
+    }
+    EXPECT_EQ( pose_index, poses.size() );
+    EXPECT_EQ( poses.front().timestamp.nanoseconds(),
+               first_ok->timestamp_ns );
+    EXPECT_EQ( poses.back().timestamp.nanoseconds(),
+               result.diag.back().timestamp_ns );
   }
 
 }  // namespace

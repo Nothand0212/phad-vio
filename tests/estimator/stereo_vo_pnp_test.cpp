@@ -3,11 +3,14 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
 #include "phad/camera/rectified_stereo_calibration.hpp"
+#include "phad/estimator/internal/vio_estimator_test_access.hpp"
 #include "phad/estimator/vio_estimator.hpp"
 #include "phad/sensor/rigid_transform.hpp"
 #include "tests/estimator/vio_test_utils.hpp"
@@ -18,10 +21,14 @@ namespace
   using phad::camera::RectifiedStereoCalibration;
   using phad::estimator::EstimatorOptions;
   using phad::estimator::LandmarkId;
+  using phad::estimator::PnpGuessRetryOutcome;
+  using phad::estimator::PnpProbeResult;
   using phad::estimator::StereoObservation;
   using phad::estimator::UpdateStatus;
   using phad::estimator::VioEstimator;
   using phad::estimator::VioMeasurement;
+  using phad::estimator::VioUpdateResult;
+  using phad::estimator::internal::VioEstimatorTestAccess;
   using phad::sensor::RigidTransform;
 
   RectifiedStereoCalibration makeCalibration()
@@ -173,6 +180,209 @@ namespace
     return options;
   }
 
+  void expectFiniteCurrentGraphProbe(
+      const phad::estimator::UpdateDiagnostics& diagnostics )
+  {
+    ASSERT_TRUE(
+        diagnostics.probe_current_pose_translation_delta_m.has_value() );
+    EXPECT_TRUE( std::isfinite(
+        *diagnostics.probe_current_pose_translation_delta_m ) );
+    ASSERT_TRUE(
+        diagnostics.probe_current_pose_rotation_delta_rad.has_value() );
+    EXPECT_TRUE(
+        std::isfinite( *diagnostics.probe_current_pose_rotation_delta_rad ) );
+    ASSERT_TRUE( diagnostics.probe_current_velocity_delta_mps.has_value() );
+    EXPECT_TRUE(
+        std::isfinite( *diagnostics.probe_current_velocity_delta_mps ) );
+    ASSERT_TRUE(
+        diagnostics.probe_current_acc_bias_delta_mps2.has_value() );
+    EXPECT_TRUE(
+        std::isfinite( *diagnostics.probe_current_acc_bias_delta_mps2 ) );
+    ASSERT_TRUE(
+        diagnostics.probe_current_gyr_bias_delta_radps.has_value() );
+    EXPECT_TRUE(
+        std::isfinite( *diagnostics.probe_current_gyr_bias_delta_radps ) );
+    ASSERT_TRUE( diagnostics.probe_primary_graph_error_seed.has_value() );
+    EXPECT_TRUE(
+        std::isfinite( *diagnostics.probe_primary_graph_error_seed ) );
+    ASSERT_TRUE(
+        diagnostics.probe_primary_graph_error_optimized.has_value() );
+    EXPECT_TRUE(
+        std::isfinite( *diagnostics.probe_primary_graph_error_optimized ) );
+    ASSERT_TRUE(
+        diagnostics.probe_primary_imu_factor_error_seed.has_value() );
+    EXPECT_TRUE( std::isfinite(
+        *diagnostics.probe_primary_imu_factor_error_seed ) );
+    ASSERT_TRUE(
+        diagnostics.probe_primary_imu_factor_error_optimized.has_value() );
+    EXPECT_TRUE( std::isfinite(
+        *diagnostics.probe_primary_imu_factor_error_optimized ) );
+  }
+
+  struct PnpFaultResults
+  {
+    VioUpdateResult m_fault;
+    VioUpdateResult m_recovered;
+  };
+
+  struct PnpFaultScenario
+  {
+    PnpProbeResult                      m_failure;
+    bool                                m_enable_product_retry = false;
+    std::optional<PnpGuessRetryOutcome> m_retry_failure        = std::nullopt;
+  };
+
+  void expectGuessRetryNotAttempted(
+      const phad::estimator::UpdateDiagnostics& diagnostics )
+  {
+    EXPECT_EQ( diagnostics.probe_pnp_guess_retry_outcome,
+               PnpGuessRetryOutcome::kNotAttempted );
+    EXPECT_FALSE(
+        diagnostics.probe_pnp_guess_retry_proposal_rms_px.has_value() );
+    EXPECT_FALSE(
+        diagnostics.probe_pnp_guess_retry_guess_rms_px.has_value() );
+    EXPECT_FALSE( diagnostics
+                      .probe_pnp_guess_retry_cheiral_inlier_count.has_value() );
+    EXPECT_FALSE(
+        diagnostics.probe_pnp_guess_retry_min_inlier_depth_m.has_value() );
+    EXPECT_FALSE(
+        diagnostics.probe_pnp_guess_retry_translation_delta_m.has_value() );
+    EXPECT_FALSE(
+        diagnostics.probe_pnp_guess_retry_rotation_delta_rad.has_value() );
+  }
+
+  void expectExactPublicState( const VioUpdateResult& expected,
+                               const VioUpdateResult& actual )
+  {
+    EXPECT_EQ( actual.status, expected.status );
+    EXPECT_EQ( actual.message, expected.message );
+    ASSERT_EQ( actual.estimate.has_value(), expected.estimate.has_value() );
+    if ( expected.estimate.has_value() )
+    {
+      EXPECT_EQ( actual.estimate->timestamp, expected.estimate->timestamp );
+      EXPECT_EQ( actual.estimate->m_segment_id,
+                 expected.estimate->m_segment_id );
+      EXPECT_TRUE( ( actual.estimate->T_W_B.matrix().array() ==
+                     expected.estimate->T_W_B.matrix().array() )
+                       .all() );
+      EXPECT_TRUE( ( actual.estimate->m_v_W_B.array() ==
+                     expected.estimate->m_v_W_B.array() )
+                       .all() );
+      EXPECT_TRUE( ( actual.estimate->m_bias.m_acc_mps2.array() ==
+                     expected.estimate->m_bias.m_acc_mps2.array() )
+                       .all() );
+      EXPECT_TRUE( ( actual.estimate->m_bias.m_gyr_radps.array() ==
+                     expected.estimate->m_bias.m_gyr_radps.array() )
+                       .all() );
+    }
+
+    const auto& actual_diagnostics   = actual.diagnostics;
+    const auto& expected_diagnostics = expected.diagnostics;
+    EXPECT_EQ( actual_diagnostics.num_observations,
+               expected_diagnostics.num_observations );
+    EXPECT_EQ( actual_diagnostics.num_retained_observations,
+               expected_diagnostics.num_retained_observations );
+    EXPECT_EQ( actual_diagnostics.num_landmarks,
+               expected_diagnostics.num_landmarks );
+    EXPECT_EQ( actual_diagnostics.num_shared,
+               expected_diagnostics.num_shared );
+    EXPECT_EQ( actual_diagnostics.num_current_visual_factors,
+               expected_diagnostics.num_current_visual_factors );
+    EXPECT_EQ( actual_diagnostics.num_current_mono_visual_factors,
+               expected_diagnostics.num_current_mono_visual_factors );
+    EXPECT_EQ( actual_diagnostics.segment_id,
+               expected_diagnostics.segment_id );
+    EXPECT_EQ( actual_diagnostics.prior_key, expected_diagnostics.prior_key );
+    EXPECT_EQ( actual_diagnostics.pnp_success,
+               expected_diagnostics.pnp_success );
+    EXPECT_EQ( actual_diagnostics.pnp_inliers,
+               expected_diagnostics.pnp_inliers );
+    EXPECT_EQ( actual_diagnostics.culled_landmark_ids,
+               expected_diagnostics.culled_landmark_ids );
+    EXPECT_EQ( actual_diagnostics.m_vio.m_root_prior_sets,
+               expected_diagnostics.m_vio.m_root_prior_sets );
+    EXPECT_EQ( actual_diagnostics.m_vio.m_completed_segment_id,
+               expected_diagnostics.m_vio.m_completed_segment_id );
+  }
+
+  [[nodiscard]] PnpFaultResults runPnpProposalFailure(
+      const PnpFaultScenario& scenario )
+  {
+    const auto calibration = makeCalibration();
+    const auto ids         = sequentialIds( kNearAxisLandmarks.size(), 1 );
+
+    EstimatorOptions options            = defaultPnpOptions();
+    options.enable_pnp_cheirality_retry = scenario.m_enable_product_retry;
+    options.enable_probe_b              = true;
+    options.enable_outlier_cull         = false;
+    options.enable_outlier_reopt        = false;
+    VioEstimator estimator( calibration,
+                            phad::test_support::testImuParameters(),
+                            options );
+
+    const Eigen::Isometry3d stationary = Eigen::Isometry3d::Identity();
+    for ( std::int64_t frame = 1; frame <= 2; ++frame )
+    {
+      const auto seeded = estimator.update( makeFrame(
+          calibration, stationary, frame * 50'000'000,
+          kNearAxisLandmarks, ids ) );
+      EXPECT_EQ( seeded.status, UpdateStatus::kOk ) << seeded.message;
+    }
+
+    std::vector<Eigen::Vector3d> landmarks_plus = kNearAxisLandmarks;
+    std::vector<LandmarkId>      ids_plus       = ids;
+    const LandmarkId             probe_id       = 99;
+    landmarks_plus.emplace_back( 0.04, -0.03, 5.5 );
+    ids_plus.push_back( probe_id );
+
+    const auto introduced = estimator.update( makeFrame(
+        calibration, stationary, 150'000'000, landmarks_plus, ids_plus ) );
+    EXPECT_EQ( introduced.status, UpdateStatus::kOk ) << introduced.message;
+    EXPECT_EQ( introduced.diagnostics.num_landmarks,
+               kNearAxisLandmarks.size() );
+
+    auto fault_measurement = makeFrame(
+        calibration, stationary, 200'000'000, landmarks_plus, ids_plus );
+    offsetLeftPixel(
+        fault_measurement, probe_id, Eigen::Vector2d( 80.0, 0.0 ) );
+    VioEstimatorTestAccess::setNextPnpProposalFailure(
+        estimator, scenario.m_failure );
+    if ( scenario.m_retry_failure.has_value() )
+    {
+      VioEstimatorTestAccess::setNextPnpGuessRetryOutcome(
+          estimator, *scenario.m_retry_failure );
+    }
+    VioUpdateResult fault = estimator.update( fault_measurement );
+    EXPECT_EQ( fault.status, UpdateStatus::kOk ) << fault.message;
+    EXPECT_TRUE( fault.estimate.has_value() );
+    if ( fault.estimate.has_value() )
+    {
+      EXPECT_TRUE( fault.estimate->T_W_B.matrix().allFinite() );
+    }
+    EXPECT_FALSE( fault.diagnostics.pnp_success );
+    EXPECT_EQ( fault.diagnostics.pnp_inliers, 0U );
+    EXPECT_EQ( fault.diagnostics.num_landmarks, landmarks_plus.size() );
+    EXPECT_TRUE( fault.diagnostics.probe_pnp_attempted );
+    EXPECT_EQ( fault.diagnostics.probe_pnp_result, scenario.m_failure );
+    EXPECT_EQ( fault.diagnostics.probe_pnp_correspondences,
+               landmarks_plus.size() );
+    // A shadow retry never applies its mask, so the current observation
+    // remains in committed history and the probe landmark reaches the graph.
+    const auto probe_timestamps = estimator.observationTimestamps( probe_id );
+    EXPECT_EQ( probe_timestamps.size(), 2U );
+    EXPECT_TRUE( hasTimestamp( probe_timestamps, 150'000'000 ) );
+    EXPECT_TRUE( hasTimestamp( probe_timestamps, 200'000'000 ) );
+
+    VioUpdateResult recovered = estimator.update( makeFrame(
+        calibration, stationary, 250'000'000, landmarks_plus, ids_plus ) );
+    EXPECT_EQ( recovered.status, UpdateStatus::kOk ) << recovered.message;
+    EXPECT_TRUE( recovered.diagnostics.pnp_success );
+    EXPECT_EQ( recovered.diagnostics.probe_pnp_result,
+               PnpProbeResult::kAccepted );
+    return PnpFaultResults{ .m_fault     = std::move( fault ),
+                            .m_recovered = std::move( recovered ) };
+  }
+
 }  // namespace
 
 TEST( StereoVoPnpTest, RejectsNonPositivePnpReproj )
@@ -202,6 +412,326 @@ TEST( StereoVoPnpTest, RejectsMinPnpInliersBelowFour )
                 std::invalid_argument );
 }
 
+TEST( StereoVoPnpTest, ReportsProposalPoseNonFinite )
+{
+  const auto results = runPnpProposalFailure( PnpFaultScenario{
+      .m_failure = PnpProbeResult::kProposalPoseNonFinite } );
+  EXPECT_EQ( results.m_fault.diagnostics.probe_pnp_result,
+             PnpProbeResult::kProposalPoseNonFinite );
+  expectGuessRetryNotAttempted( results.m_fault.diagnostics );
+}
+
+TEST( StereoVoPnpTest, ReportsProposalRmsInvalidCorrespondence )
+{
+  const auto results = runPnpProposalFailure( PnpFaultScenario{
+      .m_failure = PnpProbeResult::kProposalRmsInvalidCorrespondence } );
+  EXPECT_EQ( results.m_fault.diagnostics.probe_pnp_result,
+             PnpProbeResult::kProposalRmsInvalidCorrespondence );
+  expectGuessRetryNotAttempted( results.m_fault.diagnostics );
+}
+
+TEST( StereoVoPnpTest, ReportsProposalRmsCheirality )
+{
+  const auto results = runPnpProposalFailure( PnpFaultScenario{
+      .m_failure = PnpProbeResult::kProposalRmsCheirality } );
+  EXPECT_FALSE( results.m_fault.diagnostics.pnp_success );
+  EXPECT_EQ( results.m_fault.diagnostics.probe_pnp_result,
+             PnpProbeResult::kProposalRmsCheirality );
+  const auto& diagnostics = results.m_fault.diagnostics;
+  EXPECT_EQ( diagnostics.probe_pnp_guess_retry_outcome,
+             PnpGuessRetryOutcome::kWouldPassExistingPnpGates );
+  ASSERT_TRUE(
+      diagnostics.probe_pnp_guess_retry_proposal_rms_px.has_value() );
+  EXPECT_TRUE( std::isfinite(
+      *diagnostics.probe_pnp_guess_retry_proposal_rms_px ) );
+  ASSERT_TRUE( diagnostics.probe_pnp_guess_retry_guess_rms_px.has_value() );
+  EXPECT_TRUE( std::isfinite(
+      *diagnostics.probe_pnp_guess_retry_guess_rms_px ) );
+  ASSERT_TRUE( diagnostics
+                   .probe_pnp_guess_retry_cheiral_inlier_count.has_value() );
+  EXPECT_EQ(
+      *diagnostics.probe_pnp_guess_retry_cheiral_inlier_count, 0U );
+  ASSERT_TRUE(
+      diagnostics.probe_pnp_guess_retry_min_inlier_depth_m.has_value() );
+  EXPECT_GT( *diagnostics.probe_pnp_guess_retry_min_inlier_depth_m, 0.0 );
+  ASSERT_TRUE(
+      diagnostics.probe_pnp_guess_retry_translation_delta_m.has_value() );
+  EXPECT_TRUE( std::isfinite(
+      *diagnostics.probe_pnp_guess_retry_translation_delta_m ) );
+  ASSERT_TRUE(
+      diagnostics.probe_pnp_guess_retry_rotation_delta_rad.has_value() );
+  EXPECT_TRUE( std::isfinite(
+      *diagnostics.probe_pnp_guess_retry_rotation_delta_rad ) );
+}
+
+TEST( StereoVoPnpTest,
+      ProductCheiralityRetryInstallsExactRansacInlierMaskWithoutProbe )
+{
+  const auto                   calibration = makeCalibration();
+  std::vector<Eigen::Vector3d> landmarks   = kNearAxisLandmarks;
+  landmarks.emplace_back( 0.04, -0.03, 5.5 );
+  const auto              ids        = sequentialIds( landmarks.size(), 1 );
+  const LandmarkId        outlier_id = ids.back();
+  const Eigen::Isometry3d stationary = Eigen::Isometry3d::Identity();
+
+  // A unique mono observation makes membership in the committed current-frame
+  // mask observable through the public factor diagnostics. Repeat that tag for
+  // every LandmarkId so a matching count cannot hide an identity swap.
+  for ( const LandmarkId tagged_mono_id : ids )
+  {
+    SCOPED_TRACE( tagged_mono_id );
+    EstimatorOptions options            = defaultPnpOptions();
+    options.enable_pnp_cheirality_retry = true;
+    options.enable_probe_b              = false;
+    options.enable_outlier_cull         = false;
+    options.enable_outlier_reopt        = false;
+    VioEstimator estimator( calibration,
+                            phad::test_support::testImuParameters(),
+                            options );
+
+    const auto root = estimator.update( makeFrame(
+        calibration, stationary, 50'000'000, landmarks, ids ) );
+    ASSERT_EQ( root.status, UpdateStatus::kOk ) << root.message;
+    const auto committed = estimator.update( makeFrame(
+        calibration, stationary, 100'000'000, landmarks, ids ) );
+    ASSERT_EQ( committed.status, UpdateStatus::kOk ) << committed.message;
+    ASSERT_EQ( committed.diagnostics.num_landmarks, landmarks.size() );
+
+    auto fault_measurement = makeFrame(
+        calibration, stationary, 150'000'000, landmarks, ids );
+    offsetLeftPixel(
+        fault_measurement, outlier_id, Eigen::Vector2d( 80.0, 0.0 ) );
+    for ( StereoObservation& observation : fault_measurement.m_observations )
+    {
+      if ( observation.id == tagged_mono_id )
+      {
+        observation.disparity_px = 0.0;
+      }
+    }
+    VioEstimatorTestAccess::setNextPnpProposalFailure(
+        estimator, PnpProbeResult::kProposalRmsCheirality );
+
+    const auto recovered = estimator.update( fault_measurement );
+    ASSERT_EQ( recovered.status, UpdateStatus::kOk ) << recovered.message;
+    ASSERT_TRUE( recovered.estimate.has_value() );
+    EXPECT_TRUE( recovered.diagnostics.pnp_success );
+    EXPECT_FALSE( recovered.diagnostics.probe_pnp_attempted );
+    EXPECT_EQ( recovered.diagnostics.pnp_inliers,
+               kNearAxisLandmarks.size() );
+    EXPECT_EQ( recovered.diagnostics.num_retained_observations,
+               kNearAxisLandmarks.size() );
+    EXPECT_EQ( recovered.diagnostics.num_current_visual_factors,
+               kNearAxisLandmarks.size() );
+    EXPECT_EQ( recovered.diagnostics.num_current_mono_visual_factors,
+               tagged_mono_id == outlier_id ? 0U : 1U );
+
+    for ( const LandmarkId id : ids )
+    {
+      const auto timestamps = estimator.observationTimestamps( id );
+      ASSERT_EQ( timestamps.size(), 3U ) << "id=" << id;
+      EXPECT_TRUE( hasTimestamp( timestamps, 50'000'000 ) ) << "id=" << id;
+      EXPECT_TRUE( hasTimestamp( timestamps, 100'000'000 ) ) << "id=" << id;
+      EXPECT_TRUE( hasTimestamp( timestamps, 150'000'000 ) ) << "id=" << id;
+    }
+  }
+}
+
+TEST( StereoVoPnpTest,
+      FailedTypedCheiralityRetryIsExactlyEquivalentToGateOffFallback )
+{
+  const auto calibration = makeCalibration();
+  const auto ids         = sequentialIds( kNearAxisLandmarks.size(), 1 );
+
+  const auto make_options = []( bool enable_retry ) {
+    EstimatorOptions options            = defaultPnpOptions();
+    options.enable_pnp_cheirality_retry = enable_retry;
+    options.enable_probe_b              = false;
+    options.enable_outlier_cull         = false;
+    options.enable_outlier_reopt        = false;
+    return options;
+  };
+  VioEstimator gate_off( calibration,
+                         phad::test_support::testImuParameters(),
+                         make_options( false ) );
+  VioEstimator retry_failure( calibration,
+                              phad::test_support::testImuParameters(),
+                              make_options( true ) );
+
+  const Eigen::Isometry3d stationary = Eigen::Isometry3d::Identity();
+  for ( std::int64_t frame = 1; frame <= 2; ++frame )
+  {
+    const auto measurement = makeFrame(
+        calibration, stationary, frame * 50'000'000,
+        kNearAxisLandmarks, ids );
+    const auto off_seeded = gate_off.update( measurement );
+    const auto on_seeded  = retry_failure.update( measurement );
+    ASSERT_EQ( off_seeded.status, UpdateStatus::kOk ) << off_seeded.message;
+    ASSERT_EQ( on_seeded.status, UpdateStatus::kOk ) << on_seeded.message;
+  }
+
+  std::vector<Eigen::Vector3d> landmarks_plus = kNearAxisLandmarks;
+  std::vector<LandmarkId>      ids_plus       = ids;
+  const LandmarkId             probe_id       = 99;
+  landmarks_plus.emplace_back( 0.04, -0.03, 5.5 );
+  ids_plus.push_back( probe_id );
+
+  const auto introduced_measurement = makeFrame(
+      calibration, stationary, 150'000'000, landmarks_plus, ids_plus );
+  const auto off_introduced = gate_off.update( introduced_measurement );
+  const auto on_introduced  = retry_failure.update( introduced_measurement );
+  ASSERT_EQ( off_introduced.status, UpdateStatus::kOk )
+      << off_introduced.message;
+  ASSERT_EQ( on_introduced.status, UpdateStatus::kOk )
+      << on_introduced.message;
+
+  auto fault_measurement = makeFrame(
+      calibration, stationary, 200'000'000, landmarks_plus, ids_plus );
+  offsetLeftPixel(
+      fault_measurement, probe_id, Eigen::Vector2d( 80.0, 0.0 ) );
+  VioEstimatorTestAccess::setNextPnpProposalFailure(
+      gate_off, PnpProbeResult::kProposalRmsCheirality );
+  VioEstimatorTestAccess::setNextPnpProposalFailure(
+      retry_failure, PnpProbeResult::kProposalRmsCheirality );
+  VioEstimatorTestAccess::setNextPnpGuessRetryOutcome(
+      retry_failure, PnpGuessRetryOutcome::kSolveFailed );
+
+  const auto off_fallback = gate_off.update( fault_measurement );
+  const auto on_fallback  = retry_failure.update( fault_measurement );
+  expectExactPublicState( off_fallback, on_fallback );
+  EXPECT_FALSE( off_fallback.diagnostics.pnp_success );
+  EXPECT_FALSE( on_fallback.diagnostics.pnp_success );
+  EXPECT_FALSE( off_fallback.diagnostics.probe_pnp_attempted );
+  EXPECT_FALSE( on_fallback.diagnostics.probe_pnp_attempted );
+  for ( const LandmarkId id : ids_plus )
+  {
+    EXPECT_EQ( retry_failure.observationTimestamps( id ),
+               gate_off.observationTimestamps( id ) );
+  }
+
+  const auto next_measurement = makeFrame(
+      calibration, stationary, 250'000'000, landmarks_plus, ids_plus );
+  const auto off_next = gate_off.update( next_measurement );
+  const auto on_next  = retry_failure.update( next_measurement );
+  expectExactPublicState( off_next, on_next );
+  EXPECT_TRUE( off_next.diagnostics.pnp_success );
+  EXPECT_TRUE( on_next.diagnostics.pnp_success );
+  EXPECT_FALSE( off_next.diagnostics.probe_pnp_attempted );
+  EXPECT_FALSE( on_next.diagnostics.probe_pnp_attempted );
+}
+
+TEST( StereoVoPnpTest, ReportsProposalRmsNonFinite )
+{
+  const auto results = runPnpProposalFailure( PnpFaultScenario{
+      .m_failure = PnpProbeResult::kProposalRmsNonFinite } );
+  EXPECT_EQ( results.m_fault.diagnostics.probe_pnp_result,
+             PnpProbeResult::kProposalRmsNonFinite );
+  expectGuessRetryNotAttempted( results.m_fault.diagnostics );
+}
+
+TEST( StereoVoPnpTest,
+      ProductGateDoesNotRetryNonCheiralityProposalFailures )
+{
+  const std::vector<PnpProbeResult> failures{
+      PnpProbeResult::kProposalPoseNonFinite,
+      PnpProbeResult::kProposalRmsInvalidCorrespondence,
+      PnpProbeResult::kProposalRmsNonFinite,
+  };
+  for ( const PnpProbeResult failure : failures )
+  {
+    SCOPED_TRACE( static_cast<int>( failure ) );
+    const auto results = runPnpProposalFailure( PnpFaultScenario{
+        .m_failure              = failure,
+        .m_enable_product_retry = true } );
+    EXPECT_FALSE( results.m_fault.diagnostics.pnp_success );
+    EXPECT_EQ( results.m_fault.diagnostics.probe_pnp_result, failure );
+    expectGuessRetryNotAttempted( results.m_fault.diagnostics );
+  }
+}
+
+TEST( StereoVoPnpTest, CheiralityRetryFailureDoesNotRecurse )
+{
+  const auto results = runPnpProposalFailure( PnpFaultScenario{
+      .m_failure              = PnpProbeResult::kProposalRmsCheirality,
+      .m_enable_product_retry = true,
+      .m_retry_failure        = PnpGuessRetryOutcome::kProposalRmsCheirality } );
+  EXPECT_FALSE( results.m_fault.diagnostics.pnp_success );
+  EXPECT_EQ( results.m_fault.diagnostics.probe_pnp_result,
+             PnpProbeResult::kProposalRmsCheirality );
+  EXPECT_EQ( results.m_fault.diagnostics.probe_pnp_guess_retry_outcome,
+             PnpGuessRetryOutcome::kProposalRmsCheirality );
+  EXPECT_TRUE( results.m_recovered.diagnostics.pnp_success );
+  EXPECT_EQ( results.m_recovered.diagnostics.probe_pnp_result,
+             PnpProbeResult::kAccepted );
+  expectGuessRetryNotAttempted( results.m_recovered.diagnostics );
+}
+
+TEST( StereoVoPnpTest, ProposalFailureFaultArmRejectsNonFailureResult )
+{
+  VioEstimator estimator( makeCalibration(),
+                          phad::test_support::testImuParameters(),
+                          defaultPnpOptions() );
+  EXPECT_THROW(
+      VioEstimatorTestAccess::setNextPnpProposalFailure(
+          estimator, PnpProbeResult::kAccepted ),
+      std::invalid_argument );
+}
+
+TEST( StereoVoPnpTest, GuessRetryFaultArmRejectsNonFailureOutcomes )
+{
+  VioEstimator estimator( makeCalibration(),
+                          phad::test_support::testImuParameters(),
+                          defaultPnpOptions() );
+  EXPECT_THROW(
+      VioEstimatorTestAccess::setNextPnpGuessRetryOutcome(
+          estimator, PnpGuessRetryOutcome::kNotAttempted ),
+      std::invalid_argument );
+  EXPECT_THROW(
+      VioEstimatorTestAccess::setNextPnpGuessRetryOutcome(
+          estimator, PnpGuessRetryOutcome::kWouldPassExistingPnpGates ),
+      std::invalid_argument );
+}
+
+TEST( StereoVoPnpTest,
+      ProductGateDoesNotChangePrimaryPnpSuccessPublicState )
+{
+  const auto calibration = makeCalibration();
+  const auto ids         = sequentialIds( kLandmarksA.size(), 1 );
+  const auto poses       = translatingPoses( 6, 0.05 );
+
+  EstimatorOptions gate_off_options           = defaultPnpOptions();
+  gate_off_options.enable_probe_b             = false;
+  EstimatorOptions gate_on_options            = gate_off_options;
+  gate_on_options.enable_pnp_cheirality_retry = true;
+  VioEstimator gate_off( calibration,
+                         phad::test_support::testImuParameters(),
+                         gate_off_options );
+  VioEstimator gate_on( calibration,
+                        phad::test_support::testImuParameters(),
+                        gate_on_options );
+
+  for ( std::size_t index = 0; index < poses.size(); ++index )
+  {
+    const std::int64_t timestamp_ns =
+        static_cast<std::int64_t>( index + 1U ) * 50'000'000;
+    const auto measurement = makeFrame(
+        calibration, poses[ index ], timestamp_ns, kLandmarksA, ids );
+    const auto gate_off_result = gate_off.update( measurement );
+    const auto gate_on_result  = gate_on.update( measurement );
+    expectExactPublicState( gate_off_result, gate_on_result );
+
+    if ( index == 0U )
+    {
+      EXPECT_FALSE( gate_off_result.diagnostics.pnp_success );
+      EXPECT_FALSE( gate_on_result.diagnostics.pnp_success );
+      continue;
+    }
+    EXPECT_TRUE( gate_off_result.diagnostics.pnp_success );
+    EXPECT_TRUE( gate_on_result.diagnostics.pnp_success );
+    EXPECT_FALSE( gate_off_result.diagnostics.probe_pnp_attempted );
+    EXPECT_FALSE( gate_on_result.diagnostics.probe_pnp_attempted );
+  }
+}
+
 TEST( StereoVoPnpTest, PnpSucceedsOnCleanMotion )
 {
   const auto calibration = makeCalibration();
@@ -209,7 +739,8 @@ TEST( StereoVoPnpTest, PnpSucceedsOnCleanMotion )
   const auto poses       = translatingPoses( 6, 0.05 );
 
   EstimatorOptions options_pnp = defaultPnpOptions();
-  VioEstimator     estimator_pnp( calibration, phad::test_support::testImuParameters(), options_pnp );
+  options_pnp.enable_probe_b   = true;
+  VioEstimator estimator_pnp( calibration, phad::test_support::testImuParameters(), options_pnp );
 
   EstimatorOptions options_cv = defaultPnpOptions();
   options_cv.enable_pnp_init  = false;
@@ -233,12 +764,66 @@ TEST( StereoVoPnpTest, PnpSucceedsOnCleanMotion )
     if ( index == 0 )
     {
       EXPECT_FALSE( result_pnp.diagnostics.pnp_success );
+      EXPECT_FALSE( result_pnp.diagnostics.probe_pnp_attempted );
+      EXPECT_EQ( result_pnp.diagnostics.probe_pnp_result,
+                 PnpProbeResult::kNotAttempted );
       EXPECT_FALSE( result_cv.diagnostics.pnp_success );
       continue;
     }
 
     EXPECT_TRUE( result_pnp.diagnostics.pnp_success );
     EXPECT_GE( result_pnp.diagnostics.pnp_inliers, 10U );
+    EXPECT_TRUE( result_pnp.diagnostics.probe_pnp_attempted );
+    EXPECT_EQ( result_pnp.diagnostics.probe_pnp_result,
+               PnpProbeResult::kAccepted );
+    EXPECT_EQ( result_pnp.diagnostics.probe_pnp_correspondences,
+               ids.size() );
+    EXPECT_EQ( result_pnp.diagnostics.probe_pnp_inliers,
+               result_pnp.diagnostics.pnp_inliers );
+    ASSERT_TRUE(
+        result_pnp.diagnostics.probe_pnp_proposal_rms_px.has_value() );
+    EXPECT_TRUE( std::isfinite(
+        *result_pnp.diagnostics.probe_pnp_proposal_rms_px ) );
+    ASSERT_TRUE( result_pnp.diagnostics.probe_pnp_guess_rms_px.has_value() );
+    EXPECT_TRUE(
+        std::isfinite( *result_pnp.diagnostics.probe_pnp_guess_rms_px ) );
+    ASSERT_TRUE( result_pnp.diagnostics
+                     .probe_pnp_proposal_inlier_count.has_value() );
+    EXPECT_EQ( *result_pnp.diagnostics.probe_pnp_proposal_inlier_count,
+               result_pnp.diagnostics.pnp_inliers );
+    ASSERT_TRUE( result_pnp.diagnostics
+                     .probe_pnp_proposal_cheiral_inlier_count.has_value() );
+    EXPECT_EQ(
+        *result_pnp.diagnostics.probe_pnp_proposal_cheiral_inlier_count,
+        0U );
+    ASSERT_TRUE(
+        result_pnp.diagnostics
+            .probe_pnp_proposal_min_inlier_depth_m.has_value() );
+    EXPECT_GT(
+        *result_pnp.diagnostics.probe_pnp_proposal_min_inlier_depth_m,
+        0.0 );
+    ASSERT_TRUE(
+        result_pnp.diagnostics
+            .probe_pnp_proposal_min_inlier_landmark_id.has_value() );
+    EXPECT_NE(
+        std::find(
+            ids.begin(), ids.end(),
+            *result_pnp.diagnostics
+                 .probe_pnp_proposal_min_inlier_landmark_id ),
+        ids.end() );
+    ASSERT_TRUE(
+        result_pnp.diagnostics
+            .probe_pnp_proposal_guess_translation_delta_m.has_value() );
+    EXPECT_TRUE( std::isfinite(
+        *result_pnp.diagnostics
+             .probe_pnp_proposal_guess_translation_delta_m ) );
+    ASSERT_TRUE(
+        result_pnp.diagnostics
+            .probe_pnp_proposal_guess_rotation_delta_rad.has_value() );
+    EXPECT_TRUE( std::isfinite(
+        *result_pnp.diagnostics
+             .probe_pnp_proposal_guess_rotation_delta_rad ) );
+    expectFiniteCurrentGraphProbe( result_pnp.diagnostics );
     EXPECT_FALSE( result_cv.diagnostics.pnp_success );
 
     // Clean synthetic motion + BA make both paths near-truth; gate on absolute
@@ -409,9 +994,11 @@ TEST( StereoVoPnpTest, FallsBackWhenPnpStereoRmsIsWorseThanGuess )
   const auto calibration = makeCalibration();
   const auto ids         = sequentialIds( kNearAxisLandmarks.size(), 1 );
 
-  EstimatorOptions options     = defaultPnpOptions();
-  options.enable_outlier_cull  = false;
-  options.enable_outlier_reopt = false;
+  EstimatorOptions options            = defaultPnpOptions();
+  options.enable_pnp_cheirality_retry = true;
+  options.enable_outlier_cull         = false;
+  options.enable_outlier_reopt        = false;
+  options.enable_probe_b              = true;
   VioEstimator estimator( calibration, phad::test_support::testImuParameters(), options );
 
   const Eigen::Isometry3d stationary = Eigen::Isometry3d::Identity();
@@ -454,6 +1041,23 @@ TEST( StereoVoPnpTest, FallsBackWhenPnpStereoRmsIsWorseThanGuess )
   EXPECT_TRUE( fallback.estimate->T_W_B.matrix().allFinite() );
   EXPECT_FALSE( fallback.diagnostics.pnp_success );
   EXPECT_EQ( fallback.diagnostics.pnp_inliers, 0U );
+  EXPECT_TRUE( fallback.diagnostics.probe_pnp_attempted );
+  EXPECT_EQ( fallback.diagnostics.probe_pnp_result,
+             PnpProbeResult::kProposalRmsRejected );
+  EXPECT_EQ( fallback.diagnostics.probe_pnp_correspondences,
+             landmarks_plus.size() );
+  EXPECT_GE( fallback.diagnostics.probe_pnp_inliers,
+             static_cast<std::uint32_t>( kNearAxisLandmarks.size() ) );
+  ASSERT_TRUE(
+      fallback.diagnostics.probe_pnp_proposal_rms_px.has_value() );
+  ASSERT_TRUE( fallback.diagnostics.probe_pnp_guess_rms_px.has_value() );
+  EXPECT_TRUE( std::isfinite(
+      *fallback.diagnostics.probe_pnp_proposal_rms_px ) );
+  EXPECT_TRUE(
+      std::isfinite( *fallback.diagnostics.probe_pnp_guess_rms_px ) );
+  EXPECT_GT( *fallback.diagnostics.probe_pnp_proposal_rms_px,
+             *fallback.diagnostics.probe_pnp_guess_rms_px );
+  expectGuessRetryNotAttempted( fallback.diagnostics );
   // Rejected proposal must not apply its mask: the probe's second sighting
   // reaches min_landmark_observations and therefore enters the graph.
   EXPECT_EQ( fallback.diagnostics.num_landmarks, landmarks_plus.size() );

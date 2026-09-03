@@ -86,6 +86,144 @@ namespace
     EXPECT_NE( err.find( "--evict-skip-culled" ), std::string::npos );
     EXPECT_NE( err.find( "--zombie-drop-age" ), std::string::npos );
     EXPECT_NE( err.find( "--gyro-observe" ), std::string::npos );
+    EXPECT_NE( err.find( "--estimator-enable-pnp-cheirality-retry" ),
+               std::string::npos );
+    EXPECT_NE( err.find( "--dataset-format" ), std::string::npos );
+    EXPECT_NE( err.find( "euroc|tum-vi" ), std::string::npos );
+    EXPECT_NE( err.find( "--gt-tum-vi" ), std::string::npos );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest,
+        DatasetFormatIsExplicitAndPreservesFormalEurocIdentity )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_dataset_format";
+    std::filesystem::remove_all( root );
+    std::filesystem::create_directories( root );
+
+    struct RunPaths
+    {
+      std::filesystem::path out;
+      std::filesystem::path stdout_path;
+      std::filesystem::path stderr_path;
+    };
+    const RunPaths default_euroc{ root / "default-euroc",
+                                  root / "default-euroc.stdout",
+                                  root / "default-euroc.stderr" };
+    const RunPaths explicit_euroc{ root / "explicit-euroc",
+                                   root / "explicit-euroc.stdout",
+                                   root / "explicit-euroc.stderr" };
+    const RunPaths tum_vi{ root / "tum-vi", root / "tum-vi.stdout",
+                           root / "tum-vi.stderr" };
+    const auto     tum_vi_sequence = root / "tum-vi-sequence";
+    for ( const auto* sensor : { "cam0", "cam1", "imu0" } )
+    {
+      const auto sensor_root = tum_vi_sequence / "mav0" / sensor;
+      std::filesystem::create_directories( sensor_root );
+      std::ofstream( sensor_root / "data.csv" );
+    }
+
+    const auto base_args = []( const RunPaths&  paths,
+                               std::string_view sequence_name ) {
+      return "/nonexistent/sequence --out \"" + paths.out.string() +
+             "\" --sequence-name " + std::string{ sequence_name } +
+             " --force --estimator-enable-moving-bootstrap";
+    };
+
+    EXPECT_NE( runBench( base_args( default_euroc, "default_euroc" ),
+                         default_euroc.stdout_path,
+                         default_euroc.stderr_path ),
+               0 );
+    EXPECT_NE( runBench( base_args( explicit_euroc, "explicit_euroc" ) +
+                             " --dataset-format euroc",
+                         explicit_euroc.stdout_path,
+                         explicit_euroc.stderr_path ),
+               0 );
+    EXPECT_NE( runBench( "\"" + tum_vi_sequence.string() + "\" --out \"" +
+                             tum_vi.out.string() +
+                             "\" --sequence-name tum_vi --force "
+                             "--estimator-enable-moving-bootstrap "
+                             "--dataset-format tum-vi --gt-tum-vi \"" +
+                             tum_vi_sequence.string() + "\"",
+                         tum_vi.stdout_path, tum_vi.stderr_path ),
+               0 );
+
+    ASSERT_TRUE( std::filesystem::exists( default_euroc.out / "meta.json" ) )
+        << readFile( default_euroc.stderr_path );
+    ASSERT_TRUE( std::filesystem::exists( explicit_euroc.out / "meta.json" ) )
+        << readFile( explicit_euroc.stderr_path );
+    ASSERT_TRUE( std::filesystem::exists( tum_vi.out / "meta.json" ) )
+        << readFile( tum_vi.stderr_path );
+    const auto default_meta =
+        nlohmann::json::parse( readFile( default_euroc.out / "meta.json" ) );
+    const auto explicit_meta =
+        nlohmann::json::parse( readFile( explicit_euroc.out / "meta.json" ) );
+    const auto tum_vi_meta =
+        nlohmann::json::parse( readFile( tum_vi.out / "meta.json" ) );
+
+    EXPECT_EQ( default_meta.at( "paths" ),
+               nlohmann::json( { { "bench_root", "" },
+                                 { "output_dir",
+                                   default_euroc.out.string() },
+                                 { "layout_template", "override" } } ) );
+    EXPECT_EQ( default_meta.at( "config_hash" ), "0337287b" );
+    EXPECT_EQ( explicit_meta.at( "config_hash" ),
+               default_meta.at( "config_hash" ) );
+    EXPECT_EQ( explicit_meta.at( "config_canonical_text" ),
+               default_meta.at( "config_canonical_text" ) );
+    EXPECT_NE( tum_vi_meta.at( "config_hash" ),
+               default_meta.at( "config_hash" ) );
+    EXPECT_NE( tum_vi_meta.at( "config_canonical_text" )
+                   .get<std::string>()
+                   .find( "session.dataset_format=tum_vi" ),
+               std::string::npos );
+    EXPECT_NE( readFile( tum_vi.stderr_path ).find( "dso/camchain.yaml" ),
+               std::string::npos );
+
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, RejectsInvalidOrConflictingDatasetOptions )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_dataset_format_reject";
+    std::filesystem::remove_all( root );
+    std::filesystem::create_directories( root );
+
+    const auto expect_parse_failure =
+        [ &root ]( std::string_view name, const std::string& arguments,
+                   std::string_view expected_message ) {
+          const auto stdout_path = root / ( std::string{ name } + ".stdout" );
+          const auto stderr_path = root / ( std::string{ name } + ".stderr" );
+          EXPECT_EQ( runBench( arguments, stdout_path, stderr_path ), 2 );
+          EXPECT_NE( readFile( stderr_path ).find( expected_message ),
+                     std::string::npos );
+        };
+
+    expect_parse_failure(
+        "invalid", "/nonexistent/sequence --dataset-format inferred",
+        "--dataset-format" );
+    expect_parse_failure(
+        "tum-with-euroc-gt",
+        "/nonexistent/sequence --dataset-format tum-vi --gt-euroc "
+        "/nonexistent/gt",
+        "--gt-euroc" );
+    expect_parse_failure(
+        "euroc-with-tum-gt",
+        "/nonexistent/sequence --dataset-format euroc --gt-tum-vi "
+        "/nonexistent/gt",
+        "--gt-tum-vi" );
+    expect_parse_failure(
+        "both-gt",
+        "/nonexistent/sequence --dataset-format tum-vi --gt-euroc "
+        "/nonexistent/euroc --gt-tum-vi /nonexistent/tum",
+        "groundtruth" );
 
     std::filesystem::remove_all( root );
   }
@@ -204,6 +342,71 @@ namespace
     std::filesystem::remove_all( root );
   }
 
+  TEST( VoBenchCliTest,
+        PnpCheiralityRetryGateChangesConfigIdentityOnlyWhenEnabled )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_pnp_cheirality_retry_hash";
+    std::filesystem::remove_all( root );
+    std::filesystem::create_directories( root );
+    const auto out_default    = root / "out_default";
+    const auto out_retry      = root / "out_retry";
+    const auto stdout_default = root / "stdout_default.txt";
+    const auto stderr_default = root / "stderr_default.txt";
+    const auto stdout_retry   = root / "stdout_retry.txt";
+    const auto stderr_retry   = root / "stderr_retry.txt";
+
+    const int default_exit = runBench(
+        "/nonexistent/sequence --out \"" + out_default.string() +
+            "\" --sequence-name pnp_retry_default --force "
+            "--estimator-enable-moving-bootstrap",
+        stdout_default, stderr_default );
+    const int retry_exit = runBench(
+        "/nonexistent/sequence --out \"" + out_retry.string() +
+            "\" --sequence-name pnp_retry_enabled --force "
+            "--estimator-enable-moving-bootstrap "
+            "--estimator-enable-pnp-cheirality-retry",
+        stdout_retry, stderr_retry );
+
+    EXPECT_NE( default_exit, 0 );
+    ASSERT_NE( retry_exit, 2 ) << readFile( stderr_retry );
+    EXPECT_NE( retry_exit, 0 );
+    ASSERT_TRUE( std::filesystem::exists( out_default / "meta.json" ) )
+        << readFile( stderr_default );
+    ASSERT_TRUE( std::filesystem::exists( out_retry / "meta.json" ) )
+        << readFile( stderr_retry );
+
+    const auto default_meta =
+        nlohmann::json::parse( readFile( out_default / "meta.json" ) );
+    const auto retry_meta =
+        nlohmann::json::parse( readFile( out_retry / "meta.json" ) );
+    const std::string default_hash =
+        default_meta.at( "config_hash" ).get<std::string>();
+    const std::string retry_hash =
+        retry_meta.at( "config_hash" ).get<std::string>();
+    const std::string default_config =
+        default_meta.at( "config_canonical_text" ).get<std::string>();
+    const std::string retry_config =
+        retry_meta.at( "config_canonical_text" ).get<std::string>();
+
+    constexpr std::string_view kRetryKey =
+        "estimator.enable_pnp_cheirality_retry=true";
+    EXPECT_EQ( default_hash, "0337287b" );
+    EXPECT_EQ( extractConfigHash( readFile( stdout_default ) ), default_hash );
+    EXPECT_EQ( default_config.find( kRetryKey ), std::string::npos );
+    ASSERT_FALSE( retry_hash.empty() );
+    EXPECT_NE( retry_hash, default_hash );
+    EXPECT_EQ( extractConfigHash( readFile( stdout_retry ) ), retry_hash );
+    const auto key_position = retry_config.find( kRetryKey );
+    ASSERT_NE( key_position, std::string::npos );
+    EXPECT_EQ( retry_config.find( kRetryKey, key_position + kRetryKey.size() ),
+               std::string::npos );
+
+    std::filesystem::remove_all( root );
+  }
+
   TEST( VoBenchCliTest, RejectsNegativeMaxOutlierReopts )
   {
     ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
@@ -225,6 +428,29 @@ namespace
     EXPECT_NE( err.find( "--max-outlier-reopts" ), std::string::npos );
     EXPECT_NE( err.find( "non-negative" ), std::string::npos );
 
+    std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, RejectsRetiredAccumulatedSeedFlag )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    const auto root = std::filesystem::temp_directory_path() /
+                      "phad_vo_bench_cli_retired_seed";
+    std::filesystem::remove_all( root );
+    std::filesystem::create_directories( root );
+    const auto stdout_path = root / "stdout.txt";
+    const auto stderr_path = root / "stderr.txt";
+
+    const int exit_code = runBench(
+        "/nonexistent/sequence --estimator-enable-accumulated-seed",
+        stdout_path, stderr_path );
+
+    EXPECT_EQ( exit_code, 2 );
+    const std::string err = readFile( stderr_path );
+    EXPECT_NE(
+        err.find( "unknown option: --estimator-enable-accumulated-seed" ),
+        std::string::npos );
     std::filesystem::remove_all( root );
   }
 

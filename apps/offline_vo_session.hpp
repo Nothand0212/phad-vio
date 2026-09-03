@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -27,6 +28,9 @@ namespace phad::apps
   struct SessionError
   {
     std::string detail;
+    /// Present only when the estimator returned a terminal typed result.
+    std::optional<estimator::UpdateStatus> estimator_status = std::nullopt;
+    std::optional<common::Timestamp>       timestamp        = std::nullopt;
   };
 
   enum class GyroPacketStatus : std::uint8_t
@@ -125,6 +129,8 @@ namespace phad::apps
     std::uint32_t num_current_visual_factors      = 0;
     std::uint32_t num_mapped_observations         = 0;
     std::uint32_t num_current_mono_visual_factors = 0;
+    /// In-memory lifecycle snapshot; writeDiagCsv() intentionally ignores it.
+    estimator::InitializationDiagnostics initialization;
   };
 
   struct FrameCounts
@@ -161,6 +167,21 @@ namespace phad::apps
     std::uint64_t non_keyframe_evictions  = 0;
     std::uint64_t imu_reintegrations      = 0;
   };
+
+  namespace internal
+  {
+    /// Record one accepted pose's segment without counting repeated poses in
+    /// the same segment as additional segments or re-anchors.
+    void recordAcceptedSegment(
+        std::uint32_t                 segment_id,
+        std::optional<std::uint32_t>& last_segment_id,
+        FrameCounts&                  counts );
+
+    /// Append the canonical segment summary when a re-anchor or rejected seed
+    /// makes the initialization lifecycle noteworthy.
+    void appendSegmentSummaryWarning( const FrameCounts&        counts,
+                                      std::vector<std::string>& warnings );
+  }  // namespace internal
 
   struct StageTiming
   {
@@ -199,6 +220,19 @@ namespace phad::apps
     ReprojSummary                     reproj;
     std::optional<SessionError>       error;
   };
+
+  namespace internal
+  {
+    using EstimatorUpdateFunction = std::function<estimator::VioUpdateResult(
+        const estimator::VioMeasurement&, bool )>;
+
+    /// Test seam for exercising terminal estimator results through the full
+    /// session lifecycle. An empty function uses the production estimator.
+    [[nodiscard]] OfflineVoSessionResult runOfflineVoSessionWithEstimatorUpdate(
+        io::dataset::StereoImuDataset  dataset,
+        const OfflineVoSessionOptions& options,
+        const EstimatorUpdateFunction& estimator_update );
+  }  // namespace internal
 
   [[nodiscard]] OfflineVoSessionResult runOfflineVoSession(
       io::dataset::StereoImuDataset  dataset,

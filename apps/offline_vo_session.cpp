@@ -19,6 +19,7 @@
 #include <variant>
 #include <vector>
 
+#include "apps/internal/offline_vo_session_keyframe.hpp"
 #include "apps/probe_b_writer.hpp"
 #include "apps/stereo_pair_stream.hpp"
 #include "apps/stereo_vo_glue.hpp"
@@ -36,6 +37,38 @@
 
 namespace phad::apps
 {
+  void internal::recordAcceptedSegment(
+      const std::uint32_t           segment_id,
+      std::optional<std::uint32_t>& last_segment_id,
+      FrameCounts&                  counts )
+  {
+    const bool is_new_segment =
+        !last_segment_id.has_value() || segment_id > *last_segment_id;
+    if ( is_new_segment )
+    {
+      ++counts.segments;
+      if ( last_segment_id.has_value() )
+      {
+        ++counts.reanchors;
+      }
+    }
+    last_segment_id = segment_id;
+  }
+
+  void internal::appendSegmentSummaryWarning(
+      const FrameCounts& counts, std::vector<std::string>& warnings )
+  {
+    if ( counts.reanchors == 0U && counts.seed_rejected == 0U )
+    {
+      return;
+    }
+
+    warnings.push_back(
+        "vo segments summary: segments=" + std::to_string( counts.segments ) +
+        " reanchors=" + std::to_string( counts.reanchors ) +
+        " seed_rejected=" + std::to_string( counts.seed_rejected ) );
+  }
+
   namespace
   {
     constexpr std::int64_t kImuContinuityLimitNs = 20'000'000;
@@ -185,132 +218,6 @@ namespace phad::apps
     constexpr std::string_view kSeedRejectedFirstSegment =
         "insufficient observations to seed first segment";
 
-    // ── Slice ⑤ keyframe selection ──────────────────────────────────────
-
-    // Parallax threshold for keyframe selection (pixels). Fixed 30 px since
-    // Slice ⑤c (f07cb93 briefly tried VINS' 10 px, ⑤d tried DKB-SLAM's
-    // dynamic Θ_max=5°; both reverted). Rotation-compensated parallax ≈ 0
-    // under pure rotation, so this rule only fires in translation segments;
-    // fast rotation is governed by Rule 1b/3 (track decay → forced
-    // keyframe). See docs/research/2026-08-05-note-m3-3-keyframe-design.md §D1.
-    constexpr double kKeyframeParallaxPx = 30.0;
-    // Minimum track count to run PnP (matches estimator.min_pnp_inliers).
-    constexpr std::size_t kKeyframeMinPnpTracks = 10U;
-
-    struct KeyframeSelectorState
-    {
-      std::unordered_map<common::LandmarkId, Eigen::Vector2d>
-                        last_kf_pixels;
-      common::Timestamp last_kf_timestamp{ 0 };
-      std::uint32_t     total_keyframes = 0;
-      // Rotation compensation (Slice ⑤b): rotation of the last accepted
-      // pose (BA/PnP-refined) used to project last-KF observations into the
-      // current frame before measuring parallax. Identity until first accept.
-      Eigen::Matrix3d last_accepted_rotation =
-          Eigen::Matrix3d::Identity();
-      // Rotation of the last keyframe pose (snapshot at kf accept).
-      Eigen::Matrix3d last_kf_rotation = Eigen::Matrix3d::Identity();
-    };
-
-    [[nodiscard]] bool isKeyframeImpl(
-        const frontend::FrameTracks&              tracks,
-        const common::Timestamp                   current_ts,
-        KeyframeSelectorState&                    state,
-        const camera::RectifiedStereoCalibration& calibration )
-    {
-      // Rule 0: empty observations never become keyframes (Slice ⑤b; the
-      // estimator rejects them, and snapshot must not advance on reject).
-      if ( tracks.observations.empty() ) return false;
-
-      // Rule 1: first 2 frames always keyframes.
-      if ( state.total_keyframes < 2 ) return true;
-
-      // Rule 1b: too few tracks to run PnP -> force keyframe (VINS
-      // last_track_num < 20 rule; here min_pnp_inliers = 10).
-      if ( tracks.observations.size() < kKeyframeMinPnpTracks ) return true;
-
-      // Rule 2: time fallback (> 0.5 s).
-      const std::int64_t dt_ns = current_ts.nanoseconds() -
-                                 state.last_kf_timestamp.nanoseconds();
-      if ( dt_ns > 500'000'000 ) return true;  // > 0.5 s
-
-      // Rule 3: track survival ratio (< 60%).
-      std::size_t common_count = 0;
-      for ( const auto& obs : tracks.observations )
-      {
-        if ( state.last_kf_pixels.count( obs.id ) > 0U )
-        {
-          ++common_count;
-        }
-      }
-      const double survive_ratio =
-          static_cast<double>( common_count ) /
-          static_cast<double>(
-              std::max( state.last_kf_pixels.size(), std::size_t{ 1 } ) );
-      if ( survive_ratio < 0.6 ) return true;
-
-      // Rule 4: rotation-compensated average parallax (> 30 px).
-      // Project last-KF observations into the current frame using the
-      // rotation between last-KF and last-accepted poses, then measure
-      // translational parallax. Pure rotation yields ~0 parallax and does
-      // not trigger a keyframe (VINS compensatedParallax2 idea).
-      // Camera-frame rotation: R_kf_to_cur = R_cur^T * R_kf (transforms a
-      // direction expressed in the last-KF camera frame into the current
-      // frame).
-      const Eigen::Matrix3d R_kf_to_cur =
-          state.last_accepted_rotation.transpose() *
-          state.last_kf_rotation;
-      // Normalized-coordinate projection of the rotation-compensated ray:
-      // pixel -> normalized ray, rotate, back to pixel. This avoids the
-      // degenerate z~0 blow-up of rotating raw pixel coordinates.
-      const double fx             = calibration.fxPixels();
-      const double fy             = calibration.fyPixels();
-      const double cx             = calibration.cxPixels();
-      const double cy             = calibration.cyPixels();
-      double       parallax_sum   = 0.0;
-      std::size_t  parallax_count = 0;
-      for ( const auto& obs : tracks.observations )
-      {
-        auto it = state.last_kf_pixels.find( obs.id );
-        if ( it == state.last_kf_pixels.end() ) continue;
-        // Last-KF observation as a unit-depth normalized ray.
-        const Eigen::Vector2d p_lastkf = it->second;
-        const Eigen::Vector2d p_cur    = obs.left_pixel;
-        const Eigen::Vector3d ray_kf(
-            ( p_lastkf.x() - cx ) / fx, ( p_lastkf.y() - cy ) / fy, 1.0 );
-        const Eigen::Vector3d ray_cur = R_kf_to_cur * ray_kf;
-        if ( ray_cur.z() <= 1e-6 )
-        {
-          continue;  // behind camera after rotation; skip
-        }
-        const Eigen::Vector2d p_comp(
-            ray_cur.x() / ray_cur.z() * fx + cx,
-            ray_cur.y() / ray_cur.z() * fy + cy );
-        const double dx = p_cur.x() - p_comp.x();
-        const double dy = p_cur.y() - p_comp.y();
-        parallax_sum += std::sqrt( dx * dx + dy * dy );
-        ++parallax_count;
-      }
-      if ( parallax_count > 0 &&
-           ( parallax_sum / static_cast<double>( parallax_count ) ) >
-               kKeyframeParallaxPx )
-        return true;
-
-      return false;
-    }
-
-    void updateKeyframeSnapshotImpl(
-        const frontend::FrameTracks& tracks,
-        const common::Timestamp      ts,
-        KeyframeSelectorState&       state )
-    {
-      state.last_kf_pixels.clear();
-      for ( const auto& obs : tracks.observations )
-        state.last_kf_pixels[ obs.id ] = obs.left_pixel;
-      state.last_kf_timestamp = ts;
-      state.last_kf_rotation  = state.last_accepted_rotation;
-      ++state.total_keyframes;
-    }
 
     [[nodiscard]] double percentile( std::vector<double> values, double q )
     {
@@ -353,9 +260,10 @@ namespace phad::apps
 
   }  // namespace
 
-  OfflineVoSessionResult runOfflineVoSession(
+  OfflineVoSessionResult internal::runOfflineVoSessionWithEstimatorUpdate(
       io::dataset::StereoImuDataset  dataset,
-      const OfflineVoSessionOptions& options )
+      const OfflineVoSessionOptions& options,
+      const EstimatorUpdateFunction& estimator_update )
   {
     OfflineVoSessionResult result;
 
@@ -438,18 +346,7 @@ namespace phad::apps
           return selected;
         };
 
-    // Slice ⑤ keyframe selector state.
-    KeyframeSelectorState kf_state;
-    const auto            isKeyframe =
-        [ &kf_state, &rectified_cal ]( const frontend::FrameTracks& tracks,
-                                       const common::Timestamp      ts ) {
-          return isKeyframeImpl( tracks, ts, kf_state, rectified_cal );
-        };
-    const auto updateKeyframeSnapshot =
-        [ &kf_state ]( const frontend::FrameTracks& tracks,
-                       const common::Timestamp      ts ) {
-          updateKeyframeSnapshotImpl( tracks, ts, kf_state );
-        };
+    internal::KeyframeSelectorState kf_state;
 
     std::vector<common::TimedPose> poses;
     std::vector<common::TimedPose> kf_poses;
@@ -469,14 +366,7 @@ namespace phad::apps
 
     const auto finalizeSegmentsAndWarnings = [ &result, &stream ]() {
       result.warnings = stream.warnings();
-      if ( result.counts.seed_rejected > 0U )
-      {
-        result.warnings.push_back(
-            "vo initialization summary: segments=" +
-            std::to_string( result.counts.segments ) +
-            " seed_rejected=" +
-            std::to_string( result.counts.seed_rejected ) );
-      }
+      internal::appendSegmentSummaryWarning( result.counts, result.warnings );
       if ( result.counts.pnp_fallbacks > 0U )
       {
         result.warnings.push_back(
@@ -569,13 +459,15 @@ namespace phad::apps
       }
 
       // Slice ⑤: keyframe selection.
-      const bool is_kf = isKeyframe( tracks, tracks.timestamp );
+      const bool is_kf = internal::isKeyframe(
+          tracks, tracks.timestamp, kf_state, rectified_cal );
       const auto estimator_begin =
           std::chrono::steady_clock::now();
       const estimator::VioMeasurement measurement =
           toVioMeasurement( tracks, packet.m_imu );
       const estimator::VioUpdateResult update =
-          estimator.update( measurement, is_kf );
+          estimator_update ? estimator_update( measurement, is_kf )
+                           : estimator.update( measurement, is_kf );
       const auto estimator_end = std::chrono::steady_clock::now();
 
       if ( options.collect_gyro_observe )
@@ -592,20 +484,8 @@ namespace phad::apps
         }
       }
 
-      // Update keyframe snapshot ONLY when the estimator accepted the
-      // keyframe (Slice ⑤b fix: rejected kf must not advance the parallax
-      // / time baselines).
-      if ( is_kf && update.status == estimator::UpdateStatus::kOk )
-      {
-        updateKeyframeSnapshot( tracks, tracks.timestamp );
-      }
-      // Track last-accepted rotation for rotation-compensated parallax.
-      if ( update.status == estimator::UpdateStatus::kOk &&
-           update.estimate.has_value() )
-      {
-        kf_state.last_accepted_rotation =
-            update.estimate->T_W_B.linear();
-      }
+      internal::applyAcceptedCameraState(
+          is_kf, tracks, tracks.timestamp, update, rectified_cal, kf_state );
       const auto frame_end = estimator_end;
 
       // Composition-root feedback: drop frontend tracks for ids the
@@ -693,8 +573,58 @@ namespace phad::apps
             d.max_window_pose_shift_m > 0.5;
 
         ProbeBFrame probe_frame;
-        probe_frame.i     = frame_i;
-        probe_frame.ts_ns = tracks.timestamp.nanoseconds();
+        probe_frame.i                   = frame_i;
+        probe_frame.ts_ns               = tracks.timestamp.nanoseconds();
+        probe_frame.pnp_attempted       = d.probe_pnp_attempted;
+        probe_frame.pnp_result          = d.probe_pnp_result;
+        probe_frame.pnp_correspondences = d.probe_pnp_correspondences;
+        probe_frame.pnp_inliers         = d.probe_pnp_inliers;
+        probe_frame.pnp_proposal_rms_px = d.probe_pnp_proposal_rms_px;
+        probe_frame.pnp_guess_rms_px    = d.probe_pnp_guess_rms_px;
+        probe_frame.pnp_proposal_inlier_count =
+            d.probe_pnp_proposal_inlier_count;
+        probe_frame.pnp_proposal_cheiral_inlier_count =
+            d.probe_pnp_proposal_cheiral_inlier_count;
+        probe_frame.pnp_proposal_min_inlier_depth_m =
+            d.probe_pnp_proposal_min_inlier_depth_m;
+        probe_frame.pnp_proposal_min_inlier_landmark_id =
+            d.probe_pnp_proposal_min_inlier_landmark_id;
+        probe_frame.pnp_proposal_guess_translation_delta_m =
+            d.probe_pnp_proposal_guess_translation_delta_m;
+        probe_frame.pnp_proposal_guess_rotation_delta_rad =
+            d.probe_pnp_proposal_guess_rotation_delta_rad;
+        probe_frame.pnp_guess_retry_outcome =
+            d.probe_pnp_guess_retry_outcome;
+        probe_frame.pnp_guess_retry_proposal_rms_px =
+            d.probe_pnp_guess_retry_proposal_rms_px;
+        probe_frame.pnp_guess_retry_guess_rms_px =
+            d.probe_pnp_guess_retry_guess_rms_px;
+        probe_frame.pnp_guess_retry_cheiral_inlier_count =
+            d.probe_pnp_guess_retry_cheiral_inlier_count;
+        probe_frame.pnp_guess_retry_min_inlier_depth_m =
+            d.probe_pnp_guess_retry_min_inlier_depth_m;
+        probe_frame.pnp_guess_retry_translation_delta_m =
+            d.probe_pnp_guess_retry_translation_delta_m;
+        probe_frame.pnp_guess_retry_rotation_delta_rad =
+            d.probe_pnp_guess_retry_rotation_delta_rad;
+        probe_frame.current_pose_translation_delta_m =
+            d.probe_current_pose_translation_delta_m;
+        probe_frame.current_pose_rotation_delta_rad =
+            d.probe_current_pose_rotation_delta_rad;
+        probe_frame.current_velocity_delta_mps =
+            d.probe_current_velocity_delta_mps;
+        probe_frame.current_acc_bias_delta_mps2 =
+            d.probe_current_acc_bias_delta_mps2;
+        probe_frame.current_gyr_bias_delta_radps =
+            d.probe_current_gyr_bias_delta_radps;
+        probe_frame.primary_graph_error_seed =
+            d.probe_primary_graph_error_seed;
+        probe_frame.primary_graph_error_optimized =
+            d.probe_primary_graph_error_optimized;
+        probe_frame.primary_imu_factor_error_seed =
+            d.probe_primary_imu_factor_error_seed;
+        probe_frame.primary_imu_factor_error_optimized =
+            d.probe_primary_imu_factor_error_optimized;
         if ( heavy )
         {
           probe_frame.culled_ids = std::vector<std::uint64_t>(
@@ -760,6 +690,7 @@ namespace phad::apps
         ++result.counts.total_track_only_frames;
       }
 
+      bool terminal_estimator_result = false;
       switch ( update.status )
       {
         case estimator::UpdateStatus::kOk:
@@ -773,12 +704,14 @@ namespace phad::apps
         case estimator::UpdateStatus::kFailed:
           ++result.counts.failed;
           result.error = SessionError{
-              "VIO estimator " + std::string{ updateStatusName( update.status ) } +
-              ": " + update.message };
-          result.sync = stream.diagnostics();
-          flushPendingDrop();
-          finalizeSegmentsAndWarnings();
-          return result;
+              .detail = "VIO estimator " +
+                        std::string{ updateStatusName( update.status ) } +
+                        ": " + update.message,
+              .estimator_status = update.status,
+              .timestamp        = tracks.timestamp,
+          };
+          terminal_estimator_result = true;
+          break;
         case estimator::UpdateStatus::kRejected:
           ++result.counts.rejected;
           if ( update.message == kSeedRejectedNewSegment ||
@@ -818,10 +751,8 @@ namespace phad::apps
         const std::uint32_t segment_id = d.segment_id;
         const bool          is_new_segment =
             !last_segment_id.has_value() || segment_id > *last_segment_id;
-        if ( is_new_segment )
-        {
-          ++result.counts.segments;
-        }
+        internal::recordAcceptedSegment( segment_id, last_segment_id,
+                                         result.counts );
 
         // Normal-path PnP counters exclude each segment root. A disabled PnP
         // initializer is not a
@@ -836,8 +767,6 @@ namespace phad::apps
         {
           ++result.counts.pnp_fallbacks;
         }
-
-        last_segment_id = segment_id;
       }
 
       result.diag.push_back( VoDiagRow{
@@ -868,6 +797,7 @@ namespace phad::apps
           .num_mapped_observations    = d.num_mapped_observations,
           .num_current_mono_visual_factors =
               d.num_current_mono_visual_factors,
+          .initialization = d.m_initialization,
       } );
 
       if ( options.collect_timing )
@@ -879,6 +809,10 @@ namespace phad::apps
         frontend_s.push_back( seconds( frontend_begin, frontend_end ) );
         estimator_s.push_back( seconds( estimator_begin, estimator_end ) );
         total_s.push_back( seconds( frame_begin, frame_end ) );
+      }
+      if ( terminal_estimator_result )
+      {
+        break;
       }
     }
 
@@ -926,6 +860,14 @@ namespace phad::apps
       result.kf_trajectory = std::move( kf_trajectory.value() );
     }
     return result;
+  }
+
+  OfflineVoSessionResult runOfflineVoSession(
+      io::dataset::StereoImuDataset  dataset,
+      const OfflineVoSessionOptions& options )
+  {
+    return internal::runOfflineVoSessionWithEstimatorUpdate(
+        std::move( dataset ), options, {} );
   }
 
   std::optional<SessionError> collectGyroObservePacket(

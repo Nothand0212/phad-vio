@@ -8,6 +8,8 @@ option(PHAD_BUILD_TESTS "Build phad-vio tests" ON)
 option(PHAD_ENABLE_MH01_TESTS "Enable local EuRoC MH_01 integration tests" OFF)
 option(PHAD_ENABLE_TUMVI_CORRIDOR1_TESTS
   "Enable local TUM VI corridor1 integration tests" OFF)
+option(PHAD_ENABLE_V102_TESTS
+  "Enable local EuRoC V1_02 initial-root product test" OFF)
 
 find_package(OpenCV 4 REQUIRED COMPONENTS
   core highgui imgcodecs imgproc calib3d video
@@ -137,6 +139,7 @@ add_library(phad_io_dataset
   phad/io/dataset/euroc/euroc_groundtruth.cpp
   phad/io/dataset/euroc/internal/euroc_yaml.cpp
   phad/io/dataset/tum_vi/tum_vi_dataset.cpp
+  phad/io/dataset/tum_vi/tum_vi_groundtruth.cpp
 )
 add_library(phad::io_dataset ALIAS phad_io_dataset)
 
@@ -196,7 +199,10 @@ target_compile_options(phad_viz PRIVATE
 add_library(phad_estimator
   phad/estimator/gyro_rotation_predictor.cpp
   phad/estimator/internal/gyro_interval_reducer.cpp
+  phad/estimator/internal/initial_moving_root_math.cpp
+  phad/estimator/internal/initial_visual_evidence.cpp
   phad/estimator/internal/imu_interval.cpp
+  phad/estimator/internal/initialization_diagnostics.cpp
   phad/estimator/vio_estimator.cpp
 )
 add_library(phad::estimator ALIAS phad_estimator)
@@ -213,6 +219,9 @@ target_include_directories(phad_estimator SYSTEM PRIVATE
 target_compile_options(phad_estimator PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
+if(PHAD_BUILD_TESTS)
+  target_compile_definitions(phad_estimator PRIVATE PHAD_ESTIMATOR_TESTING)
+endif()
 
 add_library(phad_bench
   phad/bench/code_identity.cpp
@@ -250,7 +259,20 @@ target_compile_options(phad_stereo_pair_stream PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
+add_library(phad_vo_bench_dataset STATIC
+  apps/internal/vo_bench_dataset.cpp
+)
+target_compile_features(phad_vo_bench_dataset PUBLIC cxx_std_20)
+target_include_directories(phad_vo_bench_dataset PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_link_libraries(phad_vo_bench_dataset PUBLIC phad::io_dataset)
+target_compile_options(phad_vo_bench_dataset PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+)
+
 add_library(phad_offline_vo_session STATIC
+  apps/internal/offline_vo_session_keyframe.cpp
   apps/offline_vo_session.cpp
   apps/probe_b_writer.cpp
 )
@@ -376,7 +398,7 @@ target_link_libraries(phad_stereo_vo_probe
 add_executable(phad_vo_bench apps/phad_vo_bench.cpp)
 target_link_libraries(phad_vo_bench
   PRIVATE phad_offline_vo_session phad_gyro_observe_writer phad::bench
-          phad::eval phad::io_dataset
+          phad::eval phad_vo_bench_dataset
 )
 target_compile_definitions(phad_vo_bench PRIVATE
   PHAD_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -471,6 +493,9 @@ if(PHAD_BUILD_TESTS)
   add_executable(phad_estimator_tests
     tests/estimator/gyro_rotation_predictor_test.cpp
     tests/estimator/gtsam_smoke_test.cpp
+    tests/estimator/initial_visual_evidence_test.cpp
+    tests/estimator/initial_moving_root_math_test.cpp
+    tests/estimator/vio_update_transaction_test.cpp
     tests/estimator/types_test.cpp
     tests/estimator/stereo_point_mapping_test.cpp
     tests/estimator/stereo_vo_estimator_test.cpp
@@ -494,6 +519,9 @@ if(PHAD_BUILD_TESTS)
   )
   target_compile_options(phad_estimator_tests PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+  target_compile_definitions(phad_estimator_tests PRIVATE
+    PHAD_ESTIMATOR_TESTING
   )
   gtest_discover_tests(phad_estimator_tests PROPERTIES LABELS "unit")
 
@@ -527,10 +555,12 @@ if(PHAD_BUILD_TESTS)
     tests/apps/gyro_observe_artifact_test.cpp
     tests/apps/offline_vo_session_test.cpp
     tests/apps/phad_vo_bench_cli_test.cpp
+    tests/apps/vo_bench_dataset_test.cpp
     tests/apps/keyframe_selection_test.cpp
   )
   target_link_libraries(phad_apps_tests PRIVATE
-    phad_offline_vo_session phad_gyro_observe_writer GTest::gtest_main
+    phad_offline_vo_session phad_gyro_observe_writer phad_vo_bench_dataset
+    GTest::gtest_main
     nlohmann_json::nlohmann_json opencv_imgcodecs
   )
   target_compile_definitions(phad_apps_tests PRIVATE
@@ -570,6 +600,7 @@ if(PHAD_BUILD_TESTS)
     tests/io/dataset/euroc/euroc_dataset_test.cpp
     tests/io/dataset/euroc/euroc_groundtruth_test.cpp
     tests/io/dataset/tum_vi/tum_vi_dataset_test.cpp
+    tests/io/dataset/tum_vi/tum_vi_groundtruth_test.cpp
   )
   target_link_libraries(phad_io_dataset_tests PRIVATE
     phad::io_dataset GTest::gtest_main opencv_imgcodecs
@@ -652,6 +683,22 @@ if(PHAD_BUILD_TESTS)
     )
     gtest_discover_tests(phad_tumvi_corridor1_product_test
       PROPERTIES LABELS "tumvi-corridor1"
+    )
+  endif()
+
+  if(PHAD_ENABLE_V102_TESTS)
+    add_executable(phad_v102_initial_root_product_test
+      tests/apps/v102_initial_root_product_test.cpp
+    )
+    target_link_libraries(phad_v102_initial_root_product_test
+      PRIVATE phad::io_dataset phad_offline_vo_session phad::eval
+              GTest::gtest_main OpenSSL::Crypto
+    )
+    target_compile_options(phad_v102_initial_root_product_test PRIVATE
+      $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+    )
+    gtest_discover_tests(phad_v102_initial_root_product_test
+      PROPERTIES LABELS "v102-initial-root"
     )
   endif()
 endif()

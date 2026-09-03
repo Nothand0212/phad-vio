@@ -50,9 +50,12 @@ namespace phad::estimator
     double prior_rotation_sigma_rad        = 1e-4;
     double prior_translation_sigma_m       = 1e-4;
     bool   enable_pnp_init                 = true;
-    double pnp_reproj_px                   = 2.0;
-    double pnp_confidence                  = 0.99;
-    int    min_pnp_inliers                 = 10;
+    // Default-off product candidate: retry only a typed PnP cheirality
+    // rejection from the pre-RANSAC propagation guess.
+    bool   enable_pnp_cheirality_retry = false;
+    double pnp_reproj_px               = 2.0;
+    double pnp_confidence              = 0.99;
+    int    min_pnp_inliers             = 10;
     // enable_outlier_cull only gates mean-reproj cull; cheirality always
     // clears window observations for dropped landmarks.
     bool   enable_outlier_cull   = true;
@@ -77,9 +80,6 @@ namespace phad::estimator
     // disables the refresh entirely (E13 pure-gate runs). Bench CLI:
     // --far-refresh-px.
     double far_return_refresh_px = 6.0;
-    // Optionally accumulate sparse visual evidence while initializing a root.
-    // CLI-only and excluded from config_hash.
-    bool enable_accumulated_seed = false;
     // Session sets true when probe_b_path non-empty; NOT in flattenConfig.
     bool          enable_probe_b                = false;
     double        m_gravity_mps2                = 9.81;
@@ -90,10 +90,8 @@ namespace phad::estimator
     double        m_bootstrap_max_gyr_std_radps = 0.005;
     double        m_bootstrap_acc_norm_tol_mps2 = 0.25;
     std::int64_t  m_bootstrap_timeout_ns        = 1'000'000'000;
-    // Explicit moving-start fallback: use the shortest recent suffix that
-    // satisfies the bootstrap duration/sample floor for gravity direction,
-    // while leaving initial velocity and both biases at zero. Static
-    // bootstrap remains the default and retains gyro-mean bias estimation.
+    // Activation seam for estimator-owned moving initialization. Static
+    // bootstrap remains first priority; moving evidence is opt-in.
     bool         m_enable_moving_bootstrap    = false;
     double       m_velocity_prior_sigma_mps   = 0.1;
     double       m_acc_bias_prior_sigma_mps2  = 0.1;
@@ -110,6 +108,32 @@ namespace phad::estimator
     kInvalidInput  = 4,
     kRejected      = 5,
     kFailed        = 6
+  };
+
+  enum class PnpProbeResult : std::uint8_t
+  {
+    kNotAttempted                     = 0,
+    kRansacFailed                     = 1,
+    kInsufficientInliers              = 2,
+    kProposalPoseNonFinite            = 3,
+    kProposalRmsInvalidCorrespondence = 4,
+    kProposalRmsCheirality            = 5,
+    kProposalRmsNonFinite             = 6,
+    kProposalRmsRejected              = 7,
+    kAccepted                         = 8,
+    kAcceptedAfterGuessRetry          = 9
+  };
+
+  enum class PnpGuessRetryOutcome : std::uint8_t
+  {
+    kNotAttempted                     = 0,
+    kSolveFailed                      = 1,
+    kProposalPoseNonFinite            = 2,
+    kProposalRmsInvalidCorrespondence = 3,
+    kProposalRmsCheirality            = 4,
+    kProposalRmsNonFinite             = 5,
+    kProposalRmsRejected              = 6,
+    kWouldPassExistingPnpGates        = 7
   };
 
   struct ImuBias
@@ -147,6 +171,129 @@ namespace phad::estimator
     std::optional<std::uint32_t> m_completed_segment_id;
   };
 
+  enum class InitializationPath : std::uint8_t
+  {
+    kNone   = 0,
+    kStatic = 1,
+    kMoving = 2
+  };
+
+  enum class InitializationPhase : std::uint8_t
+  {
+    kInactive             = 0,
+    kCollectingEvidence   = 1,
+    kVisualSolve          = 2,
+    kGyroAlignment        = 3,
+    kGravityVelocitySolve = 4,
+    kJointConsistency     = 5,
+    kCurrentGraph         = 6,
+    kCommit               = 7
+  };
+
+  enum class InitializationReason : std::uint8_t
+  {
+    kNone                           = 0,
+    kStaticEvidenceInsufficient     = 1,
+    kStaticTimeout                  = 2,
+    kPoseCountInsufficient          = 3,
+    kDurationInsufficient           = 4,
+    kVisualConnectivityInsufficient = 5,
+    kVisualPopulationInsufficient   = 6,
+    kVisualSupportInsufficient      = 7,
+    kVisualFitRejected              = 8,
+    kCheiralityRejected             = 9,
+    kRankDeficient                  = 10,
+    kIllConditioned                 = 11,
+    kNoConvergence                  = 12,
+    kJointDofInsufficient           = 13,
+    kJointInconsistent              = 14,
+    kCurrentGraphUnderconstrained   = 15,
+    kCurrentGraphRejected           = 16,
+    kContractError                  = 17
+  };
+
+  enum class InitializationOutcome : std::uint8_t
+  {
+    kNotActive           = 0,
+    kPending             = 1,
+    kRecoverableRejected = 2,
+    kCommitted           = 3,
+    kFatalError          = 4
+  };
+
+  enum class InitializationGraphResult : std::uint8_t
+  {
+    kNotEvaluated = 0,
+    kValidated    = 1,
+    kRejected     = 2
+  };
+
+  enum class InitializationTransactionResult : std::uint8_t
+  {
+    kNotEvaluated      = 0,
+    kEvidenceCommitted = 1,
+    kRootCommitted     = 2,
+    kRolledBack        = 3
+  };
+
+  struct InitializationCountSummary
+  {
+    std::uint32_t m_actual   = 0;
+    std::uint32_t m_required = 0;
+  };
+
+  struct InitializationDurationSummary
+  {
+    std::int64_t m_actual_ns   = 0;
+    std::int64_t m_required_ns = 0;
+  };
+
+  struct InitializationFitSummary
+  {
+    double       m_statistic     = 0.0;
+    double       m_limit         = 0.0;
+    std::int64_t m_effective_dof = 0;
+  };
+
+  struct InitializationRankSummary
+  {
+    std::uint32_t m_actual   = 0;
+    std::uint32_t m_required = 0;
+  };
+
+  struct InitializationThresholdSummary
+  {
+    double m_value = 0.0;
+    double m_limit = 0.0;
+  };
+
+  struct InitializationDiagnostics
+  {
+    InitializationPath           m_path    = InitializationPath::kNone;
+    InitializationPhase          m_phase   = InitializationPhase::kInactive;
+    InitializationReason         m_reason  = InitializationReason::kNone;
+    InitializationOutcome        m_outcome = InitializationOutcome::kNotActive;
+    std::optional<std::uint64_t> m_attempt_id;
+
+    InitializationCountSummary                m_connected_poses;
+    InitializationDurationSummary             m_duration;
+    InitializationCountSummary                m_connected_landmarks;
+    std::optional<InitializationCountSummary> m_visual_support;
+    std::optional<InitializationFitSummary>   m_visual_fit;
+    std::optional<InitializationRankSummary>  m_gyro_rank;
+    std::optional<InitializationThresholdSummary>
+                                             m_gyro_normalized_condition;
+    std::optional<InitializationRankSummary> m_gravity_velocity_rank;
+    std::optional<InitializationThresholdSummary>
+                                            m_gravity_velocity_normalized_condition;
+    std::optional<InitializationFitSummary> m_joint_fit;
+
+    InitializationGraphResult m_current_graph =
+        InitializationGraphResult::kNotEvaluated;
+    InitializationTransactionResult m_transaction =
+        InitializationTransactionResult::kNotEvaluated;
+  };
+
   struct UpdateDiagnostics
   {
     std::uint32_t num_observations                = 0;
@@ -179,8 +326,43 @@ namespace phad::estimator
     // 本帧永久移出地图的 id（mean-cull ∪ cheirality）；不进 diag.csv
     std::vector<common::LandmarkId> culled_landmark_ids;
     // Probe B 旁路字段；不进 diag.csv
-    std::uint32_t probe_rejected_block_n = 0;
-    std::uint32_t probe_new_lm_n         = 0;
+    std::uint32_t                probe_rejected_block_n    = 0;
+    std::uint32_t                probe_new_lm_n            = 0;
+    bool                         probe_pnp_attempted       = false;
+    PnpProbeResult               probe_pnp_result          = PnpProbeResult::kNotAttempted;
+    std::uint32_t                probe_pnp_correspondences = 0;
+    std::uint32_t                probe_pnp_inliers         = 0;
+    std::optional<double>        probe_pnp_proposal_rms_px;
+    std::optional<double>        probe_pnp_guess_rms_px;
+    std::optional<std::uint32_t> probe_pnp_proposal_inlier_count;
+    std::optional<std::uint32_t>
+                          probe_pnp_proposal_cheiral_inlier_count;
+    std::optional<double> probe_pnp_proposal_min_inlier_depth_m;
+    std::optional<LandmarkId>
+        probe_pnp_proposal_min_inlier_landmark_id;
+    std::optional<double>
+                          probe_pnp_proposal_guess_translation_delta_m;
+    std::optional<double> probe_pnp_proposal_guess_rotation_delta_rad;
+    PnpGuessRetryOutcome  probe_pnp_guess_retry_outcome =
+        PnpGuessRetryOutcome::kNotAttempted;
+    std::optional<double> probe_pnp_guess_retry_proposal_rms_px;
+    std::optional<double> probe_pnp_guess_retry_guess_rms_px;
+    std::optional<std::uint32_t>
+                          probe_pnp_guess_retry_cheiral_inlier_count;
+    std::optional<double> probe_pnp_guess_retry_min_inlier_depth_m;
+    std::optional<double> probe_pnp_guess_retry_translation_delta_m;
+    std::optional<double> probe_pnp_guess_retry_rotation_delta_rad;
+    std::optional<double> probe_current_pose_translation_delta_m;
+    std::optional<double> probe_current_pose_rotation_delta_rad;
+    std::optional<double> probe_current_velocity_delta_mps;
+    std::optional<double> probe_current_acc_bias_delta_mps2;
+    std::optional<double> probe_current_gyr_bias_delta_radps;
+    // GTSAM noise-weighted half-squared objectives from the same primary
+    // graph before/after its first solve; not a physical-unit residual or RMS.
+    std::optional<double> probe_primary_graph_error_seed;
+    std::optional<double> probe_primary_graph_error_optimized;
+    std::optional<double> probe_primary_imu_factor_error_seed;
+    std::optional<double> probe_primary_imu_factor_error_optimized;
     // 仅当 enable_probe_b 时填充；默认保持 0/空
     std::vector<std::pair<std::uint64_t, double>> probe_shift_top;  // key, |Δt|
     double                                        probe_res_mean_px = 0.0;
@@ -188,6 +370,7 @@ namespace phad::estimator
     LandmarkId                                    probe_res_max_id{};
     bool                                          probe_detail_valid = false;
     VioDiagnostics                                m_vio;
+    InitializationDiagnostics                     m_initialization;
   };
 
   struct VioUpdateResult
