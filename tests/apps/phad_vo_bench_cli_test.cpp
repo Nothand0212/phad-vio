@@ -11,6 +11,8 @@
 #include <tuple>
 #include <vector>
 
+#include "tests/support/scoped_temp_directory.hpp"
+
 #ifdef __linux__
 #include <sys/wait.h>
 #endif
@@ -96,87 +98,43 @@ namespace
     std::filesystem::remove_all( root );
   }
 
-#if defined( PHAD_REPLAY_DIAGNOSTIC_TESTING )
-  TEST( VoBenchCliTest,
-        M5PrefixDiagnosticEnforcesFormalConfigAndBaselineGate )
+  TEST( VoBenchCliTest, ProductionTargetRejectsM551DiagnosticOptions )
   {
     ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
 
-    const auto root = std::filesystem::temp_directory_path() /
-                      "phad_vo_bench_cli_m5_51_gate";
-    std::filesystem::remove_all( root );
-    std::filesystem::create_directories( root );
+    phad::testing::ScopedTempDirectory temp_directory{
+        "phad_vo_bench_cli_rejects_m5_51_diagnostic" };
+    const auto& root        = temp_directory.path();
+    const auto  stdout_path = root / "stdout.txt";
+    const auto  stderr_path = root / "stderr.txt";
+    const auto  state_path  = root / "state.json";
 
-    const auto run = [ &root ]( std::string_view   name,
-                                const std::string& suffix ) {
-      const auto        stdout_path  = root / ( std::string{ name } + ".stdout" );
-      const auto        stderr_path  = root / ( std::string{ name } + ".stderr" );
-      const auto        output_path  = root / ( std::string{ name } + ".out" );
-      const auto        receipt_path = root / ( std::string{ name } + ".json" );
-      const std::string base =
-          "/nonexistent/sequence --out \"" + output_path.string() +
-          "\" --sequence-name MH_01_easy --config-label default "
-          "--gt-euroc /nonexistent/sequence --repo \"" +
-          std::filesystem::current_path().string() +
-          "\" --max-dt-ms 2.5 --min-match-rate 0.5 "
-          "--rpe-delta-s 1.0 --estimator-enable-moving-bootstrap "
-          "--m5-51-state-receipt \"" +
-          receipt_path.string() + "\" ";
-      const int exit_code =
-          runBench( base + suffix, stdout_path, stderr_path );
-      return std::tuple{ exit_code, output_path, stderr_path };
-    };
+    const int exit_code = runBench(
+        "/nonexistent/sequence --m5-51-state-receipt \"" +
+            state_path.string() + "\"",
+        stdout_path, stderr_path );
 
-    const auto [ bounded_exit, bounded_output, bounded_stderr ] =
-        run( "bounded", "--max-frames 43" );
-    EXPECT_NE( bounded_exit, 0 );
-    ASSERT_TRUE( std::filesystem::exists( bounded_output / "meta.json" ) )
-        << readFile( bounded_stderr );
-    const auto bounded_meta = nlohmann::json::parse(
-        readFile( bounded_output / "meta.json" ) );
-    EXPECT_EQ( bounded_meta.at( "config_hash" ), "0337287b" );
-    EXPECT_EQ( bounded_meta.at( "config_canonical_text" )
-                   .get<std::string>()
-                   .find( "session.max_frames" ),
+    EXPECT_EQ( exit_code, 2 );
+    EXPECT_NE( readFile( stderr_path )
+                   .find( "unknown option: --m5-51-state-receipt" ),
                std::string::npos );
-
-    const auto [ missing_bound_exit, missing_bound_output,
-                 missing_bound_stderr ] = run( "missing-bound", "" );
-    static_cast<void>( missing_bound_output );
-    EXPECT_EQ( missing_bound_exit, 2 );
-    EXPECT_NE( readFile( missing_bound_stderr ).find( "--max-frames 43" ),
+    const std::string production_binary = readFile( PHAD_VO_BENCH_PATH );
+    EXPECT_EQ( production_binary.find( "--m5-51-" ), std::string::npos );
+    EXPECT_EQ( production_binary.find( "runM5RpePrefixDiagnostic" ),
                std::string::npos );
-
-    const auto [ direct_exit, direct_output, direct_stderr ] =
-        run( "direct-intervention",
-             "--max-frames 43 --m5-51-selector-warmup" );
-    static_cast<void>( direct_output );
-    EXPECT_EQ( direct_exit, 2 );
-    EXPECT_NE( readFile( direct_stderr ).find( "--m5-51-baseline-qualification" ),
+    EXPECT_EQ( production_binary.find( "StereoPairStreamTestAccess" ),
                std::string::npos );
-
-    const auto [ invalid_qualification_exit, invalid_qualification_output,
-                 invalid_qualification_stderr ] =
-        run( "invalid-qualification",
-             "--max-frames 43 --m5-51-selector-warmup "
-             "--m5-51-baseline-qualification /nonexistent/qualification.json "
-             "--m5-51-comparison-receipt /nonexistent/comparison.json" );
-    static_cast<void>( invalid_qualification_output );
-    EXPECT_EQ( invalid_qualification_exit, 2 );
-    EXPECT_NE( readFile( invalid_qualification_stderr ).find( "baseline qualification invalid" ),
+    EXPECT_EQ( production_binary.find( "DatasetReplaySourceTestAccess" ),
                std::string::npos );
-
-    const auto [ retry_exit, retry_output, retry_stderr ] =
-        run( "pnp-retry",
-             "--max-frames 43 --estimator-enable-pnp-cheirality-retry" );
-    static_cast<void>( retry_output );
-    EXPECT_EQ( retry_exit, 2 );
-    EXPECT_NE( readFile( retry_stderr ).find( "retry" ),
+    EXPECT_EQ( production_binary.find( "StereoImuDatasetReaderTestAccess" ),
                std::string::npos );
-
-    std::filesystem::remove_all( root );
+    EXPECT_EQ( production_binary.find( "StereoPairSynchronizerTestAccess" ),
+               std::string::npos );
+    EXPECT_EQ( production_binary.find( "StereoTrackerTestAccess" ),
+               std::string::npos );
+    EXPECT_EQ( production_binary.find( "VioEstimatorTestAccess" ),
+               std::string::npos );
   }
-#endif
 
   TEST( VoBenchCliTest,
         DatasetFormatIsExplicitAndPreservesFormalEurocIdentity )

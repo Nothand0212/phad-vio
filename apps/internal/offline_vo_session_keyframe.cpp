@@ -70,7 +70,7 @@ namespace phad::apps::internal
       return true;
     }
 
-    const Eigen::Matrix3d R_kf_to_cur =
+    const Eigen::Matrix3d r_kf_to_cur =
         state.m_last_accepted_rotation.transpose() * state.m_last_kf_rotation;
     const double fx = calibration.fxPixels();
     const double fy = calibration.fyPixels();
@@ -89,7 +89,7 @@ namespace phad::apps::internal
       const Eigen::Vector2d& last_pixel = previous->second;
       const Eigen::Vector3d  ray_kf( ( last_pixel.x() - cx ) / fx,
                                      ( last_pixel.y() - cy ) / fy, 1.0 );
-      const Eigen::Vector3d  ray_cur = R_kf_to_cur * ray_kf;
+      const Eigen::Vector3d  ray_cur = r_kf_to_cur * ray_kf;
       if ( ray_cur.z() <= 1e-6 )
       {
         continue;

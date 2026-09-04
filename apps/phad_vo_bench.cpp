@@ -13,6 +13,7 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <map>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -24,15 +25,33 @@
 #include <vector>
 
 #if defined( PHAD_REPLAY_DIAGNOSTIC_TESTING )
+#ifdef __linux__
+#include <link.h>
+#endif
 #include <openssl/evp.h>
 #include <sys/stat.h>
 
 #include <nlohmann/json.hpp>
+
+#if !defined( PHAD_M5_51_EXPECTED_CXX_COMPILER_PATH ) ||    \
+    !defined( PHAD_M5_51_EXPECTED_CXX_COMPILER_VERSION ) || \
+    !defined( PHAD_M5_51_EXPECTED_CMAKE_PATH ) ||           \
+    !defined( PHAD_M5_51_EXPECTED_CMAKE_VERSION ) ||        \
+    !defined( PHAD_M5_51_EXPECTED_BUILD_TOOL_PATH ) ||      \
+    !defined( PHAD_M5_51_EXPECTED_GENERATOR ) ||            \
+    !defined( PHAD_M5_51_EXPECTED_BUILD_TYPE ) ||           \
+    !defined( PHAD_M5_51_EXPECTED_BUILD_TESTS ) ||          \
+    !defined( PHAD_M5_51_EXPECTED_TRAJ_EVAL_PATH )
+#error "M5 #51 replay diagnostic requires trusted build identity definitions"
+#endif
 #endif
 
 #include "apps/gyro_observe_writer.hpp"
 #if defined( PHAD_REPLAY_DIAGNOSTIC_TESTING )
 #include "apps/internal/m5_51_prefix_diagnostic.hpp"
+#endif
+#if defined( PHAD_M5_51_REPLAY_DIAGNOSTIC_CLI_FIXTURE_TESTING )
+#include "tests/apps/m5_51_replay_diagnostic_cli_fixture.hpp"
 #endif
 #include "apps/internal/vo_bench_dataset.hpp"
 #include "apps/offline_vo_session.hpp"
@@ -721,6 +740,61 @@ namespace
     return bytesSha256( readFileBytes( path ) );
   }
 
+  using RuntimeLibraryIdentities = std::map<std::string, std::string>;
+
+  [[nodiscard]] std::optional<std::string> loadedRuntimeLibraryIdentities(
+      RuntimeLibraryIdentities& identities )
+  {
+#ifdef __linux__
+    struct LoadedObjects
+    {
+      std::set<std::filesystem::path> paths;
+      std::string                     error;
+    } loaded;
+
+    const auto visit = []( struct dl_phdr_info* info, std::size_t,
+                           void*                opaque ) {
+      auto& objects = *static_cast<LoadedObjects*>( opaque );
+      if ( info == nullptr || info->dlpi_name == nullptr ||
+           info->dlpi_name[ 0 ] == '\0' )
+      {
+        return 0;
+      }
+      const std::string_view name{ info->dlpi_name };
+      if ( name.starts_with( "linux-vdso" ) )
+      {
+        return 0;
+      }
+
+      std::error_code error;
+      const auto      canonical =
+          std::filesystem::canonical( std::filesystem::path{ name }, error );
+      if ( error || !std::filesystem::is_regular_file( canonical ) )
+      {
+        objects.error = "cannot identify loaded runtime object " +
+                        std::string{ name };
+        return 1;
+      }
+      objects.paths.insert( canonical );
+      return 0;
+    };
+
+    static_cast<void>( ::dl_iterate_phdr( visit, &loaded ) );
+    if ( !loaded.error.empty() )
+    {
+      return loaded.error;
+    }
+    for ( const auto& path : loaded.paths )
+    {
+      identities.emplace( path.string(), fileSha256( path ) );
+    }
+    return std::nullopt;
+#else
+    static_cast<void>( identities );
+    return "loaded runtime identity is supported only on Linux";
+#endif
+  }
+
   [[nodiscard]] bool isSafeRelativePath( const std::filesystem::path& path )
   {
     return !path.empty() && !path.is_absolute() &&
@@ -925,7 +999,8 @@ namespace
 
   [[nodiscard]] std::optional<std::string> verifyInputManifest(
       const std::filesystem::path& sequence_root,
-      const std::filesystem::path& manifest_path )
+      const std::filesystem::path& manifest_path,
+      const std::size_t            expected_entry_count )
   {
     std::ifstream input( manifest_path );
     if ( !input )
@@ -965,6 +1040,11 @@ namespace
       }
     }
 
+    if ( expected_paths.size() != expected_entry_count )
+    {
+      return "frozen input manifest entry count mismatch";
+    }
+
     std::set<std::filesystem::path> actual_paths;
     for ( const auto& entry :
           std::filesystem::recursive_directory_iterator( sequence_root ) )
@@ -990,9 +1070,20 @@ namespace
 
   [[nodiscard]] std::optional<std::string> validateM5BaselineQualification(
       const Arguments& arguments, std::string_view config_hash,
+      std::string_view         canonical_config_text,
       M5BaselineQualification& validated_qualification )
   {
     constexpr std::string_view kFormalConfigHash = "0337287b";
+#if defined( PHAD_M5_51_REPLAY_DIAGNOSTIC_CLI_FIXTURE_TESTING )
+    constexpr std::string_view kInputManifestSha =
+        "2b982fd1a2c814d077e0ee4361ca45d8b56ca23aabc65c5c14509d40f4763ea4";
+    constexpr std::string_view kDiagSha =
+        "ef783a731d0946936e0640065a215138471b58d81f0b55d156ed61228331674d";
+    constexpr std::string_view kEstSha =
+        "ff390472ab5a66e5d4db829511c305d4155110cb8516e0a32bf4c191770527fe";
+    constexpr std::string_view kKeyframeSha =
+        "cfa32b9311b7ca9f4e56b1fdc88d32287e0d655d73cb34adcddf7bac4bb195aa";
+#else
     constexpr std::string_view kInputManifestSha =
         "edd7053e1152e1cd167cec3564e694696d7d5f25fddb0f4f90b1453a310992db";
     constexpr std::string_view kDiagSha =
@@ -1001,6 +1092,7 @@ namespace
         "1f032910d0e2c4464c30d861d2d18d73439a904bbead148c09627c24d35b16b6";
     constexpr std::string_view kKeyframeSha =
         "a5f9c6a423d6fc854cebe98a57d773faa1edbb7fee9fd15199dd941b13adcb7c";
+#endif
 
     try
     {
@@ -1020,6 +1112,336 @@ namespace
       {
         return "baseline qualification canonical config mismatch";
       }
+      const std::string canonical_config_sha =
+          bytesSha256( canonical_config_text );
+      if ( !qualification.contains( "config_canonical_text_sha256" ) ||
+           !qualification.at( "config_canonical_text_sha256" ).is_string() ||
+           qualification.at( "config_canonical_text_sha256" )
+                   .get<std::string>() != canonical_config_sha )
+      {
+        return "baseline qualification canonical config SHA-256 mismatch";
+      }
+
+      if ( !qualification.contains( "preflight_identity_path" ) ||
+           !qualification.at( "preflight_identity_path" ).is_string() ||
+           !qualification.contains( "preflight_identity_sha256" ) ||
+           !qualification.at( "preflight_identity_sha256" ).is_string() )
+      {
+        return "baseline qualification preflight identity missing";
+      }
+      const std::filesystem::path preflight_path =
+          qualification.at( "preflight_identity_path" ).get<std::string>();
+      if ( !preflight_path.is_absolute() ||
+           !std::filesystem::is_regular_file( preflight_path ) )
+      {
+        return "baseline qualification preflight identity unreadable";
+      }
+      const std::string preflight_bytes = readFileBytes( preflight_path );
+      if ( bytesSha256( preflight_bytes ) !=
+           qualification.at( "preflight_identity_sha256" )
+               .get<std::string>() )
+      {
+        return "baseline qualification preflight identity digest mismatch";
+      }
+      const nlohmann::json preflight =
+          nlohmann::json::parse( preflight_bytes );
+      if ( !preflight.contains( "schema" ) ||
+           preflight.at( "schema" ) !=
+               "phad.m5_51.preflight_identity.v1" )
+      {
+        return "baseline qualification preflight identity schema mismatch";
+      }
+      if ( !preflight.contains( "configuration" ) ||
+           !preflight.at( "configuration" ).is_object() ||
+           !preflight.at( "configuration" )
+                .contains( "canonical_text_sha256" ) ||
+           !preflight.at( "configuration" )
+                .at( "canonical_text_sha256" )
+                .is_string() ||
+           preflight.at( "configuration" )
+                   .at( "canonical_text_sha256" )
+                   .get<std::string>() != canonical_config_sha ||
+           preflight.at( "configuration" )
+                   .at( "canonical_text_sha256" )
+                   .get<std::string>() !=
+               qualification.at( "config_canonical_text_sha256" )
+                   .get<std::string>() )
+      {
+        return "baseline qualification preflight identity canonical config "
+               "SHA-256 mismatch";
+      }
+
+      const auto isSha256 = []( const std::string_view value ) {
+        return value.size() == 64U &&
+               std::all_of( value.begin(), value.end(), []( const char digit ) {
+                 return ( digit >= '0' && digit <= '9' ) ||
+                        ( digit >= 'a' && digit <= 'f' );
+               } );
+      };
+      const auto hasFileIdentity = [ &isSha256 ](
+                                       const nlohmann::json& identity ) {
+        if ( !identity.is_object() || !identity.contains( "path" ) ||
+             !identity.at( "path" ).is_string() ||
+             !identity.contains( "sha256" ) ||
+             !identity.at( "sha256" ).is_string() )
+        {
+          return false;
+        }
+        const std::filesystem::path path =
+            identity.at( "path" ).get<std::string>();
+        const std::string sha = identity.at( "sha256" ).get<std::string>();
+        return path.is_absolute() && std::filesystem::is_regular_file( path ) &&
+               isSha256( sha ) && fileSha256( path ) == sha;
+      };
+      const auto hasExpectedFileIdentity =
+          [ &hasFileIdentity ]( const nlohmann::json&        identity,
+                                const std::filesystem::path& expected ) {
+            return hasFileIdentity( identity ) && expected.is_absolute() &&
+                   std::filesystem::is_regular_file( expected ) &&
+                   std::filesystem::canonical(
+                       identity.at( "path" ).get<std::string>() ) ==
+                       std::filesystem::canonical( expected );
+          };
+
+      const nlohmann::json& preflight_source = preflight.at( "source" );
+      if ( preflight_source.at( "source_id" ) !=
+               qualification.at( "source_id" ) ||
+           preflight_source.at( "manifest_path" ) !=
+               qualification.at( "source_manifest_path" ) ||
+           preflight_source.at( "manifest_sha256" ) !=
+               qualification.at( "source_manifest_sha256" ) ||
+           preflight_source.at( "archive_path" ) !=
+               qualification.at( "source_archive_path" ) ||
+           preflight_source.at( "archive_sha256" ) !=
+               qualification.at( "source_archive_sha256" ) ||
+           preflight_source.at( "base_bundle_path" ) !=
+               qualification.at( "base_bundle_path" ) ||
+           preflight_source.at( "base_bundle_sha256" ) !=
+               qualification.at( "base_bundle_sha256" ) ||
+           preflight_source.at( "verification_receipt_path" ) !=
+               qualification.at( "source_verification_receipt_path" ) ||
+           preflight_source.at( "verification_receipt_sha256" ) !=
+               qualification.at( "source_verification_receipt_sha256" ) )
+      {
+        return "baseline qualification preflight source identity mismatch";
+      }
+
+      const std::filesystem::path executable =
+          std::filesystem::canonical( "/proc/self/exe" );
+      const std::string     executable_sha = fileSha256( executable );
+      const nlohmann::json& preflight_binary =
+          preflight.at( "binaries" ).at( "phad_vo_bench" );
+      if ( !hasFileIdentity( preflight_binary ) ||
+           std::filesystem::canonical(
+               preflight_binary.at( "path" ).get<std::string>() ) !=
+               executable ||
+           preflight_binary.at( "sha256" ).get<std::string>() !=
+               executable_sha ||
+           qualification.at( "binary_sha256" ).get<std::string>() !=
+               executable_sha )
+      {
+        return "baseline qualification preflight binary identity mismatch";
+      }
+
+      const nlohmann::json& preflight_input = preflight.at( "input" );
+      const auto            input_entry_count =
+          qualification.at( "input_entry_count" ).get<std::size_t>();
+      if ( preflight_input.at( "ordered_manifest_path" ) !=
+               qualification.at( "input_manifest_path" ) ||
+           preflight_input.at( "ordered_manifest_sha256" ) !=
+               qualification.at( "input_manifest_sha256" ) ||
+           preflight_input.at( "entry_count" ).get<std::size_t>() !=
+               input_entry_count ||
+           preflight_input.at( "verified_entry_count" ).get<std::size_t>() !=
+               input_entry_count ||
+           std::filesystem::path{
+               preflight_input.at( "root" ).get<std::string>() }
+                   .lexically_normal() !=
+               arguments.sequence_root.lexically_normal() ||
+           preflight_input.at( "sequence" ).get<std::string>() !=
+               resolveSequenceName( arguments ) )
+      {
+        return "baseline qualification preflight input identity mismatch";
+      }
+
+      const nlohmann::json& preflight_evaluator =
+          preflight.at( "evaluator" );
+      const std::filesystem::path bench_source =
+          arguments.repo / "apps/phad_vo_bench.cpp";
+      const std::filesystem::path rpe_cpp = arguments.repo / "phad/eval/rpe.cpp";
+      const std::filesystem::path rpe_hpp = arguments.repo / "phad/eval/rpe.hpp";
+      const nlohmann::json&       traj_eval =
+          preflight.at( "binaries" ).at( "phad_traj_eval" );
+      if ( !std::filesystem::is_regular_file( bench_source ) ||
+           !std::filesystem::is_regular_file( rpe_cpp ) ||
+           !std::filesystem::is_regular_file( rpe_hpp ) ||
+           preflight_evaluator.at( "bench_source_sha256" ) !=
+               fileSha256( bench_source ) ||
+           preflight_evaluator.at( "rpe_cpp_sha256" ) !=
+               fileSha256( rpe_cpp ) ||
+           preflight_evaluator.at( "rpe_cpp_sha256" ) !=
+               qualification.at( "rpe_evaluator_sha256" ) ||
+           preflight_evaluator.at( "rpe_hpp_sha256" ) !=
+               fileSha256( rpe_hpp ) ||
+           preflight_evaluator.at( "max_dt_ms" ).get<double>() !=
+               arguments.max_dt_ms ||
+           preflight_evaluator.at( "min_match_rate" ).get<double>() !=
+               arguments.min_match_rate ||
+           preflight_evaluator.at( "rpe_delta_s" ).get<double>() !=
+               arguments.rpe_delta_s ||
+           !hasExpectedFileIdentity(
+               traj_eval,
+               std::filesystem::path{ PHAD_M5_51_EXPECTED_TRAJ_EVAL_PATH } ) )
+      {
+        return "baseline qualification preflight evaluator identity mismatch";
+      }
+
+      const nlohmann::json& build = preflight.at( "build" );
+      if ( build.at( "type" ) != PHAD_M5_51_EXPECTED_BUILD_TYPE ||
+           build.at( "generator" ) != PHAD_M5_51_EXPECTED_GENERATOR ||
+           !build.at( "phad_build_tests" ).is_boolean() ||
+           build.at( "phad_build_tests" ).get<bool>() !=
+               static_cast<bool>( PHAD_M5_51_EXPECTED_BUILD_TESTS ) )
+      {
+        return "baseline qualification preflight build identity mismatch";
+      }
+
+      const nlohmann::json& compiler = build.at( "compiler" );
+      if ( compiler.at( "version" ) !=
+               PHAD_M5_51_EXPECTED_CXX_COMPILER_VERSION ||
+           !hasExpectedFileIdentity(
+               compiler,
+               std::filesystem::path{
+                   PHAD_M5_51_EXPECTED_CXX_COMPILER_PATH } ) )
+      {
+        return "baseline qualification preflight compiler identity mismatch";
+      }
+      const nlohmann::json& cmake = build.at( "cmake" );
+      if ( cmake.at( "version" ) != PHAD_M5_51_EXPECTED_CMAKE_VERSION ||
+           !hasExpectedFileIdentity(
+               cmake,
+               std::filesystem::path{ PHAD_M5_51_EXPECTED_CMAKE_PATH } ) )
+      {
+        return "baseline qualification preflight cmake identity mismatch";
+      }
+      const nlohmann::json& build_tool = build.at( "ninja" );
+      if ( !build_tool.contains( "version" ) ||
+           !build_tool.at( "version" ).is_string() ||
+           build_tool.at( "version" ).get<std::string>().empty() ||
+           !hasExpectedFileIdentity(
+               build_tool,
+               std::filesystem::path{
+                   PHAD_M5_51_EXPECTED_BUILD_TOOL_PATH } ) )
+      {
+        return "baseline qualification preflight build tool identity mismatch";
+      }
+
+      const nlohmann::json& preflight_config =
+          preflight.at( "configuration" );
+      const std::filesystem::path reference_meta =
+          preflight_config.at( "reference_meta_path" ).get<std::string>();
+      if ( preflight_config.at( "label" ) != arguments.config_label ||
+           preflight_config.at( "canonical_hash" ) != config_hash ||
+           preflight_config.at( "canonical_text_sha256" ) !=
+               canonical_config_sha ||
+           preflight_config.at( "moving_bootstrap" ).get<bool>() !=
+               arguments.enable_moving_bootstrap ||
+           preflight_config.at( "pnp_cheirality_retry" ).get<bool>() !=
+               arguments.enable_pnp_cheirality_retry ||
+           preflight_config.at( "collect_timing" ).get<bool>() ||
+           !arguments.max_frames.has_value() ||
+           preflight_config.at( "execution_bound_max_frames" ) !=
+               *arguments.max_frames ||
+           !std::filesystem::is_regular_file( reference_meta ) ||
+           fileSha256( reference_meta ) !=
+               preflight_config.at( "reference_meta_sha256" )
+                   .get<std::string>() )
+      {
+        return "baseline qualification preflight configuration identity "
+               "mismatch";
+      }
+
+      const nlohmann::json& runtime = preflight.at( "runtime" );
+      for ( const std::string_view version :
+            { "opencv_version", "gtsam_version", "openssl_version" } )
+      {
+        if ( !runtime.at( version ).is_string() ||
+             runtime.at( version ).get<std::string>().empty() )
+        {
+          return "baseline qualification preflight runtime identity mismatch";
+        }
+      }
+      const nlohmann::json& determinism =
+          runtime.at( "determinism_environment" );
+      for ( const char* variable :
+            { "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS" } )
+      {
+        const char* value = std::getenv( variable );
+        if ( value == nullptr || !determinism.contains( variable ) ||
+             !determinism.at( variable ).is_string() ||
+             determinism.at( variable ).get<std::string>() != value )
+        {
+          return "baseline qualification preflight runtime identity mismatch";
+        }
+      }
+
+      const std::filesystem::path dynamic_libraries =
+          runtime.at( "dynamic_libraries_path" ).get<std::string>();
+      if ( !std::filesystem::is_regular_file( dynamic_libraries ) ||
+           fileSha256( dynamic_libraries ) !=
+               runtime.at( "dynamic_libraries_sha256" ).get<std::string>() )
+      {
+        return "baseline qualification preflight runtime library identity "
+               "mismatch";
+      }
+      std::ifstream            dynamic_input( dynamic_libraries );
+      RuntimeLibraryIdentities expected_runtime_libraries;
+      std::string              dynamic_line;
+      while ( std::getline( dynamic_input, dynamic_line ) )
+      {
+        if ( dynamic_line.size() <= 66U || dynamic_line[ 64U ] != ' ' ||
+             dynamic_line[ 65U ] != ' ' )
+        {
+          return "baseline qualification preflight runtime library identity "
+                 "mismatch";
+        }
+        const std::string           expected_sha = dynamic_line.substr( 0U, 64U );
+        const std::filesystem::path library{ dynamic_line.substr( 66U ) };
+        std::error_code             canonical_error;
+        const auto                  canonical_library =
+            std::filesystem::canonical( library, canonical_error );
+        if ( !isSha256( expected_sha ) || !library.is_absolute() ||
+             canonical_error ||
+             !std::filesystem::is_regular_file( canonical_library ) ||
+             fileSha256( canonical_library ) != expected_sha ||
+             !expected_runtime_libraries
+                  .emplace( canonical_library.string(), expected_sha )
+                  .second )
+        {
+          return "baseline qualification preflight runtime library identity "
+                 "mismatch";
+        }
+      }
+      if ( !dynamic_input.eof() ||
+           expected_runtime_libraries.size() !=
+               runtime.at( "dynamic_library_count" ).get<std::size_t>() )
+      {
+        return "baseline qualification preflight runtime library identity "
+               "mismatch";
+      }
+      RuntimeLibraryIdentities loaded_runtime_libraries;
+      if ( const auto loaded_error =
+               loadedRuntimeLibraryIdentities( loaded_runtime_libraries ) )
+      {
+        return "baseline qualification preflight runtime library identity "
+               "mismatch: " +
+               *loaded_error;
+      }
+      if ( loaded_runtime_libraries != expected_runtime_libraries )
+      {
+        return "baseline qualification preflight runtime library identity "
+               "loaded set mismatch";
+      }
 
       const std::filesystem::path source_manifest =
           qualification.at( "source_manifest_path" ).get<std::string>();
@@ -1033,6 +1455,18 @@ namespace
           nlohmann::json::parse( readFileBytes( source_manifest ) );
       const std::string source_id =
           qualification.at( "source_id" ).get<std::string>();
+      if ( preflight_source.at( "entry_count" ).get<std::size_t>() !=
+               source.at( "entries" ).size() ||
+           preflight_source.at( "deleted_tracked_count" )
+                   .get<std::size_t>() !=
+               source.at( "deleted_tracked" ).size() ||
+           preflight_source.at( "git_head" ) !=
+               source.at( "git" ).at( "head" ) ||
+           preflight_source.at( "git_tree" ) !=
+               source.at( "git" ).at( "tree" ) )
+      {
+        return "baseline qualification preflight source identity mismatch";
+      }
       if ( const auto source_error =
                verifySourceManifest( arguments.repo, source, source_id ) )
       {
@@ -1088,9 +1522,7 @@ namespace
         return "baseline qualification source verification mismatch";
       }
 
-      const std::filesystem::path executable =
-          std::filesystem::canonical( "/proc/self/exe" );
-      if ( fileSha256( executable ) !=
+      if ( executable_sha !=
            qualification.at( "binary_sha256" ).get<std::string>() )
       {
         return "baseline qualification binary mismatch";
@@ -1105,7 +1537,8 @@ namespace
         return "baseline qualification input manifest mismatch";
       }
       if ( const auto input_error =
-               verifyInputManifest( arguments.sequence_root, input_manifest ) )
+               verifyInputManifest( arguments.sequence_root, input_manifest,
+                                    input_entry_count ) )
       {
         return *input_error;
       }
@@ -1590,6 +2023,14 @@ namespace
                      "to remain disabled\n";
         return 2;
       }
+#if defined( PHAD_M5_51_REPLAY_DIAGNOSTIC_CLI_FIXTURE_TESTING )
+      if ( !arguments.m5_51_selector_warmup )
+      {
+        std::cerr << "M5 #51 CLI fixture requires "
+                     "--m5-51-selector-warmup\n";
+        return 2;
+      }
+#endif
     }
 #endif
 
@@ -1620,9 +2061,10 @@ namespace
     }
     if ( arguments.m5_51_selector_warmup )
     {
-      if ( const auto qualification_error =
-               validateM5BaselineQualification(
-                   arguments, config_hash, m5_51_baseline_qualification ) )
+      const auto qualification_error = validateM5BaselineQualification(
+          arguments, config_hash, config_text,
+          m5_51_baseline_qualification );
+      if ( qualification_error )
       {
         std::cerr << *qualification_error << '\n';
         return 2;
@@ -1696,31 +2138,48 @@ namespace
     phad::apps::internal::M5RpePrefixDiagnosticReceipt m5_51_receipt;
     bool                                               m5_51_receipt_valid = true;
 #endif
-    auto dataset = phad::apps::internal::openVoBenchDataset(
-        arguments.dataset_format, arguments.sequence_root );
-    if ( !dataset )
+#if defined( PHAD_M5_51_REPLAY_DIAGNOSTIC_CLI_FIXTURE_TESTING )
+    if ( m5_51_diagnostic )
     {
-      session.error =
-          phad::apps::SessionError{ dataset.error().describe() };
+      const auto arm = arguments.m5_51_selector_warmup
+                           ? phad::apps::internal::M5RpePrefixArm::
+                                 kSelectorWarmup
+                           : phad::apps::internal::M5RpePrefixArm::kBaseline;
+      session        = phad::apps::testing::runM551ReplayDiagnosticCliFixture(
+          m5_51_baseline_qualification.m_document
+              .at( "baseline_state_receipt" )
+              .get<std::string>(),
+          arm, m5_51_receipt );
     }
     else
+#endif
     {
-#if defined( PHAD_REPLAY_DIAGNOSTIC_TESTING )
-      if ( m5_51_diagnostic )
+      auto dataset = phad::apps::internal::openVoBenchDataset(
+          arguments.dataset_format, arguments.sequence_root );
+      if ( !dataset )
       {
-        const auto arm = arguments.m5_51_selector_warmup
-                             ? phad::apps::internal::M5RpePrefixArm::
-                                   kSelectorWarmup
-                             : phad::apps::internal::M5RpePrefixArm::kBaseline;
-        session        = phad::apps::internal::runM5RpePrefixDiagnostic(
-            std::move( dataset ).value(), session_options, arm,
-            m5_51_receipt );
+        session.error =
+            phad::apps::SessionError{ dataset.error().describe() };
       }
       else
-#endif
       {
-        session = phad::apps::runOfflineVoSession(
-            std::move( dataset ).value(), session_options );
+#if defined( PHAD_REPLAY_DIAGNOSTIC_TESTING )
+        if ( m5_51_diagnostic )
+        {
+          const auto arm = arguments.m5_51_selector_warmup
+                               ? phad::apps::internal::M5RpePrefixArm::
+                                     kSelectorWarmup
+                               : phad::apps::internal::M5RpePrefixArm::kBaseline;
+          session        = phad::apps::internal::runM5RpePrefixDiagnostic(
+              std::move( dataset ).value(), session_options, arm,
+              m5_51_receipt );
+        }
+        else
+#endif
+        {
+          session = phad::apps::runOfflineVoSession(
+              std::move( dataset ).value(), session_options );
+        }
       }
     }
 
@@ -1759,6 +2218,12 @@ namespace
         }
       }
     }
+#if defined( PHAD_M5_51_REPLAY_DIAGNOSTIC_CLI_FIXTURE_TESTING )
+    if ( m5_51_diagnostic )
+    {
+      return m5_51_receipt_valid ? 0 : 1;
+    }
+#endif
 #endif
 
     phad::bench::RunSummary summary;

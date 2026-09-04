@@ -1,5 +1,15 @@
 cmake_minimum_required(VERSION 3.20)
 
+option(PHAD_ENABLE_M5_51_REPLAY_DIAGNOSTIC
+  "Build the M5 #51 replay diagnostic executable and tests" OFF)
+if(PHAD_ENABLE_M5_51_REPLAY_DIAGNOSTIC AND
+    (NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" OR
+     (DEFINED CMAKE_SYSTEM_NAME AND
+      NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")))
+  message(FATAL_ERROR
+    "PHAD_ENABLE_M5_51_REPLAY_DIAGNOSTIC requires Linux")
+endif()
+
 project(phad_vio VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -108,12 +118,6 @@ target_link_libraries(phad_sync PUBLIC phad::sensor phad::common)
 target_compile_options(phad_sync PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
-if(PHAD_BUILD_TESTS)
-  target_compile_definitions(phad_sync PRIVATE
-    PHAD_REPLAY_DIAGNOSTIC_TESTING
-  )
-  target_link_libraries(phad_sync PRIVATE nlohmann_json::nlohmann_json)
-endif()
 
 add_library(phad_camera
   phad/camera/camera_model.cpp
@@ -137,7 +141,7 @@ target_compile_features(phad_io INTERFACE cxx_std_20)
 target_include_directories(phad_io INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(phad_io INTERFACE phad::sensor)
 
-add_library(phad_io_dataset
+set(PHAD_IO_DATASET_SOURCES
   phad/io/dataset/internal/dataset_adapter_utils.cpp
   phad/io/dataset/dataset_replay_source.cpp
   phad/io/dataset/stereo_imu_dataset.cpp
@@ -147,6 +151,7 @@ add_library(phad_io_dataset
   phad/io/dataset/tum_vi/tum_vi_dataset.cpp
   phad/io/dataset/tum_vi/tum_vi_groundtruth.cpp
 )
+add_library(phad_io_dataset ${PHAD_IO_DATASET_SOURCES})
 add_library(phad::io_dataset ALIAS phad_io_dataset)
 
 target_link_libraries(phad_io_dataset
@@ -156,12 +161,6 @@ target_link_libraries(phad_io_dataset
 target_compile_options(phad_io_dataset PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
-if(PHAD_BUILD_TESTS)
-  target_compile_definitions(phad_io_dataset PRIVATE
-    PHAD_REPLAY_DIAGNOSTIC_TESTING
-  )
-  target_link_libraries(phad_io_dataset PRIVATE nlohmann_json::nlohmann_json)
-endif()
 
 add_library(phad_eval
   phad/eval/align.cpp
@@ -192,12 +191,6 @@ target_link_libraries(phad_frontend
 target_compile_options(phad_frontend PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
-if(PHAD_BUILD_TESTS)
-  target_compile_definitions(phad_frontend PRIVATE PHAD_FRONTEND_TESTING)
-  target_link_libraries(phad_frontend PRIVATE
-    nlohmann_json::nlohmann_json OpenSSL::Crypto
-  )
-endif()
 
 add_library(phad_viz
   phad/viz/image_window.cpp
@@ -214,7 +207,7 @@ target_compile_options(phad_viz PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
-add_library(phad_estimator
+set(PHAD_ESTIMATOR_SOURCES
   phad/estimator/gyro_rotation_predictor.cpp
   phad/estimator/internal/gyro_interval_reducer.cpp
   phad/estimator/internal/initial_moving_root_math.cpp
@@ -223,6 +216,7 @@ add_library(phad_estimator
   phad/estimator/internal/initialization_diagnostics.cpp
   phad/estimator/vio_estimator.cpp
 )
+add_library(phad_estimator ${PHAD_ESTIMATOR_SOURCES})
 add_library(phad::estimator ALIAS phad_estimator)
 target_compile_features(phad_estimator PUBLIC cxx_std_20)
 target_include_directories(phad_estimator PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -238,8 +232,24 @@ target_compile_options(phad_estimator PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 if(PHAD_BUILD_TESTS)
-  target_compile_definitions(phad_estimator PRIVATE PHAD_ESTIMATOR_TESTING)
-  target_link_libraries(phad_estimator PRIVATE nlohmann_json::nlohmann_json)
+  add_library(phad_estimator_test_support STATIC ${PHAD_ESTIMATOR_SOURCES})
+  target_compile_features(phad_estimator_test_support PUBLIC cxx_std_20)
+  target_include_directories(phad_estimator_test_support PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_link_libraries(phad_estimator_test_support
+    PUBLIC phad::common phad::camera phad::sensor
+    PRIVATE gtsam opencv_calib3d nlohmann_json::nlohmann_json
+  )
+  target_include_directories(phad_estimator_test_support SYSTEM PRIVATE
+    $<TARGET_PROPERTY:gtsam,INTERFACE_INCLUDE_DIRECTORIES>
+  )
+  target_compile_definitions(phad_estimator_test_support PRIVATE
+    PHAD_ESTIMATOR_TESTING
+  )
+  target_compile_options(phad_estimator_test_support PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
 endif()
 
 add_library(phad_bench
@@ -277,14 +287,6 @@ target_link_libraries(phad_stereo_pair_stream
 target_compile_options(phad_stereo_pair_stream PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
-if(PHAD_BUILD_TESTS)
-  target_compile_definitions(phad_stereo_pair_stream PRIVATE
-    PHAD_REPLAY_DIAGNOSTIC_TESTING
-  )
-  target_link_libraries(phad_stereo_pair_stream PRIVATE
-    nlohmann_json::nlohmann_json
-  )
-endif()
 
 add_library(phad_vo_bench_dataset STATIC
   apps/internal/vo_bench_dataset.cpp
@@ -298,16 +300,12 @@ target_compile_options(phad_vo_bench_dataset PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
 
-add_library(phad_offline_vo_session STATIC
+set(PHAD_OFFLINE_VO_SESSION_SOURCES
   apps/internal/offline_vo_session_keyframe.cpp
   apps/offline_vo_session.cpp
   apps/probe_b_writer.cpp
 )
-if(PHAD_BUILD_TESTS)
-  target_sources(phad_offline_vo_session PRIVATE
-    apps/internal/m5_51_prefix_diagnostic.cpp
-  )
-endif()
+add_library(phad_offline_vo_session STATIC ${PHAD_OFFLINE_VO_SESSION_SOURCES})
 target_compile_features(phad_offline_vo_session PUBLIC cxx_std_20)
 target_include_directories(phad_offline_vo_session PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -318,16 +316,6 @@ target_link_libraries(phad_offline_vo_session
 target_compile_options(phad_offline_vo_session PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
-if(PHAD_BUILD_TESTS)
-  target_compile_definitions(phad_offline_vo_session PRIVATE
-    PHAD_REPLAY_DIAGNOSTIC_TESTING
-    PHAD_ESTIMATOR_TESTING
-    PHAD_FRONTEND_TESTING
-  )
-  target_link_libraries(phad_offline_vo_session PRIVATE
-    nlohmann_json::nlohmann_json OpenSSL::Crypto
-  )
-endif()
 
 get_target_property( _phad_session_link_libs phad_offline_vo_session
   LINK_LIBRARIES )
@@ -349,6 +337,171 @@ target_link_libraries(phad_gyro_observe_writer
 target_compile_options(phad_gyro_observe_writer PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
+
+if(PHAD_ENABLE_M5_51_REPLAY_DIAGNOSTIC)
+  add_library(phad_sync_m5_51_diagnostic STATIC
+    phad/sync/stereo_pair_synchronizer.cpp
+  )
+  target_compile_features(phad_sync_m5_51_diagnostic PUBLIC cxx_std_20)
+  target_include_directories(phad_sync_m5_51_diagnostic PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_link_libraries(phad_sync_m5_51_diagnostic
+    PUBLIC phad::sensor phad::common
+    PRIVATE nlohmann_json::nlohmann_json
+  )
+  target_compile_definitions(phad_sync_m5_51_diagnostic PRIVATE
+    PHAD_REPLAY_DIAGNOSTIC_TESTING
+  )
+  target_compile_options(phad_sync_m5_51_diagnostic PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+
+  add_library(phad_io_dataset_m5_51_diagnostic STATIC
+    ${PHAD_IO_DATASET_SOURCES}
+  )
+  target_compile_features(phad_io_dataset_m5_51_diagnostic PUBLIC cxx_std_20)
+  target_include_directories(phad_io_dataset_m5_51_diagnostic PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_link_libraries(phad_io_dataset_m5_51_diagnostic
+    PUBLIC phad::io phad::common
+    PRIVATE opencv_imgcodecs yaml-cpp::yaml-cpp
+            nlohmann_json::nlohmann_json
+  )
+  target_compile_definitions(phad_io_dataset_m5_51_diagnostic PRIVATE
+    PHAD_REPLAY_DIAGNOSTIC_TESTING
+  )
+  target_compile_options(phad_io_dataset_m5_51_diagnostic PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+
+  add_library(phad_frontend_m5_51_diagnostic STATIC
+    phad/frontend/stereo_tracker.cpp
+  )
+  target_compile_features(phad_frontend_m5_51_diagnostic PUBLIC cxx_std_20)
+  target_include_directories(phad_frontend_m5_51_diagnostic PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_link_libraries(phad_frontend_m5_51_diagnostic
+    PUBLIC phad::common phad::camera
+    PRIVATE opencv_core opencv_imgproc opencv_video
+            nlohmann_json::nlohmann_json OpenSSL::Crypto
+  )
+  target_compile_definitions(phad_frontend_m5_51_diagnostic PRIVATE
+    PHAD_FRONTEND_TESTING
+  )
+  target_compile_options(phad_frontend_m5_51_diagnostic PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+
+  add_library(phad_estimator_m5_51_diagnostic STATIC
+    ${PHAD_ESTIMATOR_SOURCES}
+  )
+  target_compile_features(phad_estimator_m5_51_diagnostic PUBLIC cxx_std_20)
+  target_include_directories(phad_estimator_m5_51_diagnostic PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_link_libraries(phad_estimator_m5_51_diagnostic
+    PUBLIC phad::common phad::camera phad::sensor
+    PRIVATE gtsam opencv_calib3d nlohmann_json::nlohmann_json
+  )
+  target_include_directories(phad_estimator_m5_51_diagnostic SYSTEM PRIVATE
+    $<TARGET_PROPERTY:gtsam,INTERFACE_INCLUDE_DIRECTORIES>
+  )
+  target_compile_definitions(phad_estimator_m5_51_diagnostic PRIVATE
+    PHAD_ESTIMATOR_TESTING
+  )
+  target_compile_options(phad_estimator_m5_51_diagnostic PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+
+  add_library(phad_stereo_pair_stream_m5_51_diagnostic STATIC
+    apps/stereo_pair_stream.cpp
+  )
+  target_compile_features(phad_stereo_pair_stream_m5_51_diagnostic
+    PUBLIC cxx_std_20
+  )
+  target_include_directories(phad_stereo_pair_stream_m5_51_diagnostic PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_link_libraries(phad_stereo_pair_stream_m5_51_diagnostic
+    PUBLIC phad_io_dataset_m5_51_diagnostic
+           phad_sync_m5_51_diagnostic
+    PRIVATE nlohmann_json::nlohmann_json
+  )
+  target_compile_definitions(phad_stereo_pair_stream_m5_51_diagnostic PRIVATE
+    PHAD_REPLAY_DIAGNOSTIC_TESTING
+  )
+  target_compile_options(phad_stereo_pair_stream_m5_51_diagnostic PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+
+  add_library(phad_vo_bench_dataset_m5_51_diagnostic STATIC
+    apps/internal/vo_bench_dataset.cpp
+  )
+  target_compile_features(phad_vo_bench_dataset_m5_51_diagnostic
+    PUBLIC cxx_std_20
+  )
+  target_include_directories(phad_vo_bench_dataset_m5_51_diagnostic PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_link_libraries(phad_vo_bench_dataset_m5_51_diagnostic
+    PUBLIC phad_io_dataset_m5_51_diagnostic
+  )
+  target_compile_options(phad_vo_bench_dataset_m5_51_diagnostic PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+
+  add_library(phad_offline_vo_session_m5_51_diagnostic STATIC
+    ${PHAD_OFFLINE_VO_SESSION_SOURCES}
+    apps/internal/m5_51_prefix_diagnostic.cpp
+  )
+  target_compile_features(phad_offline_vo_session_m5_51_diagnostic
+    PUBLIC cxx_std_20
+  )
+  target_include_directories(phad_offline_vo_session_m5_51_diagnostic PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_link_libraries(phad_offline_vo_session_m5_51_diagnostic
+    PUBLIC phad_stereo_pair_stream_m5_51_diagnostic phad::camera
+           phad_frontend_m5_51_diagnostic
+           phad_estimator_m5_51_diagnostic
+    PRIVATE nlohmann_json::nlohmann_json OpenSSL::Crypto
+  )
+  target_compile_definitions(phad_offline_vo_session_m5_51_diagnostic PRIVATE
+    PHAD_REPLAY_DIAGNOSTIC_TESTING
+    PHAD_ESTIMATOR_TESTING
+    PHAD_FRONTEND_TESTING
+  )
+  target_compile_options(phad_offline_vo_session_m5_51_diagnostic PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+
+  get_target_property(_phad_m5_51_session_link_libs
+    phad_offline_vo_session_m5_51_diagnostic LINK_LIBRARIES)
+  if(_phad_m5_51_session_link_libs MATCHES "phad_eval|phad::eval")
+    message(FATAL_ERROR
+      "phad_offline_vo_session_m5_51_diagnostic must not link phad_eval")
+  endif()
+  unset(_phad_m5_51_session_link_libs)
+
+  add_library(phad_gyro_observe_writer_m5_51_diagnostic STATIC
+    apps/gyro_observe_writer.cpp
+  )
+  target_compile_features(phad_gyro_observe_writer_m5_51_diagnostic
+    PUBLIC cxx_std_20
+  )
+  target_include_directories(phad_gyro_observe_writer_m5_51_diagnostic PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_link_libraries(phad_gyro_observe_writer_m5_51_diagnostic
+    PUBLIC phad_offline_vo_session_m5_51_diagnostic
+  )
+  target_compile_options(phad_gyro_observe_writer_m5_51_diagnostic PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+endif()
 
 add_library(phad_gyro_alignment STATIC
   apps/gyro_alignment.cpp
@@ -445,28 +598,60 @@ target_link_libraries(phad_vo_bench
 target_compile_definitions(phad_vo_bench PRIVATE
   PHAD_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
-if(PHAD_BUILD_TESTS)
-  target_compile_definitions(phad_vo_bench PRIVATE
-    PHAD_REPLAY_DIAGNOSTIC_TESTING
-  )
-  target_link_libraries(phad_vo_bench PRIVATE
-    nlohmann_json::nlohmann_json OpenSSL::Crypto
-  )
-endif()
 target_compile_options(phad_vo_bench PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
 )
+
+if(PHAD_ENABLE_M5_51_REPLAY_DIAGNOSTIC)
+  add_executable(phad_m5_51_replay_diagnostic apps/phad_vo_bench.cpp)
+  target_link_libraries(phad_m5_51_replay_diagnostic
+    PRIVATE phad_offline_vo_session_m5_51_diagnostic
+            phad_gyro_observe_writer_m5_51_diagnostic phad::bench phad::eval
+            phad_vo_bench_dataset_m5_51_diagnostic
+            nlohmann_json::nlohmann_json OpenSSL::Crypto
+  )
+  target_compile_definitions(phad_m5_51_replay_diagnostic PRIVATE
+    PHAD_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    PHAD_REPLAY_DIAGNOSTIC_TESTING
+    PHAD_M5_51_EXPECTED_CXX_COMPILER_PATH="${CMAKE_CXX_COMPILER}"
+    PHAD_M5_51_EXPECTED_CXX_COMPILER_VERSION="${CMAKE_CXX_COMPILER_VERSION}"
+    PHAD_M5_51_EXPECTED_CMAKE_PATH="${CMAKE_COMMAND}"
+    PHAD_M5_51_EXPECTED_CMAKE_VERSION="${CMAKE_VERSION}"
+    PHAD_M5_51_EXPECTED_BUILD_TOOL_PATH="${CMAKE_MAKE_PROGRAM}"
+    PHAD_M5_51_EXPECTED_GENERATOR="${CMAKE_GENERATOR}"
+    PHAD_M5_51_EXPECTED_BUILD_TYPE="$<IF:$<BOOL:$<CONFIG>>,$<CONFIG>,Unspecified>"
+    PHAD_M5_51_EXPECTED_BUILD_TESTS=$<BOOL:${PHAD_BUILD_TESTS}>
+    PHAD_M5_51_EXPECTED_TRAJ_EVAL_PATH="$<TARGET_FILE:phad_traj_eval>"
+  )
+  target_compile_options(phad_m5_51_replay_diagnostic PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+  )
+endif()
 
 add_executable(phad_euroc_gt_export apps/phad_euroc_gt_export.cpp)
 target_link_libraries(phad_euroc_gt_export PRIVATE phad::io_dataset phad::eval)
 
 add_executable(phad_traj_eval apps/phad_traj_eval.cpp)
 target_link_libraries(phad_traj_eval PRIVATE phad::io_dataset phad::eval)
+if(PHAD_ENABLE_M5_51_REPLAY_DIAGNOSTIC)
+  add_dependencies(phad_m5_51_replay_diagnostic phad_traj_eval)
+endif()
 
 if(PHAD_BUILD_TESTS)
   enable_testing()
   find_package(GTest 1.14 REQUIRED)
   include(GoogleTest)
+
+  add_test(
+    NAME M551ReplayDiagnosticCMakeTest.RequiresLinux
+    COMMAND "${CMAKE_COMMAND}"
+      "-DPHAD_TEST_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      "-DPHAD_TEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+      "-DPHAD_TEST_GENERATOR=${CMAKE_GENERATOR}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/m5_51_replay_diagnostic_platform_test.cmake"
+  )
+  set_tests_properties(M551ReplayDiagnosticCMakeTest.RequiresLinux
+    PROPERTIES LABELS "unit;m5-51-replay-diagnostic")
 
   add_executable(phad_sensor_tests
     tests/sensor/calibration_error_header_test.cpp
@@ -562,7 +747,7 @@ if(PHAD_BUILD_TESTS)
     tests/estimator/mapped_landmark_bearing_test.cpp
   )
   target_link_libraries(phad_estimator_tests PRIVATE
-    phad::estimator gtsam GTest::gtest_main
+    phad_estimator_test_support gtsam GTest::gtest_main
   )
   target_include_directories(phad_estimator_tests SYSTEM PRIVATE
     $<TARGET_PROPERTY:gtsam,INTERFACE_INCLUDE_DIRECTORIES>
@@ -615,13 +800,93 @@ if(PHAD_BUILD_TESTS)
   )
   target_compile_definitions(phad_apps_tests PRIVATE
     PHAD_VO_BENCH_PATH="$<TARGET_FILE:phad_vo_bench>"
-    PHAD_REPLAY_DIAGNOSTIC_TESTING
   )
   add_dependencies(phad_apps_tests phad_vo_bench)
   target_compile_options(phad_apps_tests PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
   )
   gtest_discover_tests(phad_apps_tests PROPERTIES LABELS "unit")
+
+  if(PHAD_ENABLE_M5_51_REPLAY_DIAGNOSTIC)
+    add_executable(phad_m5_51_replay_diagnostic_cli_fixture
+      apps/phad_vo_bench.cpp
+      tests/apps/m5_51_replay_diagnostic_cli_fixture.cpp
+    )
+    target_link_libraries(phad_m5_51_replay_diagnostic_cli_fixture
+      PRIVATE phad_offline_vo_session_m5_51_diagnostic
+              phad_gyro_observe_writer_m5_51_diagnostic phad::bench phad::eval
+              phad_vo_bench_dataset_m5_51_diagnostic
+              nlohmann_json::nlohmann_json OpenSSL::Crypto
+    )
+    target_compile_definitions(phad_m5_51_replay_diagnostic_cli_fixture PRIVATE
+      PHAD_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+      PHAD_REPLAY_DIAGNOSTIC_TESTING
+      PHAD_M5_51_REPLAY_DIAGNOSTIC_CLI_FIXTURE_TESTING
+      PHAD_M5_51_EXPECTED_CXX_COMPILER_PATH="${CMAKE_CXX_COMPILER}"
+      PHAD_M5_51_EXPECTED_CXX_COMPILER_VERSION="${CMAKE_CXX_COMPILER_VERSION}"
+      PHAD_M5_51_EXPECTED_CMAKE_PATH="${CMAKE_COMMAND}"
+      PHAD_M5_51_EXPECTED_CMAKE_VERSION="${CMAKE_VERSION}"
+      PHAD_M5_51_EXPECTED_BUILD_TOOL_PATH="${CMAKE_MAKE_PROGRAM}"
+      PHAD_M5_51_EXPECTED_GENERATOR="${CMAKE_GENERATOR}"
+      PHAD_M5_51_EXPECTED_BUILD_TYPE="$<IF:$<BOOL:$<CONFIG>>,$<CONFIG>,Unspecified>"
+      PHAD_M5_51_EXPECTED_BUILD_TESTS=$<BOOL:${PHAD_BUILD_TESTS}>
+      PHAD_M5_51_EXPECTED_TRAJ_EVAL_PATH="$<TARGET_FILE:phad_traj_eval>"
+    )
+    target_compile_options(phad_m5_51_replay_diagnostic_cli_fixture PRIVATE
+      $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+    )
+    add_dependencies(phad_m5_51_replay_diagnostic_cli_fixture phad_traj_eval)
+
+    add_executable(phad_m5_51_replay_diagnostic_tests
+      tests/apps/m5_51_replay_diagnostic_test.cpp
+    )
+    target_link_libraries(phad_m5_51_replay_diagnostic_tests PRIVATE
+      phad_offline_vo_session_m5_51_diagnostic GTest::gtest_main
+      nlohmann_json::nlohmann_json OpenSSL::Crypto
+    )
+    target_compile_definitions(phad_m5_51_replay_diagnostic_tests PRIVATE
+      PHAD_M5_51_REPLAY_DIAGNOSTIC_PATH="$<TARGET_FILE:phad_m5_51_replay_diagnostic>"
+      PHAD_M5_51_REPLAY_DIAGNOSTIC_FIXTURE_PATH="$<TARGET_FILE:phad_m5_51_replay_diagnostic_cli_fixture>"
+      PHAD_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+      PHAD_REPLAY_DIAGNOSTIC_TESTING
+      PHAD_M5_51_EXPECTED_CXX_COMPILER_PATH="${CMAKE_CXX_COMPILER}"
+      PHAD_M5_51_EXPECTED_CXX_COMPILER_VERSION="${CMAKE_CXX_COMPILER_VERSION}"
+      PHAD_M5_51_EXPECTED_CMAKE_PATH="${CMAKE_COMMAND}"
+      PHAD_M5_51_EXPECTED_CMAKE_VERSION="${CMAKE_VERSION}"
+      PHAD_M5_51_EXPECTED_BUILD_TOOL_PATH="${CMAKE_MAKE_PROGRAM}"
+      PHAD_M5_51_EXPECTED_GENERATOR="${CMAKE_GENERATOR}"
+      PHAD_M5_51_EXPECTED_BUILD_TYPE="$<IF:$<BOOL:$<CONFIG>>,$<CONFIG>,Unspecified>"
+      PHAD_M5_51_EXPECTED_BUILD_TESTS=$<BOOL:${PHAD_BUILD_TESTS}>
+      PHAD_M5_51_EXPECTED_TRAJ_EVAL_PATH="$<TARGET_FILE:phad_traj_eval>"
+    )
+    add_dependencies(phad_m5_51_replay_diagnostic_tests
+      phad_m5_51_replay_diagnostic
+      phad_m5_51_replay_diagnostic_cli_fixture)
+    target_compile_options(phad_m5_51_replay_diagnostic_tests PRIVATE
+      $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+    )
+    gtest_discover_tests(phad_m5_51_replay_diagnostic_tests
+      PROPERTIES LABELS "unit;m5-51-replay-diagnostic")
+
+    if(PHAD_ENABLE_MH01_TESTS)
+      add_executable(phad_m5_51_replay_diagnostic_mh01_test
+        tests/apps/m5_51_replay_diagnostic_mh01_test.cpp
+      )
+      target_link_libraries(phad_m5_51_replay_diagnostic_mh01_test PRIVATE
+        phad_offline_vo_session_m5_51_diagnostic GTest::gtest_main
+        nlohmann_json::nlohmann_json
+      )
+      target_compile_definitions(
+        phad_m5_51_replay_diagnostic_mh01_test PRIVATE
+        PHAD_REPLAY_DIAGNOSTIC_TESTING
+      )
+      target_compile_options(phad_m5_51_replay_diagnostic_mh01_test PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wconversion;-Wsign-conversion>
+      )
+      gtest_discover_tests(phad_m5_51_replay_diagnostic_mh01_test
+        PROPERTIES LABELS "mh01;m5-51-replay-diagnostic")
+    endif()
+  endif()
 
   add_executable(phad_gyro_alignment_tests
     tests/apps/gyro_alignment_test.cpp
