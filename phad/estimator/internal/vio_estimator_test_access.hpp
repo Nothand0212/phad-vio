@@ -8,6 +8,7 @@
 #include <string>
 
 #include "phad/estimator/internal/initial_moving_root_math.hpp"
+#include "phad/estimator/internal/pnp_gauge_capture.hpp"
 #include "phad/estimator/types.hpp"
 
 namespace phad::estimator
@@ -20,6 +21,13 @@ namespace phad::estimator
     class VioEstimatorTestAccess
     {
     public:
+      static void armPnpGaugeCapture( VioEstimator&     estimator,
+                                      common::Timestamp root_timestamp,
+                                      common::Timestamp pnp_timestamp );
+
+      [[nodiscard]] static std::optional<PnpGaugeCapture> takePnpGaugeCapture(
+          VioEstimator& estimator );
+
       static void setNextMovingCandidateResult(
           VioEstimator& estimator, InitialMovingCandidateResult result );
 

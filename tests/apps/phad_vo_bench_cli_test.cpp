@@ -85,17 +85,60 @@ namespace
     EXPECT_EQ( exit_code, 2 );
     const std::string err = readFile( stderr_path );
     EXPECT_NE( err.find( "--probe-b" ), std::string::npos );
+    EXPECT_NE( err.find( "--recovery-bridge-log" ), std::string::npos );
     EXPECT_NE( err.find( "--defer-drop-topk" ), std::string::npos );
     EXPECT_NE( err.find( "--evict-skip-culled" ), std::string::npos );
     EXPECT_NE( err.find( "--zombie-drop-age" ), std::string::npos );
     EXPECT_NE( err.find( "--gyro-observe" ), std::string::npos );
     EXPECT_NE( err.find( "--estimator-enable-pnp-cheirality-retry" ),
                std::string::npos );
+    EXPECT_NE( err.find( "--visual-coast-horizon-ms" ), std::string::npos );
     EXPECT_NE( err.find( "--dataset-format" ), std::string::npos );
     EXPECT_NE( err.find( "euroc|tum-vi" ), std::string::npos );
     EXPECT_NE( err.find( "--gt-tum-vi" ), std::string::npos );
 
     std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, RecoveryBridgeLogIsCliOnlyAndRejectsEmptyPath )
+  {
+    phad::testing::ScopedTempDirectory temp{ "recovery_bridge_cli" };
+    const auto&                        root        = temp.path();
+    const auto                         stdout_path = root / "stdout";
+    const auto                         stderr_path = root / "stderr";
+    const auto                         output      = root / "bench";
+    const auto                         sidecar     = root / "bridge.jsonl";
+    const std::string                  base        = "/nonexistent/sequence --out \"" + output.string() +
+                             "\" --sequence-name V2_03_difficult --estimator-enable-moving-bootstrap --force";
+    EXPECT_EQ( runBench( base + " --recovery-bridge-log", stdout_path, stderr_path ), 2 );
+    EXPECT_EQ( runBench( base + " --recovery-bridge-log \"\"", stdout_path, stderr_path ), 2 );
+    EXPECT_NE( runBench( base, stdout_path, stderr_path ), 0 );
+    const auto off = nlohmann::json::parse( readFile( output / "meta.json" ) );
+    EXPECT_NE( runBench( base + " --recovery-bridge-log \"" + sidecar.string() + "\"",
+                         stdout_path, stderr_path ),
+               0 );
+    const auto on = nlohmann::json::parse( readFile( output / "meta.json" ) );
+    EXPECT_EQ( off.at( "config_hash" ), "4e2b30f2" );
+    EXPECT_EQ( off.at( "config_hash" ), on.at( "config_hash" ) );
+    EXPECT_EQ( off.at( "config" ), on.at( "config" ) );
+    EXPECT_EQ( off.at( "config_canonical_text" ), on.at( "config_canonical_text" ) );
+    EXPECT_EQ( runBench( base + " --recovery-bridge-log \"" +
+                             ( output / "diag.csv" ).string() + "\"",
+                         stdout_path, stderr_path ),
+               2 );
+    for ( const auto& [ flag, filename ] : {
+              std::pair{ "--errors-csv", "errors.csv" },
+              std::pair{ "--gyro-observe", "gyro_packets.csv" },
+              std::pair{ "--gyro-observe", "gyro_samples.csv" } } )
+    {
+      const auto rc = runBench( base + " " + flag + " --recovery-bridge-log \"" +
+                                    ( output / filename ).string() + "\"",
+                                stdout_path, stderr_path );
+      EXPECT_EQ( rc, 2 ) << filename;
+      EXPECT_NE( readFile( stderr_path ).find( "must be separate from regular artifacts" ),
+                 std::string::npos )
+          << filename;
+    }
   }
 
   TEST( VoBenchCliTest, ProductionTargetRejectsM551DiagnosticOptions )
@@ -211,7 +254,7 @@ namespace
                                  { "output_dir",
                                    default_euroc.out.string() },
                                  { "layout_template", "override" } } ) );
-    EXPECT_EQ( default_meta.at( "config_hash" ), "0337287b" );
+    EXPECT_EQ( default_meta.at( "config_hash" ), "4e2b30f2" );
     EXPECT_EQ( explicit_meta.at( "config_hash" ),
                default_meta.at( "config_hash" ) );
     EXPECT_EQ( explicit_meta.at( "config_canonical_text" ),
@@ -434,7 +477,7 @@ namespace
 
     constexpr std::string_view kRetryKey =
         "estimator.enable_pnp_cheirality_retry=true";
-    EXPECT_EQ( default_hash, "0337287b" );
+    EXPECT_EQ( default_hash, "4e2b30f2" );
     EXPECT_EQ( extractConfigHash( readFile( stdout_default ) ), default_hash );
     EXPECT_EQ( default_config.find( kRetryKey ), std::string::npos );
     ASSERT_FALSE( retry_hash.empty() );
@@ -446,6 +489,115 @@ namespace
                std::string::npos );
 
     std::filesystem::remove_all( root );
+  }
+
+  TEST( VoBenchCliTest, VisualCoastHorizonIsCanonicalAndWired )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    phad::testing::ScopedTempDirectory temp_directory{
+        "phad_vo_bench_cli_visual_coast_horizon" };
+    const auto& root = temp_directory.path();
+
+    struct RunPaths
+    {
+      std::filesystem::path out;
+      std::filesystem::path stdout_path;
+      std::filesystem::path stderr_path;
+    };
+    const RunPaths default_run{ root / "default", root / "default.stdout",
+                                root / "default.stderr" };
+    const RunPaths explicit_500{ root / "explicit-500",
+                                 root / "explicit-500.stdout",
+                                 root / "explicit-500.stderr" };
+    const RunPaths explicit_2000{ root / "explicit-2000",
+                                  root / "explicit-2000.stdout",
+                                  root / "explicit-2000.stderr" };
+
+    const auto run = [ & ]( const RunPaths& paths, std::string_view suffix ) {
+      return runBench(
+          "/nonexistent/sequence --out \"" + paths.out.string() +
+              "\" --sequence-name visual_coast --force "
+              "--estimator-enable-moving-bootstrap " +
+              std::string{ suffix },
+          paths.stdout_path, paths.stderr_path );
+    };
+
+    EXPECT_NE( run( default_run, "" ), 0 );
+    EXPECT_NE( run( explicit_500, "--visual-coast-horizon-ms 500" ), 0 );
+    EXPECT_NE( run( explicit_2000, "--visual-coast-horizon-ms 2000" ), 0 );
+
+    const auto load_meta = []( const RunPaths& paths ) {
+      return nlohmann::json::parse( readFile( paths.out / "meta.json" ) );
+    };
+    const auto default_meta = load_meta( default_run );
+    const auto meta_500     = load_meta( explicit_500 );
+    const auto meta_2000    = load_meta( explicit_2000 );
+    constexpr std::string_view kKey =
+        "estimator.visual_coast_horizon_ns";
+
+    EXPECT_EQ( default_meta.at( "config" ).at( kKey ), 500'000'000 );
+    EXPECT_EQ( meta_500.at( "config" ).at( kKey ), 500'000'000 );
+    EXPECT_EQ( meta_2000.at( "config" ).at( kKey ), 2'000'000'000 );
+    EXPECT_EQ( default_meta.at( "config_canonical_text" ),
+               meta_500.at( "config_canonical_text" ) );
+    EXPECT_EQ( default_meta.at( "config_hash" ),
+               meta_500.at( "config_hash" ) );
+    EXPECT_NE( default_meta.at( "config_hash" ),
+               meta_2000.at( "config_hash" ) );
+    EXPECT_EQ( extractConfigHash( readFile( default_run.stdout_path ) ),
+               default_meta.at( "config_hash" ).get<std::string>() );
+    EXPECT_EQ( extractConfigHash( readFile( explicit_2000.stdout_path ) ),
+               meta_2000.at( "config_hash" ).get<std::string>() );
+  }
+
+  TEST( VoBenchCliTest, VisualCoastHorizonRejectsInvalidOrOverflowingMs )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    phad::testing::ScopedTempDirectory temp_directory{
+        "phad_vo_bench_cli_visual_coast_horizon_invalid" };
+    const auto& root = temp_directory.path();
+    for ( const std::string_view value :
+          { "0", "-1", "1.5", "9223372036855", "18446744073709551616" } )
+    {
+      const auto stdout_path = root / ( std::string{ value } + ".stdout" );
+      const auto stderr_path = root / ( std::string{ value } + ".stderr" );
+      const int  exit_code   = runBench(
+          "/nonexistent/sequence --out \"" + ( root / "out" ).string() +
+              "\" --sequence-name visual_coast_invalid "
+              "--visual-coast-horizon-ms " +
+              std::string{ value },
+          stdout_path, stderr_path );
+
+      EXPECT_EQ( exit_code, 2 ) << value;
+      EXPECT_NE( readFile( stderr_path ).find( "positive integer" ),
+                 std::string::npos )
+          << value;
+    }
+  }
+
+  TEST( VoBenchCliTest, VisualCoastHorizonAcceptsLargestSafeMilliseconds )
+  {
+    ASSERT_FALSE( std::string_view{ PHAD_VO_BENCH_PATH }.empty() );
+
+    phad::testing::ScopedTempDirectory temp_directory{
+        "phad_vo_bench_cli_visual_coast_horizon_max" };
+    const auto& root        = temp_directory.path();
+    const auto  output_path = root / "out";
+    const auto  stdout_path = root / "stdout";
+    const auto  stderr_path = root / "stderr";
+    const int   exit_code   = runBench(
+        "/nonexistent/sequence --out \"" + output_path.string() +
+            "\" --sequence-name visual_coast_max --force "
+            "--visual-coast-horizon-ms 9223372036854",
+        stdout_path, stderr_path );
+
+    EXPECT_NE( exit_code, 2 ) << readFile( stderr_path );
+    const auto meta =
+        nlohmann::json::parse( readFile( output_path / "meta.json" ) );
+    EXPECT_EQ( meta.at( "config" ).at( "estimator.visual_coast_horizon_ns" ),
+               9'223'372'036'854'000'000LL );
   }
 
   TEST( VoBenchCliTest, RejectsNegativeMaxOutlierReopts )

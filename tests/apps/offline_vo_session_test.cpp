@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -20,6 +22,8 @@
 
 #include "apps/internal/offline_vo_session_keyframe.hpp"
 #include "apps/probe_b_writer.hpp"
+#include "apps/recovery_bridge_log.hpp"
+#include "phad/eval/tum_io.hpp"
 #include "phad/io/dataset/euroc/euroc_dataset.hpp"
 #include "phad/sensor/rigid_transform.hpp"
 
@@ -670,6 +674,239 @@ namespace
                discontinuity_line.size() -
                    std::string{ ",0,0,0,0,0,0" }.size() );
     std::filesystem::remove( path );
+  }
+
+  TEST( OfflineVoSessionTest, RecoveryBridgeLogPreservesOrderedInputAndTypedAbsence )
+  {
+    VoDiagRow row;
+    row.timestamp_ns     = TinyEurocFixture::kFirstTimestampNs;
+    row.status           = "initializing";
+    row.is_keyframe      = true;
+    row.m_recovery_input = phad::apps::RecoveryBridgeInput{
+        .m_processed_index = 9U,
+        .m_timestamp_ns    = row.timestamp_ns,
+        .m_is_keyframe     = true,
+        .m_observations    = {
+            { .id = 91U, .left_pixel = Eigen::Vector2d{ 10.25, 20.5 }, .disparity_px = 3.5 },
+            { .id = 4U, .left_pixel = Eigen::Vector2d{ 30.5, 40.25 }, .disparity_px = 0.0 } },
+    };
+    row.initialization.m_path       = phad::estimator::InitializationPath::kMoving;
+    row.initialization.m_attempt_id = 23U;
+    const auto encoded              = phad::apps::recoveryBridgeLogRowJson( row );
+    const auto parsed               = nlohmann::json::parse( encoded.dump() );
+    EXPECT_EQ( parsed.at( "i" ), 9U );
+    EXPECT_TRUE( parsed.at( "ts_ns" ).is_number_integer() );
+    EXPECT_EQ( parsed.at( "ts_ns" ).get<std::int64_t>(), row.timestamp_ns );
+    EXPECT_EQ( parsed.at( "frontend" ).at( "observations" ),
+               nlohmann::json( { { 91U, 10.25, 20.5, 3.5 },
+                                 { 4U, 30.5, 40.25, 0.0 } } ) );
+    EXPECT_EQ( parsed.at( "initialization" ).at( "path" ), "Moving" );
+    EXPECT_EQ( parsed.at( "initialization" ).at( "attempt_id" ), 23U );
+    EXPECT_TRUE( parsed.at( "bridge" ).at( "lineage" ).is_null() );
+    EXPECT_TRUE( parsed.at( "bridge" ).at( "attempt_id" ).is_null() );
+    EXPECT_TRUE( parsed.at( "bridge" ).at( "anchor_ts_ns" ).is_null() );
+    EXPECT_EQ( parsed.at( "bridge" ).at( "result" ), "NotApplicable" );
+    row.m_recovery_input.reset();
+    EXPECT_THROW( phad::apps::recoveryBridgeLogRowJson( row ), std::runtime_error );
+  }
+
+  TEST( OfflineVoSessionTest, RecoveryBridgeLogPreservesNonfiniteTerminalRowAndExactBits )
+  {
+    TinyEurocFixture fixture{ "recovery_bridge_nonfinite" };
+    VoDiagRow        row;
+    row.timestamp_ns     = 9007199254740999LL;
+    row.status           = "invalid_input";
+    const double next    = std::nextafter( 1.0, 2.0 );
+    row.m_recovery_input = phad::apps::RecoveryBridgeInput{
+        .m_processed_index = 0U,
+        .m_timestamp_ns    = row.timestamp_ns,
+        .m_is_keyframe     = false,
+        .m_observations    = {
+            { .id           = 9007199254740997ULL,
+                 .left_pixel   = Eigen::Vector2d{ next, std::bit_cast<double>( 0x7ff8000000000042ULL ) },
+                 .disparity_px = std::numeric_limits<double>::infinity() },
+        },
+    };
+    row.m_recovery_bridge.m_result      = phad::estimator::RecoveryBridgeResult::kFatalError;
+    row.m_recovery_bridge.m_transaction = phad::estimator::InitializationTransactionResult::kRolledBack;
+    ASSERT_FALSE( phad::apps::writeRecoveryBridgeLog( fixture.root() / "bridge.jsonl", { row } ) );
+    const auto parsed = nlohmann::json::parse( readTextFile( fixture.root() / "bridge.jsonl" ) );
+    EXPECT_EQ( parsed.at( "status" ), "invalid_input" );
+    EXPECT_EQ( parsed.at( "ts_ns" ).get<std::int64_t>(), 9007199254740999LL );
+    const auto& observation = parsed.at( "frontend" ).at( "observations" ).at( 0 );
+    EXPECT_EQ( observation.at( 0 ).get<std::uint64_t>(), 9007199254740997ULL );
+    EXPECT_EQ( std::bit_cast<std::uint64_t>( observation.at( 1 ).get<double>() ),
+               std::bit_cast<std::uint64_t>( next ) );
+    EXPECT_EQ( observation.at( 2 ), nlohmann::json( { { "f64_bits", "7ff8000000000042" } } ) );
+    EXPECT_EQ( observation.at( 3 ), nlohmann::json( { { "f64_bits", "7ff0000000000000" } } ) );
+    EXPECT_TRUE( parsed.at( "bridge" ).at( "lineage" ).is_null() );
+    EXPECT_EQ( parsed.at( "bridge" ).at( "transaction" ), "RolledBack" );
+  }
+
+  TEST( OfflineVoSessionTest, RecoveryBridgeLogProjectsFatalResultWithoutChangingDiag )
+  {
+    TinyEurocFixture fixture{ "recovery_bridge_projection" };
+    const auto       run = [ & ]( bool capture ) {
+      auto opened = phad::io::dataset::euroc::open( fixture.root() );
+      EXPECT_TRUE( opened );
+      OfflineVoSessionOptions options;
+      options.max_frames                  = 2U;
+      options.collect_timing              = false;
+      options.collect_recovery_bridge_log = capture;
+      return phad::apps::internal::runOfflineVoSessionWithEstimatorUpdate(
+          std::move( opened ).value(), options,
+          []( const phad::estimator::VioMeasurement& measurement, bool ) {
+            phad::estimator::VioUpdateResult update;
+            update.status = phad::estimator::UpdateStatus::kFailed;
+            update.diagnostics.m_initialization.m_transaction =
+                phad::estimator::InitializationTransactionResult::kRolledBack;
+            auto& bridge              = update.diagnostics.m_recovery_bridge;
+            bridge.m_origin           = phad::estimator::RecoveryBridgeOrigin::kVisualOutageRecovery;
+            bridge.m_result           = phad::estimator::RecoveryBridgeResult::kFatalError;
+            bridge.m_reason           = phad::estimator::RecoveryBridgeReason::kTimestampMismatch;
+            bridge.m_anchor_timestamp = phad::common::Timestamp{ 1234567890123456789LL };
+            bridge.m_root_timestamp   = measurement.m_timestamp;
+            bridge.m_attempt_id       = 987U;
+            bridge.m_transaction      = phad::estimator::InitializationTransactionResult::kRolledBack;
+            bridge.m_lineage          = phad::estimator::RecoveryBridgeLineage{
+                               .m_source_segment_id       = 4U,
+                               .m_source_frame_index      = 123U,
+                               .m_source_timestamp        = phad::common::Timestamp{ 1234567890123456000LL },
+                               .m_target_segment_id       = 5U,
+                               .m_world_origin_segment_id = 2U,
+            };
+            return update;
+          } );
+    };
+    const auto off = run( false );
+    const auto on  = run( true );
+    ASSERT_EQ( on.diag.size(), 1U );
+    ASSERT_TRUE( on.error );
+    EXPECT_FALSE( off.diag.front().m_recovery_input );
+    EXPECT_TRUE( on.diag.front().m_recovery_input );
+    expectFrameCountsEqual( off.counts, on.counts );
+    expectTrajectoryEqual( off.trajectory, on.trajectory );
+    ASSERT_FALSE( writeDiagCsv( fixture.root() / "off.csv", off.diag ) );
+    ASSERT_FALSE( writeDiagCsv( fixture.root() / "on.csv", on.diag ) );
+    EXPECT_EQ( readTextFile( fixture.root() / "off.csv" ), readTextFile( fixture.root() / "on.csv" ) );
+    ASSERT_FALSE( phad::apps::writeRecoveryBridgeLog( fixture.root() / "bridge.jsonl", on.diag ) );
+    const auto row = nlohmann::json::parse( readTextFile( fixture.root() / "bridge.jsonl" ) );
+    EXPECT_EQ( row.at( "i" ), 0U );
+    EXPECT_EQ( row.at( "ts_ns" ), TinyEurocFixture::kFirstTimestampNs );
+    const auto& bridge = row.at( "bridge" );
+    EXPECT_EQ( bridge.at( "result" ), "FatalError" );
+    EXPECT_EQ( bridge.at( "transaction" ), "RolledBack" );
+    EXPECT_EQ( bridge.at( "anchor_ts_ns" ), 1234567890123456789LL );
+    EXPECT_EQ( bridge.at( "attempt_id" ), 987U );
+    EXPECT_EQ( bridge.at( "lineage" ).at( "source_segment_id" ), 4U );
+    EXPECT_EQ( bridge.at( "lineage" ).at( "world_origin_segment_id" ), 2U );
+    EXPECT_TRUE( phad::apps::writeRecoveryBridgeLog( fixture.root() / "absent" / "bridge.jsonl", on.diag ) );
+  }
+
+  TEST( OfflineVoSessionTest, RecoveryBridgeLogKeepsActualTumWriterPayloadIdentical )
+  {
+    TinyEurocFixture fixture{ "recovery_bridge_tum_identity" };
+    // Give the existing keyframe selector observable tracks in both frames.
+    cv::Mat left( 48, 64, CV_8UC1 );
+    cv::Mat right( 48, 64, CV_8UC1, cv::Scalar( 0 ) );
+    for ( int y = 0; y < left.rows; ++y )
+    {
+      for ( int x = 0; x < left.cols; ++x )
+      {
+        left.at<unsigned char>( y, x ) =
+            static_cast<unsigned char>( ( x * 17 + y * 31 + x * y % 97 ) % 256 );
+      }
+      for ( int x = 0; x + 4 < left.cols; ++x )
+      {
+        right.at<unsigned char>( y, x ) = left.at<unsigned char>( y, x + 4 );
+      }
+    }
+    for ( const auto* name : { "left-a.png", "left-b.png" } )
+    {
+      ASSERT_TRUE( cv::imwrite( ( fixture.root() / "mav0/cam0/data" / name ).string(), left ) );
+    }
+    for ( const auto* name : { "right-a.png", "right-b.png" } )
+    {
+      ASSERT_TRUE( cv::imwrite( ( fixture.root() / "mav0/cam1/data" / name ).string(), right ) );
+    }
+    const auto run = [ & ]( bool capture ) {
+      auto opened = phad::io::dataset::euroc::open( fixture.root() );
+      EXPECT_TRUE( opened );
+      OfflineVoSessionOptions options;
+      options.collect_timing              = false;
+      options.collect_recovery_bridge_log = capture;
+      return phad::apps::internal::runOfflineVoSessionWithEstimatorUpdate(
+          std::move( opened ).value(), options,
+          []( const phad::estimator::VioMeasurement& measurement, bool ) {
+            phad::estimator::VioUpdateResult update;
+            update.status = phad::estimator::UpdateStatus::kOk;
+            phad::estimator::VioEstimate estimate;
+            estimate.timestamp = measurement.m_timestamp;
+            estimate.T_W_B     = Eigen::Isometry3d::Identity();
+            estimate.T_W_B.translation().x() =
+                static_cast<double>( measurement.m_timestamp.nanoseconds() -
+                                     TinyEurocFixture::kFirstTimestampNs ) *
+                1e-9;
+            update.estimate = estimate;
+            return update;
+          } );
+    };
+    const auto off = run( false );
+    const auto on  = run( true );
+    ASSERT_FALSE( off.error );
+    ASSERT_FALSE( on.error );
+    ASSERT_TRUE( off.trajectory );
+    ASSERT_TRUE( on.trajectory );
+    ASSERT_EQ( off.trajectory->size(), 2U );
+    ASSERT_TRUE( off.kf_trajectory );
+    ASSERT_TRUE( on.kf_trajectory );
+    expectTrajectoryEqual( off.trajectory, on.trajectory );
+    expectTrajectoryEqual( off.kf_trajectory, on.kf_trajectory );
+    for ( const bool keyframes : { false, true } )
+    {
+      const auto& off_trajectory = keyframes ? off.kf_trajectory : off.trajectory;
+      const auto& on_trajectory  = keyframes ? on.kf_trajectory : on.trajectory;
+      ASSERT_FALSE( phad::eval::writeTum( fixture.root() / "off.tum", *off_trajectory ) );
+      ASSERT_FALSE( phad::eval::writeTum( fixture.root() / "on.tum", *on_trajectory ) );
+      EXPECT_EQ( readTextFile( fixture.root() / "off.tum" ),
+                 readTextFile( fixture.root() / "on.tum" ) );
+    }
+    ASSERT_FALSE( writeDiagCsv( fixture.root() / "off.csv", off.diag ) );
+    ASSERT_FALSE( writeDiagCsv( fixture.root() / "on.csv", on.diag ) );
+    EXPECT_EQ( readTextFile( fixture.root() / "off.csv" ), readTextFile( fixture.root() / "on.csv" ) );
+    ASSERT_FALSE( phad::apps::writeRecoveryBridgeLog( fixture.root() / "bridge.jsonl", on.diag ) );
+    for ( const auto& row : on.diag )
+    {
+      EXPECT_TRUE( row.m_recovery_input );
+    }
+  }
+
+  TEST( OfflineVoSessionTest, RecoveryBridgeLogNamesAllResults )
+  {
+    using Result = phad::estimator::RecoveryBridgeResult;
+    VoDiagRow row;
+    row.m_recovery_input = phad::apps::RecoveryBridgeInput{};
+    for ( const auto& [ result, name ] : {
+              std::pair{ Result::kNotApplicable, "NotApplicable" },
+              std::pair{ Result::kPending, "Pending" },
+              std::pair{ Result::kEligible, "Eligible" },
+              std::pair{ Result::kApplied, "Applied" },
+              std::pair{ Result::kCleared, "Cleared" },
+              std::pair{ Result::kFatalError, "FatalError" } } )
+    {
+      row.m_recovery_bridge.m_result = result;
+      EXPECT_EQ( phad::apps::recoveryBridgeLogRowJson( row ).at( "bridge" ).at( "result" ), name );
+    }
+  }
+
+  TEST( OfflineVoSessionTest, RecoveryBridgeLogNamesExpiredRoot )
+  {
+    VoDiagRow row;
+    row.m_recovery_input = phad::apps::RecoveryBridgeInput{};
+    row.m_recovery_bridge.m_reason = phad::estimator::RecoveryBridgeReason::kAnchorExpired;
+    const auto encoded = phad::apps::recoveryBridgeLogRowJson( row );
+    EXPECT_EQ( encoded.at( "bridge" ).at( "result" ), "NotApplicable" );
+    EXPECT_EQ( encoded.at( "bridge" ).at( "reason" ), "AnchorExpired" );
   }
 
   TEST( OfflineVoSessionTest, EmptyProbeBPathDoesNotCreateFile )

@@ -57,6 +57,13 @@ namespace phad::estimator::internal
     std::optional<NavigationState>       m_navigation;
   };
 
+  struct RecoveryAnchor
+  {
+    common::Timestamp     m_timestamp{ 0 };
+    NavigationState       m_navigation;
+    RecoveryBridgeLineage m_lineage;
+  };
+
   struct VioUpdateState
   {
     std::deque<WindowFrame>                         m_window;
@@ -80,6 +87,11 @@ namespace phad::estimator::internal
     std::uint64_t                                     m_non_keyframe_evictions   = 0;
     std::uint64_t                                     m_imu_reintegrations       = 0;
     VioDiagnostics                                    m_vio_diagnostics;
+    std::optional<RecoveryAnchor>                     m_recovery_anchor;
+    RecoveryBridgeOrigin                              m_initialization_origin = RecoveryBridgeOrigin::kProcessStart;
+    std::optional<std::uint32_t>                      m_world_origin_segment_id;
+    // Keep the solver in its segment frame; only published navigation uses W.
+    std::optional<Eigen::Isometry3d>                  m_T_W_local;
   };
 
   inline void installVioUpdateStateInPlace(

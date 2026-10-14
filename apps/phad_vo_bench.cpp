@@ -55,6 +55,7 @@
 #endif
 #include "apps/internal/vo_bench_dataset.hpp"
 #include "apps/offline_vo_session.hpp"
+#include "apps/recovery_bridge_log.hpp"
 #include "phad/bench/code_identity.hpp"
 #include "phad/bench/config_snapshot.hpp"
 #include "phad/bench/run_paths.hpp"
@@ -100,6 +101,8 @@ namespace
       "                     [--tracker-disable-exposure-norm]\n"
       "                     [--estimator-enable-moving-bootstrap]\n"
       "                     [--estimator-enable-pnp-cheirality-retry]\n"
+      "                     [--visual-coast-horizon-ms <n>]\n"
+      "                     [--recovery-bridge-log <path>]\n"
       "                     [--min-seed-observations <n>]\n";
 
 #ifndef PHAD_SOURCE_DIR
@@ -132,11 +135,13 @@ namespace
     std::optional<int>           max_outlier_reopts;
     std::optional<int>           skip_drop_min_culled;
     std::filesystem::path        probe_b_path;
+    std::filesystem::path        recovery_bridge_log;
     std::optional<int>           defer_drop_topk;
     bool                         evict_skip_culled = false;
     std::optional<int>           zombie_drop_age;
     std::optional<double>        hanging_gate_m;
     std::optional<double>        far_refresh_px;
+    std::optional<std::int64_t>  visual_coast_horizon_ns;
     // Root visual-seed threshold; enters flattenConfig / config_hash.
     std::optional<int> min_seed_observations;
 
@@ -193,8 +198,10 @@ namespace
            option == "--outlier-avg-reproj-px" ||
            option == "--max-outlier-reopts" ||
            option == "--skip-drop-min-culled" || option == "--probe-b" ||
+           option == "--recovery-bridge-log" ||
            option == "--defer-drop-topk" || option == "--zombie-drop-age" ||
            option == "--hanging-gate-m" || option == "--far-refresh-px" ||
+           option == "--visual-coast-horizon-ms" ||
            option == "--min-seed-observations" ||
            option == "--tracker-quality-level" ||
            option == "--tracker-lk-pyramid-levels";
@@ -481,6 +488,15 @@ namespace
         }
         arguments.skip_drop_min_culled = static_cast<int>( parsed );
       }
+      else if ( flag == "--recovery-bridge-log" )
+      {
+        if ( value.empty() )
+        {
+          std::cerr << "--recovery-bridge-log expects a non-empty path\n";
+          return false;
+        }
+        arguments.recovery_bridge_log = value;
+      }
       else if ( flag == "--probe-b" )
       {
         arguments.probe_b_path = value;
@@ -532,6 +548,24 @@ namespace
           return false;
         }
         arguments.far_refresh_px = parsed;
+      }
+      else if ( flag == "--visual-coast-horizon-ms" )
+      {
+        constexpr std::uint64_t kNsPerMs = 1'000'000U;
+        constexpr std::uint64_t kMaxMs =
+            static_cast<std::uint64_t>(
+                std::numeric_limits<std::int64_t>::max() ) /
+            kNsPerMs;
+        std::uint64_t parsed = 0U;
+        if ( !parseUint64( value, parsed ) || parsed == 0U ||
+             parsed > kMaxMs )
+        {
+          std::cerr << "--visual-coast-horizon-ms expects a positive integer "
+                       "safely convertible to nanoseconds\n";
+          return false;
+        }
+        arguments.visual_coast_horizon_ns =
+            static_cast<std::int64_t>( parsed * kNsPerMs );
       }
       else if ( flag == "--min-seed-observations" )
       {
@@ -1073,7 +1107,7 @@ namespace
       std::string_view         canonical_config_text,
       M5BaselineQualification& validated_qualification )
   {
-    constexpr std::string_view kFormalConfigHash = "0337287b";
+    constexpr std::string_view kFormalConfigHash = "4e2b30f2";
 #if defined( PHAD_M5_51_REPLAY_DIAGNOSTIC_CLI_FIXTURE_TESTING )
     constexpr std::string_view kInputManifestSha =
         "2b982fd1a2c814d077e0ee4361ca45d8b56ca23aabc65c5c14509d40f4763ea4";
@@ -1782,6 +1816,8 @@ namespace
     }
     snap.set( "estimator.velocity_prior_sigma_mps",
               estimator.m_velocity_prior_sigma_mps );
+    snap.set( "estimator.visual_coast_horizon_ns",
+              estimator.m_visual_coast_horizon_ns );
 
     snap.set( "session.dataset_format",
               std::string( phad::apps::internal::voBenchDatasetConfigToken(
@@ -1939,6 +1975,11 @@ namespace
         arguments.enable_moving_bootstrap;
     session_options.estimator.enable_pnp_cheirality_retry =
         arguments.enable_pnp_cheirality_retry;
+    if ( arguments.visual_coast_horizon_ns.has_value() )
+    {
+      session_options.estimator.m_visual_coast_horizon_ns =
+          *arguments.visual_coast_horizon_ns;
+    }
     if ( arguments.min_seed_observations.has_value() )
     {
       session_options.estimator.min_seed_observations =
@@ -1956,6 +1997,8 @@ namespace
     }
     // Probe B path is CLI-only: not in flattenConfig / config_hash.
     session_options.probe_b_path = arguments.probe_b_path;
+    session_options.collect_recovery_bridge_log =
+        !arguments.recovery_bridge_log.empty();
     // defer-drop-topk is CLI-only probe: not in flattenConfig / config_hash.
     if ( arguments.defer_drop_topk.has_value() )
     {
@@ -2010,6 +2053,7 @@ namespace
            arguments.enable_exposure_norm ||
            arguments.enable_zero_mean_sad || arguments.gyro_observe ||
            !arguments.probe_b_path.empty() ||
+           !arguments.recovery_bridge_log.empty() ||
            arguments.defer_drop_topk.has_value() ||
            arguments.evict_skip_culled )
       {
@@ -2053,9 +2097,9 @@ namespace
 
 #if defined( PHAD_REPLAY_DIAGNOSTIC_TESTING )
     M5BaselineQualification m5_51_baseline_qualification;
-    if ( m5_51_diagnostic && config_hash != "0337287b" )
+    if ( m5_51_diagnostic && config_hash != "4e2b30f2" )
     {
-      std::cerr << "M5 #51 diagnostic canonical config must be 0337287b, got "
+      std::cerr << "M5 #51 diagnostic canonical config must be 4e2b30f2, got "
                 << config_hash << '\n';
       return 2;
     }
@@ -2088,6 +2132,36 @@ namespace
                                                    sequence, code,
                                                    arguments.config_label,
                                                    config_hash );
+
+    if ( !arguments.recovery_bridge_log.empty() )
+    {
+      const auto               sidecar = std::filesystem::weakly_canonical( arguments.recovery_bridge_log );
+      std::vector<const char*> artifact_names{
+          "diag.csv", "est.tum", "kf.tum", "meta.json", "summary.json" };
+      if ( arguments.write_errors_csv )
+      {
+        artifact_names.push_back( "errors.csv" );
+      }
+      if ( arguments.gyro_observe )
+      {
+        artifact_names.push_back( "gyro_packets.csv" );
+        artifact_names.push_back( "gyro_samples.csv" );
+      }
+      for ( const auto* filename : artifact_names )
+      {
+        if ( sidecar == std::filesystem::weakly_canonical( output_dir / filename ) )
+        {
+          std::cerr << "--recovery-bridge-log must be separate from regular artifacts\n";
+          return 2;
+        }
+      }
+      if ( !arguments.probe_b_path.empty() &&
+           sidecar == std::filesystem::weakly_canonical( arguments.probe_b_path ) )
+      {
+        std::cerr << "--recovery-bridge-log must be separate from --probe-b\n";
+        return 2;
+      }
+    }
 
     const phad::bench::OverwriteDecision overwrite =
         phad::bench::decideOverwrite( output_dir, code.git_dirty,
@@ -2511,6 +2585,18 @@ namespace
       exit_code      = 1;
     }
 #endif
+
+    if ( !arguments.recovery_bridge_log.empty() )
+    {
+      if ( const auto error = phad::apps::writeRecoveryBridgeLog(
+               arguments.recovery_bridge_log, session.diag ) )
+      {
+        summary.status = phad::bench::RunStatus::kFailed;
+        summary.warnings.push_back( error->detail );
+        std::cerr << error->detail << '\n';
+        exit_code = 1;
+      }
+    }
 
     // failed / eval_failed still write summary.json for the regression table.
     if ( !writeTextFile( output_dir / "summary.json", summary.toJson() ) )

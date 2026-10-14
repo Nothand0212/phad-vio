@@ -10,6 +10,7 @@
 
 #include "phad/common/landmark_id.hpp"
 #include "phad/estimator/internal/initialization_diagnostics.hpp"
+#include "phad/estimator/internal/recovery_bridge.hpp"
 #include "tests/estimator/vio_test_utils.hpp"
 
 TEST( EstimatorTypes, LandmarkIdAliasesCommon )
@@ -46,6 +47,64 @@ TEST( EstimatorTypes, InitializationDiagnosticsInactiveDefaults )
   EXPECT_EQ(
       initialization.m_transaction,
       phad::estimator::InitializationTransactionResult::kNotEvaluated );
+}
+
+TEST( EstimatorTypes, RecoveryBridgeDiagnosticsInactiveDefaults )
+{
+  using namespace phad::estimator;
+  const UpdateDiagnostics diagnostics;
+  const auto&             bridge = diagnostics.m_recovery_bridge;
+  EXPECT_EQ( bridge.m_origin, RecoveryBridgeOrigin::kNone );
+  EXPECT_EQ( bridge.m_result, RecoveryBridgeResult::kNotApplicable );
+  EXPECT_EQ( bridge.m_reason, RecoveryBridgeReason::kNone );
+  EXPECT_EQ( bridge.m_transaction, InitializationTransactionResult::kNotEvaluated );
+  EXPECT_FALSE( bridge.m_lineage.has_value() );
+  EXPECT_FALSE( bridge.m_anchor_timestamp.has_value() );
+  EXPECT_FALSE( bridge.m_root_timestamp.has_value() );
+  EXPECT_FALSE( bridge.m_attempt_id.has_value() );
+}
+
+TEST( EstimatorTypes, RecoveryYawHasExactDefinitionBoundary )
+{
+  using namespace phad::estimator;
+  using internal::recoveryYaw;
+  constexpr double limit = 64.0 * std::numeric_limits<double>::epsilon();
+  for ( const double value : { 0.0, std::nextafter( limit, 0.0 ), limit } )
+  {
+    const auto result = recoveryYaw( value, 0.0 );
+    ASSERT_TRUE( std::holds_alternative<RecoveryBridgeReason>( result ) );
+    EXPECT_EQ( std::get<RecoveryBridgeReason>( result ), RecoveryBridgeReason::kYawUndefined );
+  }
+  const auto above = recoveryYaw( std::nextafter( limit, 1.0 ), 0.0 );
+  ASSERT_TRUE( std::holds_alternative<double>( above ) );
+  EXPECT_DOUBLE_EQ( std::get<double>( above ), 0.0 );
+  const auto non_finite = recoveryYaw( std::numeric_limits<double>::infinity(), 0.0 );
+  EXPECT_EQ( std::get<RecoveryBridgeReason>( non_finite ), RecoveryBridgeReason::kInvalidTransform );
+  const auto not_a_number = recoveryYaw( 0.0, std::numeric_limits<double>::quiet_NaN() );
+  EXPECT_EQ( std::get<RecoveryBridgeReason>( not_a_number ), RecoveryBridgeReason::kInvalidTransform );
+}
+
+TEST( EstimatorTypes, RecoveryProposalPreservesGravityWithDifferentTilts )
+{
+  using namespace phad::estimator;
+  Eigen::Isometry3d anchor = Eigen::Isometry3d::Identity();
+  Eigen::Isometry3d local  = Eigen::Isometry3d::Identity();
+  Eigen::Matrix3d   yaw;
+  yaw << 0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0;
+  anchor.linear()      = yaw * Eigen::AngleAxisd( 0.7, Eigen::Vector3d::UnitX() ).toRotationMatrix();
+  local.linear()       = Eigen::AngleAxisd( 0.2, Eigen::Vector3d::UnitX() ).toRotationMatrix();
+  anchor.translation() = Eigen::Vector3d( 4.0, 5.0, 6.0 );
+  local.translation()  = Eigen::Vector3d( 1.0, 2.0, 3.0 );
+  const auto proposal  = internal::makeRecoveryBridgeProposal( anchor, local );
+  ASSERT_TRUE( std::holds_alternative<Eigen::Isometry3d>( proposal ) );
+  const auto& transform = std::get<Eigen::Isometry3d>( proposal );
+  EXPECT_TRUE( transform.rotation().isApprox( yaw, 1e-14 ) );
+  EXPECT_TRUE( transform.translation().isApprox( Eigen::Vector3d( 6.0, 4.0, 3.0 ), 1e-14 ) );
+  EXPECT_TRUE( ( transform.rotation() * Eigen::Vector3d::UnitZ() ).isApprox( Eigen::Vector3d::UnitZ(), 1e-14 ) );
+  anchor.linear() = Eigen::AngleAxisd( std::acos( -1.0 ), Eigen::Vector3d::UnitX() ).toRotationMatrix();
+  local.setIdentity();
+  EXPECT_EQ( std::get<RecoveryBridgeReason>( internal::makeRecoveryBridgeProposal( anchor, local ) ),
+             RecoveryBridgeReason::kYawUndefined );
 }
 
 TEST( EstimatorTypes, InitializationDiagnosticsLegalCombinations )

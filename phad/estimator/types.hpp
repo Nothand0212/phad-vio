@@ -294,6 +294,60 @@ namespace phad::estimator
         InitializationTransactionResult::kNotEvaluated;
   };
 
+  enum class RecoveryBridgeOrigin : std::uint8_t
+  {
+    kNone,
+    kProcessStart,
+    kVisualOutageRecovery,
+    kMeasurementDiscontinuity,
+  };
+
+  enum class RecoveryBridgeResult : std::uint8_t
+  {
+    kNotApplicable,
+    kPending,
+    kEligible,
+    kApplied,
+    kCleared,
+    kFatalError,
+  };
+
+  enum class RecoveryBridgeReason : std::uint8_t
+  {
+    kNone,
+    kAwaitingValidatedRoot,
+    kStaticRootSelected,
+    kMeasurementDiscontinuity,
+    kTimestampMismatch,
+    kInvalidAnchor,
+    kYawUndefined,
+    kInvalidTransform,
+    kContractError,
+    kAnchorExpired,
+  };
+
+  struct RecoveryBridgeLineage
+  {
+    std::uint32_t     m_source_segment_id  = 0;
+    std::uint64_t     m_source_frame_index = 0;
+    common::Timestamp m_source_timestamp{ 0 };
+    std::uint32_t     m_target_segment_id       = 0;
+    std::uint32_t     m_world_origin_segment_id = 0;
+  };
+
+  struct RecoveryBridgeDiagnostics
+  {
+    RecoveryBridgeOrigin                 m_origin = RecoveryBridgeOrigin::kNone;
+    RecoveryBridgeResult                 m_result = RecoveryBridgeResult::kNotApplicable;
+    RecoveryBridgeReason                 m_reason = RecoveryBridgeReason::kNone;
+    std::optional<RecoveryBridgeLineage> m_lineage;
+    std::optional<common::Timestamp>     m_anchor_timestamp;
+    std::optional<common::Timestamp>     m_root_timestamp;
+    std::optional<std::uint64_t>         m_attempt_id;
+    InitializationTransactionResult      m_transaction =
+        InitializationTransactionResult::kNotEvaluated;
+  };
+
   struct UpdateDiagnostics
   {
     std::uint32_t num_observations                = 0;
@@ -371,6 +425,7 @@ namespace phad::estimator
     bool                                          probe_detail_valid = false;
     VioDiagnostics                                m_vio;
     InitializationDiagnostics                     m_initialization;
+    RecoveryBridgeDiagnostics                     m_recovery_bridge;
   };
 
   struct VioUpdateResult

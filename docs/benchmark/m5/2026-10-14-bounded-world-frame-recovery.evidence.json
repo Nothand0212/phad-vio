@@ -1,0 +1,2635 @@
+{
+  "schema_version": 1,
+  "record_date": "2026-10-14",
+  "issue": 58,
+  "scope": "bounded_world_frame_recovery_local_core4",
+  "contract": {
+    "horizon_ns": 500000000,
+    "budget_origin": "immutable_source_committed_navigation_timestamp",
+    "inclusive": true,
+    "expired_root": "NotApplicable / AnchorExpired / RootCommitted",
+    "local_solver_preserved": true
+  },
+  "configuration": {
+    "config_label": "default",
+    "config_hash": "4e2b30f2",
+    "config": {
+      "estimator.block_culled_rebirth": true,
+      "estimator.enable_moving_bootstrap": true,
+      "estimator.enable_outlier_cull": true,
+      "estimator.enable_outlier_reopt": true,
+      "estimator.enable_pnp_init": true,
+      "estimator.far_return_refresh_px": 6.0,
+      "estimator.hanging_landmark_gate_m": 1.0,
+      "estimator.huber_k_px": 3.0,
+      "estimator.max_outlier_reopts": 3,
+      "estimator.min_landmark_observations": 2,
+      "estimator.min_pnp_inliers": 10,
+      "estimator.min_seed_observations": 10,
+      "estimator.min_shared_landmarks": 10,
+      "estimator.min_track_observations_for_seed": 1,
+      "estimator.outlier_avg_reproj_px": 4.0,
+      "estimator.pnp_confidence": 0.99,
+      "estimator.pnp_reproj_px": 2.0,
+      "estimator.prior_rotation_sigma_rad": 0.0001,
+      "estimator.prior_translation_sigma_m": 0.0001,
+      "estimator.stereo_sigma_px": 1.0,
+      "estimator.velocity_prior_sigma_mps": 0.1,
+      "estimator.visual_coast_horizon_ns": 500000000,
+      "estimator.window_size": 10,
+      "eval.max_dt_ms": 2.5,
+      "eval.min_match_rate": 0.5,
+      "eval.rpe_delta_s": 1.0,
+      "session.dataset_format": "euroc",
+      "session.drop_culled_tracks": true,
+      "session.skip_drop_min_culled": 4,
+      "session.zombie_drop_age": 5,
+      "tracker.forward_backward_px": 0.5,
+      "tracker.lk_pyramid_levels": 4,
+      "tracker.lk_window_px": 21,
+      "tracker.mask_radius_px": 20,
+      "tracker.max_depth_m": 25.0,
+      "tracker.max_epipolar_px": 1.5,
+      "tracker.max_tracks": 200,
+      "tracker.min_depth_m": 0.3,
+      "tracker.min_disparity_px": 2.0,
+      "tracker.min_distance_px": 20.0,
+      "tracker.quality_level": 0.003,
+      "tracker.stereo_bidir_px": 0.5,
+      "tracker.stereo_check_bidir": true,
+      "tracker.stereo_row_tol_px": 0,
+      "tracker.stereo_sad_half_win_px": 7,
+      "tracker.stereo_uniq_ratio": 0.5
+    },
+    "config_canonical_text": "estimator.block_culled_rebirth=true\nestimator.enable_moving_bootstrap=true\nestimator.enable_outlier_cull=true\nestimator.enable_outlier_reopt=true\nestimator.enable_pnp_init=true\nestimator.far_return_refresh_px=6\nestimator.hanging_landmark_gate_m=1\nestimator.huber_k_px=3\nestimator.max_outlier_reopts=3\nestimator.min_landmark_observations=2\nestimator.min_pnp_inliers=10\nestimator.min_seed_observations=10\nestimator.min_shared_landmarks=10\nestimator.min_track_observations_for_seed=1\nestimator.outlier_avg_reproj_px=4\nestimator.pnp_confidence=0.98999999999999999\nestimator.pnp_reproj_px=2\nestimator.prior_rotation_sigma_rad=0.0001\nestimator.prior_translation_sigma_m=0.0001\nestimator.stereo_sigma_px=1\nestimator.velocity_prior_sigma_mps=0.10000000000000001\nestimator.visual_coast_horizon_ns=500000000\nestimator.window_size=10\neval.max_dt_ms=2.5\neval.min_match_rate=0.5\neval.rpe_delta_s=1\nsession.dataset_format=euroc\nsession.drop_culled_tracks=true\nsession.skip_drop_min_culled=4\nsession.zombie_drop_age=5\ntracker.forward_backward_px=0.5\ntracker.lk_pyramid_levels=4\ntracker.lk_window_px=21\ntracker.mask_radius_px=20\ntracker.max_depth_m=25\ntracker.max_epipolar_px=1.5\ntracker.max_tracks=200\ntracker.min_depth_m=0.29999999999999999\ntracker.min_disparity_px=2\ntracker.min_distance_px=20\ntracker.quality_level=0.0030000000000000001\ntracker.stereo_bidir_px=0.5\ntracker.stereo_check_bidir=true\ntracker.stereo_row_tol_px=0\ntracker.stereo_sad_half_win_px=7\ntracker.stereo_uniq_ratio=0.5\n"
+  },
+  "experiment_source_identity": {
+    "code": {
+      "git_branch": "codex/m5-product-recut-design",
+      "git_commit": "b3402b5315b0ccd9b8448ce5f617ff4ae49cc1c2",
+      "git_commit_short": "b3402b5",
+      "git_dirty": true
+    },
+    "source_before_tar_sha256": "90d15e286f1a4e9c8b00a2f326ae89fa27e1285694ccb1fad1804ba9ddc5af43",
+    "task_delta_sha256": "ca224ad8d75538de9fb9d3e9edc9f9331e31438113979f174624b9715a7d02fd",
+    "subject_estimator_sha256": "f39cf0ef42afa941bfe3b18246aadd6a8621687947aa18acc08c9f3bc7423e9b",
+    "control_estimator_sha256": "3e2f1bd90362c35caec167e609af857ea5680388439f12f0d3f38afd7b2e9dfc",
+    "counterfactual_source_patch": "2026-10-14-bounded-world-frame-recovery.control.patch",
+    "source_file_sha256": {
+      "CMakeLists.txt": "a644d82613f6b8c08dcd4ff7aae3b75d6d188da1849ed79e16f13c276ee82458",
+      "apps/offline_vo_session.cpp": "657722aca7ca8a73ac8d25fd470a9cc53905ba3809479884d198e700c9c4b124",
+      "apps/offline_vo_session.hpp": "195275fb90a54506df6415d0a85666cdb04590131f0f59dc84d24d4b7de161e7",
+      "apps/phad_vo_bench.cpp": "11452379c682d065de099b8f769c89d911daca00b75d49bb21671eab10286567",
+      "apps/recovery_bridge_log.hpp": "c05b2d65fec4c77ec1a7135bc18c6ed356799326ded8da8f686cfee57d926fca",
+      "phad/estimator/README.md": "0ab878f1c20c8d27a1e8698a774ef67736bd8a06d196055e60f449382ccf24ea",
+      "phad/estimator/internal/pnp_gauge_capture.hpp": "07e5c2d7ec17dbccb7d8ac4fbc76c597c41aa16503bde85f09685ed209f82f23",
+      "phad/estimator/internal/recovery_bridge.hpp": "d215c2a39d08e4cce7c2ee3face7d3c41f82aaeebb5eb2b8afcce67928cc0cd0",
+      "phad/estimator/internal/vio_estimator_test_access.hpp": "7fb180f862276aaa97117983567bea43b6dddbabcf2bafacff45745ba0ecd5a9",
+      "phad/estimator/internal/vio_update_transaction.hpp": "5d52b44fc9e1b16b3dd0aa04fb7d76dd57b43f5d0acadbf8dff636f59e54f419",
+      "phad/estimator/types.hpp": "d6edaf4aef6e686934c0e4d05be71b19432c0ba1cd1ab6ce584ffc268e2ab6b1",
+      "phad/estimator/vio_estimator.cpp": "f39cf0ef42afa941bfe3b18246aadd6a8621687947aa18acc08c9f3bc7423e9b",
+      "scripts/m5_recovery_pair.py": "ded98cb2197a750a95c97897d84c83a8d6f7b47c328c3cd001081e61b650cf0d",
+      "scripts/remote_ci.py": "6bcfb452bc08a5580649edbe687afa68b49ce81f5bf109d5c7418f470fdd98db"
+    },
+    "build_type": "RelWithDebInfo",
+    "production_test_macros": false,
+    "local_raw_artifact_root": "build/world-frame-recovery-20261013"
+  },
+  "tests": {
+    "validated_working_snapshot": {
+      "unit_passed": 675,
+      "unit_failed": 0,
+      "unit_skipped": 0,
+      "recovery_script_passed": 31,
+      "recovery_script_failed": 0
+    },
+    "publication_snapshot": {
+      "state": "PASS",
+      "build": "independent_export_of_staged_index",
+      "unit_passed": 642,
+      "unit_failed": 0,
+      "unit_skipped": 0,
+      "recovery_script_passed": 31,
+      "recovery_script_failed": 0,
+      "source_sha256": {
+        "CMakeLists.txt": "d69a10e9d1085f5e31c268c5cf8c750d67727426f6358989aed85214db56a140",
+        "apps/offline_vo_session.cpp": "f098af9942bde17ea6b675bc4667bb48940e861817055d73fb465e86949d59a0",
+        "apps/offline_vo_session.hpp": "195275fb90a54506df6415d0a85666cdb04590131f0f59dc84d24d4b7de161e7",
+        "apps/phad_vo_bench.cpp": "b67e35939b66e4311e241663a0f94f582506e87cd0ebfd1092034852aafa5002",
+        "apps/recovery_bridge_log.hpp": "c05b2d65fec4c77ec1a7135bc18c6ed356799326ded8da8f686cfee57d926fca",
+        "phad/estimator/README.md": "e5a3ea3c18d53b19f1e7d4aec94e17867792e889dcea3afcaf7b12c4cafe3786",
+        "phad/estimator/internal/pnp_gauge_capture.hpp": "07e5c2d7ec17dbccb7d8ac4fbc76c597c41aa16503bde85f09685ed209f82f23",
+        "phad/estimator/internal/recovery_bridge.hpp": "d215c2a39d08e4cce7c2ee3face7d3c41f82aaeebb5eb2b8afcce67928cc0cd0",
+        "phad/estimator/internal/vio_estimator_test_access.hpp": "7fb180f862276aaa97117983567bea43b6dddbabcf2bafacff45745ba0ecd5a9",
+        "phad/estimator/internal/vio_update_transaction.hpp": "5d52b44fc9e1b16b3dd0aa04fb7d76dd57b43f5d0acadbf8dff636f59e54f419",
+        "phad/estimator/types.hpp": "d6edaf4aef6e686934c0e4d05be71b19432c0ba1cd1ab6ce584ffc268e2ab6b1",
+        "phad/estimator/vio_estimator.cpp": "f39cf0ef42afa941bfe3b18246aadd6a8621687947aa18acc08c9f3bc7423e9b",
+        "scripts/m5_recovery_pair.py": "ded98cb2197a750a95c97897d84c83a8d6f7b47c328c3cd001081e61b650cf0d",
+        "scripts/remote_ci.py": "6bcfb452bc08a5580649edbe687afa68b49ce81f5bf109d5c7418f470fdd98db"
+      },
+      "paired_linkage": "same production compiler flags; explicit estimator object immediately before libphad_estimator.a in both arms",
+      "link_commands": {
+        "control": [
+          "/usr/bin/c++",
+          "-O2",
+          "-g",
+          "-DNDEBUG",
+          "-Wl,--dependency-file=CMakeFiles/phad_vo_bench.dir/link.d",
+          "CMakeFiles/phad_vo_bench.dir/apps/phad_vo_bench.cpp.o",
+          "-o",
+          "<publication>/phad_vo_bench.symmetric-control",
+          "-Wl,-rpath,/usr/local/lib",
+          "libphad_offline_vo_session.a",
+          "libphad_gyro_observe_writer.a",
+          "libphad_bench.a",
+          "libphad_eval.a",
+          "libphad_vo_bench_dataset.a",
+          "libphad_offline_vo_session.a",
+          "libphad_stereo_pair_stream.a",
+          "libphad_sync.a",
+          "libphad_frontend.a",
+          "/usr/lib/x86_64-linux-gnu/libopencv_video.so.4.6.0",
+          "/usr/lib/x86_64-linux-gnu/libopencv_dnn.so.4.6.0",
+          "<publication>/control.o",
+          "libphad_estimator.a",
+          "libphad_camera.a",
+          "/usr/lib/x86_64-linux-gnu/libopencv_calib3d.so.4.6.0",
+          "/usr/lib/x86_64-linux-gnu/libopencv_features2d.so.4.6.0",
+          "/usr/lib/x86_64-linux-gnu/libopencv_flann.so.4.6.0",
+          "/usr/local/lib/libgtsam.so.4.3a0",
+          "/usr/lib/x86_64-linux-gnu/libboost_serialization.so.1.83.0",
+          "/usr/lib/x86_64-linux-gnu/libboost_system.so.1.83.0",
+          "/usr/lib/x86_64-linux-gnu/libboost_filesystem.so.1.83.0",
+          "/usr/lib/x86_64-linux-gnu/libboost_thread.so.1.83.0",
+          "/usr/lib/x86_64-linux-gnu/libboost_atomic.so.1.83.0",
+          "/usr/lib/x86_64-linux-gnu/libboost_date_time.so.1.83.0",
+          "/usr/lib/x86_64-linux-gnu/libboost_regex.so.1.83.0",
+          "/usr/lib/x86_64-linux-gnu/libboost_timer.so.1.83.0",
+          "/usr/lib/x86_64-linux-gnu/libboost_chrono.so.1.83.0",
+          "/usr/lib/x86_64-linux-gnu/libtbb.so.12.11",
+          "/usr/lib/x86_64-linux-gnu/libtbbmalloc.so.2.11",
+          "/usr/local/lib/libmetis-gtsam.so",
+          "-lm",
+          "/usr/local/lib/libcephes-gtsam.so.1.0.0",
+          "libphad_io_dataset.a",
+          "libphad_common.a",
+          "libphad_sensor.a",
+          "/usr/lib/x86_64-linux-gnu/libopencv_imgcodecs.so.4.6.0",
+          "/usr/lib/x86_64-linux-gnu/libopencv_imgproc.so.4.6.0",
+          "/usr/lib/x86_64-linux-gnu/libopencv_core.so.4.6.0",
+          "/usr/lib/x86_64-linux-gnu/libyaml-cpp.so.0.8.0"
+        ],
+        "subject": [
+          "/usr/bin/c++",
+          "-O2",
+          "-g",
+          "-DNDEBUG",
+          "-Wl,--dependency-file=CMakeFiles/phad_vo_bench.dir/link.d",
+          "CMakeFiles/phad_vo_bench.dir/apps/phad_vo_bench.cpp.o",
+          "-o",
+          "<publication>/phad_vo_bench.symmetric-subject",
+          "-Wl,-rpath,/usr/local/lib",
+          "libphad_offline_vo_session.a",
+          "libphad_gyro_observe_writer.a",
+          "libphad_bench.a",
+          "libphad_eval.a",
+          "libphad_vo_bench_dataset.a",
+          "libphad_offline_vo_session.a",
+          "libphad_stereo_pair_stream.a",
+          "libphad_sync.a",
+          "libphad_frontend.a",
+          "/usr/lib/x86_64-linux-gnu/libopencv_video.so.4.6.0",
+          "/usr/lib/x86_64-linux-gnu/libopencv_dnn.so.4.6.0",
+          "CMakeFiles/phad_estimator.dir/phad/estimator/vio_estimator.cpp.o",
+          "libphad_estimator.a",
+          "libphad_camera.a",
+          "/usr/lib/x86_64-linux-gnu/libopencv_calib3d.so.4.6.0",
+          "/usr/lib/x86_64-linux-gnu/libopencv_features2d.so.4.6.0",
+          "/usr/lib/x86_64-linux-gnu/libopencv_flann.so.4.6.0",
+          "/usr/local/lib/libgtsam.so.4.3a0",
+          "/usr/lib/x86_64-linux-gnu/libboost_serialization.so.1.83.0",
+          "/usr/lib/x86_64-linux-gnu/libboost_system.so.1.83.0",
+          "/usr/lib/x86_64-linux-gnu/libboost_filesystem.so.1.83.0",
+          "/usr/lib/x86_64-linux-gnu/libboost_thread.so.1.83.0",
+          "/usr/lib/x86_64-linux-gnu/libboost_atomic.so.1.83.0",
+          "/usr/lib/x86_64-linux-gnu/libboost_date_time.so.1.83.0",
+          "/usr/lib/x86_64-linux-gnu/libboost_regex.so.1.83.0",
+          "/usr/lib/x86_64-linux-gnu/libboost_timer.so.1.83.0",
+          "/usr/lib/x86_64-linux-gnu/libboost_chrono.so.1.83.0",
+          "/usr/lib/x86_64-linux-gnu/libtbb.so.12.11",
+          "/usr/lib/x86_64-linux-gnu/libtbbmalloc.so.2.11",
+          "/usr/local/lib/libmetis-gtsam.so",
+          "-lm",
+          "/usr/local/lib/libcephes-gtsam.so.1.0.0",
+          "libphad_io_dataset.a",
+          "libphad_common.a",
+          "libphad_sensor.a",
+          "/usr/lib/x86_64-linux-gnu/libopencv_imgcodecs.so.4.6.0",
+          "/usr/lib/x86_64-linux-gnu/libopencv_imgproc.so.4.6.0",
+          "/usr/lib/x86_64-linux-gnu/libopencv_core.so.4.6.0",
+          "/usr/lib/x86_64-linux-gnu/libyaml-cpp.so.0.8.0"
+        ]
+      },
+      "core4_replay_processes": 8,
+      "historical_payloads": "diag.csv, est.tum, kf.tum byte-identical in each role and sequence",
+      "input_identity": {
+        "V2_03_difficult": {
+          "rows": 1921,
+          "input_and_initialization_identity": true,
+          "historical_sidecar_identity": true,
+          "pre_applied_payload_identity": true,
+          "applied": [
+            937
+          ],
+          "expired": [
+            459,
+            809,
+            1097,
+            1343,
+            1563
+          ]
+        },
+        "V1_03_difficult": {
+          "rows": 2149,
+          "input_and_initialization_identity": true,
+          "historical_sidecar_identity": true,
+          "pre_applied_payload_identity": true,
+          "applied": [
+            1244
+          ],
+          "expired": []
+        },
+        "V2_02_medium": {
+          "rows": 2348,
+          "input_and_initialization_identity": true,
+          "historical_sidecar_identity": true,
+          "pre_applied_payload_identity": true,
+          "applied": [],
+          "expired": []
+        },
+        "MH_01_easy": {
+          "rows": 3682,
+          "input_and_initialization_identity": true,
+          "historical_sidecar_identity": true,
+          "pre_applied_payload_identity": true,
+          "applied": [],
+          "expired": []
+        }
+      },
+      "native_replay_summaries": [
+        {
+          "sequence": "V2_03_difficult",
+          "role": "control",
+          "payload_identity_with_qualified_run": {
+            "diag.csv": true,
+            "est.tum": true,
+            "kf.tum": true
+          },
+          "config_hash": "4e2b30f2",
+          "summary": {
+            "ate": {
+              "rot_deg": {
+                "max": 168.94100980093444,
+                "mean": 109.11246358036888,
+                "median": 87.89689803208097,
+                "rmse": 115.03470013868198,
+                "stddev": 36.434221926907604
+              },
+              "trans": {
+                "max": 4.3935496257205,
+                "mean": 1.7815431741964607,
+                "median": 1.7918011557053988,
+                "rmse": 1.96022503505069,
+                "stddev": 0.8176711481478834
+              }
+            },
+            "code": {
+              "git_commit_short": "b3402b5",
+              "git_dirty": true
+            },
+            "config_hash": "4e2b30f2",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 2,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 0,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 0,
+              "outliers_culled": 18,
+              "outliers_culled_unique": 18,
+              "pnp_fallbacks": 119,
+              "pnp_successes": 808,
+              "reanchors": 6,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 0,
+              "zombie_age_drops": 0
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 63.91402633937057,
+                "mean": 2.1199709459987988,
+                "median": 0.9306527694911189,
+                "rmse": 8.15725539708514,
+                "stddev": 7.876962536498163
+              },
+              "trans": {
+                "max": 3.408042885307776,
+                "mean": 0.10952105233668859,
+                "median": 0.052064394362149394,
+                "rmse": 0.4160126554214516,
+                "stddev": 0.4013373500758081
+              }
+            },
+            "schema_version": 2,
+            "sequence": "V2_03_difficult",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 1,
+              "dropped_left_overflow": 0,
+              "dropped_right": 415,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 1921,
+              "max_left_queue": 2,
+              "max_right_queue": 1,
+              "pushed_left": 1922,
+              "pushed_right": 2336
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.212692958,
+                "mean": 0.00740727356741281,
+                "p95": 0.018671785
+              },
+              "frontend": {
+                "max": 0.030932697,
+                "mean": 0.016317017104112444,
+                "p95": 0.018579763
+              },
+              "rectify": {
+                "max": 0.004275305,
+                "mean": 0.0014290879213951085,
+                "p95": 0.002539852
+              },
+              "rtf": 2.131096804181031,
+              "total": {
+                "max": 0.230916388,
+                "mean": 0.025185527695471152,
+                "p95": 0.037921661
+              },
+              "wall_s": 54.760534468
+            },
+            "trajectory": {
+              "completion_rate": 0.4903695991671005,
+              "coverage_rate": 0.724935732647815,
+              "failed": 0,
+              "image_frames": 1921,
+              "ok": 942,
+              "poses_written": 942,
+              "rejected": 0,
+              "segments": 7,
+              "total_keyframes": 1624,
+              "total_track_only_frames": 297
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "stereo sync dropped unpaired frames (see summary.sync)",
+              "vo segments summary: segments=7 reanchors=6 seed_rejected=0",
+              "vo pnp summary: pnp_successes=808 pnp_fallbacks=119"
+            ]
+          }
+        },
+        {
+          "sequence": "V2_03_difficult",
+          "role": "subject",
+          "payload_identity_with_qualified_run": {
+            "diag.csv": true,
+            "est.tum": true,
+            "kf.tum": true
+          },
+          "config_hash": "4e2b30f2",
+          "summary": {
+            "ate": {
+              "rot_deg": {
+                "max": 171.85817147423012,
+                "mean": 105.33935831675561,
+                "median": 89.36054956970578,
+                "rmse": 110.52175254923648,
+                "stddev": 33.446634748040516
+              },
+              "trans": {
+                "max": 3.6631666960049603,
+                "mean": 1.6463951165542896,
+                "median": 1.5496463334184685,
+                "rmse": 1.8097295539200247,
+                "stddev": 0.7513349309846832
+              }
+            },
+            "code": {
+              "git_commit_short": "b3402b5",
+              "git_dirty": true
+            },
+            "config_hash": "4e2b30f2",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 2,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 0,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 0,
+              "outliers_culled": 18,
+              "outliers_culled_unique": 18,
+              "pnp_fallbacks": 119,
+              "pnp_successes": 808,
+              "reanchors": 6,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 0,
+              "zombie_age_drops": 0
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 10.685456412761152,
+                "mean": 1.131886845956961,
+                "median": 0.9306527694911189,
+                "rmse": 1.3865000451826508,
+                "stddev": 0.8007587297314313
+              },
+              "trans": {
+                "max": 0.42857732640870144,
+                "mean": 0.05920195938248954,
+                "median": 0.052064394362149394,
+                "rmse": 0.06986812425531234,
+                "stddev": 0.03710367626300424
+              }
+            },
+            "schema_version": 2,
+            "sequence": "V2_03_difficult",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 1,
+              "dropped_left_overflow": 0,
+              "dropped_right": 415,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 1921,
+              "max_left_queue": 2,
+              "max_right_queue": 1,
+              "pushed_left": 1922,
+              "pushed_right": 2336
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.21080729,
+                "mean": 0.007379230688183227,
+                "p95": 0.018858802
+              },
+              "frontend": {
+                "max": 0.036548415,
+                "mean": 0.016379722957313887,
+                "p95": 0.018537425
+              },
+              "rectify": {
+                "max": 0.009167713,
+                "mean": 0.0014355351181676212,
+                "p95": 0.002494272
+              },
+              "rtf": 2.1290190672810074,
+              "total": {
+                "max": 0.230120356,
+                "mean": 0.025226825041645005,
+                "p95": 0.038228946
+              },
+              "wall_s": 54.813975973
+            },
+            "trajectory": {
+              "completion_rate": 0.4903695991671005,
+              "coverage_rate": 0.724935732647815,
+              "failed": 0,
+              "image_frames": 1921,
+              "ok": 942,
+              "poses_written": 942,
+              "rejected": 0,
+              "segments": 7,
+              "total_keyframes": 1624,
+              "total_track_only_frames": 297
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "stereo sync dropped unpaired frames (see summary.sync)",
+              "vo segments summary: segments=7 reanchors=6 seed_rejected=0",
+              "vo pnp summary: pnp_successes=808 pnp_fallbacks=119"
+            ]
+          }
+        },
+        {
+          "sequence": "V1_03_difficult",
+          "role": "control",
+          "payload_identity_with_qualified_run": {
+            "diag.csv": true,
+            "est.tum": true,
+            "kf.tum": true
+          },
+          "config_hash": "4e2b30f2",
+          "summary": {
+            "ate": {
+              "rot_deg": {
+                "max": 19.563654013225708,
+                "mean": 12.087222681190903,
+                "median": 12.309865150394753,
+                "rmse": 12.261010548847699,
+                "stddev": 2.057043396299341
+              },
+              "trans": {
+                "max": 1.226796338580491,
+                "mean": 0.8070971442197405,
+                "median": 0.7938984677843233,
+                "rmse": 0.836282212386709,
+                "stddev": 0.21900259940637215
+              }
+            },
+            "code": {
+              "git_commit_short": "b3402b5",
+              "git_dirty": true
+            },
+            "config_hash": "4e2b30f2",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 5,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 0,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 0,
+              "outliers_culled": 25,
+              "outliers_culled_unique": 25,
+              "pnp_fallbacks": 55,
+              "pnp_successes": 2028,
+              "reanchors": 1,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 0,
+              "zombie_age_drops": 0
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 8.345247552611347,
+                "mean": 0.7404963477106634,
+                "median": 0.5436836791157841,
+                "rmse": 1.1234939471239624,
+                "stddev": 0.8449282858629773
+              },
+              "trans": {
+                "max": 1.8870651418669429,
+                "mean": 0.058398447348332515,
+                "median": 0.03899728498022916,
+                "rmse": 0.15941578226039022,
+                "stddev": 0.14833412615105188
+              }
+            },
+            "schema_version": 2,
+            "sequence": "V1_03_difficult",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 2149,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 2149,
+              "pushed_right": 2149
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.332023869,
+                "mean": 0.020009439555607224,
+                "p95": 0.0332638624
+              },
+              "frontend": {
+                "max": 0.0384139,
+                "mean": 0.017223083156817153,
+                "p95": 0.019919541199999998
+              },
+              "rectify": {
+                "max": 0.006374135,
+                "mean": 0.0014778876202885057,
+                "p95": 0.0026998215999999996
+              },
+              "rtf": 1.198978656876705,
+              "total": {
+                "max": 0.351646738,
+                "mean": 0.0387484822675663,
+                "p95": 0.0535808376
+              },
+              "wall_s": 89.576240064
+            },
+            "trajectory": {
+              "completion_rate": 0.9716147045137273,
+              "coverage_rate": 0.9748603351955307,
+              "failed": 0,
+              "image_frames": 2149,
+              "ok": 2088,
+              "poses_written": 2088,
+              "rejected": 0,
+              "segments": 2,
+              "total_keyframes": 1106,
+              "total_track_only_frames": 1043
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo segments summary: segments=2 reanchors=1 seed_rejected=0",
+              "vo pnp summary: pnp_successes=2028 pnp_fallbacks=55"
+            ]
+          }
+        },
+        {
+          "sequence": "V1_03_difficult",
+          "role": "subject",
+          "payload_identity_with_qualified_run": {
+            "diag.csv": true,
+            "est.tum": true,
+            "kf.tum": true
+          },
+          "config_hash": "4e2b30f2",
+          "summary": {
+            "ate": {
+              "rot_deg": {
+                "max": 8.549215673846092,
+                "mean": 4.513062807638996,
+                "median": 3.8753039197190926,
+                "rmse": 4.899921290500599,
+                "stddev": 1.9082695688520197
+              },
+              "trans": {
+                "max": 0.34639135557083983,
+                "mean": 0.15015509544994135,
+                "median": 0.14528029926418448,
+                "rmse": 0.16926996524626872,
+                "stddev": 0.07813941671712187
+              }
+            },
+            "code": {
+              "git_commit_short": "b3402b5",
+              "git_dirty": true
+            },
+            "config_hash": "4e2b30f2",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 5,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 0,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 0,
+              "outliers_culled": 25,
+              "outliers_culled_unique": 25,
+              "pnp_fallbacks": 55,
+              "pnp_successes": 2028,
+              "reanchors": 1,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 0,
+              "zombie_age_drops": 0
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 5.67072352368847,
+                "mean": 0.7039800944610167,
+                "median": 0.543683679115782,
+                "rmse": 0.9471262181932975,
+                "stddev": 0.6336087908100674
+              },
+              "trans": {
+                "max": 0.3289913331196699,
+                "mean": 0.04706816811525907,
+                "median": 0.03899728498022916,
+                "rmse": 0.06088777111689557,
+                "stddev": 0.03862522779035965
+              }
+            },
+            "schema_version": 2,
+            "sequence": "V1_03_difficult",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 2149,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 2149,
+              "pushed_right": 2149
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.321363866,
+                "mean": 0.019891254909725434,
+                "p95": 0.03277023739999999
+              },
+              "frontend": {
+                "max": 0.035953316,
+                "mean": 0.017186237053047945,
+                "p95": 0.0197914054
+              },
+              "rectify": {
+                "max": 0.004270466,
+                "mean": 0.0014737116649604473,
+                "p95": 0.0027629726
+              },
+              "rtf": 1.2035281368972115,
+              "total": {
+                "max": 0.339671583,
+                "mean": 0.03858847075430433,
+                "p95": 0.0531195112
+              },
+              "wall_s": 89.237631184
+            },
+            "trajectory": {
+              "completion_rate": 0.9716147045137273,
+              "coverage_rate": 0.9748603351955307,
+              "failed": 0,
+              "image_frames": 2149,
+              "ok": 2088,
+              "poses_written": 2088,
+              "rejected": 0,
+              "segments": 2,
+              "total_keyframes": 1106,
+              "total_track_only_frames": 1043
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo segments summary: segments=2 reanchors=1 seed_rejected=0",
+              "vo pnp summary: pnp_successes=2028 pnp_fallbacks=55"
+            ]
+          }
+        },
+        {
+          "sequence": "V2_02_medium",
+          "role": "control",
+          "payload_identity_with_qualified_run": {
+            "diag.csv": true,
+            "est.tum": true,
+            "kf.tum": true
+          },
+          "config_hash": "4e2b30f2",
+          "summary": {
+            "ate": {
+              "rot_deg": {
+                "max": 3.7356990565442194,
+                "mean": 2.289452780950186,
+                "median": 2.3170483568184057,
+                "rmse": 2.3566064366605843,
+                "stddev": 0.558569477423853
+              },
+              "trans": {
+                "max": 0.467592291421049,
+                "mean": 0.18499685448395434,
+                "median": 0.1746399797389467,
+                "rmse": 0.20663390308816343,
+                "stddev": 0.09205288554136223
+              }
+            },
+            "code": {
+              "git_commit_short": "b3402b5",
+              "git_dirty": true
+            },
+            "config_hash": "4e2b30f2",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 37,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 0,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 0,
+              "outliers_culled": 60,
+              "outliers_culled_unique": 60,
+              "pnp_fallbacks": 15,
+              "pnp_successes": 2268,
+              "reanchors": 0,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 0,
+              "zombie_age_drops": 0
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 2.628718895568945,
+                "mean": 0.6335621323331082,
+                "median": 0.5357594993510011,
+                "rmse": 0.7464354846660889,
+                "stddev": 0.39467069468383914
+              },
+              "trans": {
+                "max": 0.16602765404686134,
+                "mean": 0.03792925580734718,
+                "median": 0.03270323250275135,
+                "rmse": 0.04531588121651815,
+                "stddev": 0.024797190250720007
+              }
+            },
+            "schema_version": 2,
+            "sequence": "V2_02_medium",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 2348,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 2348,
+              "pushed_right": 2348
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.130554732,
+                "mean": 0.017521489579642252,
+                "p95": 0.029864319450000003
+              },
+              "frontend": {
+                "max": 0.034240008,
+                "mean": 0.016406973468057893,
+                "p95": 0.0183902802
+              },
+              "rectify": {
+                "max": 0.004188668,
+                "mean": 0.0014725872010221469,
+                "p95": 0.0027458920000000006
+              },
+              "rtf": 1.2825238091080047,
+              "total": {
+                "max": 0.149469588,
+                "mean": 0.0354424102806644,
+                "p95": 0.04935634800000001
+              },
+              "wall_s": 91.499275911
+            },
+            "trajectory": {
+              "completion_rate": 0.9727427597955707,
+              "coverage_rate": 0.97273114611427,
+              "failed": 0,
+              "image_frames": 2348,
+              "ok": 2284,
+              "poses_written": 2284,
+              "rejected": 0,
+              "segments": 1,
+              "total_keyframes": 744,
+              "total_track_only_frames": 1604
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo pnp summary: pnp_successes=2268 pnp_fallbacks=15"
+            ]
+          }
+        },
+        {
+          "sequence": "V2_02_medium",
+          "role": "subject",
+          "payload_identity_with_qualified_run": {
+            "diag.csv": true,
+            "est.tum": true,
+            "kf.tum": true
+          },
+          "config_hash": "4e2b30f2",
+          "summary": {
+            "ate": {
+              "rot_deg": {
+                "max": 3.7356990565442194,
+                "mean": 2.289452780950186,
+                "median": 2.3170483568184057,
+                "rmse": 2.3566064366605843,
+                "stddev": 0.558569477423853
+              },
+              "trans": {
+                "max": 0.467592291421049,
+                "mean": 0.18499685448395434,
+                "median": 0.1746399797389467,
+                "rmse": 0.20663390308816343,
+                "stddev": 0.09205288554136223
+              }
+            },
+            "code": {
+              "git_commit_short": "b3402b5",
+              "git_dirty": true
+            },
+            "config_hash": "4e2b30f2",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 37,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 0,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 0,
+              "outliers_culled": 60,
+              "outliers_culled_unique": 60,
+              "pnp_fallbacks": 15,
+              "pnp_successes": 2268,
+              "reanchors": 0,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 0,
+              "zombie_age_drops": 0
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 2.628718895568945,
+                "mean": 0.6335621323331082,
+                "median": 0.5357594993510011,
+                "rmse": 0.7464354846660889,
+                "stddev": 0.39467069468383914
+              },
+              "trans": {
+                "max": 0.16602765404686134,
+                "mean": 0.03792925580734718,
+                "median": 0.03270323250275135,
+                "rmse": 0.04531588121651815,
+                "stddev": 0.024797190250720007
+              }
+            },
+            "schema_version": 2,
+            "sequence": "V2_02_medium",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 2348,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 2348,
+              "pushed_right": 2348
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.126583879,
+                "mean": 0.017514762157580892,
+                "p95": 0.029927635549999998
+              },
+              "frontend": {
+                "max": 0.03231294,
+                "mean": 0.01641517400851794,
+                "p95": 0.01840579125
+              },
+              "rectify": {
+                "max": 0.004420117,
+                "mean": 0.0014624797031516192,
+                "p95": 0.00269789945
+              },
+              "rtf": 1.2830367267156444,
+              "total": {
+                "max": 0.146526271,
+                "mean": 0.0354338155655877,
+                "p95": 0.049565052250000005
+              },
+              "wall_s": 91.462697387
+            },
+            "trajectory": {
+              "completion_rate": 0.9727427597955707,
+              "coverage_rate": 0.97273114611427,
+              "failed": 0,
+              "image_frames": 2348,
+              "ok": 2284,
+              "poses_written": 2284,
+              "rejected": 0,
+              "segments": 1,
+              "total_keyframes": 744,
+              "total_track_only_frames": 1604
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo pnp summary: pnp_successes=2268 pnp_fallbacks=15"
+            ]
+          }
+        },
+        {
+          "sequence": "MH_01_easy",
+          "role": "control",
+          "payload_identity_with_qualified_run": {
+            "diag.csv": true,
+            "est.tum": true,
+            "kf.tum": true
+          },
+          "config_hash": "4e2b30f2",
+          "summary": {
+            "ate": {
+              "rot_deg": {
+                "max": 3.507191508709753,
+                "mean": 1.5379080086832153,
+                "median": 1.3106163741563255,
+                "rmse": 1.700940266555157,
+                "stddev": 0.7266613703897818
+              },
+              "trans": {
+                "max": 0.29864752989118964,
+                "mean": 0.10581118847888535,
+                "median": 0.08796902893455259,
+                "rmse": 0.12021819849884123,
+                "stddev": 0.05706494232882911
+              }
+            },
+            "code": {
+              "git_commit_short": "b3402b5",
+              "git_dirty": true
+            },
+            "config_hash": "4e2b30f2",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 18,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 6,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 6,
+              "outliers_culled": 118,
+              "outliers_culled_unique": 118,
+              "pnp_fallbacks": 20,
+              "pnp_successes": 3655,
+              "reanchors": 0,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 39,
+              "zombie_age_drops": 6
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 0.8304640025413664,
+                "mean": 0.20526965125958624,
+                "median": 0.18177286145929764,
+                "rmse": 0.24938857995562533,
+                "stddev": 0.1416299194522512
+              },
+              "trans": {
+                "max": 0.1058931758543157,
+                "mean": 0.02462814789161685,
+                "median": 0.021135032220135658,
+                "rmse": 0.03159579824947332,
+                "stddev": 0.019792645059467668
+              }
+            },
+            "schema_version": 2,
+            "sequence": "MH_01_easy",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 3682,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 3682,
+              "pushed_right": 3682
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.23394288,
+                "mean": 0.026649019690657232,
+                "p95": 0.0405864924
+              },
+              "frontend": {
+                "max": 0.037549117,
+                "mean": 0.015543160920152106,
+                "p95": 0.0196640008
+              },
+              "rectify": {
+                "max": 0.005428995,
+                "mean": 0.0014909981083650213,
+                "p95": 0.0028138929
+              },
+              "rtf": 1.0479127037734104,
+              "total": {
+                "max": 0.248454201,
+                "mean": 0.04372805325719715,
+                "p95": 0.059418202149999995
+              },
+              "wall_s": 175.634858905
+            },
+            "trajectory": {
+              "completion_rate": 0.9983704508419338,
+              "coverage_rate": 0.9983700081488257,
+              "failed": 0,
+              "image_frames": 3682,
+              "ok": 3676,
+              "poses_written": 3676,
+              "rejected": 0,
+              "segments": 1,
+              "total_keyframes": 433,
+              "total_track_only_frames": 3249
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo pnp summary: pnp_successes=3655 pnp_fallbacks=20"
+            ]
+          }
+        },
+        {
+          "sequence": "MH_01_easy",
+          "role": "subject",
+          "payload_identity_with_qualified_run": {
+            "diag.csv": true,
+            "est.tum": true,
+            "kf.tum": true
+          },
+          "config_hash": "4e2b30f2",
+          "summary": {
+            "ate": {
+              "rot_deg": {
+                "max": 3.507191508709753,
+                "mean": 1.5379080086832153,
+                "median": 1.3106163741563255,
+                "rmse": 1.700940266555157,
+                "stddev": 0.7266613703897818
+              },
+              "trans": {
+                "max": 0.29864752989118964,
+                "mean": 0.10581118847888535,
+                "median": 0.08796902893455259,
+                "rmse": 0.12021819849884123,
+                "stddev": 0.05706494232882911
+              }
+            },
+            "code": {
+              "git_commit_short": "b3402b5",
+              "git_dirty": true
+            },
+            "config_hash": "4e2b30f2",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 18,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 6,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 6,
+              "outliers_culled": 118,
+              "outliers_culled_unique": 118,
+              "pnp_fallbacks": 20,
+              "pnp_successes": 3655,
+              "reanchors": 0,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 39,
+              "zombie_age_drops": 6
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 0.8304640025413664,
+                "mean": 0.20526965125958624,
+                "median": 0.18177286145929764,
+                "rmse": 0.24938857995562533,
+                "stddev": 0.1416299194522512
+              },
+              "trans": {
+                "max": 0.1058931758543157,
+                "mean": 0.02462814789161685,
+                "median": 0.021135032220135658,
+                "rmse": 0.03159579824947332,
+                "stddev": 0.019792645059467668
+              }
+            },
+            "schema_version": 2,
+            "sequence": "MH_01_easy",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 3682,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 3682,
+              "pushed_right": 3682
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.214442584,
+                "mean": 0.026370706658066283,
+                "p95": 0.04012533044999999
+              },
+              "frontend": {
+                "max": 0.041799526,
+                "mean": 0.015535545747419886,
+                "p95": 0.019613356349999993
+              },
+              "rectify": {
+                "max": 0.004528139,
+                "mean": 0.0014999530844649644,
+                "p95": 0.00277763565
+              },
+              "rtf": 1.054150106278225,
+              "total": {
+                "max": 0.224852057,
+                "mean": 0.043451795774035795,
+                "p95": 0.05872965989999995
+              },
+              "wall_s": 174.595628057
+            },
+            "trajectory": {
+              "completion_rate": 0.9983704508419338,
+              "coverage_rate": 0.9983700081488257,
+              "failed": 0,
+              "image_frames": 3682,
+              "ok": 3676,
+              "poses_written": 3676,
+              "rejected": 0,
+              "segments": 1,
+              "total_keyframes": 433,
+              "total_track_only_frames": 3249
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo pnp summary: pnp_successes=3655 pnp_fallbacks=20"
+            ]
+          }
+        }
+      ],
+      "unqualified_linkage_probe": {
+        "state": "EXCLUDED",
+        "reason": "asymmetric object/archive placement produced nonidentical TUM low bits",
+        "v2_03_subject_max_scalar_delta": 1.0249745496793139e-11,
+        "regular_diag_identical": true
+      }
+    }
+  },
+  "core4": {
+    "schema_version": 1,
+    "kind": "four_sequence_local_guardrail_not_euroc11_checkpoint",
+    "sequence_count": 4,
+    "qualified_process_count": 8,
+    "means": {
+      "control": {
+        "ate": 0.780839837256101,
+        "rpe": 0.1630850292869583
+      },
+      "subject": {
+        "ate": 0.5764629051883245,
+        "rpe": 0.05191689370954985
+      }
+    },
+    "sequences": {
+      "V2_03_difficult": {
+        "gate": "PASS",
+        "processed_frames": 1921,
+        "config_hash": "4e2b30f2",
+        "eligible": [
+          459,
+          809,
+          937,
+          1097,
+          1343,
+          1563
+        ],
+        "applied": [
+          937
+        ],
+        "expired": [
+          459,
+          809,
+          1097,
+          1343,
+          1563
+        ],
+        "input_and_initialization_identity": true,
+        "diag_csv_byte_identity": true,
+        "native_support": {
+          "control": {
+            "matched": 942,
+            "poses": 942,
+            "rpe_pairs": 808
+          },
+          "subject": {
+            "matched": 942,
+            "poses": 942,
+            "rpe_pairs": 808
+          }
+        },
+        "roles": {
+          "control": {
+            "ate": {
+              "rot_deg": {
+                "max": 168.94100980093444,
+                "mean": 109.11246358036888,
+                "median": 87.89689803208097,
+                "rmse": 115.03470013868198,
+                "stddev": 36.434221926907604
+              },
+              "trans": {
+                "max": 4.3935496257205,
+                "mean": 1.7815431741964607,
+                "median": 1.7918011557053988,
+                "rmse": 1.96022503505069,
+                "stddev": 0.8176711481478834
+              }
+            },
+            "code": {
+              "git_commit_short": "b3402b5",
+              "git_dirty": true
+            },
+            "config_hash": "4e2b30f2",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 2,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 0,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 0,
+              "outliers_culled": 18,
+              "outliers_culled_unique": 18,
+              "pnp_fallbacks": 119,
+              "pnp_successes": 808,
+              "reanchors": 6,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 0,
+              "zombie_age_drops": 0
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 63.91402633937057,
+                "mean": 2.1199709459987988,
+                "median": 0.9306527694911189,
+                "rmse": 8.15725539708514,
+                "stddev": 7.876962536498163
+              },
+              "trans": {
+                "max": 3.408042885307776,
+                "mean": 0.10952105233668859,
+                "median": 0.052064394362149394,
+                "rmse": 0.4160126554214516,
+                "stddev": 0.4013373500758081
+              }
+            },
+            "schema_version": 2,
+            "sequence": "V2_03_difficult",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 1,
+              "dropped_left_overflow": 0,
+              "dropped_right": 415,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 1921,
+              "max_left_queue": 2,
+              "max_right_queue": 1,
+              "pushed_left": 1922,
+              "pushed_right": 2336
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.14467792,
+                "mean": 0.005223351351379486,
+                "p95": 0.013097665
+              },
+              "frontend": {
+                "max": 0.028303614,
+                "mean": 0.011471172919312846,
+                "p95": 0.013167517
+              },
+              "rectify": {
+                "max": 0.002789358,
+                "mean": 0.0011750049328474769,
+                "p95": 0.001718297
+              },
+              "rtf": 3.0080312807456617,
+              "total": {
+                "max": 0.158477412,
+                "mean": 0.01788856113170225,
+                "p95": 0.027139827
+              },
+              "wall_s": 38.796139105
+            },
+            "trajectory": {
+              "completion_rate": 0.4903695991671005,
+              "coverage_rate": 0.724935732647815,
+              "failed": 0,
+              "image_frames": 1921,
+              "ok": 942,
+              "poses_written": 942,
+              "rejected": 0,
+              "segments": 7,
+              "total_keyframes": 1624,
+              "total_track_only_frames": 297
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "stereo sync dropped unpaired frames (see summary.sync)",
+              "vo segments summary: segments=7 reanchors=6 seed_rejected=0",
+              "vo pnp summary: pnp_successes=808 pnp_fallbacks=119"
+            ]
+          },
+          "subject": {
+            "ate": {
+              "rot_deg": {
+                "max": 171.85817147423012,
+                "mean": 105.33935831675561,
+                "median": 89.36054956970578,
+                "rmse": 110.52175254923648,
+                "stddev": 33.446634748040516
+              },
+              "trans": {
+                "max": 3.6631666960049603,
+                "mean": 1.6463951165542896,
+                "median": 1.5496463334184685,
+                "rmse": 1.8097295539200247,
+                "stddev": 0.7513349309846832
+              }
+            },
+            "code": {
+              "git_commit_short": "b3402b5",
+              "git_dirty": true
+            },
+            "config_hash": "4e2b30f2",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 2,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 0,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 0,
+              "outliers_culled": 18,
+              "outliers_culled_unique": 18,
+              "pnp_fallbacks": 119,
+              "pnp_successes": 808,
+              "reanchors": 6,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 0,
+              "zombie_age_drops": 0
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 10.685456412761152,
+                "mean": 1.131886845956961,
+                "median": 0.9306527694911189,
+                "rmse": 1.3865000451826508,
+                "stddev": 0.8007587297314313
+              },
+              "trans": {
+                "max": 0.42857732640870144,
+                "mean": 0.05920195938248954,
+                "median": 0.052064394362149394,
+                "rmse": 0.06986812425531234,
+                "stddev": 0.03710367626300424
+              }
+            },
+            "schema_version": 2,
+            "sequence": "V2_03_difficult",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 1,
+              "dropped_left_overflow": 0,
+              "dropped_right": 415,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 1921,
+              "max_left_queue": 2,
+              "max_right_queue": 1,
+              "pushed_left": 1922,
+              "pushed_right": 2336
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.144267936,
+                "mean": 0.005032469526288399,
+                "p95": 0.012952833
+              },
+              "frontend": {
+                "max": 0.025132887,
+                "mean": 0.011065724563768878,
+                "p95": 0.012475257
+              },
+              "rectify": {
+                "max": 0.003251659,
+                "mean": 0.0011483000780843327,
+                "p95": 0.001669675
+              },
+              "rtf": 3.110482095354579,
+              "total": {
+                "max": 0.157238136,
+                "mean": 0.0172631278427902,
+                "p95": 0.026400344
+              },
+              "wall_s": 37.518299872
+            },
+            "trajectory": {
+              "completion_rate": 0.4903695991671005,
+              "coverage_rate": 0.724935732647815,
+              "failed": 0,
+              "image_frames": 1921,
+              "ok": 942,
+              "poses_written": 942,
+              "rejected": 0,
+              "segments": 7,
+              "total_keyframes": 1624,
+              "total_track_only_frames": 297
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "stereo sync dropped unpaired frames (see summary.sync)",
+              "vo segments summary: segments=7 reanchors=6 seed_rejected=0",
+              "vo pnp summary: pnp_successes=808 pnp_fallbacks=119"
+            ]
+          }
+        }
+      },
+      "MH_01_easy": {
+        "gate": "PASS",
+        "processed_frames": 3682,
+        "config_hash": "4e2b30f2",
+        "eligible": [],
+        "applied": [],
+        "expired": [],
+        "input_and_initialization_identity": true,
+        "diag_csv_byte_identity": true,
+        "native_support": {
+          "control": {
+            "matched": 3638,
+            "poses": 3676,
+            "rpe_pairs": 3618
+          },
+          "subject": {
+            "matched": 3638,
+            "poses": 3676,
+            "rpe_pairs": 3618
+          }
+        },
+        "roles": {
+          "control": {
+            "ate": {
+              "rot_deg": {
+                "max": 3.507191508709753,
+                "mean": 1.5379080086832153,
+                "median": 1.3106163741563255,
+                "rmse": 1.700940266555157,
+                "stddev": 0.7266613703897818
+              },
+              "trans": {
+                "max": 0.29864752989118964,
+                "mean": 0.10581118847888535,
+                "median": 0.08796902893455259,
+                "rmse": 0.12021819849884123,
+                "stddev": 0.05706494232882911
+              }
+            },
+            "code": {
+              "git_commit_short": "b3402b5",
+              "git_dirty": true
+            },
+            "config_hash": "4e2b30f2",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 18,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 6,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 6,
+              "outliers_culled": 118,
+              "outliers_culled_unique": 118,
+              "pnp_fallbacks": 20,
+              "pnp_successes": 3655,
+              "reanchors": 0,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 39,
+              "zombie_age_drops": 6
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 0.8304640025413664,
+                "mean": 0.20526965125958624,
+                "median": 0.18177286145929764,
+                "rmse": 0.24938857995562533,
+                "stddev": 0.1416299194522512
+              },
+              "trans": {
+                "max": 0.1058931758543157,
+                "mean": 0.02462814789161685,
+                "median": 0.021135032220135658,
+                "rmse": 0.03159579824947332,
+                "stddev": 0.019792645059467668
+              }
+            },
+            "schema_version": 2,
+            "sequence": "MH_01_easy",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 3682,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 3682,
+              "pushed_right": 3682
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.180662078,
+                "mean": 0.02132589616349808,
+                "p95": 0.03224659924999999
+              },
+              "frontend": {
+                "max": 0.032823401,
+                "mean": 0.012598646721347109,
+                "p95": 0.019958658999999993
+              },
+              "rectify": {
+                "max": 0.005954079,
+                "mean": 0.001210634727050519,
+                "p95": 0.0017937412999999998
+              },
+              "rtf": 1.2585907203877666,
+              "total": {
+                "max": 0.188798489,
+                "mean": 0.03517564204073859,
+                "p95": 0.049961468999999994
+              },
+              "wall_s": 146.234988778
+            },
+            "trajectory": {
+              "completion_rate": 0.9983704508419338,
+              "coverage_rate": 0.9983700081488257,
+              "failed": 0,
+              "image_frames": 3682,
+              "ok": 3676,
+              "poses_written": 3676,
+              "rejected": 0,
+              "segments": 1,
+              "total_keyframes": 433,
+              "total_track_only_frames": 3249
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo pnp summary: pnp_successes=3655 pnp_fallbacks=20"
+            ]
+          },
+          "subject": {
+            "ate": {
+              "rot_deg": {
+                "max": 3.507191508709753,
+                "mean": 1.5379080086832153,
+                "median": 1.3106163741563255,
+                "rmse": 1.700940266555157,
+                "stddev": 0.7266613703897818
+              },
+              "trans": {
+                "max": 0.29864752989118964,
+                "mean": 0.10581118847888535,
+                "median": 0.08796902893455259,
+                "rmse": 0.12021819849884123,
+                "stddev": 0.05706494232882911
+              }
+            },
+            "code": {
+              "git_commit_short": "b3402b5",
+              "git_dirty": true
+            },
+            "config_hash": "4e2b30f2",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 18,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 6,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 6,
+              "outliers_culled": 118,
+              "outliers_culled_unique": 118,
+              "pnp_fallbacks": 20,
+              "pnp_successes": 3655,
+              "reanchors": 0,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 39,
+              "zombie_age_drops": 6
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 0.8304640025413664,
+                "mean": 0.20526965125958624,
+                "median": 0.18177286145929764,
+                "rmse": 0.24938857995562533,
+                "stddev": 0.1416299194522512
+              },
+              "trans": {
+                "max": 0.1058931758543157,
+                "mean": 0.02462814789161685,
+                "median": 0.021135032220135658,
+                "rmse": 0.03159579824947332,
+                "stddev": 0.019792645059467668
+              }
+            },
+            "schema_version": 2,
+            "sequence": "MH_01_easy",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 3682,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 3682,
+              "pushed_right": 3682
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.165174851,
+                "mean": 0.021461951709397017,
+                "p95": 0.033304212199999995
+              },
+              "frontend": {
+                "max": 0.03081962,
+                "mean": 0.011820275259098323,
+                "p95": 0.01508270835
+              },
+              "rectify": {
+                "max": 0.003379809,
+                "mean": 0.0012015866175991313,
+                "p95": 0.00178737975
+              },
+              "rtf": 1.3194339252196325,
+              "total": {
+                "max": 0.173327683,
+                "mean": 0.03452285795763177,
+                "p95": 0.047285641499999996
+              },
+              "wall_s": 139.491638311
+            },
+            "trajectory": {
+              "completion_rate": 0.9983704508419338,
+              "coverage_rate": 0.9983700081488257,
+              "failed": 0,
+              "image_frames": 3682,
+              "ok": 3676,
+              "poses_written": 3676,
+              "rejected": 0,
+              "segments": 1,
+              "total_keyframes": 433,
+              "total_track_only_frames": 3249
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo pnp summary: pnp_successes=3655 pnp_fallbacks=20"
+            ]
+          }
+        }
+      },
+      "V1_03_difficult": {
+        "gate": "PASS",
+        "processed_frames": 2149,
+        "config_hash": "4e2b30f2",
+        "eligible": [
+          1244
+        ],
+        "applied": [
+          1244
+        ],
+        "expired": [],
+        "input_and_initialization_identity": true,
+        "diag_csv_byte_identity": true,
+        "native_support": {
+          "control": {
+            "matched": 2052,
+            "poses": 2088,
+            "rpe_pairs": 2025
+          },
+          "subject": {
+            "matched": 2052,
+            "poses": 2088,
+            "rpe_pairs": 2025
+          }
+        },
+        "roles": {
+          "control": {
+            "ate": {
+              "rot_deg": {
+                "max": 19.563654013225708,
+                "mean": 12.087222681190903,
+                "median": 12.309865150394753,
+                "rmse": 12.261010548847699,
+                "stddev": 2.057043396299341
+              },
+              "trans": {
+                "max": 1.226796338580491,
+                "mean": 0.8070971442197405,
+                "median": 0.7938984677843233,
+                "rmse": 0.836282212386709,
+                "stddev": 0.21900259940637215
+              }
+            },
+            "code": {
+              "git_commit_short": "b3402b5",
+              "git_dirty": true
+            },
+            "config_hash": "4e2b30f2",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 5,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 0,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 0,
+              "outliers_culled": 25,
+              "outliers_culled_unique": 25,
+              "pnp_fallbacks": 55,
+              "pnp_successes": 2028,
+              "reanchors": 1,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 0,
+              "zombie_age_drops": 0
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 8.345247552611347,
+                "mean": 0.7404963477106634,
+                "median": 0.5436836791157841,
+                "rmse": 1.1234939471239624,
+                "stddev": 0.8449282858629773
+              },
+              "trans": {
+                "max": 1.8870651418669429,
+                "mean": 0.058398447348332515,
+                "median": 0.03899728498022916,
+                "rmse": 0.15941578226039022,
+                "stddev": 0.14833412615105188
+              }
+            },
+            "schema_version": 2,
+            "sequence": "V1_03_difficult",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 2149,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 2149,
+              "pushed_right": 2149
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.242116209,
+                "mean": 0.0157075032066077,
+                "p95": 0.026162321599999996
+              },
+              "frontend": {
+                "max": 0.033483975,
+                "mean": 0.013727591829688234,
+                "p95": 0.023602943199999997
+              },
+              "rectify": {
+                "max": 0.003703879,
+                "mean": 0.0012243612736156356,
+                "p95": 0.0018036893999999997
+              },
+              "rtf": 1.4696655237291816,
+              "total": {
+                "max": 0.257027476,
+                "mean": 0.030692328547231352,
+                "p95": 0.044990189
+              },
+              "wall_s": 73.07785225
+            },
+            "trajectory": {
+              "completion_rate": 0.9716147045137273,
+              "coverage_rate": 0.9748603351955307,
+              "failed": 0,
+              "image_frames": 2149,
+              "ok": 2088,
+              "poses_written": 2088,
+              "rejected": 0,
+              "segments": 2,
+              "total_keyframes": 1106,
+              "total_track_only_frames": 1043
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo segments summary: segments=2 reanchors=1 seed_rejected=0",
+              "vo pnp summary: pnp_successes=2028 pnp_fallbacks=55"
+            ]
+          },
+          "subject": {
+            "ate": {
+              "rot_deg": {
+                "max": 8.549215673846092,
+                "mean": 4.513062807638996,
+                "median": 3.8753039197190926,
+                "rmse": 4.899921290500599,
+                "stddev": 1.9082695688520197
+              },
+              "trans": {
+                "max": 0.34639135557083983,
+                "mean": 0.15015509544994135,
+                "median": 0.14528029926418448,
+                "rmse": 0.16926996524626872,
+                "stddev": 0.07813941671712187
+              }
+            },
+            "code": {
+              "git_commit_short": "b3402b5",
+              "git_dirty": true
+            },
+            "config_hash": "4e2b30f2",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 5,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 0,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 0,
+              "outliers_culled": 25,
+              "outliers_culled_unique": 25,
+              "pnp_fallbacks": 55,
+              "pnp_successes": 2028,
+              "reanchors": 1,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 0,
+              "zombie_age_drops": 0
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 5.67072352368847,
+                "mean": 0.7039800944610167,
+                "median": 0.543683679115782,
+                "rmse": 0.9471262181932975,
+                "stddev": 0.6336087908100674
+              },
+              "trans": {
+                "max": 0.3289913331196699,
+                "mean": 0.04706816811525907,
+                "median": 0.03899728498022916,
+                "rmse": 0.06088777111689557,
+                "stddev": 0.03862522779035965
+              }
+            },
+            "schema_version": 2,
+            "sequence": "V1_03_difficult",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 2149,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 2149,
+              "pushed_right": 2149
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.249996483,
+                "mean": 0.016182829625407107,
+                "p95": 0.02735468
+              },
+              "frontend": {
+                "max": 0.03327825,
+                "mean": 0.013005930838064212,
+                "p95": 0.0153042406
+              },
+              "rectify": {
+                "max": 0.003108159,
+                "mean": 0.0012049106119125174,
+                "p95": 0.0017714493999999997
+              },
+              "rtf": 1.5196196237210797,
+              "total": {
+                "max": 0.263701389,
+                "mean": 0.030425836972545323,
+                "p95": 0.0428920212
+              },
+              "wall_s": 70.675581128
+            },
+            "trajectory": {
+              "completion_rate": 0.9716147045137273,
+              "coverage_rate": 0.9748603351955307,
+              "failed": 0,
+              "image_frames": 2149,
+              "ok": 2088,
+              "poses_written": 2088,
+              "rejected": 0,
+              "segments": 2,
+              "total_keyframes": 1106,
+              "total_track_only_frames": 1043
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo segments summary: segments=2 reanchors=1 seed_rejected=0",
+              "vo pnp summary: pnp_successes=2028 pnp_fallbacks=55"
+            ]
+          }
+        }
+      },
+      "V2_02_medium": {
+        "gate": "PASS",
+        "processed_frames": 2348,
+        "config_hash": "4e2b30f2",
+        "eligible": [],
+        "applied": [],
+        "expired": [],
+        "input_and_initialization_identity": true,
+        "diag_csv_byte_identity": true,
+        "native_support": {
+          "control": {
+            "matched": 2265,
+            "poses": 2284,
+            "rpe_pairs": 2245
+          },
+          "subject": {
+            "matched": 2265,
+            "poses": 2284,
+            "rpe_pairs": 2245
+          }
+        },
+        "roles": {
+          "control": {
+            "ate": {
+              "rot_deg": {
+                "max": 3.7356990565442194,
+                "mean": 2.289452780950186,
+                "median": 2.3170483568184057,
+                "rmse": 2.3566064366605843,
+                "stddev": 0.558569477423853
+              },
+              "trans": {
+                "max": 0.467592291421049,
+                "mean": 0.18499685448395434,
+                "median": 0.1746399797389467,
+                "rmse": 0.20663390308816343,
+                "stddev": 0.09205288554136223
+              }
+            },
+            "code": {
+              "git_commit_short": "b3402b5",
+              "git_dirty": true
+            },
+            "config_hash": "4e2b30f2",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 37,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 0,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 0,
+              "outliers_culled": 60,
+              "outliers_culled_unique": 60,
+              "pnp_fallbacks": 15,
+              "pnp_successes": 2268,
+              "reanchors": 0,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 0,
+              "zombie_age_drops": 0
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 2.628718895568945,
+                "mean": 0.6335621323331082,
+                "median": 0.5357594993510011,
+                "rmse": 0.7464354846660889,
+                "stddev": 0.39467069468383914
+              },
+              "trans": {
+                "max": 0.16602765404686134,
+                "mean": 0.03792925580734718,
+                "median": 0.03270323250275135,
+                "rmse": 0.04531588121651815,
+                "stddev": 0.024797190250720007
+              }
+            },
+            "schema_version": 2,
+            "sequence": "V2_02_medium",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 2348,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 2348,
+              "pushed_right": 2348
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.105503436,
+                "mean": 0.014016058044293012,
+                "p95": 0.0245261725
+              },
+              "frontend": {
+                "max": 0.028507528,
+                "mean": 0.013080140287052818,
+                "p95": 0.019602480700000015
+              },
+              "rectify": {
+                "max": 0.002568863,
+                "mean": 0.001222478148211245,
+                "p95": 0.0018034751000000002
+              },
+              "rtf": 1.5540964843524885,
+              "total": {
+                "max": 0.120716621,
+                "mean": 0.02835518528662695,
+                "p95": 0.0407489977
+              },
+              "wall_s": 75.51011218
+            },
+            "trajectory": {
+              "completion_rate": 0.9727427597955707,
+              "coverage_rate": 0.97273114611427,
+              "failed": 0,
+              "image_frames": 2348,
+              "ok": 2284,
+              "poses_written": 2284,
+              "rejected": 0,
+              "segments": 1,
+              "total_keyframes": 744,
+              "total_track_only_frames": 1604
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo pnp summary: pnp_successes=2268 pnp_fallbacks=15"
+            ]
+          },
+          "subject": {
+            "ate": {
+              "rot_deg": {
+                "max": 3.7356990565442194,
+                "mean": 2.289452780950186,
+                "median": 2.3170483568184057,
+                "rmse": 2.3566064366605843,
+                "stddev": 0.558569477423853
+              },
+              "trans": {
+                "max": 0.467592291421049,
+                "mean": 0.18499685448395434,
+                "median": 0.1746399797389467,
+                "rmse": 0.20663390308816343,
+                "stddev": 0.09205288554136223
+              }
+            },
+            "code": {
+              "git_commit_short": "b3402b5",
+              "git_dirty": true
+            },
+            "config_hash": "4e2b30f2",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 37,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 0,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 0,
+              "outliers_culled": 60,
+              "outliers_culled_unique": 60,
+              "pnp_fallbacks": 15,
+              "pnp_successes": 2268,
+              "reanchors": 0,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 0,
+              "zombie_age_drops": 0
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 2.628718895568945,
+                "mean": 0.6335621323331082,
+                "median": 0.5357594993510011,
+                "rmse": 0.7464354846660889,
+                "stddev": 0.39467069468383914
+              },
+              "trans": {
+                "max": 0.16602765404686134,
+                "mean": 0.03792925580734718,
+                "median": 0.03270323250275135,
+                "rmse": 0.04531588121651815,
+                "stddev": 0.024797190250720007
+              }
+            },
+            "schema_version": 2,
+            "sequence": "V2_02_medium",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 2348,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 2348,
+              "pushed_right": 2348
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.092999147,
+                "mean": 0.014231379022146506,
+                "p95": 0.0234573858
+              },
+              "frontend": {
+                "max": 0.032070164,
+                "mean": 0.012686187487649051,
+                "p95": 0.014454696700000002
+              },
+              "rectify": {
+                "max": 0.004713032,
+                "mean": 0.0012187851341567268,
+                "p95": 0.0018567088500000002
+              },
+              "rtf": 1.6021866102218978,
+              "total": {
+                "max": 0.107206636,
+                "mean": 0.028170465481686547,
+                "p95": 0.03812065965
+              },
+              "wall_s": 73.243652845
+            },
+            "trajectory": {
+              "completion_rate": 0.9727427597955707,
+              "coverage_rate": 0.97273114611427,
+              "failed": 0,
+              "image_frames": 2348,
+              "ok": 2284,
+              "poses_written": 2284,
+              "rejected": 0,
+              "segments": 1,
+              "total_keyframes": 744,
+              "total_track_only_frames": 1604
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo pnp summary: pnp_successes=2268 pnp_fallbacks=15"
+            ]
+          }
+        }
+      }
+    },
+    "gate": "PASS",
+    "paired_geometric_mean_ratios": {
+      "ate": 0.6574817435822795,
+      "rpe": 0.5032604780711163
+    }
+  },
+  "fixed_v2_03_boundaries": {
+    "schema_version": 1,
+    "sequence": "V2_03_difficult",
+    "kind": "full_local_production_replays",
+    "gt_association_tolerance_ns": 2500000,
+    "definition": "inverse(inverse(T_gt(i))*T_gt(j)) * (inverse(T_est(i))*T_est(j))",
+    "roles": {
+      "control": {
+        "directory": "bounded-production-control",
+        "events": [
+          {
+            "i": 433,
+            "j": 459,
+            "ti_ns": 1413394903555760384,
+            "tj_ns": 1413394904855760384,
+            "gap_ns": 1300000000,
+            "gt_ti_ns": 1413394903555760384,
+            "gt_tj_ns": 1413394904855760640,
+            "translation_error_m": 3.656201332432673,
+            "rotation_error_rad": 2.6822159546531843
+          },
+          {
+            "i": 701,
+            "j": 809,
+            "ti_ns": 1413394917155760384,
+            "tj_ns": 1413394926405760512,
+            "gap_ns": 9250000128,
+            "gt_ti_ns": 1413394917155760640,
+            "gt_tj_ns": 1413394926405760512,
+            "translation_error_m": 4.875073026460229,
+            "rotation_error_rad": 2.3202611713301167
+          },
+          {
+            "i": 929,
+            "j": 937,
+            "ti_ns": 1413394932405760512,
+            "tj_ns": 1413394932805760512,
+            "gap_ns": 400000000,
+            "gt_ti_ns": 1413394932405760512,
+            "gt_tj_ns": 1413394932805760256,
+            "translation_error_m": 3.3829523515718685,
+            "rotation_error_rad": 1.117128314181415
+          },
+          {
+            "i": 1010,
+            "j": 1097,
+            "ti_ns": 1413394936705760512,
+            "tj_ns": 1413394943405760512,
+            "gap_ns": 6700000000,
+            "gt_ti_ns": 1413394936705760512,
+            "gt_tj_ns": 1413394943405760512,
+            "translation_error_m": 5.368270660923806,
+            "rotation_error_rad": 0.3288263954334132
+          },
+          {
+            "i": 1157,
+            "j": 1343,
+            "ti_ns": 1413394946655760384,
+            "tj_ns": 1413394960855760384,
+            "gap_ns": 14200000000,
+            "gt_ti_ns": 1413394946655760640,
+            "gt_tj_ns": 1413394960855760640,
+            "translation_error_m": 3.559578657691491,
+            "rotation_error_rad": 1.5462741524290533
+          },
+          {
+            "i": 1521,
+            "j": 1563,
+            "ti_ns": 1413394970455760384,
+            "tj_ns": 1413394973805760512,
+            "gap_ns": 3350000128,
+            "gt_ti_ns": 1413394970455760384,
+            "gt_tj_ns": 1413394973805760256,
+            "translation_error_m": 3.273676516071648,
+            "rotation_error_rad": 1.1496559772579815
+          }
+        ],
+        "stats": {
+          "translation_error_m": {
+            "rms": 4.098463123552439,
+            "median": 3.607889995062082,
+            "max": 5.368270660923806
+          },
+          "rotation_error_rad": {
+            "rms": 1.714966929699279,
+            "median": 1.3479650648435175,
+            "max": 2.6822159546531843
+          }
+        },
+        "ate": {
+          "rot_deg": {
+            "max": 168.94100980093444,
+            "mean": 109.11246358036888,
+            "median": 87.89689803208097,
+            "rmse": 115.03470013868198,
+            "stddev": 36.434221926907604
+          },
+          "trans": {
+            "max": 4.3935496257205,
+            "mean": 1.7815431741964607,
+            "median": 1.7918011557053988,
+            "rmse": 1.96022503505069,
+            "stddev": 0.8176711481478834
+          }
+        },
+        "rpe": {
+          "rot_deg": {
+            "max": 63.91402633937057,
+            "mean": 2.1199709459987988,
+            "median": 0.9306527694911189,
+            "rmse": 8.15725539708514,
+            "stddev": 7.876962536498163
+          },
+          "trans": {
+            "max": 3.408042885307776,
+            "mean": 0.10952105233668859,
+            "median": 0.052064394362149394,
+            "rmse": 0.4160126554214516,
+            "stddev": 0.4013373500758081
+          }
+        },
+        "trajectory": {
+          "completion_rate": 0.4903695991671005,
+          "coverage_rate": 0.724935732647815,
+          "failed": 0,
+          "image_frames": 1921,
+          "ok": 942,
+          "poses_written": 942,
+          "rejected": 0,
+          "segments": 7,
+          "total_keyframes": 1624,
+          "total_track_only_frames": 297
+        }
+      },
+      "subject": {
+        "directory": "bounded-subject",
+        "events": [
+          {
+            "i": 433,
+            "j": 459,
+            "ti_ns": 1413394903555760384,
+            "tj_ns": 1413394904855760384,
+            "gap_ns": 1300000000,
+            "gt_ti_ns": 1413394903555760384,
+            "gt_tj_ns": 1413394904855760640,
+            "translation_error_m": 3.656201332432673,
+            "rotation_error_rad": 2.6822159546531843
+          },
+          {
+            "i": 701,
+            "j": 809,
+            "ti_ns": 1413394917155760384,
+            "tj_ns": 1413394926405760512,
+            "gap_ns": 9250000128,
+            "gt_ti_ns": 1413394917155760640,
+            "gt_tj_ns": 1413394926405760512,
+            "translation_error_m": 4.875073026460229,
+            "rotation_error_rad": 2.3202611713301167
+          },
+          {
+            "i": 929,
+            "j": 937,
+            "ti_ns": 1413394932405760512,
+            "tj_ns": 1413394932805760512,
+            "gap_ns": 400000000,
+            "gt_ti_ns": 1413394932405760512,
+            "gt_tj_ns": 1413394932805760256,
+            "translation_error_m": 0.05567376451435615,
+            "rotation_error_rad": 0.021782295609105017
+          },
+          {
+            "i": 1010,
+            "j": 1097,
+            "ti_ns": 1413394936705760512,
+            "tj_ns": 1413394943405760512,
+            "gap_ns": 6700000000,
+            "gt_ti_ns": 1413394936705760512,
+            "gt_tj_ns": 1413394943405760512,
+            "translation_error_m": 6.235215955685146,
+            "rotation_error_rad": 1.45395850724839
+          },
+          {
+            "i": 1157,
+            "j": 1343,
+            "ti_ns": 1413394946655760384,
+            "tj_ns": 1413394960855760384,
+            "gap_ns": 14200000000,
+            "gt_ti_ns": 1413394946655760640,
+            "gt_tj_ns": 1413394960855760640,
+            "translation_error_m": 3.559578657691491,
+            "rotation_error_rad": 1.5462741524290533
+          },
+          {
+            "i": 1521,
+            "j": 1563,
+            "ti_ns": 1413394970455760384,
+            "tj_ns": 1413394973805760512,
+            "gap_ns": 3350000128,
+            "gt_ti_ns": 1413394970455760384,
+            "gt_tj_ns": 1413394973805760256,
+            "translation_error_m": 3.273676516071648,
+            "rotation_error_rad": 1.1496559772579815
+          }
+        ],
+        "stats": {
+          "translation_error_m": {
+            "rms": 4.0702727371938305,
+            "median": 3.607889995062082,
+            "max": 6.235215955685146
+          },
+          "rotation_error_rad": {
+            "rms": 1.7514297378758619,
+            "median": 1.5001163298387217,
+            "max": 2.6822159546531843
+          }
+        },
+        "ate": {
+          "rot_deg": {
+            "max": 171.85817147423012,
+            "mean": 105.33935831675561,
+            "median": 89.36054956970578,
+            "rmse": 110.52175254923648,
+            "stddev": 33.446634748040516
+          },
+          "trans": {
+            "max": 3.6631666960049603,
+            "mean": 1.6463951165542896,
+            "median": 1.5496463334184685,
+            "rmse": 1.8097295539200247,
+            "stddev": 0.7513349309846832
+          }
+        },
+        "rpe": {
+          "rot_deg": {
+            "max": 10.685456412761152,
+            "mean": 1.131886845956961,
+            "median": 0.9306527694911189,
+            "rmse": 1.3865000451826508,
+            "stddev": 0.8007587297314313
+          },
+          "trans": {
+            "max": 0.42857732640870144,
+            "mean": 0.05920195938248954,
+            "median": 0.052064394362149394,
+            "rmse": 0.06986812425531234,
+            "stddev": 0.03710367626300424
+          }
+        },
+        "trajectory": {
+          "completion_rate": 0.4903695991671005,
+          "coverage_rate": 0.724935732647815,
+          "failed": 0,
+          "image_frames": 1921,
+          "ok": 942,
+          "poses_written": 942,
+          "rejected": 0,
+          "segments": 7,
+          "total_keyframes": 1624,
+          "total_track_only_frames": 297
+        }
+      }
+    },
+    "common_timestamp_count": 942,
+    "support_differences": {
+      "control_only": 0,
+      "subject_only": 0
+    },
+    "local_product_gate": "PASS",
+    "event_count": 6,
+    "identity": {
+      "processed_frames": 1921,
+      "input_identity": true,
+      "diag_csv_byte_identity": true,
+      "eligible": [
+        459,
+        809,
+        937,
+        1097,
+        1343,
+        1563
+      ],
+      "applied": [
+        937
+      ],
+      "expired": [
+        459,
+        809,
+        1097,
+        1343,
+        1563
+      ],
+      "first_pre_applied_payload_difference": null,
+      "initialization_json_differences": []
+    }
+  },
+  "qualification": {
+    "local_core4": "PASS",
+    "tumvi_room1_6": "NOT_RUN",
+    "issue58_state": "OPEN",
+    "independent_cpp_review_outstanding_findings": 0,
+    "mh01_formal_exact_red": "independent_issue51",
+    "euroc11_checkpoint": "not_established_by_this_run"
+  },
+  "limitations": [
+    "Long outages still start a new local world frame.",
+    "V2_03 boundary maximum translation error increased from 5.368270660923806 m to 6.235215955685146 m.",
+    "V2_03 completion and coverage remain 0.4903695991671005 and 0.724935732647815."
+  ]
+}

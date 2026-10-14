@@ -10,6 +10,19 @@ CMake target：`phad_estimator`（alias `phad::estimator`），公开依赖
 `phad::common`、`phad::camera`、`phad::sensor`；GTSAM 为 PRIVATE（PIMPL 藏图与 Values，
 include 标 SYSTEM）。
 
+## M5 有界世界系恢复
+
+#58 recovery 的世界系表达保存在 private optional `T_W_local`。Moving root
+commit 与 active update 返回的 pose 左乘该 transform，velocity 仅乘其 rotation；
+下一次 outage 从已发布的世界系 navigation 捕获 anchor。段内 PnP、图优化、
+landmark 与 pose cache 保持本段局部坐标，使世界系表达不改变下一帧的求解输入
+或 cull feedback。完成段与 measurement discontinuity 清除该 transform；安装
+与清除仍受同一 transaction 保护。恢复预算从 immutable source timestamp 起算，
+复用既有 `m_visual_coast_horizon_ns`，等号可继承；超时提交局部新段，报告
+`NotApplicable / AnchorExpired / RootCommitted`，消费 anchor 并建立 target world origin。
+实际产品范围见
+[恢复诊断](../../docs/research/2026-10-14-note-m5-world-frame-recovery-local-solve.md)。
+
 M4 Q2 另提供纯 `integrateGyroRotation` helper：消费 timestamped gyro point
 samples 与同 frame、同为 rad/s 的已知常值 bias，返回 `delta_R_i_j` 和 exact
 `int64` 纳秒 duration。它按相邻 endpoint average 积分，不读取 accel；所有输入、

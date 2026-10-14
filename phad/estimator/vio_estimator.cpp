@@ -45,6 +45,7 @@
 #include "phad/estimator/internal/initial_moving_root_math.hpp"
 #include "phad/estimator/internal/initial_visual_evidence.hpp"
 #include "phad/estimator/internal/initialization_diagnostics.hpp"
+#include "phad/estimator/internal/recovery_bridge.hpp"
 #include "phad/estimator/internal/vio_update_transaction.hpp"
 #ifdef PHAD_ESTIMATOR_TESTING
 #include <bit>
@@ -1106,6 +1107,7 @@ namespace phad::estimator
         m_test_next_pnp_proposal_failure;
     mutable std::optional<PnpGuessRetryOutcome>
         m_test_next_pnp_guess_retry_outcome;
+    mutable std::optional<internal::PnpGaugeCapture> m_test_pnp_gauge_capture;
 #endif
 
     explicit Impl( camera::RectifiedStereoCalibration calibration_in,
@@ -1209,13 +1211,14 @@ namespace phad::estimator
       m_state->m_continuity_anchor                = next_continuity_anchor;
       m_state->m_visual_coast_duration_ns         = 0;
       m_state->m_initialized                      = false;
+      m_state->m_T_W_local.reset();
       m_state->m_vio_diagnostics =
           makeVioDiagnostics( VioGraphInfo{}, *m_state );
       ++m_state->m_segment_id;
       return completed_segment;
     }
 
-    void clearProvisionalMovingLifecycleForStaticRoot()
+    void clearProvisionalEvidence()
     {
       m_state->m_window.clear();
       m_state->m_landmarks_w.clear();
@@ -1785,6 +1788,43 @@ namespace phad::estimator
             calibration.cxPixels(), 0.0, calibration.fyPixels(),
             calibration.cyPixels(), 0.0, 0.0, 1.0 );
 
+#ifdef PHAD_ESTIMATOR_TESTING
+      internal::PnpCallCapture* capture = nullptr;
+      if ( m_test_pnp_gauge_capture.has_value() &&
+           m_test_pnp_gauge_capture->m_pnp_timestamp == measurement.m_timestamp &&
+           !m_test_pnp_gauge_capture->m_pnp.has_value() )
+      {
+        capture = &m_test_pnp_gauge_capture->m_pnp.emplace();
+        capture->m_correspondences.reserve( pts3d.size() );
+        for ( std::size_t index = 0; index < pts3d.size(); ++index )
+        {
+          capture->m_correspondences.push_back( internal::PnpCorrespondence{
+              .m_id      = mapped_observations[ index ]->id,
+              .m_point_W = Eigen::Vector3d( pts3d[ index ].x, pts3d[ index ].y, pts3d[ index ].z ),
+              .m_pixel   = Eigen::Vector2d( pts2d[ index ].x, pts2d[ index ].y ) } );
+        }
+        capture->m_guess_T_W_B = guess_T_W_B;
+        capture->m_T_B_left    = T_B_left;
+        for ( int row = 0; row < 3; ++row )
+        {
+          capture->m_guess_rvec[ row ] = rvec.at<double>( row, 0 );
+          capture->m_guess_tvec[ row ] = tvec.at<double>( row, 0 );
+          for ( int col = 0; col < 3; ++col )
+          {
+            capture->m_K( row, col ) = K.at<double>( row, col );
+          }
+        }
+        capture->m_rvec_type          = rvec.type();
+        capture->m_tvec_type          = tvec.type();
+        capture->m_K_type             = K.type();
+        capture->m_object_points_type = cv::Mat( pts3d, false ).type();
+        capture->m_image_points_type  = cv::Mat( pts2d, false ).type();
+        capture->m_reprojection_error = static_cast<float>( options.pnp_reproj_px );
+        capture->m_confidence         = options.pnp_confidence;
+        capture->m_flags              = cv::SOLVEPNP_ITERATIVE;
+      }
+#endif
+
       cv::Mat inliers;
       bool    solved = false;
       try
@@ -1795,10 +1835,43 @@ namespace phad::estimator
             static_cast<float>( options.pnp_reproj_px ),
             options.pnp_confidence, inliers, cv::SOLVEPNP_ITERATIVE );
       }
+#ifdef PHAD_ESTIMATOR_TESTING
+      catch ( const cv::Exception& exception )
+#else
       catch ( const cv::Exception& )
+#endif
       {
+#ifdef PHAD_ESTIMATOR_TESTING
+        if ( capture != nullptr )
+        {
+          capture->m_exception = exception.what();
+        }
+#endif
         return result;
       }
+#ifdef PHAD_ESTIMATOR_TESTING
+      if ( capture != nullptr )
+      {
+        capture->m_solved             = solved;
+        capture->m_returned_rvec_type = rvec.type();
+        capture->m_returned_tvec_type = tvec.type();
+        capture->m_inliers_type       = inliers.type();
+        if ( !rvec.empty() )
+        {
+          capture->m_returned_rvec = Eigen::Vector3d(
+              rvec.at<double>( 0, 0 ), rvec.at<double>( 1, 0 ), rvec.at<double>( 2, 0 ) );
+        }
+        if ( !tvec.empty() )
+        {
+          capture->m_returned_tvec = Eigen::Vector3d(
+              tvec.at<double>( 0, 0 ), tvec.at<double>( 1, 0 ), tvec.at<double>( 2, 0 ) );
+        }
+        for ( int row = 0; row < inliers.rows; ++row )
+        {
+          capture->m_inlier_indices.push_back( inliers.at<int>( row, 0 ) );
+        }
+      }
+#endif
       if ( !solved || inliers.empty() )
       {
         return result;
@@ -1840,6 +1913,12 @@ namespace phad::estimator
 
       const Eigen::Isometry3d T_W_left = T_left_W.inverse();
       const Eigen::Isometry3d T_W_B    = T_W_left * T_B_left.inverse();
+#ifdef PHAD_ESTIMATOR_TESTING
+      if ( capture != nullptr )
+      {
+        capture->m_returned_T_W_B = T_W_B;
+      }
+#endif
       if ( !isFinite( T_W_B ) )
       {
         result.probe_result = PnpProbeResult::kProposalPoseNonFinite;
@@ -2271,6 +2350,81 @@ namespace phad::estimator
                                   step.m_gyr_mean_radps, step.m_dt_s );
       }
       return pim;
+    }
+
+    [[nodiscard]] NavigationState worldNavigation(
+        const NavigationState& navigation,
+        const internal::VioUpdateState& state ) const
+    {
+      NavigationState world = navigation;
+      if ( state.m_T_W_local.has_value() )
+      {
+        world.m_T_W_B = *state.m_T_W_local * navigation.m_T_W_B;
+        world.m_v_W_B = state.m_T_W_local->rotation() * navigation.m_v_W_B;
+      }
+      return world;
+    }
+
+    [[nodiscard]] RecoveryBridgeDiagnostics recoveryDiagnostics() const
+    {
+      RecoveryBridgeDiagnostics diagnostics;
+      if ( !m_state->m_initialized )
+      {
+        diagnostics.m_origin = m_state->m_initialization_origin;
+      }
+      if ( m_state->m_recovery_anchor.has_value() )
+      {
+        diagnostics.m_origin           = RecoveryBridgeOrigin::kVisualOutageRecovery;
+        diagnostics.m_result           = RecoveryBridgeResult::kPending;
+        diagnostics.m_reason           = RecoveryBridgeReason::kAwaitingValidatedRoot;
+        diagnostics.m_lineage          = m_state->m_recovery_anchor->m_lineage;
+        diagnostics.m_anchor_timestamp = m_state->m_recovery_anchor->m_timestamp;
+      }
+      return diagnostics;
+    }
+
+    void advanceRecoveryAnchor( const NormalizedImuInterval& interval,
+                                RecoveryBridgeDiagnostics&   diagnostics )
+    {
+      if ( !m_state->m_recovery_anchor.has_value() )
+      {
+        return;
+      }
+      auto& anchor = *m_state->m_recovery_anchor;
+      // Static arbitration can revisit the same accepted packet after its
+      // evidence transaction committed. That endpoint is already propagated.
+      if ( anchor.m_timestamp == interval.m_raw.m_t_end )
+      {
+        diagnostics = recoveryDiagnostics();
+        return;
+      }
+      diagnostics.m_reason = RecoveryBridgeReason::kTimestampMismatch;
+      if ( anchor.m_timestamp != interval.m_raw.m_t_begin )
+      {
+        throw std::runtime_error( "recovery anchor does not match IMU interval begin" );
+      }
+      diagnostics.m_reason   = RecoveryBridgeReason::kInvalidAnchor;
+      const auto& navigation = anchor.m_navigation;
+      if ( !isFinite( navigation.m_T_W_B ) ||
+           !navigation.m_v_W_B.allFinite() ||
+           !navigation.m_bias.m_acc_mps2.allFinite() ||
+           !navigation.m_bias.m_gyr_radps.allFinite() )
+      {
+        throw std::runtime_error( "recovery anchor navigation is non-finite" );
+      }
+      const auto pim       = preintegrate( interval, navigation.m_bias );
+      const auto predicted = pim.predict(
+          gtsam::NavState( toPose3( navigation.m_T_W_B ), navigation.m_v_W_B ),
+          toGtsamBias( navigation.m_bias ) );
+      const Eigen::Isometry3d pose = toIsometry( predicted.pose() );
+      if ( !isFinite( pose ) || !predicted.v().allFinite() )
+      {
+        throw std::runtime_error( "recovery anchor propagation is non-finite" );
+      }
+      anchor.m_navigation.m_T_W_B = pose;
+      anchor.m_navigation.m_v_W_B = predicted.v();
+      anchor.m_timestamp          = interval.m_raw.m_t_end;
+      diagnostics                 = recoveryDiagnostics();
     }
 
     struct MovingEvidenceSummary
@@ -3258,6 +3412,76 @@ namespace phad::estimator
     using CurrentGraphLifecycleResult =
         std::variant<CurrentGraphValidation, InitializationReason>;
 
+    [[nodiscard]] Eigen::Isometry3d prepareRecoveryBridge(
+        const internal::VioUpdateState& candidate,
+        RecoveryBridgeDiagnostics&      diagnostics ) const
+    {
+      const auto& anchor           = *candidate.m_recovery_anchor;
+      const auto& latest           = candidate.m_window.back();
+      diagnostics.m_root_timestamp = latest.m_timestamp;
+      diagnostics.m_reason         = RecoveryBridgeReason::kTimestampMismatch;
+      if ( anchor.m_timestamp != latest.m_timestamp )
+      {
+        throw std::runtime_error( "recovery anchor and latest root timestamps differ" );
+      }
+      const auto proposal = internal::makeRecoveryBridgeProposal(
+          anchor.m_navigation.m_T_W_B,
+          requireNavigationState( latest, "recovery latest state" ).m_T_W_B );
+      if ( const auto* reason = std::get_if<RecoveryBridgeReason>( &proposal ) )
+      {
+        diagnostics.m_reason = *reason;
+        throw std::runtime_error( "recovery world expression is undefined" );
+      }
+      const auto& transform    = std::get<Eigen::Isometry3d>( proposal );
+      diagnostics.m_reason     = RecoveryBridgeReason::kInvalidTransform;
+      const auto validate_pose = [ & ]( const Eigen::Isometry3d& pose ) {
+        if ( !internal::isRecoveryPoseValid( transform * pose ) )
+        {
+          throw std::runtime_error( "recovery world pose is invalid" );
+        }
+      };
+      for ( const auto& frame : candidate.m_window )
+      {
+        const auto& navigation = requireNavigationState( frame, "recovery state validation" );
+        validate_pose( navigation.m_T_W_B );
+        if ( !( transform.rotation() * navigation.m_v_W_B ).allFinite() )
+        {
+          throw std::runtime_error( "recovery world velocity is non-finite" );
+        }
+        if ( frame.m_visual_seed.has_value() )
+        {
+          validate_pose( frame.m_visual_seed->m_T_W_B );
+        }
+        if ( frame.m_verified_visual.has_value() )
+        {
+          validate_pose( frame.m_verified_visual->m_T_W_B );
+        }
+      }
+      for ( const auto& [ id, point ] : candidate.m_landmarks_w )
+      {
+        (void)id;
+        if ( !( transform * point ).allFinite() )
+        {
+          throw std::runtime_error( "recovery world landmark is non-finite" );
+        }
+      }
+      for ( const auto& [ id, pose ] : candidate.m_T_W_B_last_stereo )
+      {
+        (void)id;
+        validate_pose( pose );
+      }
+      diagnostics.m_reason = RecoveryBridgeReason::kNone;
+#ifdef PHAD_ESTIMATOR_TESTING
+      if ( m_test_pnp_gauge_capture.has_value() &&
+           m_test_pnp_gauge_capture->m_root_timestamp == latest.m_timestamp &&
+           !m_test_pnp_gauge_capture->m_A.has_value() )
+      {
+        m_test_pnp_gauge_capture->m_A = transform;
+      }
+#endif
+      return transform;
+    }
+
     [[nodiscard]] internal::VioUpdateState materializeMovingCandidate(
         const PreparedMovingCandidate&        prepared,
         const InitialMovingCandidateSolution& solution ) const
@@ -4168,6 +4392,34 @@ namespace phad::estimator
     result.diagnostics.m_vio     = m_impl->m_state->m_vio_diagnostics;
     result.diagnostics.unsupported_span_ns =
         m_impl->m_state->m_unsupported_span_ns;
+    result.diagnostics.m_recovery_bridge = m_impl->recoveryDiagnostics();
+    const auto finalizeInitialization    = [ & ](
+                                            VioUpdateResult pending_result, const InitializationDiagnostics& initialization,
+                                            std::optional<VioEstimate> estimate, std::string message ) {
+      auto& bridge         = pending_result.diagnostics.m_recovery_bridge;
+      bridge.m_transaction = initialization.m_transaction;
+      bridge.m_attempt_id  = initialization.m_attempt_id;
+      if ( initialization.m_outcome == InitializationOutcome::kFatalError )
+      {
+        bridge.m_result = RecoveryBridgeResult::kFatalError;
+        if ( bridge.m_reason == RecoveryBridgeReason::kNone ||
+             bridge.m_reason == RecoveryBridgeReason::kAwaitingValidatedRoot )
+        {
+          bridge.m_reason = RecoveryBridgeReason::kContractError;
+        }
+        pending_result.diagnostics.unsupported_span_ns =
+            m_impl->m_state->m_unsupported_span_ns;
+        pending_result.diagnostics.window_size =
+            static_cast<std::uint32_t>( m_impl->m_state->m_window.size() );
+        pending_result.diagnostics.prior_key = m_impl->m_state->m_window.empty()
+                                                   ? 0U
+                                                   : m_impl->m_state->m_window.front().m_frame_index;
+        pending_result.diagnostics.m_vio     = m_impl->m_state->m_vio_diagnostics;
+      }
+      return internal::finalizeInitializationResult(
+          std::move( pending_result ), initialization, std::move( estimate ),
+          std::move( message ) );
+    };
     const auto finalizePreStagingHardResult =
         [ & ]( UpdateStatus status, std::string message ) -> VioUpdateResult {
       result.status  = status;
@@ -4216,6 +4468,18 @@ namespace phad::estimator
       }
 
       VioUpdateTransaction transaction( m_impl->m_state );
+      auto&                bridge = result.diagnostics.m_recovery_bridge;
+      bridge.m_origin             = RecoveryBridgeOrigin::kMeasurementDiscontinuity;
+      bridge.m_result             = m_impl->m_state->m_recovery_anchor.has_value()
+                                        ? RecoveryBridgeResult::kCleared
+                                        : RecoveryBridgeResult::kNotApplicable;
+      bridge.m_reason             = RecoveryBridgeReason::kMeasurementDiscontinuity;
+      bridge.m_transaction        = InitializationTransactionResult::kEvidenceCommitted;
+      m_impl->m_state->m_recovery_anchor.reset();
+      m_impl->m_state->m_world_origin_segment_id.reset();
+      m_impl->m_state->m_T_W_local.reset();
+      m_impl->m_state->m_initialization_origin =
+          RecoveryBridgeOrigin::kMeasurementDiscontinuity;
       m_impl->m_state->m_bootstrap_nodes.clear();
       m_impl->m_state->m_static_candidate_ended           = false;
       m_impl->m_state->m_evidence_revision                = 0U;
@@ -4227,6 +4491,10 @@ namespace phad::estimator
       result.diagnostics.unsupported_span_ns = 0;
       if ( !m_impl->m_state->m_initialized )
       {
+        m_impl->clearProvisionalEvidence();
+        result.diagnostics.window_size = 0U;
+        result.diagnostics.prior_key   = 0U;
+        result.diagnostics.m_vio       = m_impl->m_state->m_vio_diagnostics;
         result.status  = UpdateStatus::kInitializing;
         result.message = "measurement discontinuity reset bootstrap evidence";
         transaction.commit();
@@ -4285,6 +4553,26 @@ namespace phad::estimator
     }
     result.diagnostics.num_disparity = current_num_disparity;
 
+    const auto stageRecoveryAnchor = [ & ]( VioUpdateTransaction& transaction ) {
+      try
+      {
+        m_impl->advanceRecoveryAnchor( normalized_imu,
+                                       result.diagnostics.m_recovery_bridge );
+        return true;
+      }
+      catch ( const std::exception& exception )
+      {
+        transaction.rollback();
+        result.status                                 = UpdateStatus::kFailed;
+        result.message                                = exception.what();
+        result.diagnostics.unsupported_span_ns        = m_impl->m_state->m_unsupported_span_ns;
+        result.diagnostics.m_recovery_bridge.m_result = RecoveryBridgeResult::kFatalError;
+        result.diagnostics.m_recovery_bridge.m_transaction =
+            InitializationTransactionResult::kRolledBack;
+        return false;
+      }
+    };
+
     std::vector<sensor::ImuMeasurement> bootstrap_nodes;
     BootstrapStats                      bootstrap_stats;
     Eigen::Isometry3d                   bootstrap_T_W_B =
@@ -4342,6 +4630,10 @@ namespace phad::estimator
       if ( m_impl->options.m_enable_moving_bootstrap )
       {
         VioUpdateTransaction transaction( m_impl->m_state );
+        if ( !stageRecoveryAnchor( transaction ) )
+        {
+          return result;
+        }
         m_impl->m_state->m_continuity_anchor = measurement.m_timestamp;
         if ( !static_ready && bootstrap_duration_ns.has_value() &&
              *bootstrap_duration_ns >=
@@ -4371,7 +4663,7 @@ namespace phad::estimator
           initialization.m_transaction =
               InitializationTransactionResult::kRolledBack;
           transaction.rollback();
-          return internal::finalizeInitializationResult(
+          return finalizeInitialization(
               std::move( result ), initialization, std::nullopt,
               std::string( "moving visual evidence failed: " ) +
                   exception.what() );
@@ -4445,7 +4737,9 @@ namespace phad::estimator
                 InitializationOutcome::kFatalError,
                 InitializationTransactionResult::kRolledBack );
             transaction.rollback();
-            return internal::finalizeInitializationResult(
+            result.diagnostics.unsupported_span_ns =
+                m_impl->m_state->m_unsupported_span_ns;
+            return finalizeInitialization(
                 std::move( result ), fatal, std::nullopt,
                 "moving attempt id overflows uint64" );
           }
@@ -4462,6 +4756,8 @@ namespace phad::estimator
                 InitializationTransactionResult::kRolledBack );
             fatal.m_attempt_id = attempt_id;
             transaction.rollback();
+            result.diagnostics.unsupported_span_ns =
+                m_impl->m_state->m_unsupported_span_ns;
             result.diagnostics.segment_id =
                 m_impl->m_state->m_segment_id;
             result.diagnostics.window_size =
@@ -4473,7 +4769,7 @@ namespace phad::estimator
                     : m_impl->m_state->m_window.front().m_frame_index;
             result.diagnostics.m_vio =
                 m_impl->m_state->m_vio_diagnostics;
-            return internal::finalizeInitializationResult(
+            return finalizeInitialization(
                 std::move( result ), fatal, std::nullopt,
                 std::move( message ) );
           };
@@ -4625,7 +4921,7 @@ namespace phad::estimator
               }
             }
             transaction.commit();
-            return internal::finalizeInitializationResult(
+            return finalizeInitialization(
                 std::move( result ), rejected, std::nullopt,
                 "moving initialization candidate was rejected" );
           }
@@ -4696,7 +4992,7 @@ namespace phad::estimator
                 InitializationGraphResult::kRejected;
             attachCandidateSummaries( rejected );
             transaction.commit();
-            return internal::finalizeInitializationResult(
+            return finalizeInitialization(
                 std::move( result ), rejected, std::nullopt,
                 "moving current graph rejected the candidate" );
           }
@@ -4716,7 +5012,7 @@ namespace phad::estimator
                 InitializationGraphResult::kRejected;
             attachCandidateSummaries( rejected );
             transaction.commit();
-            return internal::finalizeInitializationResult(
+            return finalizeInitialization(
                 std::move( result ), rejected, std::nullopt,
                 "moving current graph has no admitted visual factor" );
           }
@@ -4725,6 +5021,40 @@ namespace phad::estimator
             auto validated_owner =
                 std::make_unique<internal::VioUpdateState>(
                     std::move( validated.m_candidate ) );
+            validated_owner->m_world_origin_segment_id = validated_owner->m_segment_id;
+            if ( validated_owner->m_recovery_anchor.has_value() )
+            {
+              auto& bridge = result.diagnostics.m_recovery_bridge;
+              const auto& anchor = *validated_owner->m_recovery_anchor;
+              const auto latest_timestamp = validated_owner->m_window.back().m_timestamp;
+              bridge.m_root_timestamp = latest_timestamp;
+              if ( anchor.m_timestamp != latest_timestamp )
+              {
+                bridge.m_reason = RecoveryBridgeReason::kTimestampMismatch;
+                throw std::runtime_error( "recovery anchor and latest root timestamps differ" );
+              }
+              const std::int64_t source_ns = anchor.m_lineage.m_source_timestamp.nanoseconds();
+              const std::int64_t horizon_ns = m_impl->options.m_visual_coast_horizon_ns;
+              // Short circuit the addition when its deadline is beyond int64.
+              const bool expired = source_ns <= std::numeric_limits<std::int64_t>::max() - horizon_ns &&
+                                   latest_timestamp.nanoseconds() > source_ns + horizon_ns;
+              if ( expired )
+              {
+                bridge.m_result = RecoveryBridgeResult::kNotApplicable;
+                bridge.m_reason = RecoveryBridgeReason::kAnchorExpired;
+              }
+              else
+              {
+                const auto proposal = m_impl->prepareRecoveryBridge( *validated_owner, bridge );
+                // World re-expression must not perturb PnP/LM or cull feedback.
+                validated_owner->m_T_W_local = proposal;
+                validated_owner->m_world_origin_segment_id = anchor.m_lineage.m_world_origin_segment_id;
+                bridge.m_result = RecoveryBridgeResult::kApplied;
+              }
+              result.diagnostics.m_recovery_bridge.m_lineage->m_world_origin_segment_id =
+                  *validated_owner->m_world_origin_segment_id;
+              validated_owner->m_recovery_anchor.reset();
+            }
             result.diagnostics.window_size =
                 static_cast<std::uint32_t>(
                     validated_owner->m_window.size() );
@@ -4795,9 +5125,9 @@ namespace phad::estimator
                 result.diagnostics.m_vio;
             const WindowFrame& latest =
                 validated_owner->m_window.back();
-            const NavigationState& latest_navigation =
-                requireNavigationState( latest,
-                                        "moving-root committed estimate" );
+            const NavigationState latest_navigation = m_impl->worldNavigation(
+                requireNavigationState( latest, "moving-root committed estimate" ),
+                *validated_owner );
             const VioEstimate estimate{
                 .timestamp    = latest.m_timestamp,
                 .T_W_B        = latest_navigation.m_T_W_B,
@@ -4813,7 +5143,7 @@ namespace phad::estimator
                 InitializationGraphResult::kValidated;
             attachCandidateSummaries( committed );
             VioUpdateResult finalized =
-                internal::finalizeInitializationResult(
+                finalizeInitialization(
                     std::move( result ), committed, estimate, {} );
             internal::installVioUpdateStateOwner(
                 m_impl->m_state, validated_owner );
@@ -4842,7 +5172,7 @@ namespace phad::estimator
                   evidence.m_reason, InitializationOutcome::kPending,
                   InitializationTransactionResult::kEvidenceCommitted );
           transaction.commit();
-          return internal::finalizeInitializationResult(
+          return finalizeInitialization(
               std::move( result ), initialization, std::nullopt,
               "collecting moving initialization evidence" );
         }
@@ -4876,9 +5206,13 @@ namespace phad::estimator
           initialization.m_transaction =
               InitializationTransactionResult::kRolledBack;
           transaction.rollback();
-          return internal::finalizeInitializationResult(
+          return finalizeInitialization(
               std::move( result ), initialization, std::nullopt,
               "static bootstrap timed out" );
+        }
+        if ( !stageRecoveryAnchor( transaction ) )
+        {
+          return result;
         }
         m_impl->m_state->m_continuity_anchor = measurement.m_timestamp;
         m_impl->m_state->m_bootstrap_nodes   = std::move( bootstrap_nodes );
@@ -4898,7 +5232,7 @@ namespace phad::estimator
         initialization.m_transaction =
             InitializationTransactionResult::kEvidenceCommitted;
         transaction.commit();
-        return internal::finalizeInitializationResult(
+        return finalizeInitialization(
             std::move( result ), initialization, std::nullopt,
             "collecting static bootstrap evidence" );
       }
@@ -4910,6 +5244,10 @@ namespace phad::estimator
       if ( measurement.m_observations.empty() )
       {
         VioUpdateTransaction transaction( m_impl->m_state );
+        if ( !stageRecoveryAnchor( transaction ) )
+        {
+          return result;
+        }
         m_impl->m_state->m_bootstrap_nodes   = std::move( bootstrap_nodes );
         m_impl->m_state->m_continuity_anchor = measurement.m_timestamp;
         result.status                        = UpdateStatus::kInitializing;
@@ -4930,7 +5268,7 @@ namespace phad::estimator
         initialization.m_transaction =
             InitializationTransactionResult::kEvidenceCommitted;
         transaction.commit();
-        return internal::finalizeInitializationResult(
+        return finalizeInitialization(
             std::move( result ), initialization, std::nullopt,
             "static bootstrap ready; waiting for visual seed" );
       }
@@ -4939,6 +5277,10 @@ namespace phad::estimator
     const auto retainBootstrapAndReturn =
         [ & ]( std::string message ) -> VioUpdateResult {
       VioUpdateTransaction transaction( m_impl->m_state );
+      if ( !stageRecoveryAnchor( transaction ) )
+      {
+        return result;
+      }
       m_impl->m_state->m_bootstrap_nodes   = bootstrap_nodes;
       m_impl->m_state->m_continuity_anchor = measurement.m_timestamp;
       if ( !stageUnsupportedSpanForCurrentTimestamp() )
@@ -4957,7 +5299,7 @@ namespace phad::estimator
       initialization.m_transaction =
           InitializationTransactionResult::kEvidenceCommitted;
       transaction.commit();
-      return internal::finalizeInitializationResult(
+      return finalizeInitialization(
           std::move( result ), initialization, std::nullopt,
           std::move( message ) );
     };
@@ -5010,6 +5352,24 @@ namespace phad::estimator
       if ( normalized_imu.m_duration_ns > horizon_ns - coast_duration_ns )
       {
         VioUpdateTransaction transaction( m_impl->m_state );
+        const WindowFrame&   source        = m_impl->m_state->m_window.back();
+        m_impl->m_state->m_recovery_anchor = internal::RecoveryAnchor{
+            .m_timestamp  = source.m_timestamp,
+            .m_navigation = m_impl->worldNavigation(
+                requireNavigationState( source, "outage recovery anchor" ),
+                *m_impl->m_state ),
+            .m_lineage    = RecoveryBridgeLineage{
+                   .m_source_segment_id       = m_impl->m_state->m_segment_id,
+                   .m_source_frame_index      = source.m_frame_index,
+                   .m_source_timestamp        = source.m_timestamp,
+                   .m_target_segment_id       = m_impl->m_state->m_segment_id + 1U,
+                   .m_world_origin_segment_id = m_impl->m_state->m_world_origin_segment_id
+                                                 .value_or( m_impl->m_state->m_segment_id ) } };
+        result.diagnostics.m_recovery_bridge = m_impl->recoveryDiagnostics();
+        if ( !stageRecoveryAnchor( transaction ) )
+        {
+          return result;
+        }
         if ( !stageUnsupportedSpanForCurrentTimestamp() )
         {
           return finalizePreStagingHardResult(
@@ -5018,6 +5378,9 @@ namespace phad::estimator
         }
         const std::uint32_t completed_segment =
             m_impl->completeActiveSegment( measurement.m_timestamp );
+        m_impl->m_state->m_initialization_origin = RecoveryBridgeOrigin::kVisualOutageRecovery;
+        result.diagnostics.m_recovery_bridge.m_transaction =
+            InitializationTransactionResult::kEvidenceCommitted;
         result.diagnostics.segment_id  = m_impl->m_state->m_segment_id;
         result.diagnostics.window_size = 0;
         result.diagnostics.prior_key   = 0;
@@ -5057,6 +5420,10 @@ namespace phad::estimator
     std::vector<LandmarkId> frame_culled;
 
     VioUpdateTransaction transaction( m_impl->m_state );
+    if ( !stageRecoveryAnchor( transaction ) )
+    {
+      return result;
+    }
     m_impl->m_state->m_visual_coast_duration_ns =
         next_visual_coast_duration_ns;
     auto finalizePostStagingHardResult =
@@ -5073,6 +5440,11 @@ namespace phad::estimator
                                                .m_frame_index;
       result.diagnostics.m_vio     = m_impl->m_state->m_vio_diagnostics;
       result.diagnostics.culled_landmark_ids.clear();
+      result.diagnostics.unsupported_span_ns        = m_impl->m_state->m_unsupported_span_ns;
+      result.diagnostics.m_recovery_bridge.m_result = RecoveryBridgeResult::kFatalError;
+      result.diagnostics.m_recovery_bridge.m_reason = RecoveryBridgeReason::kContractError;
+      result.diagnostics.m_recovery_bridge.m_transaction =
+          InitializationTransactionResult::kRolledBack;
       return result;
     };
     Eigen::Isometry3d propagated_T_W_B = bootstrap_T_W_B;
@@ -5108,7 +5480,7 @@ namespace phad::estimator
       if ( static_root_selected &&
            m_impl->options.m_enable_moving_bootstrap )
       {
-        m_impl->clearProvisionalMovingLifecycleForStaticRoot();
+        m_impl->clearProvisionalEvidence();
       }
       if ( !m_impl->seedRoot( bootstrap_T_W_B, Eigen::Vector3d::Zero(),
                               bootstrap_bias, measurement,
@@ -5488,9 +5860,9 @@ namespace phad::estimator
     m_impl->m_state->m_vio_diagnostics = result.diagnostics.m_vio;
     const WindowFrame& lifecycle_estimate_frame =
         m_impl->m_state->m_window.back();
-    const NavigationState& lifecycle_estimate_navigation =
-        requireNavigationState( lifecycle_estimate_frame,
-                                "active committed estimate" );
+    const NavigationState lifecycle_estimate_navigation = m_impl->worldNavigation(
+        requireNavigationState( lifecycle_estimate_frame, "active committed estimate" ),
+        *m_impl->m_state );
     const VioEstimate estimate{
         .timestamp    = measurement.m_timestamp,
         .T_W_B        = lifecycle_estimate_navigation.m_T_W_B,
@@ -5499,6 +5871,16 @@ namespace phad::estimator
         .m_segment_id = m_impl->m_state->m_segment_id };
     if ( !active_segment && static_root_selected )
     {
+      m_impl->m_state->m_recovery_anchor.reset();
+      m_impl->m_state->m_world_origin_segment_id            = m_impl->m_state->m_segment_id;
+      result.diagnostics.m_recovery_bridge.m_result         = RecoveryBridgeResult::kNotApplicable;
+      result.diagnostics.m_recovery_bridge.m_reason         = RecoveryBridgeReason::kStaticRootSelected;
+      result.diagnostics.m_recovery_bridge.m_root_timestamp = measurement.m_timestamp;
+      if ( result.diagnostics.m_recovery_bridge.m_lineage.has_value() )
+      {
+        result.diagnostics.m_recovery_bridge.m_lineage->m_world_origin_segment_id =
+            *m_impl->m_state->m_world_origin_segment_id;
+      }
       InitializationDiagnostics initialization;
       initialization.m_path    = InitializationPath::kStatic;
       initialization.m_phase   = InitializationPhase::kCommit;
@@ -5508,7 +5890,7 @@ namespace phad::estimator
       initialization.m_transaction =
           InitializationTransactionResult::kRootCommitted;
       VioUpdateResult finalized =
-          internal::finalizeInitializationResult(
+          finalizeInitialization(
               std::move( result ), initialization, estimate, {} );
       transaction.commit();
       return finalized;
@@ -5665,6 +6047,32 @@ namespace phad::estimator
     estimator.m_impl->m_test_next_pnp_guess_retry_outcome = outcome;
   }
 
+  void internal::VioEstimatorTestAccess::armPnpGaugeCapture(
+      VioEstimator& estimator, const common::Timestamp root_timestamp,
+      const common::Timestamp pnp_timestamp )
+  {
+    if ( !estimator.m_impl )
+    {
+      throw std::invalid_argument( "capture requires a live VioEstimator" );
+    }
+    if ( estimator.m_impl->m_test_pnp_gauge_capture.has_value() )
+    {
+      throw std::logic_error( "PnP gauge capture is already armed" );
+    }
+    estimator.m_impl->m_test_pnp_gauge_capture = PnpGaugeCapture{
+        .m_root_timestamp = root_timestamp, .m_pnp_timestamp = pnp_timestamp, .m_A = std::nullopt, .m_pnp = std::nullopt };
+  }
+
+  std::optional<internal::PnpGaugeCapture>
+  internal::VioEstimatorTestAccess::takePnpGaugeCapture( VioEstimator& estimator )
+  {
+    if ( !estimator.m_impl )
+    {
+      throw std::invalid_argument( "capture requires a live VioEstimator" );
+    }
+    return std::exchange( estimator.m_impl->m_test_pnp_gauge_capture, std::nullopt );
+  }
+
   std::size_t
   internal::VioEstimatorTestAccess::lastInitialVisualSolveWindowSize(
       const VioEstimator& estimator )
@@ -5782,6 +6190,30 @@ namespace phad::estimator
             ? OrderedJson(
                   state.m_last_visual_support_timestamp->nanoseconds() )
             : OrderedJson( nullptr );
+    encoded_state[ "initialization_origin" ] = enumJson( state.m_initialization_origin );
+    encoded_state[ "world_origin_segment_id" ] =
+        state.m_world_origin_segment_id.has_value()
+            ? OrderedJson( *state.m_world_origin_segment_id )
+            : OrderedJson( nullptr );
+    encoded_state[ "T_W_local" ] = state.m_T_W_local.has_value()
+                                      ? eigenJson( state.m_T_W_local->matrix() )
+                                      : OrderedJson( nullptr );
+    encoded_state[ "recovery_anchor" ] = nullptr;
+    if ( state.m_recovery_anchor.has_value() )
+    {
+      const auto& anchor                   = *state.m_recovery_anchor;
+      OrderedJson encoded_anchor           = OrderedJson::object();
+      encoded_anchor[ "timestamp_ns" ]     = anchor.m_timestamp.nanoseconds();
+      encoded_anchor[ "navigation" ]       = navigationStateJson( anchor.m_navigation );
+      OrderedJson lineage                  = OrderedJson::object();
+      lineage[ "source_segment_id" ]       = anchor.m_lineage.m_source_segment_id;
+      lineage[ "source_frame_index" ]      = anchor.m_lineage.m_source_frame_index;
+      lineage[ "source_timestamp_ns" ]     = anchor.m_lineage.m_source_timestamp.nanoseconds();
+      lineage[ "target_segment_id" ]       = anchor.m_lineage.m_target_segment_id;
+      lineage[ "world_origin_segment_id" ] = anchor.m_lineage.m_world_origin_segment_id;
+      encoded_anchor[ "lineage" ]          = std::move( lineage );
+      encoded_state[ "recovery_anchor" ]   = std::move( encoded_anchor );
+    }
     encoded_state[ "unsupported_span_ns" ] = state.m_unsupported_span_ns;
     encoded_state[ "visual_coast_duration_ns" ] =
         state.m_visual_coast_duration_ns;

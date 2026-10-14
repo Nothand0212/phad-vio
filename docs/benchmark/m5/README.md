@@ -17,3 +17,10 @@ Issues：[#53](https://github.com/Nothand0212/phad-vio/issues/53)、
 也没有与运行同源的 `ConfigSnapshot`。Checkpoint 以 clean code commit、测试源码、
 显式 options 与 dataset identity 共同复现；后续有真实 bench artifact 时另行记录其
 emitted `meta.json`、config hash、raw artifact root 与完整结果。
+
+## #58 本地恢复验收
+
+2026-10-14 的有界世界系恢复已完成 EuRoC core-4 的 8 个生产回放，TUM-VI
+room1–6 guardrail 待验收。逐序列指标、完整参数和两臂身份见
+[evidence](2026-10-14-bounded-world-frame-recovery.evidence.json)，实现与限制见
+[恢复报告](../../research/2026-10-14-note-m5-world-frame-recovery-local-solve.md)。

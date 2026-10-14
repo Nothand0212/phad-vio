@@ -1221,6 +1221,16 @@ namespace phad::apps
             std::chrono::steady_clock::now();
         const estimator::VioMeasurement measurement =
             toVioMeasurement( tracks, packet.m_imu );
+        std::optional<RecoveryBridgeInput> recovery_input;
+        if ( options.collect_recovery_bridge_log )
+        {
+          recovery_input = RecoveryBridgeInput{
+              .m_processed_index = result.counts.image_frames,
+              .m_timestamp_ns    = measurement.m_timestamp.nanoseconds(),
+              .m_is_keyframe     = is_kf,
+              .m_observations    = measurement.m_observations,
+          };
+        }
         const estimator::VioUpdateResult update =
             estimator_update ? estimator_update( measurement, is_kf )
                              : estimator.update( measurement, is_kf );
@@ -1611,7 +1621,9 @@ namespace phad::apps
             .num_mapped_observations    = d.num_mapped_observations,
             .num_current_mono_visual_factors =
                 d.num_current_mono_visual_factors,
-            .initialization = d.m_initialization,
+            .initialization    = d.m_initialization,
+            .m_recovery_bridge = d.m_recovery_bridge,
+            .m_recovery_input  = std::move( recovery_input ),
         } );
 
         if ( options.collect_timing )

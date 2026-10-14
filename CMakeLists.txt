@@ -795,6 +795,7 @@ if(PHAD_BUILD_TESTS)
   )
   target_link_libraries(phad_apps_tests PRIVATE
     phad_offline_vo_session phad_gyro_observe_writer phad_vo_bench_dataset
+    phad::eval
     GTest::gtest_main
     nlohmann_json::nlohmann_json opencv_imgcodecs
   )

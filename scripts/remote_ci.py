@@ -24,7 +24,7 @@ import tarfile
 import tempfile
 import time
 import traceback
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 
 SCHEMA_VERSION = 1
@@ -2541,6 +2541,7 @@ def start_remote_run(
     profile: str,
     *,
     dataset_content_id: str | None = None,
+    prepare_run_config: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     definition = profile_definition(profile)
     dataset_root = Path(definition["dataset_root"])
@@ -2649,6 +2650,9 @@ def start_remote_run(
                     "dataset_manifest_id"
                 ]
                 run_config["dataset_content_id"] = dataset_content_id
+            if prepare_run_config is not None:
+                # Finalize caller metadata and checks before the immutable publication.
+                prepare_run_config(run_config)
             with tempfile.TemporaryDirectory(prefix="phad-remote-ci-run-") as run_temp:
                 local_run_json = Path(run_temp) / "run.json"
                 atomic_write_json(local_run_json, run_config)

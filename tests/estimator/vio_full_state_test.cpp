@@ -2,11 +2,15 @@
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
+#include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <nlohmann/json.hpp>
 #include <numbers>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -164,6 +168,173 @@ namespace
     return VioMeasurement{ .m_timestamp    = Timestamp{ timestamp_ns },
                            .m_observations = std::move( observations ),
                            .m_imu          = std::move( payload ) };
+  }
+
+  constexpr std::int64_t kRecoveryOutageTimestamp = 13 * kFramePeriodNs;
+
+  [[nodiscard]] VioMeasurement recoveryPacket( const std::int64_t index )
+  {
+    namespace fixture                  = phad::test_support::initial_moving;
+    const std::int64_t local_timestamp = index * kFramePeriodNs;
+    auto               raw             = fixture::rawInterval( local_timestamp - kFramePeriodNs, local_timestamp );
+    raw.m_t_begin                      = Timestamp{ raw.m_t_begin.nanoseconds() + kRecoveryOutageTimestamp };
+    raw.m_t_end                        = Timestamp{ raw.m_t_end.nanoseconds() + kRecoveryOutageTimestamp };
+    for ( auto& sample : raw.m_samples )
+    {
+      sample.timestamp = Timestamp{ sample.timestamp.nanoseconds() + kRecoveryOutageTimestamp };
+    }
+    return makeMeasurementWithObservations(
+        kRecoveryOutageTimestamp + local_timestamp, std::move( raw ),
+        fixture::observations( local_timestamp ) );
+  }
+
+  void primeRecoveryOutage( VioEstimator& estimator )
+  {
+    for ( std::int64_t index = 1; index <= 13; ++index )
+    {
+      const auto update = estimator.update( makeMeasurementWithObservations(
+          index * kFramePeriodNs,
+          stationaryInterval( ( index - 1 ) * kFramePeriodNs, index * kFramePeriodNs ),
+          index <= 2 ? makeObservations() : std::vector<StereoObservation>{} ) );
+      ASSERT_EQ( update.status, index == 13 ? UpdateStatus::kVisualOutage
+                                            : UpdateStatus::kOk )
+          << update.message;
+    }
+  }
+
+  [[nodiscard]] nlohmann::ordered_json recoveryState( const VioEstimator& estimator )
+  {
+    return nlohmann::ordered_json::parse(
+               phad::estimator::internal::VioEstimatorTestAccess::canonicalStateJson( estimator ) )
+        .at( "state" );
+  }
+
+  [[nodiscard]] Eigen::MatrixXd recoveryMatrix(
+      const nlohmann::ordered_json& encoded, const Eigen::Index rows, const Eigen::Index cols )
+  {
+    Eigen::MatrixXd result( rows, cols );
+    for ( Eigen::Index row = 0; row < rows; ++row )
+    {
+      for ( Eigen::Index col = 0; col < cols; ++col )
+      {
+        const auto bits    = std::stoull( encoded.at( static_cast<std::size_t>( row * cols + col ) )
+                                              .get<std::string>(),
+                                          nullptr, 16 );
+        result( row, col ) = std::bit_cast<double>( static_cast<std::uint64_t>( bits ) );
+      }
+    }
+    return result;
+  }
+
+  // A public long-coast estimator supplies the continuously propagated endpoint.
+  void primeMovingRecoveryOutage( VioEstimator& estimator, VioEstimator& coast,
+                                  const Eigen::Vector3d& angular_velocity = Eigen::Vector3d( 0.0, 0.0, 1.2 ) )
+  {
+    for ( std::int64_t index = 1; index <= 13; ++index )
+    {
+      auto raw = stationaryInterval( ( index - 1 ) * kFramePeriodNs, index * kFramePeriodNs );
+      if ( index > 2 )
+      {
+        for ( auto& sample : raw.m_samples )
+        {
+          sample.accel_mps2[ 0 ] = 1.0;
+          for ( std::size_t axis = 0; axis < 3U; ++axis )
+          {
+            sample.gyro_radps[ axis ] += angular_velocity[ static_cast<Eigen::Index>( axis ) ];
+          }
+        }
+      }
+      const auto packet = makeMeasurementWithObservations(
+          index * kFramePeriodNs, raw,
+          index <= 2 ? makeObservations() : std::vector<StereoObservation>{} );
+      const auto update = estimator.update( packet );
+      ASSERT_EQ( update.status, index == 13 ? UpdateStatus::kVisualOutage : UpdateStatus::kOk )
+          << update.message;
+      ASSERT_EQ( coast.update( packet ).status, UpdateStatus::kOk );
+    }
+  }
+
+  [[nodiscard]] VioUpdateResult coastPacket( VioEstimator& coast, VioMeasurement packet )
+  {
+    packet.m_observations.clear();
+    return coast.update( packet );
+  }
+
+  // Quaternion swing/twist projection is independent of the production matrix formula.
+  [[nodiscard]] Eigen::Isometry3d expectedRecoveryTransform(
+      const VioUpdateResult& anchor, const VioUpdateResult& local )
+  {
+    const Eigen::Quaterniond relative(
+        anchor.estimate->T_W_B.rotation() * local.estimate->T_W_B.rotation().transpose() );
+    Eigen::Isometry3d transform = Eigen::Isometry3d::Identity();
+    transform.linear()          = Eigen::AngleAxisd( 2.0 * std::atan2( relative.z(), relative.w() ),
+                                                     Eigen::Vector3d::UnitZ() )
+                             .toRotationMatrix();
+    transform.translation() = anchor.estimate->T_W_B.translation() - transform.rotation() * local.estimate->T_W_B.translation();
+    return transform;
+  }
+
+  void expectRecoveryWindowTransform( const VioEstimator& subject, const VioEstimator& local,
+                                      const Eigen::Isometry3d& transform )
+  {
+    const auto actual      = recoveryState( subject );
+    const auto expected    = recoveryState( local );
+    ASSERT_FALSE( actual.at( "T_W_local" ).is_null() );
+    EXPECT_TRUE( recoveryMatrix( actual.at( "T_W_local" ), 4, 4 ).isApprox(
+        transform.matrix(), 1e-9 ) );
+    const auto expect_pose = [ & ]( const auto& a, const auto& b ) {
+      EXPECT_TRUE( recoveryMatrix( a, 4, 4 ).isApprox(
+          recoveryMatrix( b, 4, 4 ), 1e-9 ) );
+    };
+    const auto& window       = actual.at( "window" );
+    const auto& local_window = expected.at( "window" );
+    ASSERT_EQ( window.size(), local_window.size() );
+    ASSERT_GT( window.size(), 1U );
+    for ( std::size_t index = 0; index < window.size(); ++index )
+    {
+      SCOPED_TRACE( index );
+      const auto& a = window.at( index );
+      const auto& b = local_window.at( index );
+      EXPECT_EQ( a.at( "timestamp_ns" ), b.at( "timestamp_ns" ) );
+      EXPECT_EQ( a.at( "observations" ), b.at( "observations" ) );
+      EXPECT_EQ( a.at( "imu" ), b.at( "imu" ) );
+      const auto& nav       = a.at( "navigation" );
+      const auto& local_nav = b.at( "navigation" );
+      expect_pose( nav.at( "T_W_B" ), local_nav.at( "T_W_B" ) );
+      EXPECT_TRUE( recoveryMatrix( nav.at( "v_W_B" ), 3, 1 ).isApprox(
+          recoveryMatrix( local_nav.at( "v_W_B" ), 3, 1 ), 1e-9 ) );
+      EXPECT_EQ( nav.at( "bias" ), local_nav.at( "bias" ) );
+      for ( const auto* cache : { "visual_seed", "verified_visual" } )
+      {
+        ASSERT_EQ( a.at( cache ).is_null(), b.at( cache ).is_null() );
+        if ( !b.at( cache ).is_null() )
+        {
+          expect_pose( a.at( cache ).at( "T_W_B" ), b.at( cache ).at( "T_W_B" ) );
+        }
+      }
+    }
+    // The next graph rebuild obtains its root X/V/B priors from this first frame.
+    EXPECT_TRUE( window.front().at( "predecessor_frame_index" ).is_null() );
+    for ( const auto* cache : { "landmarks_w", "T_W_B_last_stereo" } )
+    {
+      ASSERT_EQ( actual.at( cache ).size(), expected.at( cache ).size() );
+      ASSERT_FALSE( actual.at( cache ).empty() );
+      for ( std::size_t index = 0; index < actual.at( cache ).size(); ++index )
+      {
+        const auto& a = actual.at( cache ).at( index );
+        const auto& b = expected.at( cache ).at( index );
+        EXPECT_EQ( a.at( "id" ), b.at( "id" ) );
+        if ( a.contains( "p_W" ) )
+        {
+          const Eigen::Vector3d point = recoveryMatrix( b.at( "p_W" ), 3, 1 );
+          EXPECT_TRUE( recoveryMatrix( a.at( "p_W" ), 3, 1 ).isApprox( point, 1e-9 ) );
+        }
+        else
+        {
+          expect_pose( a.at( "T_W_B" ), b.at( "T_W_B" ) );
+        }
+      }
+    }
   }
 
   void expectSameEstimate( const VioUpdateResult& lhs,
@@ -2127,6 +2298,608 @@ TEST( VioInitialization, CurrentGraphContractErrorRollsBackExactly )
              *initialization.m_attempt_id );
 }
 
+TEST( VioInitialization, PnpGaugeCaptureIsOneShotAndPreservesUpdates )
+{
+  using namespace phad::estimator;
+  using Access                      = internal::VioEstimatorTestAccess;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.enable_pnp_init           = true;
+  VioEstimator observed( makeCalibration(), makeImuParameters(), options );
+  VioEstimator plain( makeCalibration(), makeImuParameters(), options );
+  VioEstimator local( makeCalibration(), makeImuParameters(), options );
+  auto         coast_options              = options;
+  coast_options.m_visual_coast_horizon_ns = 10'000'000'000;
+  VioEstimator coast( makeCalibration(), makeImuParameters(), coast_options );
+  EXPECT_FALSE( Access::takePnpGaugeCapture( observed ).has_value() );
+  Access::armPnpGaugeCapture( observed, recoveryPacket( 6 ).m_timestamp,
+                              recoveryPacket( 7 ).m_timestamp );
+  EXPECT_THROW( Access::armPnpGaugeCapture( observed, recoveryPacket( 6 ).m_timestamp,
+                                            recoveryPacket( 7 ).m_timestamp ),
+                std::logic_error );
+  primeRecoveryOutage( observed );
+  primeRecoveryOutage( plain );
+  for ( std::int64_t index = 1; index <= 13; ++index )
+  {
+    const auto update = coast.update( makeMeasurementWithObservations(
+        index * kFramePeriodNs,
+        stationaryInterval( ( index - 1 ) * kFramePeriodNs, index * kFramePeriodNs ),
+        index <= 2 ? makeObservations() : std::vector<StereoObservation>{} ) );
+    ASSERT_EQ( update.status, UpdateStatus::kOk );
+  }
+  VioUpdateResult root;
+  VioUpdateResult local_root;
+  VioUpdateResult anchor_root;
+  for ( std::int64_t index = 1; index <= 6; ++index )
+  {
+    const auto packet = recoveryPacket( index );
+    root              = observed.update( packet );
+    const auto direct = plain.update( packet );
+    local_root        = local.update( packet );
+    auto coast_packet = packet;
+    coast_packet.m_observations.clear();
+    anchor_root = coast.update( coast_packet );
+    ASSERT_EQ( root.status, direct.status );
+    if ( index == 6 )
+    {
+      expectSameCommittedUpdate( root, direct );
+    }
+  }
+  ASSERT_TRUE( root.estimate.has_value() );
+  ASSERT_TRUE( local_root.estimate.has_value() );
+  ASSERT_TRUE( anchor_root.estimate.has_value() );
+  const auto before_pnp            = recoveryState( observed );
+  auto       packet                = recoveryPacket( 7 );
+  const auto original_observations = packet.m_observations;
+  const auto update                = observed.update( packet );
+  const auto direct                = plain.update( packet );
+  expectSameCommittedUpdate( update, direct );
+  ASSERT_TRUE( update.diagnostics.pnp_success );
+  packet.m_observations.front().left_pixel.setZero();
+  packet.m_observations.clear();
+  expectSameCommittedUpdate( observed.update( recoveryPacket( 8 ) ),
+                             plain.update( recoveryPacket( 8 ) ) );
+  auto capture = Access::takePnpGaugeCapture( observed );
+  ASSERT_TRUE( capture.has_value() );
+  ASSERT_TRUE( capture->m_A.has_value() );
+  const Eigen::Quaterniond relative( anchor_root.estimate->T_W_B.rotation() * local_root.estimate->T_W_B.rotation().transpose() );
+  Eigen::Isometry3d        expected_A = Eigen::Isometry3d::Identity();
+  expected_A.linear()                 = Eigen::AngleAxisd( 2.0 * std::atan2( relative.z(), relative.w() ),
+                                                           Eigen::Vector3d::UnitZ() )
+                            .toRotationMatrix();
+  expected_A.translation() = anchor_root.estimate->T_W_B.translation() - expected_A.rotation() * local_root.estimate->T_W_B.translation();
+  EXPECT_TRUE( capture->m_A->matrix().isApprox( expected_A.matrix(), 1e-10 ) );
+  EXPECT_EQ( capture->m_root_timestamp, root.estimate->timestamp );
+  EXPECT_EQ( capture->m_pnp_timestamp, recoveryPacket( 7 ).m_timestamp );
+  ASSERT_TRUE( capture->m_pnp.has_value() );
+  const auto& call = *capture->m_pnp;
+  ASSERT_EQ( call.m_correspondences.size(), original_observations.size() );
+  for ( std::size_t index = 0; index < call.m_correspondences.size(); ++index )
+  {
+    EXPECT_EQ( call.m_correspondences[ index ].m_id, original_observations[ index ].id );
+    EXPECT_TRUE( call.m_correspondences[ index ].m_pixel.isApprox(
+        original_observations[ index ].left_pixel, 0.0 ) );
+    const auto& points = before_pnp.at( "landmarks_w" );
+    const auto  point  = std::find_if( points.begin(), points.end(), [ & ]( const auto& value ) {
+      return value.at( "id" ) == call.m_correspondences[ index ].m_id;
+    } );
+    ASSERT_NE( point, points.end() );
+    EXPECT_TRUE( call.m_correspondences[ index ].m_point_W.isApprox(
+        recoveryMatrix( point->at( "p_W" ), 3, 1 ), 0.0 ) );
+  }
+  EXPECT_EQ( call.m_inlier_indices.size(), update.diagnostics.pnp_inliers );
+  for ( const int index : call.m_inlier_indices )
+  {
+    EXPECT_GE( index, 0 );
+    EXPECT_LT( static_cast<std::size_t>( index ), call.m_correspondences.size() );
+  }
+  EXPECT_TRUE( call.m_solved );
+  EXPECT_TRUE( call.m_exception.empty() );
+  ASSERT_TRUE( call.m_returned_T_W_B.has_value() );
+  EXPECT_TRUE( call.m_returned_T_W_B->matrix().allFinite() );
+  EXPECT_EQ( call.m_iterations, 100 );
+  EXPECT_EQ( call.m_reprojection_error, 2.0F );
+  EXPECT_EQ( call.m_confidence, 0.99 );
+  EXPECT_TRUE( call.m_use_extrinsic_guess );
+  EXPECT_EQ( call.m_flags, 0 );      // SOLVEPNP_ITERATIVE
+  EXPECT_EQ( call.m_rvec_type, 6 );  // CV_64FC1
+  EXPECT_EQ( call.m_tvec_type, 6 );
+  EXPECT_EQ( call.m_K_type, 6 );
+  EXPECT_EQ( call.m_object_points_type, 22 );  // CV_64FC3
+  EXPECT_EQ( call.m_image_points_type, 14 );   // CV_64FC2
+  EXPECT_EQ( call.m_returned_rvec_type, 6 );
+  EXPECT_EQ( call.m_returned_tvec_type, 6 );
+  EXPECT_EQ( call.m_inliers_type, 4 );  // CV_32SC1
+  EXPECT_TRUE( call.m_no_distortion );
+  ASSERT_TRUE( call.m_returned_rvec.has_value() );
+  ASSERT_TRUE( call.m_returned_tvec.has_value() );
+  const double      returned_angle    = call.m_returned_rvec->norm();
+  Eigen::Isometry3d returned_T_left_W = Eigen::Isometry3d::Identity();
+  returned_T_left_W.linear()          = Eigen::AngleAxisd(
+                                   returned_angle, *call.m_returned_rvec / returned_angle )
+                                   .toRotationMatrix();
+  returned_T_left_W.translation() = *call.m_returned_tvec;
+  EXPECT_TRUE( call.m_returned_T_W_B->matrix().isApprox(
+      ( returned_T_left_W.inverse() * call.m_T_B_left.inverse() ).matrix(), 1e-12 ) );
+  EXPECT_EQ( call.m_K( 0, 0 ), 400.0 );
+  EXPECT_EQ( call.m_K( 1, 1 ), 400.0 );
+  EXPECT_EQ( call.m_K( 0, 2 ), 320.0 );
+  EXPECT_EQ( call.m_K( 1, 2 ), 240.0 );
+  const Eigen::Isometry3d T_left_W = ( call.m_guess_T_W_B * call.m_T_B_left ).inverse();
+  EXPECT_TRUE( call.m_guess_tvec.isApprox( T_left_W.translation(), 1e-12 ) );
+  const double          angle    = call.m_guess_rvec.norm();
+  const Eigen::Matrix3d rotation = Eigen::AngleAxisd( angle, call.m_guess_rvec / angle ).toRotationMatrix();
+  EXPECT_TRUE( rotation.isApprox( T_left_W.rotation(), 1e-12 ) );
+  EXPECT_FALSE( Access::takePnpGaugeCapture( observed ).has_value() );
+  Access::armPnpGaugeCapture( observed, recoveryPacket( 20 ).m_timestamp,
+                              recoveryPacket( 21 ).m_timestamp );
+  expectSameCommittedUpdate( observed.update( recoveryPacket( 9 ) ),
+                             plain.update( recoveryPacket( 9 ) ) );
+  const auto unmatched = Access::takePnpGaugeCapture( observed );
+  ASSERT_TRUE( unmatched.has_value() );
+  EXPECT_FALSE( unmatched->m_A.has_value() );
+  EXPECT_FALSE( unmatched->m_pnp.has_value() );
+}
+
+TEST( VioInitialization, RecoveryKeepsPnpInputsInSegmentFrame )
+{
+  using Access = phad::estimator::internal::VioEstimatorTestAccess;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  options.enable_pnp_init           = true;
+  VioEstimator recovered( makeCalibration(), makeImuParameters(), options );
+  VioEstimator local( makeCalibration(), makeImuParameters(), options );
+  auto coast_options                     = options;
+  coast_options.m_visual_coast_horizon_ns = 10'000'000'000;
+  VioEstimator coast( makeCalibration(), makeImuParameters(), coast_options );
+  primeMovingRecoveryOutage( recovered, coast );
+  const auto root_stamp = recoveryPacket( 6 ).m_timestamp;
+  const auto pnp_stamp  = recoveryPacket( 7 ).m_timestamp;
+  Access::armPnpGaugeCapture( recovered, root_stamp, pnp_stamp );
+  Access::armPnpGaugeCapture( local, root_stamp, pnp_stamp );
+  for ( std::int64_t index = 1; index <= 7; ++index )
+  {
+    const auto packet = recoveryPacket( index );
+    const auto global_update = recovered.update( packet );
+    const auto local_update  = local.update( packet );
+    ASSERT_EQ( global_update.status, local_update.status );
+    if ( index == 7 )
+    {
+      ASSERT_TRUE( global_update.diagnostics.pnp_success );
+      ASSERT_TRUE( local_update.diagnostics.pnp_success );
+    }
+  }
+  const auto global_capture = Access::takePnpGaugeCapture( recovered );
+  const auto local_capture  = Access::takePnpGaugeCapture( local );
+  ASSERT_TRUE( global_capture.has_value() );
+  ASSERT_TRUE( local_capture.has_value() );
+  ASSERT_TRUE( global_capture->m_A.has_value() );
+  EXPECT_GT( ( global_capture->m_A->matrix() - Eigen::Matrix4d::Identity() ).norm(), 0.1 );
+  ASSERT_TRUE( global_capture->m_pnp.has_value() );
+  ASSERT_TRUE( local_capture->m_pnp.has_value() );
+  const auto& global_call = *global_capture->m_pnp;
+  const auto& local_call  = *local_capture->m_pnp;
+  ASSERT_EQ( global_call.m_correspondences.size(), local_call.m_correspondences.size() );
+  for ( std::size_t index = 0; index < global_call.m_correspondences.size(); ++index )
+  {
+    EXPECT_EQ( global_call.m_correspondences[ index ].m_id,
+               local_call.m_correspondences[ index ].m_id );
+    EXPECT_TRUE( global_call.m_correspondences[ index ].m_point_W.isApprox(
+        local_call.m_correspondences[ index ].m_point_W, 1e-9 ) );
+    EXPECT_TRUE( global_call.m_correspondences[ index ].m_pixel.isApprox(
+        local_call.m_correspondences[ index ].m_pixel, 0.0 ) );
+  }
+  EXPECT_TRUE( global_call.m_guess_T_W_B.matrix().isApprox(
+      local_call.m_guess_T_W_B.matrix(), 1e-9 ) );
+  EXPECT_EQ( global_call.m_inlier_indices, local_call.m_inlier_indices );
+}
+
+TEST( VioInitialization, RecoveryOutageCarriesTypedAnchorThroughPending )
+{
+  using namespace phad::estimator;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  VioEstimator    estimator( makeCalibration(), makeImuParameters(), options );
+  VioUpdateResult update;
+  for ( std::int64_t index = 1; index <= 13; ++index )
+  {
+    update = estimator.update( makeMeasurementWithObservations(
+        index * kFramePeriodNs,
+        stationaryInterval( ( index - 1 ) * kFramePeriodNs,
+                            index * kFramePeriodNs ),
+        index <= 2 ? makeObservations() : std::vector<StereoObservation>{} ) );
+    ASSERT_EQ( update.status, index == 13 ? UpdateStatus::kVisualOutage
+                                          : UpdateStatus::kOk )
+        << update.message;
+  }
+  const auto& bridge = update.diagnostics.m_recovery_bridge;
+  EXPECT_EQ( bridge.m_origin, RecoveryBridgeOrigin::kVisualOutageRecovery );
+  EXPECT_EQ( bridge.m_result, RecoveryBridgeResult::kPending );
+  EXPECT_EQ( bridge.m_reason, RecoveryBridgeReason::kAwaitingValidatedRoot );
+  EXPECT_EQ( bridge.m_transaction, InitializationTransactionResult::kEvidenceCommitted );
+  ASSERT_TRUE( bridge.m_lineage.has_value() );
+  EXPECT_EQ( bridge.m_lineage->m_source_segment_id, 0U );
+  EXPECT_EQ( bridge.m_lineage->m_target_segment_id, 1U );
+  EXPECT_EQ( bridge.m_lineage->m_world_origin_segment_id, 0U );
+  EXPECT_EQ( bridge.m_lineage->m_source_frame_index, 11U );
+  EXPECT_EQ( bridge.m_lineage->m_source_timestamp, Timestamp{ 12 * kFramePeriodNs } );
+  EXPECT_EQ( bridge.m_anchor_timestamp, Timestamp{ 13 * kFramePeriodNs } );
+  EXPECT_FALSE( bridge.m_root_timestamp.has_value() );
+  EXPECT_FALSE( bridge.m_attempt_id.has_value() );
+  const auto pending = estimator.update( makeMeasurementWithObservations(
+      14 * kFramePeriodNs,
+      stationaryInterval( 13 * kFramePeriodNs, 14 * kFramePeriodNs ), {} ) );
+  ASSERT_EQ( pending.status, UpdateStatus::kInitializing ) << pending.message;
+  EXPECT_EQ( pending.diagnostics.m_recovery_bridge.m_result, RecoveryBridgeResult::kPending );
+  EXPECT_EQ( pending.diagnostics.m_recovery_bridge.m_anchor_timestamp,
+             Timestamp{ 14 * kFramePeriodNs } );
+  EXPECT_EQ( pending.diagnostics.m_recovery_bridge.m_transaction,
+             InitializationTransactionResult::kEvidenceCommitted );
+}
+
+TEST( VioInitialization, RecoveryAppliedRootPreservesMovingWorldAndConsumesAnchor )
+{
+  using namespace phad::estimator;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+  VioEstimator local( makeCalibration(), makeImuParameters(), options );
+  auto         coast_options              = options;
+  coast_options.m_visual_coast_horizon_ns = 10'000'000'000;
+  VioEstimator coast( makeCalibration(), makeImuParameters(), coast_options );
+  primeMovingRecoveryOutage( estimator, coast );
+  for ( std::int64_t index = 1; index <= 5; ++index )
+  {
+    ASSERT_EQ( estimator.update( recoveryPacket( index ) ).status, UpdateStatus::kInitializing );
+    ASSERT_EQ( local.update( recoveryPacket( index ) ).status, UpdateStatus::kInitializing );
+    ASSERT_EQ( coastPacket( coast, recoveryPacket( index ) ).status, UpdateStatus::kOk );
+  }
+  const auto root       = estimator.update( recoveryPacket( 6 ) );
+  const auto local_root = local.update( recoveryPacket( 6 ) );
+  const auto anchor     = coastPacket( coast, recoveryPacket( 6 ) );
+  ASSERT_EQ( root.status, UpdateStatus::kOk ) << root.message;
+  ASSERT_TRUE( root.estimate.has_value() );
+  ASSERT_TRUE( local_root.estimate.has_value() );
+  ASSERT_TRUE( anchor.estimate.has_value() );
+  ASSERT_GT( anchor.estimate->T_W_B.translation().norm(), 0.2 );
+  ASSERT_GT( anchor.estimate->m_v_W_B.norm(), 0.5 );
+  const auto transform = expectedRecoveryTransform( anchor, local_root );
+  ASSERT_GT( Eigen::AngleAxisd( transform.rotation() ).angle(), 0.5 );
+  const auto& bridge = root.diagnostics.m_recovery_bridge;
+  EXPECT_EQ( bridge.m_origin, RecoveryBridgeOrigin::kVisualOutageRecovery );
+  EXPECT_EQ( bridge.m_result, RecoveryBridgeResult::kApplied );
+  EXPECT_EQ( bridge.m_reason, RecoveryBridgeReason::kNone );
+  EXPECT_EQ( bridge.m_transaction, InitializationTransactionResult::kRootCommitted );
+  EXPECT_EQ( bridge.m_anchor_timestamp, root.estimate->timestamp );
+  EXPECT_EQ( bridge.m_root_timestamp, root.estimate->timestamp );
+  EXPECT_EQ( bridge.m_attempt_id, root.diagnostics.m_initialization.m_attempt_id );
+  ASSERT_TRUE( bridge.m_lineage.has_value() );
+  EXPECT_EQ( bridge.m_lineage->m_world_origin_segment_id, 0U );
+  EXPECT_EQ( bridge.m_lineage->m_target_segment_id, 1U );
+  EXPECT_TRUE( root.estimate->T_W_B.matrix().isApprox(
+      ( transform * local_root.estimate->T_W_B ).matrix(), 1e-10 ) );
+  EXPECT_TRUE( root.estimate->T_W_B.translation().isApprox( anchor.estimate->T_W_B.translation(), 1e-10 ) );
+  EXPECT_TRUE( root.estimate->m_v_W_B.isApprox( transform.rotation() * local_root.estimate->m_v_W_B, 1e-10 ) );
+  EXPECT_TRUE( root.estimate->m_bias.m_gyr_radps.isApprox( local_root.estimate->m_bias.m_gyr_radps, 1e-12 ) );
+  EXPECT_TRUE( root.estimate->m_bias.m_acc_mps2.isApprox( local_root.estimate->m_bias.m_acc_mps2, 1e-12 ) );
+  EXPECT_TRUE( ( transform.rotation() * Eigen::Vector3d::UnitZ() ).isApprox( Eigen::Vector3d::UnitZ(), 1e-12 ) );
+  expectRecoveryWindowTransform( estimator, local, transform );
+  const auto active = estimator.update( recoveryPacket( 7 ) );
+  const auto local_active = local.update( recoveryPacket( 7 ) );
+  ASSERT_TRUE( local_active.estimate.has_value() );
+  ASSERT_TRUE( active.estimate.has_value() );
+  EXPECT_TRUE( active.estimate->T_W_B.matrix().isApprox(
+      ( transform * local_active.estimate->T_W_B ).matrix(), 1e-7 ) );
+  EXPECT_TRUE( active.estimate->m_v_W_B.isApprox(
+      transform.rotation() * local_active.estimate->m_v_W_B, 1e-7 ) );
+  ASSERT_EQ( active.status, UpdateStatus::kOk ) << active.message;
+  EXPECT_EQ( active.diagnostics.m_recovery_bridge.m_origin, RecoveryBridgeOrigin::kNone );
+  EXPECT_EQ( active.diagnostics.m_recovery_bridge.m_result, RecoveryBridgeResult::kNotApplicable );
+  EXPECT_FALSE( active.diagnostics.m_recovery_bridge.m_anchor_timestamp.has_value() );
+  EXPECT_FALSE( active.diagnostics.m_recovery_bridge.m_lineage.has_value() );
+  for ( std::int64_t index = 8; index <= 18; ++index )
+  {
+    auto packet = recoveryPacket( index );
+    packet.m_observations.clear();
+    const auto next = estimator.update( packet );
+    ASSERT_EQ( next.status, index == 18 ? UpdateStatus::kVisualOutage : UpdateStatus::kOk ) << next.message;
+    if ( index == 18 )
+    {
+      ASSERT_TRUE( next.diagnostics.m_recovery_bridge.m_lineage.has_value() );
+      EXPECT_EQ( next.diagnostics.m_recovery_bridge.m_lineage->m_source_segment_id, 1U );
+      EXPECT_EQ( next.diagnostics.m_recovery_bridge.m_lineage->m_target_segment_id, 2U );
+      EXPECT_EQ( next.diagnostics.m_recovery_bridge.m_lineage->m_world_origin_segment_id, 0U );
+    }
+  }
+}
+
+TEST( VioInitialization, RecoveryAtHorizonStillInheritsWorld )
+{
+  using namespace phad::estimator;
+  using Access = internal::VioEstimatorTestAccess;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  VioEstimator subject( makeCalibration(), makeImuParameters(), options );
+  VioEstimator local( makeCalibration(), makeImuParameters(), options );
+  auto coast_options                     = options;
+  coast_options.m_visual_coast_horizon_ns = 10'000'000'000;
+  VioEstimator coast( makeCalibration(), makeImuParameters(), coast_options );
+  primeMovingRecoveryOutage( subject, coast );
+  for ( std::int64_t index = 1; index <= 8; ++index )
+  {
+    if ( index >= 6 )
+    {
+      for ( auto* estimator : { &subject, &local } )
+      {
+        Access::setNextCurrentGraphResult( *estimator, InitializationReason::kCurrentGraphUnderconstrained );
+      }
+    }
+    ASSERT_EQ( subject.update( recoveryPacket( index ) ).status, UpdateStatus::kInitializing );
+    ASSERT_EQ( local.update( recoveryPacket( index ) ).status, UpdateStatus::kInitializing );
+    ASSERT_EQ( coastPacket( coast, recoveryPacket( index ) ).status, UpdateStatus::kOk );
+  }
+  const auto root       = subject.update( recoveryPacket( 9 ) );
+  const auto local_root = local.update( recoveryPacket( 9 ) );
+  const auto anchor     = coastPacket( coast, recoveryPacket( 9 ) );
+  ASSERT_EQ( root.status, UpdateStatus::kOk ) << root.message;
+  ASSERT_TRUE( root.estimate.has_value() );
+  ASSERT_TRUE( local_root.estimate.has_value() );
+  ASSERT_TRUE( anchor.estimate.has_value() );
+  ASSERT_TRUE( root.diagnostics.m_recovery_bridge.m_lineage.has_value() );
+  EXPECT_EQ( root.estimate->timestamp.nanoseconds() -
+                 root.diagnostics.m_recovery_bridge.m_lineage->m_source_timestamp.nanoseconds(),
+             500'000'000 );
+  EXPECT_EQ( root.diagnostics.m_recovery_bridge.m_result, RecoveryBridgeResult::kApplied );
+  const auto transform = expectedRecoveryTransform( anchor, local_root );
+  EXPECT_TRUE( root.estimate->T_W_B.matrix().isApprox(
+      ( transform * local_root.estimate->T_W_B ).matrix(), 1e-10 ) );
+}
+
+TEST( VioInitialization, RecoveryExpiredRootKeepsLocalEstimateAndConsumesAnchor )
+{
+  using namespace phad::estimator;
+  using Access = internal::VioEstimatorTestAccess;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  VioEstimator subject( makeCalibration(), makeImuParameters(), options );
+  VioEstimator local( makeCalibration(), makeImuParameters(), options );
+  auto coast_options                     = options;
+  coast_options.m_visual_coast_horizon_ns = 10'000'000'000;
+  VioEstimator coast( makeCalibration(), makeImuParameters(), coast_options );
+  primeMovingRecoveryOutage( subject, coast );
+  for ( std::int64_t index = 1; index <= 9; ++index )
+  {
+    if ( index >= 6 )
+    {
+      for ( auto* estimator : { &subject, &local } )
+      {
+        Access::setNextCurrentGraphResult( *estimator, InitializationReason::kCurrentGraphUnderconstrained );
+      }
+    }
+    const auto pending = subject.update( recoveryPacket( index ) );
+    ASSERT_EQ( pending.status, UpdateStatus::kInitializing );
+    EXPECT_EQ( pending.diagnostics.m_recovery_bridge.m_result, RecoveryBridgeResult::kPending );
+    ASSERT_EQ( local.update( recoveryPacket( index ) ).status, UpdateStatus::kInitializing );
+  }
+  const auto root       = subject.update( recoveryPacket( 10 ) );
+  const auto local_root = local.update( recoveryPacket( 10 ) );
+  ASSERT_EQ( root.status, UpdateStatus::kOk ) << root.message;
+  ASSERT_TRUE( root.estimate.has_value() );
+  ASSERT_TRUE( local_root.estimate.has_value() );
+  const auto& bridge = root.diagnostics.m_recovery_bridge;
+  ASSERT_TRUE( bridge.m_lineage.has_value() );
+  EXPECT_EQ( root.estimate->timestamp.nanoseconds() - bridge.m_lineage->m_source_timestamp.nanoseconds(),
+             550'000'000 );
+  EXPECT_EQ( bridge.m_result, RecoveryBridgeResult::kNotApplicable );
+  EXPECT_EQ( bridge.m_reason, RecoveryBridgeReason::kAnchorExpired );
+  EXPECT_EQ( bridge.m_transaction, InitializationTransactionResult::kRootCommitted );
+  EXPECT_EQ( bridge.m_anchor_timestamp, root.estimate->timestamp );
+  EXPECT_EQ( bridge.m_root_timestamp, root.estimate->timestamp );
+  EXPECT_EQ( bridge.m_lineage->m_world_origin_segment_id, 1U );
+  EXPECT_EQ( bridge.m_lineage->m_source_segment_id, 0U );
+  EXPECT_TRUE( root.estimate->T_W_B.matrix().isApprox( local_root.estimate->T_W_B.matrix(), 1e-10 ) );
+  EXPECT_TRUE( root.estimate->m_v_W_B.isApprox( local_root.estimate->m_v_W_B, 1e-10 ) );
+  EXPECT_TRUE( root.estimate->m_bias.m_acc_mps2.isApprox( local_root.estimate->m_bias.m_acc_mps2, 1e-12 ) );
+  EXPECT_TRUE( root.estimate->m_bias.m_gyr_radps.isApprox( local_root.estimate->m_bias.m_gyr_radps, 1e-12 ) );
+  EXPECT_TRUE( recoveryState( subject ).at( "recovery_anchor" ).is_null() );
+  EXPECT_TRUE( recoveryState( subject ).at( "T_W_local" ).is_null() );
+  const auto active       = subject.update( recoveryPacket( 11 ) );
+  const auto local_active = local.update( recoveryPacket( 11 ) );
+  ASSERT_EQ( active.status, UpdateStatus::kOk );
+  ASSERT_TRUE( active.estimate.has_value() );
+  ASSERT_TRUE( local_active.estimate.has_value() );
+  EXPECT_TRUE( active.estimate->T_W_B.matrix().isApprox( local_active.estimate->T_W_B.matrix(), 1e-7 ) );
+  EXPECT_EQ( active.diagnostics.m_recovery_bridge.m_origin, RecoveryBridgeOrigin::kNone );
+  EXPECT_FALSE( active.diagnostics.m_recovery_bridge.m_lineage.has_value() );
+}
+
+TEST( VioInitialization, RecoveryWorldTransformSurvivesActiveFailureAndRetry )
+{
+  using namespace phad::estimator;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  VioEstimator subject( makeCalibration(), makeImuParameters(), options );
+  VioEstimator clean( makeCalibration(), makeImuParameters(), options );
+  auto coast_options                     = options;
+  coast_options.m_visual_coast_horizon_ns = 10'000'000'000;
+  for ( auto* estimator : { &subject, &clean } )
+  {
+    VioEstimator coast( makeCalibration(), makeImuParameters(), coast_options );
+    primeMovingRecoveryOutage( *estimator, coast );
+    for ( std::int64_t index = 1; index <= 6; ++index )
+    {
+      const auto update = estimator->update( recoveryPacket( index ) );
+      ASSERT_EQ( update.status, index == 6 ? UpdateStatus::kOk : UpdateStatus::kInitializing );
+    }
+  }
+  const auto before = recoveryState( subject );
+  ASSERT_FALSE( before.at( "T_W_local" ).is_null() );
+  EXPECT_GT( ( recoveryMatrix( before.at( "T_W_local" ), 4, 4 ) - Eigen::Matrix4d::Identity() ).norm(), 0.1 );
+  internal::VioEstimatorTestAccess::setNextCurrentGraphContractError( subject );
+  const auto failed = subject.update( recoveryPacket( 7 ) );
+  ASSERT_EQ( failed.status, UpdateStatus::kFailed ) << failed.message;
+  EXPECT_EQ( failed.diagnostics.m_recovery_bridge.m_transaction, InitializationTransactionResult::kRolledBack );
+  EXPECT_EQ( recoveryState( subject ), before );
+  expectSameCommittedUpdate( subject.update( recoveryPacket( 7 ) ), clean.update( recoveryPacket( 7 ) ) );
+  EXPECT_EQ( recoveryState( subject ), recoveryState( clean ) );
+}
+
+TEST( VioInitialization, RecoveryGraphFailureRestoresCommittedUnsupportedSpan )
+{
+  namespace fixture                 = phad::test_support::initial_moving;
+  namespace internal                = phad::estimator::internal;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  VioEstimator subject( makeCalibration(), makeImuParameters(), options );
+  VioEstimator control( makeCalibration(), makeImuParameters(), options );
+  for ( VioEstimator* estimator : { &subject, &control } )
+  {
+    primeRecoveryOutage( *estimator );
+    for ( std::int64_t index = 1; index <= 5; ++index )
+    {
+      const auto pending = estimator->update( recoveryPacket( index ) );
+      ASSERT_EQ( pending.status, UpdateStatus::kInitializing ) << pending.message;
+      EXPECT_EQ( pending.diagnostics.unsupported_span_ns,
+                 ( 11 + index ) * kFramePeriodNs );
+    }
+  }
+  internal::VioEstimatorTestAccess::setNextCurrentGraphContractError( subject );
+  const auto failed = subject.update( recoveryPacket( 6 ) );
+  ASSERT_EQ( failed.status, UpdateStatus::kFailed ) << failed.message;
+  EXPECT_EQ( failed.diagnostics.m_initialization.m_phase,
+             phad::estimator::InitializationPhase::kCurrentGraph );
+  EXPECT_EQ( failed.diagnostics.m_initialization.m_transaction,
+             phad::estimator::InitializationTransactionResult::kRolledBack );
+  EXPECT_EQ( failed.diagnostics.unsupported_span_ns, 16 * kFramePeriodNs );
+  EXPECT_EQ( failed.diagnostics.m_recovery_bridge.m_result,
+             phad::estimator::RecoveryBridgeResult::kFatalError );
+  EXPECT_EQ( failed.diagnostics.m_recovery_bridge.m_reason,
+             phad::estimator::RecoveryBridgeReason::kContractError );
+  EXPECT_EQ( failed.diagnostics.m_recovery_bridge.m_transaction,
+             phad::estimator::InitializationTransactionResult::kRolledBack );
+  EXPECT_FALSE( failed.estimate.has_value() );
+  const auto landmark_id = fixture::observations( kFramePeriodNs ).front().id;
+  EXPECT_EQ( subject.observationTimestamps( landmark_id ),
+             control.observationTimestamps( landmark_id ) );
+  expectSameCommittedUpdate( subject.update( recoveryPacket( 6 ) ),
+                             control.update( recoveryPacket( 6 ) ) );
+}
+
+TEST( VioInitialization, RecoveryStaticArbitrationConsumesAnchorAfterRetry )
+{
+  using namespace phad::estimator;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  VioEstimator subject( makeCalibration(), makeImuParameters(), options );
+  VioEstimator control( makeCalibration(), makeImuParameters(), options );
+  for ( auto* estimator : { &subject, &control } )
+  {
+    primeRecoveryOutage( *estimator );
+    for ( std::int64_t index = 14; index <= 15; ++index )
+    {
+      const auto pending = estimator->update( makeMeasurementWithObservations(
+                                                  index * kFramePeriodNs,
+                                                  stationaryInterval( ( index - 1 ) * kFramePeriodNs, index * kFramePeriodNs ),
+                                                  index == 14 ? std::vector<StereoObservation>{} : makeObservations() ),
+                                              false );
+      ASSERT_EQ( pending.status, UpdateStatus::kInitializing ) << pending.message;
+      EXPECT_EQ( pending.diagnostics.m_recovery_bridge.m_result, RecoveryBridgeResult::kPending );
+      EXPECT_EQ( pending.diagnostics.m_recovery_bridge.m_anchor_timestamp,
+                 Timestamp{ index * kFramePeriodNs } );
+    }
+  }
+  const auto seed = makeMeasurement( 16 * kFramePeriodNs,
+                                     stationaryInterval( 15 * kFramePeriodNs, 16 * kFramePeriodNs ) );
+  phad::estimator::internal::VioEstimatorTestAccess::setNextCurrentGraphContractError( subject );
+  const auto failed = subject.update( seed );
+  ASSERT_EQ( failed.status, UpdateStatus::kFailed ) << failed.message;
+  EXPECT_EQ( failed.diagnostics.unsupported_span_ns, 13 * kFramePeriodNs );
+  EXPECT_EQ( failed.diagnostics.m_recovery_bridge.m_result, RecoveryBridgeResult::kFatalError );
+  EXPECT_EQ( failed.diagnostics.m_recovery_bridge.m_transaction,
+             InitializationTransactionResult::kRolledBack );
+  const auto root   = subject.update( seed );
+  const auto direct = control.update( seed );
+  expectSameCommittedUpdate( root, direct );
+  const auto& bridge = root.diagnostics.m_recovery_bridge;
+  EXPECT_EQ( root.diagnostics.m_initialization.m_path, InitializationPath::kStatic );
+  EXPECT_EQ( bridge.m_result, RecoveryBridgeResult::kNotApplicable );
+  EXPECT_EQ( bridge.m_reason, RecoveryBridgeReason::kStaticRootSelected );
+  EXPECT_EQ( bridge.m_transaction, InitializationTransactionResult::kRootCommitted );
+  ASSERT_TRUE( bridge.m_lineage.has_value() );
+  EXPECT_EQ( bridge.m_lineage->m_world_origin_segment_id, 1U );
+  const auto active = subject.update( makeMeasurement( 17 * kFramePeriodNs,
+                                                       stationaryInterval( 16 * kFramePeriodNs, 17 * kFramePeriodNs ) ) );
+  ASSERT_EQ( active.status, UpdateStatus::kOk ) << active.message;
+  EXPECT_FALSE( active.diagnostics.m_recovery_bridge.m_lineage.has_value() );
+}
+
+TEST( VioInitialization, RecoveryRejectionCommitsAnchorAndInvalidInputPreservesIt )
+{
+  using namespace phad::estimator;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+  primeRecoveryOutage( estimator );
+  for ( std::int64_t index = 1; index <= 5; ++index )
+  {
+    ASSERT_EQ( estimator.update( recoveryPacket( index ) ).status, UpdateStatus::kInitializing );
+  }
+  internal::VioEstimatorTestAccess::setNextCurrentGraphResult(
+      estimator, InitializationReason::kCurrentGraphUnderconstrained );
+  const auto rejected = estimator.update( recoveryPacket( 6 ) );
+  ASSERT_EQ( rejected.status, UpdateStatus::kInitializing ) << rejected.message;
+  EXPECT_EQ( rejected.diagnostics.m_initialization.m_outcome, InitializationOutcome::kRecoverableRejected );
+  const auto& bridge = rejected.diagnostics.m_recovery_bridge;
+  EXPECT_EQ( bridge.m_result, RecoveryBridgeResult::kPending );
+  EXPECT_EQ( bridge.m_transaction, InitializationTransactionResult::kEvidenceCommitted );
+  EXPECT_EQ( bridge.m_anchor_timestamp, recoveryPacket( 6 ).m_timestamp );
+  EXPECT_EQ( bridge.m_attempt_id, rejected.diagnostics.m_initialization.m_attempt_id );
+  const auto invalid = estimator.update( recoveryPacket( 6 ) );
+  ASSERT_EQ( invalid.status, UpdateStatus::kInvalidInput );
+  EXPECT_EQ( invalid.diagnostics.m_recovery_bridge.m_transaction, InitializationTransactionResult::kNotEvaluated );
+  EXPECT_EQ( invalid.diagnostics.m_recovery_bridge.m_anchor_timestamp, bridge.m_anchor_timestamp );
+  EXPECT_EQ( invalid.diagnostics.unsupported_span_ns, rejected.diagnostics.unsupported_span_ns );
+  const auto root = estimator.update( recoveryPacket( 7 ) );
+  ASSERT_EQ( root.status, UpdateStatus::kOk ) << root.message;
+  EXPECT_EQ( root.diagnostics.m_recovery_bridge.m_anchor_timestamp, root.estimate->timestamp );
+  EXPECT_EQ( root.diagnostics.m_recovery_bridge.m_root_timestamp, root.estimate->timestamp );
+  EXPECT_EQ( root.diagnostics.m_recovery_bridge.m_transaction, InitializationTransactionResult::kRootCommitted );
+}
+
+TEST( VioInitialization, RecoveryDiscontinuityClearsAnchorAndStartsFreshEvidence )
+{
+  using namespace phad::estimator;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+  primeRecoveryOutage( estimator );
+  for ( std::int64_t index = 1; index <= 3; ++index )
+  {
+    ASSERT_EQ( estimator.update( recoveryPacket( index ) ).status, UpdateStatus::kInitializing );
+  }
+  const auto reset = estimator.update( makeMeasurementWithObservations(
+      recoveryPacket( 4 ).m_timestamp.nanoseconds(),
+      MeasurementDiscontinuity{ .m_t_begin = recoveryPacket( 3 ).m_timestamp,
+                                .m_t_end   = recoveryPacket( 4 ).m_timestamp },
+      {} ) );
+  ASSERT_EQ( reset.status, UpdateStatus::kInitializing );
+  EXPECT_EQ( reset.diagnostics.segment_id, 1U );
+  EXPECT_EQ( reset.diagnostics.m_recovery_bridge.m_origin, RecoveryBridgeOrigin::kMeasurementDiscontinuity );
+  EXPECT_EQ( reset.diagnostics.m_recovery_bridge.m_result, RecoveryBridgeResult::kCleared );
+  EXPECT_EQ( reset.diagnostics.m_recovery_bridge.m_reason, RecoveryBridgeReason::kMeasurementDiscontinuity );
+  EXPECT_EQ( reset.diagnostics.m_recovery_bridge.m_transaction, InitializationTransactionResult::kEvidenceCommitted );
+  ASSERT_TRUE( reset.diagnostics.m_recovery_bridge.m_lineage.has_value() );
+  EXPECT_EQ( reset.diagnostics.window_size, 0U );
+  EXPECT_TRUE( estimator.observationTimestamps( recoveryPacket( 1 ).m_observations.front().id ).empty() );
+  const auto next = estimator.update( recoveryPacket( 5 ) );
+  ASSERT_EQ( next.status, UpdateStatus::kInitializing ) << next.message;
+  EXPECT_EQ( next.diagnostics.m_initialization.m_connected_poses.m_actual, 1U );
+  EXPECT_EQ( next.diagnostics.m_recovery_bridge.m_origin, RecoveryBridgeOrigin::kMeasurementDiscontinuity );
+  EXPECT_EQ( next.diagnostics.m_recovery_bridge.m_result, RecoveryBridgeResult::kNotApplicable );
+  EXPECT_FALSE( next.diagnostics.m_recovery_bridge.m_lineage.has_value() );
+  EXPECT_FALSE( next.diagnostics.m_recovery_bridge.m_anchor_timestamp.has_value() );
+}
+
 TEST( VioInitialization, CandidateMathErrorRollsBackExactly )
 {
   namespace fixture                 = phad::test_support::initial_moving;
@@ -2576,6 +3349,50 @@ TEST( VioFullState, BootstrapTimestampOverflowIsInvalidInputWithoutAdvancingAnch
   EXPECT_EQ( reset.status, UpdateStatus::kInitializing );
 }
 
+TEST( VioInitialization, PendingDiscontinuityClearsVisualEvidence )
+{
+  namespace fixture                 = phad::test_support::initial_moving;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  VioEstimator estimator( makeCalibration(), makeImuParameters(), options );
+  for ( std::int64_t index = 1; index <= 3; ++index )
+  {
+    const std::int64_t timestamp_ns = index * kFramePeriodNs;
+    const auto         pending      = estimator.update( makeMeasurementWithObservations(
+        timestamp_ns,
+        fixture::rawInterval( timestamp_ns - kFramePeriodNs, timestamp_ns ),
+        fixture::observations( timestamp_ns ) ) );
+    ASSERT_EQ( pending.status, UpdateStatus::kInitializing ) << pending.message;
+  }
+  const auto landmark_id = fixture::observations( kFramePeriodNs ).front().id;
+  ASSERT_EQ( estimator.observationTimestamps( landmark_id ).size(), 3U );
+
+  const auto reset = estimator.update( makeMeasurementWithObservations(
+      4 * kFramePeriodNs,
+      MeasurementDiscontinuity{ .m_t_begin = Timestamp{ 3 * kFramePeriodNs },
+                                .m_t_end   = Timestamp{ 4 * kFramePeriodNs } },
+      {} ) );
+  ASSERT_EQ( reset.status, UpdateStatus::kInitializing ) << reset.message;
+  EXPECT_FALSE( reset.estimate.has_value() );
+  EXPECT_EQ( reset.diagnostics.segment_id, 0U );
+  EXPECT_FALSE( reset.diagnostics.m_vio.m_completed_segment_id.has_value() );
+  EXPECT_EQ( reset.diagnostics.window_size, 0U );
+  EXPECT_EQ( reset.diagnostics.prior_key, 0U );
+  EXPECT_EQ( reset.diagnostics.m_vio.m_nav_states, 0U );
+  EXPECT_EQ( reset.diagnostics.unsupported_span_ns, 0 );
+  EXPECT_TRUE( estimator.observationTimestamps( landmark_id ).empty() );
+
+  const auto next = estimator.update( makeMeasurementWithObservations(
+      5 * kFramePeriodNs,
+      fixture::rawInterval( 4 * kFramePeriodNs, 5 * kFramePeriodNs ),
+      fixture::observations( 5 * kFramePeriodNs ) ) );
+  ASSERT_EQ( next.status, UpdateStatus::kInitializing ) << next.message;
+  EXPECT_EQ( next.diagnostics.m_initialization.m_connected_poses.m_actual, 1U );
+  EXPECT_FALSE( next.diagnostics.m_initialization.m_attempt_id.has_value() );
+  EXPECT_EQ( estimator.observationTimestamps( landmark_id ),
+             ( std::vector<Timestamp>{ Timestamp{ 5 * kFramePeriodNs } } ) );
+}
+
 TEST( VioFullState, DiscontinuityStartsIndependentRootSegment )
 {
   VioEstimator estimator( makeCalibration(), makeImuParameters(),
@@ -2876,7 +3693,8 @@ TEST( VioFullState, ExactVisualCoastHorizonCommitsBeforeSegmentCompletion )
 
   const auto outage = estimator.update( makeMeasurementWithObservations(
       12 * kFramePeriodNs,
-      stationaryInterval( 11 * kFramePeriodNs, 12 * kFramePeriodNs ), {} ) );
+      stationaryInterval( 11 * kFramePeriodNs, 12 * kFramePeriodNs ),
+      {} ) );
   EXPECT_EQ( outage.status, UpdateStatus::kVisualOutage );
   EXPECT_FALSE( outage.estimate.has_value() );
   EXPECT_EQ( outage.diagnostics.segment_id, 1U );
@@ -3074,4 +3892,181 @@ TEST( VioFullState, InvalidRawIntervalPreservesVisualCoastLifecycle )
              direct.diagnostics.m_vio.m_nav_states );
   EXPECT_EQ( after_invalid.diagnostics.m_vio.m_imu_factors,
              direct.diagnostics.m_vio.m_imu_factors );
+}
+
+TEST( VioInitialization, RecoverySnapshotIncludesAnchorAndRollsBackGraphFailure )
+{
+  using namespace phad::estimator;
+  EstimatorOptions options          = makeOptions();
+  options.m_enable_moving_bootstrap = true;
+  VioEstimator subject( makeCalibration(), makeImuParameters(), options );
+  VioEstimator clean( makeCalibration(), makeImuParameters(), options );
+  for ( auto* estimator : { &subject, &clean } )
+  {
+    primeRecoveryOutage( *estimator );
+    for ( std::int64_t index = 1; index <= 5; ++index )
+    {
+      ASSERT_EQ( estimator->update( recoveryPacket( index ) ).status, UpdateStatus::kInitializing );
+    }
+  }
+  const auto before = recoveryState( subject );
+  ASSERT_TRUE( before.contains( "recovery_anchor" ) );
+  ASSERT_FALSE( before.at( "recovery_anchor" ).is_null() );
+  const auto& anchor = before.at( "recovery_anchor" );
+  EXPECT_EQ( anchor.at( "timestamp_ns" ), recoveryPacket( 5 ).m_timestamp.nanoseconds() );
+  EXPECT_GT( recoveryMatrix( anchor.at( "navigation" ).at( "v_W_B" ), 3, 1 ).norm(), 0.1 );
+  EXPECT_GT( ( recoveryMatrix( anchor.at( "navigation" ).at( "T_W_B" ), 4, 4 ) - Eigen::Matrix4d::Identity() ).norm(), 0.1 );
+  EXPECT_EQ( anchor.at( "lineage" ).at( "source_segment_id" ), 0U );
+  EXPECT_EQ( anchor.at( "lineage" ).at( "target_segment_id" ), 1U );
+  EXPECT_EQ( anchor.at( "lineage" ).at( "world_origin_segment_id" ), 0U );
+  EXPECT_EQ( before.at( "initialization_origin" ),
+             static_cast<unsigned>( RecoveryBridgeOrigin::kVisualOutageRecovery ) );
+  EXPECT_EQ( before.at( "world_origin_segment_id" ), 0U );
+  internal::VioEstimatorTestAccess::setNextCurrentGraphContractError( subject );
+  const auto fatal = subject.update( recoveryPacket( 6 ) );
+  ASSERT_EQ( fatal.status, UpdateStatus::kFailed ) << fatal.message;
+  EXPECT_EQ( fatal.diagnostics.m_recovery_bridge.m_transaction, InitializationTransactionResult::kRolledBack );
+  EXPECT_EQ( recoveryState( subject ), before );
+  // attempt IDs and consumed one-shot faults are intentionally outside the state snapshot.
+  expectSameCommittedUpdate( subject.update( recoveryPacket( 6 ) ), clean.update( recoveryPacket( 6 ) ) );
+  EXPECT_EQ( recoveryState( subject ), recoveryState( clean ) );
+}
+
+TEST( VioInitialization, RecoveryUndefinedProposalRollsBackThroughPublicUpdate )
+{
+  using namespace phad::estimator;
+  EstimatorOptions options                = makeOptions();
+  options.m_enable_moving_bootstrap       = true;
+  auto coast_options                      = options;
+  coast_options.m_visual_coast_horizon_ns = 10'000'000'000;
+  VioEstimator probe( makeCalibration(), makeImuParameters(), options );
+  VioEstimator probe_coast( makeCalibration(), makeImuParameters(), coast_options );
+  VioEstimator local( makeCalibration(), makeImuParameters(), options );
+  primeMovingRecoveryOutage( probe, probe_coast, Eigen::Vector3d::Zero() );
+  VioUpdateResult anchor;
+  VioUpdateResult local_root;
+  for ( std::int64_t index = 1; index <= 6; ++index )
+  {
+    anchor     = coastPacket( probe_coast, recoveryPacket( index ) );
+    local_root = local.update( recoveryPacket( index ) );
+  }
+  ASSERT_TRUE( anchor.estimate.has_value() );
+  ASSERT_TRUE( local_root.estimate.has_value() );
+  // Choose the pre-outage rotation so that the accepted latest poses differ by
+  // a half turn about X. All packets still enter through the public update seam.
+  const Eigen::Matrix3d half_turn = Eigen::AngleAxisd( std::numbers::pi,
+                                                       Eigen::Vector3d::UnitX() )
+                                        .toRotationMatrix();
+  const Eigen::AngleAxisd initial_rotation( half_turn * local_root.estimate->T_W_B.rotation() * anchor.estimate->T_W_B.rotation().transpose() );
+  const Eigen::Vector3d   angular_velocity = initial_rotation.axis() * initial_rotation.angle() / 0.55;
+  VioEstimator            subject( makeCalibration(), makeImuParameters(), options );
+  VioEstimator            clean( makeCalibration(), makeImuParameters(), options );
+  VioEstimator            coast( makeCalibration(), makeImuParameters(), coast_options );
+  VioEstimator            clean_coast( makeCalibration(), makeImuParameters(), coast_options );
+  primeMovingRecoveryOutage( subject, coast, angular_velocity );
+  primeMovingRecoveryOutage( clean, clean_coast, angular_velocity );
+  for ( std::int64_t index = 1; index <= 5; ++index )
+  {
+    ASSERT_EQ( subject.update( recoveryPacket( index ) ).status, UpdateStatus::kInitializing );
+    ASSERT_EQ( clean.update( recoveryPacket( index ) ).status, UpdateStatus::kInitializing );
+  }
+  const auto before = recoveryState( subject );
+  const auto fatal  = subject.update( recoveryPacket( 6 ) );
+  ASSERT_EQ( fatal.status, UpdateStatus::kFailed ) << fatal.message;
+  EXPECT_EQ( fatal.diagnostics.m_initialization.m_phase, InitializationPhase::kCommit );
+  EXPECT_EQ( fatal.diagnostics.m_recovery_bridge.m_result, RecoveryBridgeResult::kFatalError );
+  EXPECT_EQ( fatal.diagnostics.m_recovery_bridge.m_reason, RecoveryBridgeReason::kYawUndefined );
+  EXPECT_EQ( fatal.diagnostics.m_recovery_bridge.m_transaction, InitializationTransactionResult::kRolledBack );
+  EXPECT_FALSE( fatal.estimate.has_value() );
+  EXPECT_EQ( recoveryState( subject ), before );
+  const auto retry = subject.update( recoveryPacket( 6 ) );
+  EXPECT_EQ( retry.status, UpdateStatus::kFailed );
+  EXPECT_EQ( retry.diagnostics.m_recovery_bridge.m_reason, RecoveryBridgeReason::kYawUndefined );
+  EXPECT_EQ( recoveryState( subject ), before );
+  // A corrected, still-uncommitted packet leaves the exact yaw singularity.
+  auto corrected = recoveryPacket( 6 );
+  for ( auto& sample : std::get<RawImuInterval>( corrected.m_imu ).m_samples )
+  {
+    if ( sample.timestamp != std::get<RawImuInterval>( corrected.m_imu ).m_t_begin )
+    {
+      sample.gyro_radps[ 0 ] += 0.001;
+    }
+  }
+  const auto recovered = subject.update( corrected );
+  const auto direct    = clean.update( corrected );
+  expectSameCommittedUpdate( recovered, direct );
+  EXPECT_EQ( recoveryState( subject ), recoveryState( clean ) );
+}
+
+TEST( VioInitialization, RecoveryStaticSparseRetryPreservesNonzeroAnchorAndLocalRoot )
+{
+  using namespace phad::estimator;
+  EstimatorOptions options                = makeOptions();
+  options.m_enable_moving_bootstrap       = true;
+  auto coast_options                      = options;
+  coast_options.m_visual_coast_horizon_ns = 10'000'000'000;
+  VioEstimator subject( makeCalibration(), makeImuParameters(), options );
+  VioEstimator clean( makeCalibration(), makeImuParameters(), options );
+  VioEstimator coast( makeCalibration(), makeImuParameters(), coast_options );
+  VioEstimator clean_coast( makeCalibration(), makeImuParameters(), coast_options );
+  VioEstimator local( makeCalibration(), makeImuParameters(), options );
+  primeMovingRecoveryOutage( subject, coast );
+  primeMovingRecoveryOutage( clean, clean_coast );
+  for ( std::int64_t index = 14; index <= 15; ++index )
+  {
+    const auto packet = makeMeasurementWithObservations(
+        index * kFramePeriodNs,
+        stationaryInterval( ( index - 1 ) * kFramePeriodNs, index * kFramePeriodNs ),
+        index == 14 ? std::vector<StereoObservation>{} : makeObservations() );
+    for ( auto* estimator : { &subject, &clean, &local } )
+    {
+      ASSERT_EQ( estimator->update( packet, false ).status, UpdateStatus::kInitializing );
+    }
+    const auto expected = coastPacket( coast, packet );
+    ASSERT_TRUE( expected.estimate.has_value() );
+    const auto anchor = recoveryState( subject ).at( "recovery_anchor" ).at( "navigation" );
+    EXPECT_TRUE( recoveryMatrix( anchor.at( "T_W_B" ), 4, 4 ).isApprox( expected.estimate->T_W_B.matrix(), 1e-10 ) );
+    EXPECT_TRUE( recoveryMatrix( anchor.at( "v_W_B" ), 3, 1 ).isApprox( expected.estimate->m_v_W_B, 1e-10 ) );
+    ASSERT_GT( expected.estimate->T_W_B.translation().norm(), 0.1 );
+    ASSERT_GT( expected.estimate->m_v_W_B.norm(), 0.5 );
+  }
+  const auto seed   = makeMeasurement( 16 * kFramePeriodNs,
+                                       stationaryInterval( 15 * kFramePeriodNs, 16 * kFramePeriodNs ) );
+  const auto before = recoveryState( subject );
+  internal::VioEstimatorTestAccess::setNextCurrentGraphContractError( subject );
+  const auto fatal = subject.update( seed );
+  ASSERT_EQ( fatal.status, UpdateStatus::kFailed ) << fatal.message;
+  EXPECT_EQ( fatal.diagnostics.m_recovery_bridge.m_transaction, InitializationTransactionResult::kRolledBack );
+  EXPECT_EQ( recoveryState( subject ), before );
+  const auto root       = subject.update( seed );
+  const auto direct     = clean.update( seed );
+  const auto local_root = local.update( seed );
+  expectSameCommittedUpdate( root, direct );
+  ASSERT_TRUE( root.estimate.has_value() );
+  ASSERT_TRUE( local_root.estimate.has_value() );
+  EXPECT_TRUE( root.estimate->T_W_B.matrix().isApprox( local_root.estimate->T_W_B.matrix(), 1e-12 ) );
+  EXPECT_TRUE( root.estimate->m_v_W_B.isApprox( local_root.estimate->m_v_W_B, 1e-12 ) );
+  EXPECT_EQ( root.diagnostics.m_initialization.m_path, InitializationPath::kStatic );
+  EXPECT_EQ( root.diagnostics.m_recovery_bridge.m_result, RecoveryBridgeResult::kNotApplicable );
+  EXPECT_EQ( root.diagnostics.m_recovery_bridge.m_reason, RecoveryBridgeReason::kStaticRootSelected );
+  EXPECT_EQ( root.diagnostics.m_recovery_bridge.m_lineage->m_world_origin_segment_id, 1U );
+  EXPECT_TRUE( recoveryState( subject ).at( "recovery_anchor" ).is_null() );
+  EXPECT_EQ( recoveryState( subject ), recoveryState( clean ) );
+  for ( std::int64_t index = 17; index <= 27; ++index )
+  {
+    const auto next = subject.update( makeMeasurementWithObservations(
+        index * kFramePeriodNs,
+        stationaryInterval( ( index - 1 ) * kFramePeriodNs, index * kFramePeriodNs ), {} ) );
+    ASSERT_EQ( next.status, index == 27 ? UpdateStatus::kVisualOutage : UpdateStatus::kOk ) << next.message;
+    if ( index == 27 )
+    {
+      ASSERT_TRUE( next.diagnostics.m_recovery_bridge.m_lineage.has_value() );
+      EXPECT_EQ( next.diagnostics.m_recovery_bridge.m_lineage->m_source_segment_id, 1U );
+      EXPECT_EQ( next.diagnostics.m_recovery_bridge.m_lineage->m_target_segment_id, 2U );
+      EXPECT_EQ( next.diagnostics.m_recovery_bridge.m_lineage->m_world_origin_segment_id, 1U );
+      const auto anchor = recoveryState( subject ).at( "recovery_anchor" ).at( "navigation" );
+      EXPECT_LT( recoveryMatrix( anchor.at( "v_W_B" ), 3, 1 ).norm(), 1e-9 );
+      EXPECT_LT( ( recoveryMatrix( anchor.at( "T_W_B" ), 4, 4 ) - Eigen::Matrix4d::Identity() ).norm(), 1e-9 );
+    }
+  }
 }

@@ -78,6 +78,8 @@ namespace phad::apps
     bool                           collect_timing = true;
     /// Q1 Observe side-channel only. Does not enter config/hash or estimator.
     bool collect_gyro_observe = false;
+    /// CLI-only recovery experiment; capture ordered inputs without changing config.
+    bool collect_recovery_bridge_log = false;
     /// After estimator cull/cheirality erasures, drop matching frontend
     /// tracks. Default true (Slice ④c). False is A/B only — do not use as
     /// a production default without a MH_01 gate.
@@ -99,6 +101,14 @@ namespace phad::apps
     /// FrameTracks. Default 5 (M3.3 candidate B productized). 0 = off.
     /// In flattenConfig / config_hash; CLI --zombie-drop-age may override.
     int zombie_drop_age = 5;
+  };
+
+  struct RecoveryBridgeInput
+  {
+    std::uint64_t                             m_processed_index = 0;
+    std::int64_t                              m_timestamp_ns    = 0;
+    bool                                      m_is_keyframe     = false;
+    std::vector<estimator::StereoObservation> m_observations;
   };
 
   struct VoDiagRow
@@ -131,6 +141,8 @@ namespace phad::apps
     std::uint32_t num_current_mono_visual_factors = 0;
     /// In-memory lifecycle snapshot; writeDiagCsv() intentionally ignores it.
     estimator::InitializationDiagnostics initialization;
+    estimator::RecoveryBridgeDiagnostics m_recovery_bridge;
+    std::optional<RecoveryBridgeInput>   m_recovery_input;
   };
 
   struct FrameCounts

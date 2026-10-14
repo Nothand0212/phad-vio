@@ -1,0 +1,26 @@
+--- a/phad/estimator/vio_estimator.cpp
++++ b/phad/estimator/vio_estimator.cpp
+@@ -5038,19 +5038,12 @@
+               // Short circuit the addition when its deadline is beyond int64.
+               const bool expired = source_ns <= std::numeric_limits<std::int64_t>::max() - horizon_ns &&
+                                    latest_timestamp.nanoseconds() > source_ns + horizon_ns;
+-              if ( expired )
++              if ( !expired )
+               {
+-                bridge.m_result = RecoveryBridgeResult::kNotApplicable;
+-                bridge.m_reason = RecoveryBridgeReason::kAnchorExpired;
++                (void)m_impl->prepareRecoveryBridge( *validated_owner, bridge );
+               }
+-              else
+-              {
+-                const auto proposal = m_impl->prepareRecoveryBridge( *validated_owner, bridge );
+-                // World re-expression must not perturb PnP/LM or cull feedback.
+-                validated_owner->m_T_W_local = proposal;
+-                validated_owner->m_world_origin_segment_id = anchor.m_lineage.m_world_origin_segment_id;
+-                bridge.m_result = RecoveryBridgeResult::kApplied;
+-              }
++              bridge.m_result = RecoveryBridgeResult::kEligible;
++              bridge.m_reason = RecoveryBridgeReason::kNone;
+               result.diagnostics.m_recovery_bridge.m_lineage->m_world_origin_segment_id =
+                   *validated_owner->m_world_origin_segment_id;
+               validated_owner->m_recovery_anchor.reset();

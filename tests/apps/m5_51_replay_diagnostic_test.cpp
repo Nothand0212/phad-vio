@@ -69,7 +69,7 @@ namespace
 #endif
 
   constexpr std::string_view kFormalConfigSha =
-      "246033bd867ec01acad1ad8ba1ae5dab24f9c79321af862e19dc1660d99b24a7";
+      "ebb9d9abbeb628a4a38352bc41f8eec3c0e617f71ed58c1ab06869ada488c6cc";
 
   [[nodiscard]] std::string readFile( const std::filesystem::path& path )
   {
@@ -234,7 +234,7 @@ namespace
           source_verification_path.string() },
         { "source_verification_receipt_sha256", repeatedHex( '5' ) },
         { "binary_sha256", executable_sha },
-        { "config_hash", "0337287b" },
+        { "config_hash", "4e2b30f2" },
         { "config_canonical_text_sha256", kFormalConfigSha },
         { "input_manifest_path", input_manifest_path.string() },
         { "input_manifest_sha256", repeatedHex( '6' ) },
@@ -294,7 +294,7 @@ namespace
                   fileSha256( PHAD_M5_51_EXPECTED_BUILD_TOOL_PATH ) } } } } },
         { "configuration",
           { { "label", "default" },
-            { "canonical_hash", "0337287b" },
+            { "canonical_hash", "4e2b30f2" },
             { "canonical_text_sha256", kFormalConfigSha },
             { "moving_bootstrap", true },
             { "pnp_cheirality_retry", false },
@@ -434,7 +434,7 @@ namespace
         << readFile( bounded_stderr );
     const auto bounded_meta = nlohmann::json::parse(
         readFile( bounded_output / "meta.json" ) );
-    EXPECT_EQ( bounded_meta.at( "config_hash" ), "0337287b" );
+    EXPECT_EQ( bounded_meta.at( "config_hash" ), "4e2b30f2" );
     EXPECT_EQ( bounded_meta.at( "config_canonical_text" )
                    .get<std::string>()
                    .find( "session.max_frames" ),
@@ -548,7 +548,7 @@ namespace
     preflight[ "configuration" ][ "canonical_text_sha256" ] =
         different_config_sha;
     rewritePreflight( qualification, preflight );
-    ASSERT_EQ( qualification.at( "config_hash" ), "0337287b" );
+    ASSERT_EQ( qualification.at( "config_hash" ), "4e2b30f2" );
 
     const QualificationRun run =
         runQualification( root, "same-short-hash", qualification );
@@ -866,7 +866,7 @@ namespace
     ASSERT_EQ( sha256( kKeyframeBytes ),
                "cfa32b9311b7ca9f4e56b1fdc88d32287e0d655d73cb34adcddf7bac4bb195aa" );
     const nlohmann::json baseline_meta{
-        { "config_hash", "0337287b" },
+        { "config_hash", "4e2b30f2" },
         { "sequence_root", sequence_root.string() } };
     const std::string baseline_meta_bytes = baseline_meta.dump( 2 ) + '\n';
     const auto        baseline_meta_path  = baseline_artifact_dir / "meta.json";
@@ -914,7 +914,7 @@ namespace
         { "source_verification_receipt_sha256",
           sha256( source_verification_bytes ) },
         { "binary_sha256", fileSha256( fixture_executable ) },
-        { "config_hash", "0337287b" },
+        { "config_hash", "4e2b30f2" },
         { "config_canonical_text_sha256", kFormalConfigSha },
         { "input_manifest_path", input_manifest_path.string() },
         { "input_manifest_sha256", sha256( input_manifest_bytes ) },
@@ -973,7 +973,7 @@ namespace
                   fileSha256( PHAD_M5_51_EXPECTED_BUILD_TOOL_PATH ) } } } } },
         { "configuration",
           { { "label", "default" },
-            { "canonical_hash", "0337287b" },
+            { "canonical_hash", "4e2b30f2" },
             { "canonical_text_sha256", kFormalConfigSha },
             { "moving_bootstrap", true },
             { "pnp_cheirality_retry", false },
