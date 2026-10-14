@@ -303,4 +303,5 @@ status/trajectory/sidecar cadence。Fault injection 仅沿用 internal testing s
 实际完成状态。2026-10-14 的本地 core-4 与机制测试见
 [恢复报告](../research/2026-10-14-note-m5-world-frame-recovery-local-solve.md)及
 [evidence](../benchmark/m5/2026-10-14-bounded-world-frame-recovery.evidence.json)；
-TUM-VI room1–6 guardrail 待验收。远程执行与 Git / Issue 写入沿用独立授权边界。
+2026-10-15 的 [TUM-VI room1–6 guardrail](../benchmark/m5/2026-10-15-bounded-world-frame-recovery-tumvi-guardrail.evidence.json)
+已完成 12/12 回放并通过。远程执行与 Git / Issue 写入沿用独立授权边界。

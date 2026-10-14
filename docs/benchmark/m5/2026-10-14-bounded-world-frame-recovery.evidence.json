@@ -2631,5 +2631,12 @@
     "Long outages still start a new local world frame.",
     "V2_03 boundary maximum translation error increased from 5.368270660923806 m to 6.235215955685146 m.",
     "V2_03 completion and coverage remain 0.4903695991671005 and 0.724935732647815."
-  ]
+  ],
+  "qualification_as_of": "2026-10-14",
+  "followup_validation": {
+    "record_date": "2026-10-15",
+    "tumvi_room1_6": "PASS",
+    "production_processes": 12,
+    "evidence": "2026-10-15-bounded-world-frame-recovery-tumvi-guardrail.evidence.json"
+  }
 }

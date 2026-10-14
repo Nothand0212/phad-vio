@@ -14,8 +14,8 @@
 已入库的[验收证据与完整参数快照](../benchmark/m5/2026-10-14-bounded-world-frame-recovery.evidence.json)
 保存逐序列质量向量、六组边界、配置和两臂身份。原始回放和诊断文件保存在本地
 `build/world-frame-recovery-20261013/`；下文指向该目录的链接仅在本机可用。
-本轮尚未执行 TUM-VI room1–6 guardrail，#58 保持开放；M4 与 #51 checkpoint
-仍按各自合同验收。
+2026-10-15 已补齐 TUM-VI room1–6 guardrail，12/12 回放通过，#58 的本地验收
+已完成；M4 与 #51 checkpoint 仍按各自合同验收。
 
 ## 局部求解与世界输出
 
@@ -143,3 +143,33 @@ clean-equivalence 的测试。
 重建 control 的单变量源码差异见
 [control patch](../benchmark/m5/2026-10-14-bounded-world-frame-recovery.control.patch)。
 实施计划见 [`58c9f001`](../plans/2026-10-14_m5_world_frame_recovery_58c9f001.plan.md)。
+
+## 2026-10-15 TUM-VI room1–6 验收
+
+提交 `3ea548b` 的 TUM-VI guardrail **PASS**：6 条序列、12/12 个完整生产回放，
+bridge 全程 `NotApplicable`。每条序列的完整有序输入、initialization、bridge sidecar
+及 `diag.csv/est.tum/kf.tum` 全量对拍一致；trajectory 支持数量和可用性一致。
+使用 native `dso/gt_imu.csv`（body=IMU），association tolerance 为 4.166667 ms，
+min match rate 为 0.80，RPE interval 为 1 s。完整参数快照随 evidence 保存。
+
+| 序列 | processed frames | output poses | ATE RMS m（两臂相同） | RPE RMS m（两臂相同） | 分段 |
+|---|---:|---:|---:|---:|---:|
+| room1 | 2821 | 2816 | 0.789953 | 0.116896 | 1 |
+| room2 | 2882 | 2876 | 0.560701 | 0.056133 | 1 |
+| room3 | 2821 | 2816 | 0.436790 | 0.052093 | 1 |
+| room4 | 2227 | 2222 | 0.367008 | 0.077148 | 1 |
+| room5 | 2846 | 2841 | 1.345398 | 0.338915 | 1 |
+| room6 | 2636 | 2631 | 0.289299 | 0.053960 | 1 |
+
+表中 processed frames 为实际处理的 packet 数，原始输入与同步数量见 `summary.sync`。
+12 个进程合计 failed=0、rejected=0；常规 warnings 与完整质量向量按原样保留。
+复用此前验收的生产二进制，并逐文件核对 213 份源码与提交内容一致；两臂共用
+编译选项、estimator object 链接位置和依赖。运行 meta 的 dirty 标记来自 `--repo`
+引用的工作树中保留的其他未提交工作，被测代码身份由独立 source/binary manifest 固定。
+
+本轮新增占用观测峰值约 1.688 GiB，低于 3 GiB 上限；
+临时输入逐序列回收，留存压缩日志、轨迹和 input manifests 约 120.7 MiB。
+原始 archive 保持原位，复用已有构建。
+
+[完整机器证据](../benchmark/m5/2026-10-15-bounded-world-frame-recovery-tumvi-guardrail.evidence.json)。#58 的本地产品验收已完成；
+#51 formal exact RED 和 M5 default-on 资格仍沿各自合同处理。

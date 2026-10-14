@@ -72,8 +72,16 @@ fixed-input STOP 保留；本轮独立验证新的内部坐标表达和传播候
 ## 本地证据
 
 已入库的[验收证据](../benchmark/m5/2026-10-14-bounded-world-frame-recovery.evidence.json)
-保存本轮 core-4 与固定六组边界、完整参数快照。TUM-VI room1–6 guardrail 待验收。
+保存本轮 core-4 与固定六组边界、完整参数快照。2026-10-15 的
+[TUM-VI room1–6 guardrail](../benchmark/m5/2026-10-15-bounded-world-frame-recovery-tumvi-guardrail.evidence.json) 已通过。
 
 `build/world-frame-recovery-20261013/`：`source-before.tar`、`existing.diff`、
 `before/`、before/control binaries、三组 full runs、RED/GREEN tests、真实 PnP
 capture、gap probes。目录名标记首次创建日，后续产物沿用同一任务目录。
+
+## 2026-10-15 后续验收
+
+- [x] 用户选择第 1 项后，完成 room1–6 的 12/12 个生产回放。
+- [x] 全程 NotApplicable；完整有序输入、initialization 与三类算法 payload 对拍一致。
+- [x] 逐序列 native 指标、配置和 source/binary identity 入库。
+- [x] 复用构建；临时数据按序列回收，观测峰值 1.688 GiB，留存约 120.7 MiB。

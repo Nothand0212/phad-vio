@@ -1,0 +1,2633 @@
+{
+  "schema_version": 1,
+  "record_date": "2026-10-15",
+  "kind": "tumvi_room1_6_recovery_non_applicability_guardrail",
+  "source_identity": {
+    "source_commit": "3ea548b9b29ac817f0cd16565ea7d4f6cb3d71f7",
+    "code_files_verified": 213,
+    "build_reused": true,
+    "new_builds": 0,
+    "binaries": {
+      "control": {
+        "path": "build/world-frame-recovery-20261013/publish/phad_vo_bench.symmetric-control",
+        "sha256": "f410c8d32642b6e6492dd45e96f8a7e464307085e2d6a1a9c4625ede916f4366"
+      },
+      "subject": {
+        "path": "build/world-frame-recovery-20261013/publish/phad_vo_bench.symmetric-subject",
+        "sha256": "338a6a726c2d4400dcef111bb22ac39d48c72ba04b0906165791cf3f444a5dc5"
+      }
+    },
+    "code_source_sha256": {
+      "CMakeLists.txt": "d69a10e9d1085f5e31c268c5cf8c750d67727426f6358989aed85214db56a140",
+      "apps/offline_vo_session.cpp": "f098af9942bde17ea6b675bc4667bb48940e861817055d73fb465e86949d59a0",
+      "apps/offline_vo_session.hpp": "195275fb90a54506df6415d0a85666cdb04590131f0f59dc84d24d4b7de161e7",
+      "apps/phad_vo_bench.cpp": "b67e35939b66e4311e241663a0f94f582506e87cd0ebfd1092034852aafa5002",
+      "apps/recovery_bridge_log.hpp": "c05b2d65fec4c77ec1a7135bc18c6ed356799326ded8da8f686cfee57d926fca",
+      "phad/estimator/README.md": "e5a3ea3c18d53b19f1e7d4aec94e17867792e889dcea3afcaf7b12c4cafe3786",
+      "phad/estimator/internal/pnp_gauge_capture.hpp": "07e5c2d7ec17dbccb7d8ac4fbc76c597c41aa16503bde85f09685ed209f82f23",
+      "phad/estimator/internal/recovery_bridge.hpp": "d215c2a39d08e4cce7c2ee3face7d3c41f82aaeebb5eb2b8afcce67928cc0cd0",
+      "phad/estimator/internal/vio_estimator_test_access.hpp": "7fb180f862276aaa97117983567bea43b6dddbabcf2bafacff45745ba0ecd5a9",
+      "phad/estimator/internal/vio_update_transaction.hpp": "5d52b44fc9e1b16b3dd0aa04fb7d76dd57b43f5d0acadbf8dff636f59e54f419",
+      "phad/estimator/types.hpp": "d6edaf4aef6e686934c0e4d05be71b19432c0ba1cd1ab6ce584ffc268e2ab6b1",
+      "phad/estimator/vio_estimator.cpp": "f39cf0ef42afa941bfe3b18246aadd6a8621687947aa18acc08c9f3bc7423e9b",
+      "scripts/m5_recovery_pair.py": "ded98cb2197a750a95c97897d84c83a8d6f7b47c328c3cd001081e61b650cf0d",
+      "scripts/remote_ci.py": "6bcfb452bc08a5580649edbe687afa68b49ce81f5bf109d5c7418f470fdd98db"
+    }
+  },
+  "gate": "PASS",
+  "production_processes": 12,
+  "sequences": {
+    "room1": {
+      "roles": {
+        "control": {
+          "wall_seconds": 126.00046206700063,
+          "meta": {
+            "code": {
+              "git_branch": "codex/m5-product-recut-design",
+              "git_commit": "3ea548b9b29ac817f0cd16565ea7d4f6cb3d71f7",
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config": {
+              "estimator.block_culled_rebirth": true,
+              "estimator.enable_moving_bootstrap": true,
+              "estimator.enable_outlier_cull": true,
+              "estimator.enable_outlier_reopt": true,
+              "estimator.enable_pnp_init": true,
+              "estimator.far_return_refresh_px": 6.0,
+              "estimator.hanging_landmark_gate_m": 1.0,
+              "estimator.huber_k_px": 3.0,
+              "estimator.max_outlier_reopts": 3,
+              "estimator.min_landmark_observations": 2,
+              "estimator.min_pnp_inliers": 10,
+              "estimator.min_seed_observations": 10,
+              "estimator.min_shared_landmarks": 10,
+              "estimator.min_track_observations_for_seed": 1,
+              "estimator.outlier_avg_reproj_px": 4.0,
+              "estimator.pnp_confidence": 0.99,
+              "estimator.pnp_reproj_px": 2.0,
+              "estimator.prior_rotation_sigma_rad": 0.0001,
+              "estimator.prior_translation_sigma_m": 0.0001,
+              "estimator.stereo_sigma_px": 1.0,
+              "estimator.velocity_prior_sigma_mps": 0.1,
+              "estimator.visual_coast_horizon_ns": 500000000,
+              "estimator.window_size": 10,
+              "eval.max_dt_ms": 4.166667,
+              "eval.min_match_rate": 0.8,
+              "eval.rpe_delta_s": 1.0,
+              "session.dataset_format": "tum_vi",
+              "session.drop_culled_tracks": true,
+              "session.skip_drop_min_culled": 4,
+              "session.zombie_drop_age": 5,
+              "tracker.forward_backward_px": 0.5,
+              "tracker.lk_pyramid_levels": 4,
+              "tracker.lk_window_px": 21,
+              "tracker.mask_radius_px": 20,
+              "tracker.max_depth_m": 25.0,
+              "tracker.max_epipolar_px": 1.5,
+              "tracker.max_tracks": 200,
+              "tracker.min_depth_m": 0.3,
+              "tracker.min_disparity_px": 2.0,
+              "tracker.min_distance_px": 20.0,
+              "tracker.quality_level": 0.003,
+              "tracker.stereo_bidir_px": 0.5,
+              "tracker.stereo_check_bidir": true,
+              "tracker.stereo_row_tol_px": 0,
+              "tracker.stereo_sad_half_win_px": 7,
+              "tracker.stereo_uniq_ratio": 0.5
+            },
+            "config_canonical_text": "estimator.block_culled_rebirth=true\nestimator.enable_moving_bootstrap=true\nestimator.enable_outlier_cull=true\nestimator.enable_outlier_reopt=true\nestimator.enable_pnp_init=true\nestimator.far_return_refresh_px=6\nestimator.hanging_landmark_gate_m=1\nestimator.huber_k_px=3\nestimator.max_outlier_reopts=3\nestimator.min_landmark_observations=2\nestimator.min_pnp_inliers=10\nestimator.min_seed_observations=10\nestimator.min_shared_landmarks=10\nestimator.min_track_observations_for_seed=1\nestimator.outlier_avg_reproj_px=4\nestimator.pnp_confidence=0.98999999999999999\nestimator.pnp_reproj_px=2\nestimator.prior_rotation_sigma_rad=0.0001\nestimator.prior_translation_sigma_m=0.0001\nestimator.stereo_sigma_px=1\nestimator.velocity_prior_sigma_mps=0.10000000000000001\nestimator.visual_coast_horizon_ns=500000000\nestimator.window_size=10\neval.max_dt_ms=4.1666670000000003\neval.min_match_rate=0.80000000000000004\neval.rpe_delta_s=1\nsession.dataset_format=tum_vi\nsession.drop_culled_tracks=true\nsession.skip_drop_min_culled=4\nsession.zombie_drop_age=5\ntracker.forward_backward_px=0.5\ntracker.lk_pyramid_levels=4\ntracker.lk_window_px=21\ntracker.mask_radius_px=20\ntracker.max_depth_m=25\ntracker.max_epipolar_px=1.5\ntracker.max_tracks=200\ntracker.min_depth_m=0.29999999999999999\ntracker.min_disparity_px=2\ntracker.min_distance_px=20\ntracker.quality_level=0.0030000000000000001\ntracker.stereo_bidir_px=0.5\ntracker.stereo_check_bidir=true\ntracker.stereo_row_tol_px=0\ntracker.stereo_sad_half_win_px=7\ntracker.stereo_uniq_ratio=0.5\n",
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "created_utc": "2026-10-14T16:06:23Z",
+            "paths": {
+              "bench_root": "",
+              "layout_template": "override",
+              "output_dir": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/room1/control"
+            },
+            "schema_version": 2,
+            "sequence": "room1",
+            "sequence_root": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/input-6leihau8",
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline"
+            ]
+          },
+          "summary": {
+            "ate": {
+              "rot_deg": {
+                "max": 42.766540650956934,
+                "mean": 13.166653674867895,
+                "median": 10.731104763573455,
+                "rmse": 16.8192908987535,
+                "stddev": 10.465551936853597
+              },
+              "trans": {
+                "max": 2.520964529972107,
+                "mean": 0.6114887554634081,
+                "median": 0.4869386511807832,
+                "rmse": 0.7899532890981972,
+                "stddev": 0.5001076893018865
+              }
+            },
+            "code": {
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 91,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 0,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 0,
+              "outliers_culled": 18,
+              "outliers_culled_unique": 18,
+              "pnp_fallbacks": 59,
+              "pnp_successes": 2756,
+              "reanchors": 0,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 0,
+              "zombie_age_drops": 0
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 16.227810457111797,
+                "mean": 1.7332713179168813,
+                "median": 1.3627733477050177,
+                "rmse": 2.356506043126844,
+                "stddev": 1.5965247476252948
+              },
+              "trans": {
+                "max": 0.6110707119402741,
+                "mean": 0.07852187334034573,
+                "median": 0.05061606823865155,
+                "rmse": 0.116895519908528,
+                "stddev": 0.08659606216109234
+              }
+            },
+            "schema_version": 2,
+            "sequence": "room1",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 2821,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 2821,
+              "pushed_right": 2821
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.195206294,
+                "mean": 0.027437235648351693,
+                "p95": 0.041747639
+              },
+              "frontend": {
+                "max": 0.016109035,
+                "mean": 0.0071409510996100775,
+                "p95": 0.009159533
+              },
+              "rectify": {
+                "max": 0.004889063,
+                "mean": 0.0024877447047146365,
+                "p95": 0.003521036
+              },
+              "rtf": 1.1512568478952798,
+              "total": {
+                "max": 0.203040521,
+                "mean": 0.03708915851896494,
+                "p95": 0.051923977
+              },
+              "wall_s": 122.478718569
+            },
+            "trajectory": {
+              "completion_rate": 0.9982275788727402,
+              "coverage_rate": 0.9982266029823509,
+              "failed": 0,
+              "image_frames": 2821,
+              "ok": 2816,
+              "poses_written": 2816,
+              "rejected": 0,
+              "segments": 1,
+              "total_keyframes": 1994,
+              "total_track_only_frames": 827
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo pnp summary: pnp_successes=2756 pnp_fallbacks=59"
+            ]
+          },
+          "payload_sha256": {
+            "diag.csv": "2af1294d271e7e19d5ba5d5abb81f5eb9073026dca9d4d5ff91f561f21723a93",
+            "est.tum": "32a0f94d35b6ae0a7a0509401f53743b4830efd4412a6a4de78853b79498111c",
+            "kf.tum": "02f8bf3abc12741bce60ca1508855d4db5d66aec18520d6726eb0123c42cd14c"
+          },
+          "sidecar_rows": 2821,
+          "bridge_counts": {
+            "NotApplicable": 2821
+          }
+        },
+        "subject": {
+          "wall_seconds": 131.0807002929978,
+          "meta": {
+            "code": {
+              "git_branch": "codex/m5-product-recut-design",
+              "git_commit": "3ea548b9b29ac817f0cd16565ea7d4f6cb3d71f7",
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config": {
+              "estimator.block_culled_rebirth": true,
+              "estimator.enable_moving_bootstrap": true,
+              "estimator.enable_outlier_cull": true,
+              "estimator.enable_outlier_reopt": true,
+              "estimator.enable_pnp_init": true,
+              "estimator.far_return_refresh_px": 6.0,
+              "estimator.hanging_landmark_gate_m": 1.0,
+              "estimator.huber_k_px": 3.0,
+              "estimator.max_outlier_reopts": 3,
+              "estimator.min_landmark_observations": 2,
+              "estimator.min_pnp_inliers": 10,
+              "estimator.min_seed_observations": 10,
+              "estimator.min_shared_landmarks": 10,
+              "estimator.min_track_observations_for_seed": 1,
+              "estimator.outlier_avg_reproj_px": 4.0,
+              "estimator.pnp_confidence": 0.99,
+              "estimator.pnp_reproj_px": 2.0,
+              "estimator.prior_rotation_sigma_rad": 0.0001,
+              "estimator.prior_translation_sigma_m": 0.0001,
+              "estimator.stereo_sigma_px": 1.0,
+              "estimator.velocity_prior_sigma_mps": 0.1,
+              "estimator.visual_coast_horizon_ns": 500000000,
+              "estimator.window_size": 10,
+              "eval.max_dt_ms": 4.166667,
+              "eval.min_match_rate": 0.8,
+              "eval.rpe_delta_s": 1.0,
+              "session.dataset_format": "tum_vi",
+              "session.drop_culled_tracks": true,
+              "session.skip_drop_min_culled": 4,
+              "session.zombie_drop_age": 5,
+              "tracker.forward_backward_px": 0.5,
+              "tracker.lk_pyramid_levels": 4,
+              "tracker.lk_window_px": 21,
+              "tracker.mask_radius_px": 20,
+              "tracker.max_depth_m": 25.0,
+              "tracker.max_epipolar_px": 1.5,
+              "tracker.max_tracks": 200,
+              "tracker.min_depth_m": 0.3,
+              "tracker.min_disparity_px": 2.0,
+              "tracker.min_distance_px": 20.0,
+              "tracker.quality_level": 0.003,
+              "tracker.stereo_bidir_px": 0.5,
+              "tracker.stereo_check_bidir": true,
+              "tracker.stereo_row_tol_px": 0,
+              "tracker.stereo_sad_half_win_px": 7,
+              "tracker.stereo_uniq_ratio": 0.5
+            },
+            "config_canonical_text": "estimator.block_culled_rebirth=true\nestimator.enable_moving_bootstrap=true\nestimator.enable_outlier_cull=true\nestimator.enable_outlier_reopt=true\nestimator.enable_pnp_init=true\nestimator.far_return_refresh_px=6\nestimator.hanging_landmark_gate_m=1\nestimator.huber_k_px=3\nestimator.max_outlier_reopts=3\nestimator.min_landmark_observations=2\nestimator.min_pnp_inliers=10\nestimator.min_seed_observations=10\nestimator.min_shared_landmarks=10\nestimator.min_track_observations_for_seed=1\nestimator.outlier_avg_reproj_px=4\nestimator.pnp_confidence=0.98999999999999999\nestimator.pnp_reproj_px=2\nestimator.prior_rotation_sigma_rad=0.0001\nestimator.prior_translation_sigma_m=0.0001\nestimator.stereo_sigma_px=1\nestimator.velocity_prior_sigma_mps=0.10000000000000001\nestimator.visual_coast_horizon_ns=500000000\nestimator.window_size=10\neval.max_dt_ms=4.1666670000000003\neval.min_match_rate=0.80000000000000004\neval.rpe_delta_s=1\nsession.dataset_format=tum_vi\nsession.drop_culled_tracks=true\nsession.skip_drop_min_culled=4\nsession.zombie_drop_age=5\ntracker.forward_backward_px=0.5\ntracker.lk_pyramid_levels=4\ntracker.lk_window_px=21\ntracker.mask_radius_px=20\ntracker.max_depth_m=25\ntracker.max_epipolar_px=1.5\ntracker.max_tracks=200\ntracker.min_depth_m=0.29999999999999999\ntracker.min_disparity_px=2\ntracker.min_distance_px=20\ntracker.quality_level=0.0030000000000000001\ntracker.stereo_bidir_px=0.5\ntracker.stereo_check_bidir=true\ntracker.stereo_row_tol_px=0\ntracker.stereo_sad_half_win_px=7\ntracker.stereo_uniq_ratio=0.5\n",
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "created_utc": "2026-10-14T16:08:29Z",
+            "paths": {
+              "bench_root": "",
+              "layout_template": "override",
+              "output_dir": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/room1/subject"
+            },
+            "schema_version": 2,
+            "sequence": "room1",
+            "sequence_root": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/input-6leihau8",
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline"
+            ]
+          },
+          "summary": {
+            "ate": {
+              "rot_deg": {
+                "max": 42.766540650956934,
+                "mean": 13.166653674867895,
+                "median": 10.731104763573455,
+                "rmse": 16.8192908987535,
+                "stddev": 10.465551936853597
+              },
+              "trans": {
+                "max": 2.520964529972107,
+                "mean": 0.6114887554634081,
+                "median": 0.4869386511807832,
+                "rmse": 0.7899532890981972,
+                "stddev": 0.5001076893018865
+              }
+            },
+            "code": {
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 91,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 0,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 0,
+              "outliers_culled": 18,
+              "outliers_culled_unique": 18,
+              "pnp_fallbacks": 59,
+              "pnp_successes": 2756,
+              "reanchors": 0,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 0,
+              "zombie_age_drops": 0
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 16.227810457111797,
+                "mean": 1.7332713179168813,
+                "median": 1.3627733477050177,
+                "rmse": 2.356506043126844,
+                "stddev": 1.5965247476252948
+              },
+              "trans": {
+                "max": 0.6110707119402741,
+                "mean": 0.07852187334034573,
+                "median": 0.05061606823865155,
+                "rmse": 0.116895519908528,
+                "stddev": 0.08659606216109234
+              }
+            },
+            "schema_version": 2,
+            "sequence": "room1",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 2821,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 2821,
+              "pushed_right": 2821
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.185985075,
+                "mean": 0.028197167174406273,
+                "p95": 0.043261207
+              },
+              "frontend": {
+                "max": 0.036422588,
+                "mean": 0.0074781014260900365,
+                "p95": 0.011858589
+              },
+              "rectify": {
+                "max": 0.010629096,
+                "mean": 0.0024897278280751473,
+                "p95": 0.003631977
+              },
+              "rtf": 1.1168381429971597,
+              "total": {
+                "max": 0.193925152,
+                "mean": 0.0381898241726338,
+                "p95": 0.055499306
+              },
+              "wall_s": 126.253266293
+            },
+            "trajectory": {
+              "completion_rate": 0.9982275788727402,
+              "coverage_rate": 0.9982266029823509,
+              "failed": 0,
+              "image_frames": 2821,
+              "ok": 2816,
+              "poses_written": 2816,
+              "rejected": 0,
+              "segments": 1,
+              "total_keyframes": 1994,
+              "total_track_only_frames": 827
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo pnp summary: pnp_successes=2756 pnp_fallbacks=59"
+            ]
+          },
+          "payload_sha256": {
+            "diag.csv": "2af1294d271e7e19d5ba5d5abb81f5eb9073026dca9d4d5ff91f561f21723a93",
+            "est.tum": "32a0f94d35b6ae0a7a0509401f53743b4830efd4412a6a4de78853b79498111c",
+            "kf.tum": "02f8bf3abc12741bce60ca1508855d4db5d66aec18520d6726eb0123c42cd14c"
+          },
+          "sidecar_rows": 2821,
+          "bridge_counts": {
+            "NotApplicable": 2821
+          }
+        }
+      },
+      "input": {
+        "archive": "/home/lin/Projects/data/perception/data/raw/tum-vi/exported/euroc/512_16/dataset-room1_512_16.tar",
+        "archive_bytes": 1707110400,
+        "archive_mtime_ns": 1524005541000000000,
+        "selected_files": 5648,
+        "selected_bytes": 1696763346,
+        "manifest_sha256": "163808b7fc5cbb10523386b5df64d7927f7af47e10605d9b9acb3e4b2ec406e1"
+      },
+      "comparison": {
+        "state": "PASS",
+        "compared_rows": 2821,
+        "checks": {
+          "diag.csv": true,
+          "est.tum": true,
+          "kf.tum": true,
+          "full_sidecar_identity": true,
+          "ordered_input_identity": true,
+          "initialization_identity": true,
+          "bridge_all_not_applicable": true,
+          "config_identity": true
+        }
+      },
+      "temporary_input_removed": true
+    },
+    "room2": {
+      "roles": {
+        "control": {
+          "wall_seconds": 131.10670396800197,
+          "meta": {
+            "code": {
+              "git_branch": "codex/m5-product-recut-design",
+              "git_commit": "3ea548b9b29ac817f0cd16565ea7d4f6cb3d71f7",
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config": {
+              "estimator.block_culled_rebirth": true,
+              "estimator.enable_moving_bootstrap": true,
+              "estimator.enable_outlier_cull": true,
+              "estimator.enable_outlier_reopt": true,
+              "estimator.enable_pnp_init": true,
+              "estimator.far_return_refresh_px": 6.0,
+              "estimator.hanging_landmark_gate_m": 1.0,
+              "estimator.huber_k_px": 3.0,
+              "estimator.max_outlier_reopts": 3,
+              "estimator.min_landmark_observations": 2,
+              "estimator.min_pnp_inliers": 10,
+              "estimator.min_seed_observations": 10,
+              "estimator.min_shared_landmarks": 10,
+              "estimator.min_track_observations_for_seed": 1,
+              "estimator.outlier_avg_reproj_px": 4.0,
+              "estimator.pnp_confidence": 0.99,
+              "estimator.pnp_reproj_px": 2.0,
+              "estimator.prior_rotation_sigma_rad": 0.0001,
+              "estimator.prior_translation_sigma_m": 0.0001,
+              "estimator.stereo_sigma_px": 1.0,
+              "estimator.velocity_prior_sigma_mps": 0.1,
+              "estimator.visual_coast_horizon_ns": 500000000,
+              "estimator.window_size": 10,
+              "eval.max_dt_ms": 4.166667,
+              "eval.min_match_rate": 0.8,
+              "eval.rpe_delta_s": 1.0,
+              "session.dataset_format": "tum_vi",
+              "session.drop_culled_tracks": true,
+              "session.skip_drop_min_culled": 4,
+              "session.zombie_drop_age": 5,
+              "tracker.forward_backward_px": 0.5,
+              "tracker.lk_pyramid_levels": 4,
+              "tracker.lk_window_px": 21,
+              "tracker.mask_radius_px": 20,
+              "tracker.max_depth_m": 25.0,
+              "tracker.max_epipolar_px": 1.5,
+              "tracker.max_tracks": 200,
+              "tracker.min_depth_m": 0.3,
+              "tracker.min_disparity_px": 2.0,
+              "tracker.min_distance_px": 20.0,
+              "tracker.quality_level": 0.003,
+              "tracker.stereo_bidir_px": 0.5,
+              "tracker.stereo_check_bidir": true,
+              "tracker.stereo_row_tol_px": 0,
+              "tracker.stereo_sad_half_win_px": 7,
+              "tracker.stereo_uniq_ratio": 0.5
+            },
+            "config_canonical_text": "estimator.block_culled_rebirth=true\nestimator.enable_moving_bootstrap=true\nestimator.enable_outlier_cull=true\nestimator.enable_outlier_reopt=true\nestimator.enable_pnp_init=true\nestimator.far_return_refresh_px=6\nestimator.hanging_landmark_gate_m=1\nestimator.huber_k_px=3\nestimator.max_outlier_reopts=3\nestimator.min_landmark_observations=2\nestimator.min_pnp_inliers=10\nestimator.min_seed_observations=10\nestimator.min_shared_landmarks=10\nestimator.min_track_observations_for_seed=1\nestimator.outlier_avg_reproj_px=4\nestimator.pnp_confidence=0.98999999999999999\nestimator.pnp_reproj_px=2\nestimator.prior_rotation_sigma_rad=0.0001\nestimator.prior_translation_sigma_m=0.0001\nestimator.stereo_sigma_px=1\nestimator.velocity_prior_sigma_mps=0.10000000000000001\nestimator.visual_coast_horizon_ns=500000000\nestimator.window_size=10\neval.max_dt_ms=4.1666670000000003\neval.min_match_rate=0.80000000000000004\neval.rpe_delta_s=1\nsession.dataset_format=tum_vi\nsession.drop_culled_tracks=true\nsession.skip_drop_min_culled=4\nsession.zombie_drop_age=5\ntracker.forward_backward_px=0.5\ntracker.lk_pyramid_levels=4\ntracker.lk_window_px=21\ntracker.mask_radius_px=20\ntracker.max_depth_m=25\ntracker.max_epipolar_px=1.5\ntracker.max_tracks=200\ntracker.min_depth_m=0.29999999999999999\ntracker.min_disparity_px=2\ntracker.min_distance_px=20\ntracker.quality_level=0.0030000000000000001\ntracker.stereo_bidir_px=0.5\ntracker.stereo_check_bidir=true\ntracker.stereo_row_tol_px=0\ntracker.stereo_sad_half_win_px=7\ntracker.stereo_uniq_ratio=0.5\n",
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "created_utc": "2026-10-14T16:10:46Z",
+            "paths": {
+              "bench_root": "",
+              "layout_template": "override",
+              "output_dir": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/room2/control"
+            },
+            "schema_version": 2,
+            "sequence": "room2",
+            "sequence_root": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/input-k1zqgk8q",
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline"
+            ]
+          },
+          "summary": {
+            "ate": {
+              "rot_deg": {
+                "max": 27.648403398564145,
+                "mean": 15.285956044578544,
+                "median": 15.913387379207956,
+                "rmse": 16.941197854374277,
+                "stddev": 7.30367938400011
+              },
+              "trans": {
+                "max": 1.2926454492967374,
+                "mean": 0.4980683331911094,
+                "median": 0.4441233589176177,
+                "rmse": 0.5607012316535043,
+                "stddev": 0.2575146726887358
+              }
+            },
+            "code": {
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 166,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 0,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 0,
+              "outliers_culled": 16,
+              "outliers_culled_unique": 16,
+              "pnp_fallbacks": 85,
+              "pnp_successes": 2789,
+              "reanchors": 0,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 0,
+              "zombie_age_drops": 0
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 5.940547228200263,
+                "mean": 1.2076905903345405,
+                "median": 1.0908923159600588,
+                "rmse": 1.4025657118871098,
+                "stddev": 0.7132138628621882
+              },
+              "trans": {
+                "max": 0.22018210254749027,
+                "mean": 0.04613621683468906,
+                "median": 0.03932246458611424,
+                "rmse": 0.0561331974823657,
+                "stddev": 0.03197476123095871
+              }
+            },
+            "schema_version": 2,
+            "sequence": "room2",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 2882,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 2882,
+              "pushed_right": 2882
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.217810451,
+                "mean": 0.027885297729701587,
+                "p95": 0.040762733699999984
+              },
+              "frontend": {
+                "max": 0.018343427,
+                "mean": 0.007241845960444131,
+                "p95": 0.008784223249999994
+              },
+              "rectify": {
+                "max": 0.004853953,
+                "mean": 0.0024428951145038114,
+                "p95": 0.0034767118999999985
+              },
+              "rtf": 1.13714097646708,
+              "total": {
+                "max": 0.227115355,
+                "mean": 0.03759391343858432,
+                "p95": 0.05088662634999999
+              },
+              "wall_s": 126.68115062
+            },
+            "trajectory": {
+              "completion_rate": 0.9979181124219292,
+              "coverage_rate": 0.9979174829205796,
+              "failed": 0,
+              "image_frames": 2882,
+              "ok": 2876,
+              "poses_written": 2876,
+              "rejected": 0,
+              "segments": 1,
+              "total_keyframes": 1995,
+              "total_track_only_frames": 887
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo pnp summary: pnp_successes=2789 pnp_fallbacks=85"
+            ]
+          },
+          "payload_sha256": {
+            "diag.csv": "f2bef985b2e4ea6a0f547d7110d4830a4993c3a53150e6b3023a337cf2c7855b",
+            "est.tum": "4b8b824680643583ce193fa92e28323c346833a5b64b4a57004a750d302b2087",
+            "kf.tum": "2daff07fb17109bb5c05d4f8e59a25f9cd9d4e3fea3ebdd628e7cea964aa2b81"
+          },
+          "sidecar_rows": 2882,
+          "bridge_counts": {
+            "NotApplicable": 2882
+          }
+        },
+        "subject": {
+          "wall_seconds": 131.27160657000059,
+          "meta": {
+            "code": {
+              "git_branch": "codex/m5-product-recut-design",
+              "git_commit": "3ea548b9b29ac817f0cd16565ea7d4f6cb3d71f7",
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config": {
+              "estimator.block_culled_rebirth": true,
+              "estimator.enable_moving_bootstrap": true,
+              "estimator.enable_outlier_cull": true,
+              "estimator.enable_outlier_reopt": true,
+              "estimator.enable_pnp_init": true,
+              "estimator.far_return_refresh_px": 6.0,
+              "estimator.hanging_landmark_gate_m": 1.0,
+              "estimator.huber_k_px": 3.0,
+              "estimator.max_outlier_reopts": 3,
+              "estimator.min_landmark_observations": 2,
+              "estimator.min_pnp_inliers": 10,
+              "estimator.min_seed_observations": 10,
+              "estimator.min_shared_landmarks": 10,
+              "estimator.min_track_observations_for_seed": 1,
+              "estimator.outlier_avg_reproj_px": 4.0,
+              "estimator.pnp_confidence": 0.99,
+              "estimator.pnp_reproj_px": 2.0,
+              "estimator.prior_rotation_sigma_rad": 0.0001,
+              "estimator.prior_translation_sigma_m": 0.0001,
+              "estimator.stereo_sigma_px": 1.0,
+              "estimator.velocity_prior_sigma_mps": 0.1,
+              "estimator.visual_coast_horizon_ns": 500000000,
+              "estimator.window_size": 10,
+              "eval.max_dt_ms": 4.166667,
+              "eval.min_match_rate": 0.8,
+              "eval.rpe_delta_s": 1.0,
+              "session.dataset_format": "tum_vi",
+              "session.drop_culled_tracks": true,
+              "session.skip_drop_min_culled": 4,
+              "session.zombie_drop_age": 5,
+              "tracker.forward_backward_px": 0.5,
+              "tracker.lk_pyramid_levels": 4,
+              "tracker.lk_window_px": 21,
+              "tracker.mask_radius_px": 20,
+              "tracker.max_depth_m": 25.0,
+              "tracker.max_epipolar_px": 1.5,
+              "tracker.max_tracks": 200,
+              "tracker.min_depth_m": 0.3,
+              "tracker.min_disparity_px": 2.0,
+              "tracker.min_distance_px": 20.0,
+              "tracker.quality_level": 0.003,
+              "tracker.stereo_bidir_px": 0.5,
+              "tracker.stereo_check_bidir": true,
+              "tracker.stereo_row_tol_px": 0,
+              "tracker.stereo_sad_half_win_px": 7,
+              "tracker.stereo_uniq_ratio": 0.5
+            },
+            "config_canonical_text": "estimator.block_culled_rebirth=true\nestimator.enable_moving_bootstrap=true\nestimator.enable_outlier_cull=true\nestimator.enable_outlier_reopt=true\nestimator.enable_pnp_init=true\nestimator.far_return_refresh_px=6\nestimator.hanging_landmark_gate_m=1\nestimator.huber_k_px=3\nestimator.max_outlier_reopts=3\nestimator.min_landmark_observations=2\nestimator.min_pnp_inliers=10\nestimator.min_seed_observations=10\nestimator.min_shared_landmarks=10\nestimator.min_track_observations_for_seed=1\nestimator.outlier_avg_reproj_px=4\nestimator.pnp_confidence=0.98999999999999999\nestimator.pnp_reproj_px=2\nestimator.prior_rotation_sigma_rad=0.0001\nestimator.prior_translation_sigma_m=0.0001\nestimator.stereo_sigma_px=1\nestimator.velocity_prior_sigma_mps=0.10000000000000001\nestimator.visual_coast_horizon_ns=500000000\nestimator.window_size=10\neval.max_dt_ms=4.1666670000000003\neval.min_match_rate=0.80000000000000004\neval.rpe_delta_s=1\nsession.dataset_format=tum_vi\nsession.drop_culled_tracks=true\nsession.skip_drop_min_culled=4\nsession.zombie_drop_age=5\ntracker.forward_backward_px=0.5\ntracker.lk_pyramid_levels=4\ntracker.lk_window_px=21\ntracker.mask_radius_px=20\ntracker.max_depth_m=25\ntracker.max_epipolar_px=1.5\ntracker.max_tracks=200\ntracker.min_depth_m=0.29999999999999999\ntracker.min_disparity_px=2\ntracker.min_distance_px=20\ntracker.quality_level=0.0030000000000000001\ntracker.stereo_bidir_px=0.5\ntracker.stereo_check_bidir=true\ntracker.stereo_row_tol_px=0\ntracker.stereo_sad_half_win_px=7\ntracker.stereo_uniq_ratio=0.5\n",
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "created_utc": "2026-10-14T16:12:57Z",
+            "paths": {
+              "bench_root": "",
+              "layout_template": "override",
+              "output_dir": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/room2/subject"
+            },
+            "schema_version": 2,
+            "sequence": "room2",
+            "sequence_root": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/input-k1zqgk8q",
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline"
+            ]
+          },
+          "summary": {
+            "ate": {
+              "rot_deg": {
+                "max": 27.648403398564145,
+                "mean": 15.285956044578544,
+                "median": 15.913387379207956,
+                "rmse": 16.941197854374277,
+                "stddev": 7.30367938400011
+              },
+              "trans": {
+                "max": 1.2926454492967374,
+                "mean": 0.4980683331911094,
+                "median": 0.4441233589176177,
+                "rmse": 0.5607012316535043,
+                "stddev": 0.2575146726887358
+              }
+            },
+            "code": {
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 166,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 0,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 0,
+              "outliers_culled": 16,
+              "outliers_culled_unique": 16,
+              "pnp_fallbacks": 85,
+              "pnp_successes": 2789,
+              "reanchors": 0,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 0,
+              "zombie_age_drops": 0
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 5.940547228200263,
+                "mean": 1.2076905903345405,
+                "median": 1.0908923159600588,
+                "rmse": 1.4025657118871098,
+                "stddev": 0.7132138628621882
+              },
+              "trans": {
+                "max": 0.22018210254749027,
+                "mean": 0.04613621683468906,
+                "median": 0.03932246458611424,
+                "rmse": 0.0561331974823657,
+                "stddev": 0.03197476123095871
+              }
+            },
+            "schema_version": 2,
+            "sequence": "room2",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 2882,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 2882,
+              "pushed_right": 2882
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.225505435,
+                "mean": 0.027987081279319887,
+                "p95": 0.041093044100000004
+              },
+              "frontend": {
+                "max": 0.017296415,
+                "mean": 0.007294609289382371,
+                "p95": 0.00893560025
+              },
+              "rectify": {
+                "max": 0.006176264,
+                "mean": 0.0025479503459403144,
+                "p95": 0.0035746011499999996
+              },
+              "rtf": 1.1317425386804765,
+              "total": {
+                "max": 0.23538403,
+                "mean": 0.037853471992366314,
+                "p95": 0.050880347
+              },
+              "wall_s": 127.285422605
+            },
+            "trajectory": {
+              "completion_rate": 0.9979181124219292,
+              "coverage_rate": 0.9979174829205796,
+              "failed": 0,
+              "image_frames": 2882,
+              "ok": 2876,
+              "poses_written": 2876,
+              "rejected": 0,
+              "segments": 1,
+              "total_keyframes": 1995,
+              "total_track_only_frames": 887
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo pnp summary: pnp_successes=2789 pnp_fallbacks=85"
+            ]
+          },
+          "payload_sha256": {
+            "diag.csv": "f2bef985b2e4ea6a0f547d7110d4830a4993c3a53150e6b3023a337cf2c7855b",
+            "est.tum": "4b8b824680643583ce193fa92e28323c346833a5b64b4a57004a750d302b2087",
+            "kf.tum": "2daff07fb17109bb5c05d4f8e59a25f9cd9d4e3fea3ebdd628e7cea964aa2b81"
+          },
+          "sidecar_rows": 2882,
+          "bridge_counts": {
+            "NotApplicable": 2882
+          }
+        }
+      },
+      "input": {
+        "archive": "/home/lin/Projects/data/perception/data/raw/tum-vi/exported/euroc/512_16/dataset-room2_512_16.tar",
+        "archive_bytes": 1759395840,
+        "archive_mtime_ns": 1524005595000000000,
+        "selected_files": 5770,
+        "selected_bytes": 1748991773,
+        "manifest_sha256": "00479879fffd6c5587c20051daf32933860f4cf6fd88d0cab1a396ebd3c438a3"
+      },
+      "comparison": {
+        "state": "PASS",
+        "compared_rows": 2882,
+        "checks": {
+          "diag.csv": true,
+          "est.tum": true,
+          "kf.tum": true,
+          "full_sidecar_identity": true,
+          "ordered_input_identity": true,
+          "initialization_identity": true,
+          "bridge_all_not_applicable": true,
+          "config_identity": true
+        }
+      },
+      "temporary_input_removed": true
+    },
+    "room3": {
+      "roles": {
+        "control": {
+          "wall_seconds": 125.95318479300113,
+          "meta": {
+            "code": {
+              "git_branch": "codex/m5-product-recut-design",
+              "git_commit": "3ea548b9b29ac817f0cd16565ea7d4f6cb3d71f7",
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config": {
+              "estimator.block_culled_rebirth": true,
+              "estimator.enable_moving_bootstrap": true,
+              "estimator.enable_outlier_cull": true,
+              "estimator.enable_outlier_reopt": true,
+              "estimator.enable_pnp_init": true,
+              "estimator.far_return_refresh_px": 6.0,
+              "estimator.hanging_landmark_gate_m": 1.0,
+              "estimator.huber_k_px": 3.0,
+              "estimator.max_outlier_reopts": 3,
+              "estimator.min_landmark_observations": 2,
+              "estimator.min_pnp_inliers": 10,
+              "estimator.min_seed_observations": 10,
+              "estimator.min_shared_landmarks": 10,
+              "estimator.min_track_observations_for_seed": 1,
+              "estimator.outlier_avg_reproj_px": 4.0,
+              "estimator.pnp_confidence": 0.99,
+              "estimator.pnp_reproj_px": 2.0,
+              "estimator.prior_rotation_sigma_rad": 0.0001,
+              "estimator.prior_translation_sigma_m": 0.0001,
+              "estimator.stereo_sigma_px": 1.0,
+              "estimator.velocity_prior_sigma_mps": 0.1,
+              "estimator.visual_coast_horizon_ns": 500000000,
+              "estimator.window_size": 10,
+              "eval.max_dt_ms": 4.166667,
+              "eval.min_match_rate": 0.8,
+              "eval.rpe_delta_s": 1.0,
+              "session.dataset_format": "tum_vi",
+              "session.drop_culled_tracks": true,
+              "session.skip_drop_min_culled": 4,
+              "session.zombie_drop_age": 5,
+              "tracker.forward_backward_px": 0.5,
+              "tracker.lk_pyramid_levels": 4,
+              "tracker.lk_window_px": 21,
+              "tracker.mask_radius_px": 20,
+              "tracker.max_depth_m": 25.0,
+              "tracker.max_epipolar_px": 1.5,
+              "tracker.max_tracks": 200,
+              "tracker.min_depth_m": 0.3,
+              "tracker.min_disparity_px": 2.0,
+              "tracker.min_distance_px": 20.0,
+              "tracker.quality_level": 0.003,
+              "tracker.stereo_bidir_px": 0.5,
+              "tracker.stereo_check_bidir": true,
+              "tracker.stereo_row_tol_px": 0,
+              "tracker.stereo_sad_half_win_px": 7,
+              "tracker.stereo_uniq_ratio": 0.5
+            },
+            "config_canonical_text": "estimator.block_culled_rebirth=true\nestimator.enable_moving_bootstrap=true\nestimator.enable_outlier_cull=true\nestimator.enable_outlier_reopt=true\nestimator.enable_pnp_init=true\nestimator.far_return_refresh_px=6\nestimator.hanging_landmark_gate_m=1\nestimator.huber_k_px=3\nestimator.max_outlier_reopts=3\nestimator.min_landmark_observations=2\nestimator.min_pnp_inliers=10\nestimator.min_seed_observations=10\nestimator.min_shared_landmarks=10\nestimator.min_track_observations_for_seed=1\nestimator.outlier_avg_reproj_px=4\nestimator.pnp_confidence=0.98999999999999999\nestimator.pnp_reproj_px=2\nestimator.prior_rotation_sigma_rad=0.0001\nestimator.prior_translation_sigma_m=0.0001\nestimator.stereo_sigma_px=1\nestimator.velocity_prior_sigma_mps=0.10000000000000001\nestimator.visual_coast_horizon_ns=500000000\nestimator.window_size=10\neval.max_dt_ms=4.1666670000000003\neval.min_match_rate=0.80000000000000004\neval.rpe_delta_s=1\nsession.dataset_format=tum_vi\nsession.drop_culled_tracks=true\nsession.skip_drop_min_culled=4\nsession.zombie_drop_age=5\ntracker.forward_backward_px=0.5\ntracker.lk_pyramid_levels=4\ntracker.lk_window_px=21\ntracker.mask_radius_px=20\ntracker.max_depth_m=25\ntracker.max_epipolar_px=1.5\ntracker.max_tracks=200\ntracker.min_depth_m=0.29999999999999999\ntracker.min_disparity_px=2\ntracker.min_distance_px=20\ntracker.quality_level=0.0030000000000000001\ntracker.stereo_bidir_px=0.5\ntracker.stereo_check_bidir=true\ntracker.stereo_row_tol_px=0\ntracker.stereo_sad_half_win_px=7\ntracker.stereo_uniq_ratio=0.5\n",
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "created_utc": "2026-10-14T16:15:14Z",
+            "paths": {
+              "bench_root": "",
+              "layout_template": "override",
+              "output_dir": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/room3/control"
+            },
+            "schema_version": 2,
+            "sequence": "room3",
+            "sequence_root": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/input-0pwh2fl9",
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline"
+            ]
+          },
+          "summary": {
+            "ate": {
+              "rot_deg": {
+                "max": 28.056551702755968,
+                "mean": 13.182471715452591,
+                "median": 11.08221593622983,
+                "rmse": 15.449620624036136,
+                "stddev": 8.05687389115252
+              },
+              "trans": {
+                "max": 0.8500882016902583,
+                "mean": 0.40559261563795196,
+                "median": 0.3667273716432945,
+                "rmse": 0.43678952712694114,
+                "stddev": 0.16211021296556666
+              }
+            },
+            "code": {
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 126,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 0,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 0,
+              "outliers_culled": 13,
+              "outliers_culled_unique": 13,
+              "pnp_fallbacks": 61,
+              "pnp_successes": 2753,
+              "reanchors": 0,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 0,
+              "zombie_age_drops": 0
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 5.3173644724688325,
+                "mean": 1.271717788491301,
+                "median": 1.1455149338163413,
+                "rmse": 1.514530705796632,
+                "stddev": 0.8225187689260585
+              },
+              "trans": {
+                "max": 0.20842203020962422,
+                "mean": 0.04018077686573053,
+                "median": 0.032060609841727594,
+                "rmse": 0.05209337673302699,
+                "stddev": 0.033154563334712346
+              }
+            },
+            "schema_version": 2,
+            "sequence": "room3",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 2821,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 2821,
+              "pushed_right": 2821
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.124064003,
+                "mean": 0.028013531181495913,
+                "p95": 0.040586589
+              },
+              "frontend": {
+                "max": 0.01629422,
+                "mean": 0.0072483370372208415,
+                "p95": 0.00880033
+              },
+              "rectify": {
+                "max": 0.005341678,
+                "mean": 0.002513769800070896,
+                "p95": 0.003477627
+              },
+              "rtf": 1.1303809242092397,
+              "total": {
+                "max": 0.134767491,
+                "mean": 0.0378000296316909,
+                "p95": 0.050148237
+              },
+              "wall_s": 124.74100004
+            },
+            "trajectory": {
+              "completion_rate": 0.9982275788727402,
+              "coverage_rate": 0.9982269485944975,
+              "failed": 0,
+              "image_frames": 2821,
+              "ok": 2816,
+              "poses_written": 2816,
+              "rejected": 0,
+              "segments": 1,
+              "total_keyframes": 1793,
+              "total_track_only_frames": 1028
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo pnp summary: pnp_successes=2753 pnp_fallbacks=61"
+            ]
+          },
+          "payload_sha256": {
+            "diag.csv": "ba7e7fba67fd757e75cbf34b13e3c0c8d6203b176ce852d1b0d79f9c095ae5b7",
+            "est.tum": "c3b64b3b57e8af9302b27372f3c1aef35e4d4ae9c1a38e47c239b41a11d51a59",
+            "kf.tum": "793c1a69055d30024766e28f05c2c5148c13fce886933609942fa78fb4a02278"
+          },
+          "sidecar_rows": 2821,
+          "bridge_counts": {
+            "NotApplicable": 2821
+          }
+        },
+        "subject": {
+          "wall_seconds": 126.13212797400047,
+          "meta": {
+            "code": {
+              "git_branch": "codex/m5-product-recut-design",
+              "git_commit": "3ea548b9b29ac817f0cd16565ea7d4f6cb3d71f7",
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config": {
+              "estimator.block_culled_rebirth": true,
+              "estimator.enable_moving_bootstrap": true,
+              "estimator.enable_outlier_cull": true,
+              "estimator.enable_outlier_reopt": true,
+              "estimator.enable_pnp_init": true,
+              "estimator.far_return_refresh_px": 6.0,
+              "estimator.hanging_landmark_gate_m": 1.0,
+              "estimator.huber_k_px": 3.0,
+              "estimator.max_outlier_reopts": 3,
+              "estimator.min_landmark_observations": 2,
+              "estimator.min_pnp_inliers": 10,
+              "estimator.min_seed_observations": 10,
+              "estimator.min_shared_landmarks": 10,
+              "estimator.min_track_observations_for_seed": 1,
+              "estimator.outlier_avg_reproj_px": 4.0,
+              "estimator.pnp_confidence": 0.99,
+              "estimator.pnp_reproj_px": 2.0,
+              "estimator.prior_rotation_sigma_rad": 0.0001,
+              "estimator.prior_translation_sigma_m": 0.0001,
+              "estimator.stereo_sigma_px": 1.0,
+              "estimator.velocity_prior_sigma_mps": 0.1,
+              "estimator.visual_coast_horizon_ns": 500000000,
+              "estimator.window_size": 10,
+              "eval.max_dt_ms": 4.166667,
+              "eval.min_match_rate": 0.8,
+              "eval.rpe_delta_s": 1.0,
+              "session.dataset_format": "tum_vi",
+              "session.drop_culled_tracks": true,
+              "session.skip_drop_min_culled": 4,
+              "session.zombie_drop_age": 5,
+              "tracker.forward_backward_px": 0.5,
+              "tracker.lk_pyramid_levels": 4,
+              "tracker.lk_window_px": 21,
+              "tracker.mask_radius_px": 20,
+              "tracker.max_depth_m": 25.0,
+              "tracker.max_epipolar_px": 1.5,
+              "tracker.max_tracks": 200,
+              "tracker.min_depth_m": 0.3,
+              "tracker.min_disparity_px": 2.0,
+              "tracker.min_distance_px": 20.0,
+              "tracker.quality_level": 0.003,
+              "tracker.stereo_bidir_px": 0.5,
+              "tracker.stereo_check_bidir": true,
+              "tracker.stereo_row_tol_px": 0,
+              "tracker.stereo_sad_half_win_px": 7,
+              "tracker.stereo_uniq_ratio": 0.5
+            },
+            "config_canonical_text": "estimator.block_culled_rebirth=true\nestimator.enable_moving_bootstrap=true\nestimator.enable_outlier_cull=true\nestimator.enable_outlier_reopt=true\nestimator.enable_pnp_init=true\nestimator.far_return_refresh_px=6\nestimator.hanging_landmark_gate_m=1\nestimator.huber_k_px=3\nestimator.max_outlier_reopts=3\nestimator.min_landmark_observations=2\nestimator.min_pnp_inliers=10\nestimator.min_seed_observations=10\nestimator.min_shared_landmarks=10\nestimator.min_track_observations_for_seed=1\nestimator.outlier_avg_reproj_px=4\nestimator.pnp_confidence=0.98999999999999999\nestimator.pnp_reproj_px=2\nestimator.prior_rotation_sigma_rad=0.0001\nestimator.prior_translation_sigma_m=0.0001\nestimator.stereo_sigma_px=1\nestimator.velocity_prior_sigma_mps=0.10000000000000001\nestimator.visual_coast_horizon_ns=500000000\nestimator.window_size=10\neval.max_dt_ms=4.1666670000000003\neval.min_match_rate=0.80000000000000004\neval.rpe_delta_s=1\nsession.dataset_format=tum_vi\nsession.drop_culled_tracks=true\nsession.skip_drop_min_culled=4\nsession.zombie_drop_age=5\ntracker.forward_backward_px=0.5\ntracker.lk_pyramid_levels=4\ntracker.lk_window_px=21\ntracker.mask_radius_px=20\ntracker.max_depth_m=25\ntracker.max_epipolar_px=1.5\ntracker.max_tracks=200\ntracker.min_depth_m=0.29999999999999999\ntracker.min_disparity_px=2\ntracker.min_distance_px=20\ntracker.quality_level=0.0030000000000000001\ntracker.stereo_bidir_px=0.5\ntracker.stereo_check_bidir=true\ntracker.stereo_row_tol_px=0\ntracker.stereo_sad_half_win_px=7\ntracker.stereo_uniq_ratio=0.5\n",
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "created_utc": "2026-10-14T16:17:20Z",
+            "paths": {
+              "bench_root": "",
+              "layout_template": "override",
+              "output_dir": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/room3/subject"
+            },
+            "schema_version": 2,
+            "sequence": "room3",
+            "sequence_root": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/input-0pwh2fl9",
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline"
+            ]
+          },
+          "summary": {
+            "ate": {
+              "rot_deg": {
+                "max": 28.056551702755968,
+                "mean": 13.182471715452591,
+                "median": 11.08221593622983,
+                "rmse": 15.449620624036136,
+                "stddev": 8.05687389115252
+              },
+              "trans": {
+                "max": 0.8500882016902583,
+                "mean": 0.40559261563795196,
+                "median": 0.3667273716432945,
+                "rmse": 0.43678952712694114,
+                "stddev": 0.16211021296556666
+              }
+            },
+            "code": {
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 126,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 0,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 0,
+              "outliers_culled": 13,
+              "outliers_culled_unique": 13,
+              "pnp_fallbacks": 61,
+              "pnp_successes": 2753,
+              "reanchors": 0,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 0,
+              "zombie_age_drops": 0
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 5.3173644724688325,
+                "mean": 1.271717788491301,
+                "median": 1.1455149338163413,
+                "rmse": 1.514530705796632,
+                "stddev": 0.8225187689260585
+              },
+              "trans": {
+                "max": 0.20842203020962422,
+                "mean": 0.04018077686573053,
+                "median": 0.032060609841727594,
+                "rmse": 0.05209337673302699,
+                "stddev": 0.033154563334712346
+              }
+            },
+            "schema_version": 2,
+            "sequence": "room3",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 2821,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 2821,
+              "pushed_right": 2821
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.126213354,
+                "mean": 0.028020203604750077,
+                "p95": 0.041020294
+              },
+              "frontend": {
+                "max": 0.017291426,
+                "mean": 0.007277627503013107,
+                "p95": 0.009246454
+              },
+              "rectify": {
+                "max": 0.00529874,
+                "mean": 0.002549604384260903,
+                "p95": 0.003643348
+              },
+              "rtf": 1.1292535796543022,
+              "total": {
+                "max": 0.142447147,
+                "mean": 0.03787282926586318,
+                "p95": 0.050951083
+              },
+              "wall_s": 124.865530163
+            },
+            "trajectory": {
+              "completion_rate": 0.9982275788727402,
+              "coverage_rate": 0.9982269485944975,
+              "failed": 0,
+              "image_frames": 2821,
+              "ok": 2816,
+              "poses_written": 2816,
+              "rejected": 0,
+              "segments": 1,
+              "total_keyframes": 1793,
+              "total_track_only_frames": 1028
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo pnp summary: pnp_successes=2753 pnp_fallbacks=61"
+            ]
+          },
+          "payload_sha256": {
+            "diag.csv": "ba7e7fba67fd757e75cbf34b13e3c0c8d6203b176ce852d1b0d79f9c095ae5b7",
+            "est.tum": "c3b64b3b57e8af9302b27372f3c1aef35e4d4ae9c1a38e47c239b41a11d51a59",
+            "kf.tum": "793c1a69055d30024766e28f05c2c5148c13fce886933609942fa78fb4a02278"
+          },
+          "sidecar_rows": 2821,
+          "bridge_counts": {
+            "NotApplicable": 2821
+          }
+        }
+      },
+      "input": {
+        "archive": "/home/lin/Projects/data/perception/data/raw/tum-vi/exported/euroc/512_16/dataset-room3_512_16.tar",
+        "archive_bytes": 1742612480,
+        "archive_mtime_ns": 1524005648000000000,
+        "selected_files": 5648,
+        "selected_bytes": 1732414390,
+        "manifest_sha256": "f58127ad9c3bb15ee8108fed00cf12b8ccf5d56c819e5fc21b3a1ab82da77f7c"
+      },
+      "comparison": {
+        "state": "PASS",
+        "compared_rows": 2821,
+        "checks": {
+          "diag.csv": true,
+          "est.tum": true,
+          "kf.tum": true,
+          "full_sidecar_identity": true,
+          "ordered_input_identity": true,
+          "initialization_identity": true,
+          "bridge_all_not_applicable": true,
+          "config_identity": true
+        }
+      },
+      "temporary_input_removed": true
+    },
+    "room4": {
+      "roles": {
+        "control": {
+          "wall_seconds": 100.64413222000076,
+          "meta": {
+            "code": {
+              "git_branch": "codex/m5-product-recut-design",
+              "git_commit": "3ea548b9b29ac817f0cd16565ea7d4f6cb3d71f7",
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config": {
+              "estimator.block_culled_rebirth": true,
+              "estimator.enable_moving_bootstrap": true,
+              "estimator.enable_outlier_cull": true,
+              "estimator.enable_outlier_reopt": true,
+              "estimator.enable_pnp_init": true,
+              "estimator.far_return_refresh_px": 6.0,
+              "estimator.hanging_landmark_gate_m": 1.0,
+              "estimator.huber_k_px": 3.0,
+              "estimator.max_outlier_reopts": 3,
+              "estimator.min_landmark_observations": 2,
+              "estimator.min_pnp_inliers": 10,
+              "estimator.min_seed_observations": 10,
+              "estimator.min_shared_landmarks": 10,
+              "estimator.min_track_observations_for_seed": 1,
+              "estimator.outlier_avg_reproj_px": 4.0,
+              "estimator.pnp_confidence": 0.99,
+              "estimator.pnp_reproj_px": 2.0,
+              "estimator.prior_rotation_sigma_rad": 0.0001,
+              "estimator.prior_translation_sigma_m": 0.0001,
+              "estimator.stereo_sigma_px": 1.0,
+              "estimator.velocity_prior_sigma_mps": 0.1,
+              "estimator.visual_coast_horizon_ns": 500000000,
+              "estimator.window_size": 10,
+              "eval.max_dt_ms": 4.166667,
+              "eval.min_match_rate": 0.8,
+              "eval.rpe_delta_s": 1.0,
+              "session.dataset_format": "tum_vi",
+              "session.drop_culled_tracks": true,
+              "session.skip_drop_min_culled": 4,
+              "session.zombie_drop_age": 5,
+              "tracker.forward_backward_px": 0.5,
+              "tracker.lk_pyramid_levels": 4,
+              "tracker.lk_window_px": 21,
+              "tracker.mask_radius_px": 20,
+              "tracker.max_depth_m": 25.0,
+              "tracker.max_epipolar_px": 1.5,
+              "tracker.max_tracks": 200,
+              "tracker.min_depth_m": 0.3,
+              "tracker.min_disparity_px": 2.0,
+              "tracker.min_distance_px": 20.0,
+              "tracker.quality_level": 0.003,
+              "tracker.stereo_bidir_px": 0.5,
+              "tracker.stereo_check_bidir": true,
+              "tracker.stereo_row_tol_px": 0,
+              "tracker.stereo_sad_half_win_px": 7,
+              "tracker.stereo_uniq_ratio": 0.5
+            },
+            "config_canonical_text": "estimator.block_culled_rebirth=true\nestimator.enable_moving_bootstrap=true\nestimator.enable_outlier_cull=true\nestimator.enable_outlier_reopt=true\nestimator.enable_pnp_init=true\nestimator.far_return_refresh_px=6\nestimator.hanging_landmark_gate_m=1\nestimator.huber_k_px=3\nestimator.max_outlier_reopts=3\nestimator.min_landmark_observations=2\nestimator.min_pnp_inliers=10\nestimator.min_seed_observations=10\nestimator.min_shared_landmarks=10\nestimator.min_track_observations_for_seed=1\nestimator.outlier_avg_reproj_px=4\nestimator.pnp_confidence=0.98999999999999999\nestimator.pnp_reproj_px=2\nestimator.prior_rotation_sigma_rad=0.0001\nestimator.prior_translation_sigma_m=0.0001\nestimator.stereo_sigma_px=1\nestimator.velocity_prior_sigma_mps=0.10000000000000001\nestimator.visual_coast_horizon_ns=500000000\nestimator.window_size=10\neval.max_dt_ms=4.1666670000000003\neval.min_match_rate=0.80000000000000004\neval.rpe_delta_s=1\nsession.dataset_format=tum_vi\nsession.drop_culled_tracks=true\nsession.skip_drop_min_culled=4\nsession.zombie_drop_age=5\ntracker.forward_backward_px=0.5\ntracker.lk_pyramid_levels=4\ntracker.lk_window_px=21\ntracker.mask_radius_px=20\ntracker.max_depth_m=25\ntracker.max_epipolar_px=1.5\ntracker.max_tracks=200\ntracker.min_depth_m=0.29999999999999999\ntracker.min_disparity_px=2\ntracker.min_distance_px=20\ntracker.quality_level=0.0030000000000000001\ntracker.stereo_bidir_px=0.5\ntracker.stereo_check_bidir=true\ntracker.stereo_row_tol_px=0\ntracker.stereo_sad_half_win_px=7\ntracker.stereo_uniq_ratio=0.5\n",
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "created_utc": "2026-10-14T16:19:31Z",
+            "paths": {
+              "bench_root": "",
+              "layout_template": "override",
+              "output_dir": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/room4/control"
+            },
+            "schema_version": 2,
+            "sequence": "room4",
+            "sequence_root": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/input-slx9apk9",
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline"
+            ]
+          },
+          "summary": {
+            "ate": {
+              "rot_deg": {
+                "max": 11.778230430081342,
+                "mean": 8.776137742078166,
+                "median": 8.8981843562763,
+                "rmse": 8.875696632588749,
+                "stddev": 1.3256685278826008
+              },
+              "trans": {
+                "max": 0.6392560553681401,
+                "mean": 0.34349264016111963,
+                "median": 0.3047595925855917,
+                "rmse": 0.3670080734692082,
+                "stddev": 0.12925839294499736
+              }
+            },
+            "code": {
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 133,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 0,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 0,
+              "outliers_culled": 20,
+              "outliers_culled_unique": 20,
+              "pnp_fallbacks": 69,
+              "pnp_successes": 2148,
+              "reanchors": 0,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 0,
+              "zombie_age_drops": 0
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 5.745958583425448,
+                "mean": 1.264480418495387,
+                "median": 1.1109107367227495,
+                "rmse": 1.4991752824381297,
+                "stddev": 0.8053668721242369
+              },
+              "trans": {
+                "max": 0.5373298509846687,
+                "mean": 0.05603005661633274,
+                "median": 0.04445221879097304,
+                "rmse": 0.07714826147320497,
+                "stddev": 0.05303288606052427
+              }
+            },
+            "schema_version": 2,
+            "sequence": "room4",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 2228,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 2228,
+              "pushed_right": 2228
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.22502292,
+                "mean": 0.026842848299955143,
+                "p95": 0.040499768499999984
+              },
+              "frontend": {
+                "max": 0.017700827,
+                "mean": 0.00730763063313875,
+                "p95": 0.008585024599999998
+              },
+              "rectify": {
+                "max": 0.00588081,
+                "mean": 0.002597550990121244,
+                "p95": 0.003574894799999998
+              },
+              "rtf": 1.1580815383715695,
+              "total": {
+                "max": 0.232848436,
+                "mean": 0.036772798555904804,
+                "p95": 0.05127098879999998
+              },
+              "wall_s": 96.110393342
+            },
+            "trajectory": {
+              "completion_rate": 0.9977548271216884,
+              "coverage_rate": 0.9977538297244415,
+              "failed": 0,
+              "image_frames": 2227,
+              "ok": 2222,
+              "poses_written": 2222,
+              "rejected": 0,
+              "segments": 1,
+              "total_keyframes": 1180,
+              "total_track_only_frames": 1047
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo pnp summary: pnp_successes=2148 pnp_fallbacks=69"
+            ]
+          },
+          "payload_sha256": {
+            "diag.csv": "c54e0d681754a9fbcdd98147bd9ad0c715c2cdb885bd715e275a881de645e5db",
+            "est.tum": "5d8faae365cb4334e8ffe3a22099225d0617084569095fae39ac2a138ce62d29",
+            "kf.tum": "08e37a8b1cc9a489d1c46b920b00f3a3709e0635450e21acdcaa07ab7093af54"
+          },
+          "sidecar_rows": 2227,
+          "bridge_counts": {
+            "NotApplicable": 2227
+          }
+        },
+        "subject": {
+          "wall_seconds": 95.73838679400069,
+          "meta": {
+            "code": {
+              "git_branch": "codex/m5-product-recut-design",
+              "git_commit": "3ea548b9b29ac817f0cd16565ea7d4f6cb3d71f7",
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config": {
+              "estimator.block_culled_rebirth": true,
+              "estimator.enable_moving_bootstrap": true,
+              "estimator.enable_outlier_cull": true,
+              "estimator.enable_outlier_reopt": true,
+              "estimator.enable_pnp_init": true,
+              "estimator.far_return_refresh_px": 6.0,
+              "estimator.hanging_landmark_gate_m": 1.0,
+              "estimator.huber_k_px": 3.0,
+              "estimator.max_outlier_reopts": 3,
+              "estimator.min_landmark_observations": 2,
+              "estimator.min_pnp_inliers": 10,
+              "estimator.min_seed_observations": 10,
+              "estimator.min_shared_landmarks": 10,
+              "estimator.min_track_observations_for_seed": 1,
+              "estimator.outlier_avg_reproj_px": 4.0,
+              "estimator.pnp_confidence": 0.99,
+              "estimator.pnp_reproj_px": 2.0,
+              "estimator.prior_rotation_sigma_rad": 0.0001,
+              "estimator.prior_translation_sigma_m": 0.0001,
+              "estimator.stereo_sigma_px": 1.0,
+              "estimator.velocity_prior_sigma_mps": 0.1,
+              "estimator.visual_coast_horizon_ns": 500000000,
+              "estimator.window_size": 10,
+              "eval.max_dt_ms": 4.166667,
+              "eval.min_match_rate": 0.8,
+              "eval.rpe_delta_s": 1.0,
+              "session.dataset_format": "tum_vi",
+              "session.drop_culled_tracks": true,
+              "session.skip_drop_min_culled": 4,
+              "session.zombie_drop_age": 5,
+              "tracker.forward_backward_px": 0.5,
+              "tracker.lk_pyramid_levels": 4,
+              "tracker.lk_window_px": 21,
+              "tracker.mask_radius_px": 20,
+              "tracker.max_depth_m": 25.0,
+              "tracker.max_epipolar_px": 1.5,
+              "tracker.max_tracks": 200,
+              "tracker.min_depth_m": 0.3,
+              "tracker.min_disparity_px": 2.0,
+              "tracker.min_distance_px": 20.0,
+              "tracker.quality_level": 0.003,
+              "tracker.stereo_bidir_px": 0.5,
+              "tracker.stereo_check_bidir": true,
+              "tracker.stereo_row_tol_px": 0,
+              "tracker.stereo_sad_half_win_px": 7,
+              "tracker.stereo_uniq_ratio": 0.5
+            },
+            "config_canonical_text": "estimator.block_culled_rebirth=true\nestimator.enable_moving_bootstrap=true\nestimator.enable_outlier_cull=true\nestimator.enable_outlier_reopt=true\nestimator.enable_pnp_init=true\nestimator.far_return_refresh_px=6\nestimator.hanging_landmark_gate_m=1\nestimator.huber_k_px=3\nestimator.max_outlier_reopts=3\nestimator.min_landmark_observations=2\nestimator.min_pnp_inliers=10\nestimator.min_seed_observations=10\nestimator.min_shared_landmarks=10\nestimator.min_track_observations_for_seed=1\nestimator.outlier_avg_reproj_px=4\nestimator.pnp_confidence=0.98999999999999999\nestimator.pnp_reproj_px=2\nestimator.prior_rotation_sigma_rad=0.0001\nestimator.prior_translation_sigma_m=0.0001\nestimator.stereo_sigma_px=1\nestimator.velocity_prior_sigma_mps=0.10000000000000001\nestimator.visual_coast_horizon_ns=500000000\nestimator.window_size=10\neval.max_dt_ms=4.1666670000000003\neval.min_match_rate=0.80000000000000004\neval.rpe_delta_s=1\nsession.dataset_format=tum_vi\nsession.drop_culled_tracks=true\nsession.skip_drop_min_culled=4\nsession.zombie_drop_age=5\ntracker.forward_backward_px=0.5\ntracker.lk_pyramid_levels=4\ntracker.lk_window_px=21\ntracker.mask_radius_px=20\ntracker.max_depth_m=25\ntracker.max_epipolar_px=1.5\ntracker.max_tracks=200\ntracker.min_depth_m=0.29999999999999999\ntracker.min_disparity_px=2\ntracker.min_distance_px=20\ntracker.quality_level=0.0030000000000000001\ntracker.stereo_bidir_px=0.5\ntracker.stereo_check_bidir=true\ntracker.stereo_row_tol_px=0\ntracker.stereo_sad_half_win_px=7\ntracker.stereo_uniq_ratio=0.5\n",
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "created_utc": "2026-10-14T16:21:12Z",
+            "paths": {
+              "bench_root": "",
+              "layout_template": "override",
+              "output_dir": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/room4/subject"
+            },
+            "schema_version": 2,
+            "sequence": "room4",
+            "sequence_root": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/input-slx9apk9",
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline"
+            ]
+          },
+          "summary": {
+            "ate": {
+              "rot_deg": {
+                "max": 11.778230430081342,
+                "mean": 8.776137742078166,
+                "median": 8.8981843562763,
+                "rmse": 8.875696632588749,
+                "stddev": 1.3256685278826008
+              },
+              "trans": {
+                "max": 0.6392560553681401,
+                "mean": 0.34349264016111963,
+                "median": 0.3047595925855917,
+                "rmse": 0.3670080734692082,
+                "stddev": 0.12925839294499736
+              }
+            },
+            "code": {
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 133,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 0,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 0,
+              "outliers_culled": 20,
+              "outliers_culled_unique": 20,
+              "pnp_fallbacks": 69,
+              "pnp_successes": 2148,
+              "reanchors": 0,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 0,
+              "zombie_age_drops": 0
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 5.745958583425448,
+                "mean": 1.264480418495387,
+                "median": 1.1109107367227495,
+                "rmse": 1.4991752824381297,
+                "stddev": 0.8053668721242369
+              },
+              "trans": {
+                "max": 0.5373298509846687,
+                "mean": 0.05603005661633274,
+                "median": 0.04445221879097304,
+                "rmse": 0.07714826147320497,
+                "stddev": 0.05303288606052427
+              }
+            },
+            "schema_version": 2,
+            "sequence": "room4",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 2228,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 2228,
+              "pushed_right": 2228
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.235365595,
+                "mean": 0.02615152901302198,
+                "p95": 0.03925715739999999
+              },
+              "frontend": {
+                "max": 0.017488464,
+                "mean": 0.007499658510552301,
+                "p95": 0.009177209999999998
+              },
+              "rectify": {
+                "max": 0.005862325,
+                "mean": 0.0026163375707229436,
+                "p95": 0.0035718855999999997
+              },
+              "rtf": 1.1726250490381924,
+              "total": {
+                "max": 0.244644957,
+                "mean": 0.0362925592487651,
+                "p95": 0.049912662899999995
+              },
+              "wall_s": 94.918381853
+            },
+            "trajectory": {
+              "completion_rate": 0.9977548271216884,
+              "coverage_rate": 0.9977538297244415,
+              "failed": 0,
+              "image_frames": 2227,
+              "ok": 2222,
+              "poses_written": 2222,
+              "rejected": 0,
+              "segments": 1,
+              "total_keyframes": 1180,
+              "total_track_only_frames": 1047
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo pnp summary: pnp_successes=2148 pnp_fallbacks=69"
+            ]
+          },
+          "payload_sha256": {
+            "diag.csv": "c54e0d681754a9fbcdd98147bd9ad0c715c2cdb885bd715e275a881de645e5db",
+            "est.tum": "5d8faae365cb4334e8ffe3a22099225d0617084569095fae39ac2a138ce62d29",
+            "kf.tum": "08e37a8b1cc9a489d1c46b920b00f3a3709e0635450e21acdcaa07ab7093af54"
+          },
+          "sidecar_rows": 2227,
+          "bridge_counts": {
+            "NotApplicable": 2227
+          }
+        }
+      },
+      "input": {
+        "archive": "/home/lin/Projects/data/perception/data/raw/tum-vi/exported/euroc/512_16/dataset-room4_512_16.tar",
+        "archive_bytes": 1356206080,
+        "archive_mtime_ns": 1524005689000000000,
+        "selected_files": 4462,
+        "selected_bytes": 1347854607,
+        "manifest_sha256": "39b4b3435b1d88ad4f176124d01022dbf6ecedcfef0307a5a4e7afb5e2714dc5"
+      },
+      "comparison": {
+        "state": "PASS",
+        "compared_rows": 2227,
+        "checks": {
+          "diag.csv": true,
+          "est.tum": true,
+          "kf.tum": true,
+          "full_sidecar_identity": true,
+          "ordered_input_identity": true,
+          "initialization_identity": true,
+          "bridge_all_not_applicable": true,
+          "config_identity": true
+        }
+      },
+      "temporary_input_removed": true
+    },
+    "room5": {
+      "roles": {
+        "control": {
+          "wall_seconds": 126.19052836499759,
+          "meta": {
+            "code": {
+              "git_branch": "codex/m5-product-recut-design",
+              "git_commit": "3ea548b9b29ac817f0cd16565ea7d4f6cb3d71f7",
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config": {
+              "estimator.block_culled_rebirth": true,
+              "estimator.enable_moving_bootstrap": true,
+              "estimator.enable_outlier_cull": true,
+              "estimator.enable_outlier_reopt": true,
+              "estimator.enable_pnp_init": true,
+              "estimator.far_return_refresh_px": 6.0,
+              "estimator.hanging_landmark_gate_m": 1.0,
+              "estimator.huber_k_px": 3.0,
+              "estimator.max_outlier_reopts": 3,
+              "estimator.min_landmark_observations": 2,
+              "estimator.min_pnp_inliers": 10,
+              "estimator.min_seed_observations": 10,
+              "estimator.min_shared_landmarks": 10,
+              "estimator.min_track_observations_for_seed": 1,
+              "estimator.outlier_avg_reproj_px": 4.0,
+              "estimator.pnp_confidence": 0.99,
+              "estimator.pnp_reproj_px": 2.0,
+              "estimator.prior_rotation_sigma_rad": 0.0001,
+              "estimator.prior_translation_sigma_m": 0.0001,
+              "estimator.stereo_sigma_px": 1.0,
+              "estimator.velocity_prior_sigma_mps": 0.1,
+              "estimator.visual_coast_horizon_ns": 500000000,
+              "estimator.window_size": 10,
+              "eval.max_dt_ms": 4.166667,
+              "eval.min_match_rate": 0.8,
+              "eval.rpe_delta_s": 1.0,
+              "session.dataset_format": "tum_vi",
+              "session.drop_culled_tracks": true,
+              "session.skip_drop_min_culled": 4,
+              "session.zombie_drop_age": 5,
+              "tracker.forward_backward_px": 0.5,
+              "tracker.lk_pyramid_levels": 4,
+              "tracker.lk_window_px": 21,
+              "tracker.mask_radius_px": 20,
+              "tracker.max_depth_m": 25.0,
+              "tracker.max_epipolar_px": 1.5,
+              "tracker.max_tracks": 200,
+              "tracker.min_depth_m": 0.3,
+              "tracker.min_disparity_px": 2.0,
+              "tracker.min_distance_px": 20.0,
+              "tracker.quality_level": 0.003,
+              "tracker.stereo_bidir_px": 0.5,
+              "tracker.stereo_check_bidir": true,
+              "tracker.stereo_row_tol_px": 0,
+              "tracker.stereo_sad_half_win_px": 7,
+              "tracker.stereo_uniq_ratio": 0.5
+            },
+            "config_canonical_text": "estimator.block_culled_rebirth=true\nestimator.enable_moving_bootstrap=true\nestimator.enable_outlier_cull=true\nestimator.enable_outlier_reopt=true\nestimator.enable_pnp_init=true\nestimator.far_return_refresh_px=6\nestimator.hanging_landmark_gate_m=1\nestimator.huber_k_px=3\nestimator.max_outlier_reopts=3\nestimator.min_landmark_observations=2\nestimator.min_pnp_inliers=10\nestimator.min_seed_observations=10\nestimator.min_shared_landmarks=10\nestimator.min_track_observations_for_seed=1\nestimator.outlier_avg_reproj_px=4\nestimator.pnp_confidence=0.98999999999999999\nestimator.pnp_reproj_px=2\nestimator.prior_rotation_sigma_rad=0.0001\nestimator.prior_translation_sigma_m=0.0001\nestimator.stereo_sigma_px=1\nestimator.velocity_prior_sigma_mps=0.10000000000000001\nestimator.visual_coast_horizon_ns=500000000\nestimator.window_size=10\neval.max_dt_ms=4.1666670000000003\neval.min_match_rate=0.80000000000000004\neval.rpe_delta_s=1\nsession.dataset_format=tum_vi\nsession.drop_culled_tracks=true\nsession.skip_drop_min_culled=4\nsession.zombie_drop_age=5\ntracker.forward_backward_px=0.5\ntracker.lk_pyramid_levels=4\ntracker.lk_window_px=21\ntracker.mask_radius_px=20\ntracker.max_depth_m=25\ntracker.max_epipolar_px=1.5\ntracker.max_tracks=200\ntracker.min_depth_m=0.29999999999999999\ntracker.min_disparity_px=2\ntracker.min_distance_px=20\ntracker.quality_level=0.0030000000000000001\ntracker.stereo_bidir_px=0.5\ntracker.stereo_check_bidir=true\ntracker.stereo_row_tol_px=0\ntracker.stereo_sad_half_win_px=7\ntracker.stereo_uniq_ratio=0.5\n",
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "created_utc": "2026-10-14T16:22:53Z",
+            "paths": {
+              "bench_root": "",
+              "layout_template": "override",
+              "output_dir": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/room5/control"
+            },
+            "schema_version": 2,
+            "sequence": "room5",
+            "sequence_root": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/input-4ol46l3l",
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline"
+            ]
+          },
+          "summary": {
+            "ate": {
+              "rot_deg": {
+                "max": 43.99307179484386,
+                "mean": 22.404564282805964,
+                "median": 19.148125600992454,
+                "rmse": 26.28889047534844,
+                "stddev": 13.752863764412163
+              },
+              "trans": {
+                "max": 3.9146369181264373,
+                "mean": 1.318213740618941,
+                "median": 1.2996181375989921,
+                "rmse": 1.3453975409129582,
+                "stddev": 0.26908563160833154
+              }
+            },
+            "code": {
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 313,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 10,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 10,
+              "outliers_culled": 90,
+              "outliers_culled_unique": 90,
+              "pnp_fallbacks": 113,
+              "pnp_successes": 2727,
+              "reanchors": 0,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 40,
+              "zombie_age_drops": 9
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 17.22384337181277,
+                "mean": 1.9305079112919599,
+                "median": 1.5771727006480372,
+                "rmse": 2.5390978561408137,
+                "stddev": 1.6492898858290594
+              },
+              "trans": {
+                "max": 5.055006394661866,
+                "mean": 0.1012766871475634,
+                "median": 0.05442076910602418,
+                "rmse": 0.33891543669941104,
+                "stddev": 0.3234295995631307
+              }
+            },
+            "schema_version": 2,
+            "sequence": "room5",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 2847,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 2847,
+              "pushed_right": 2847
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.172301313,
+                "mean": 0.02700767496907939,
+                "p95": 0.04075600275
+              },
+              "frontend": {
+                "max": 0.020055261,
+                "mean": 0.007016738303583993,
+                "p95": 0.008694714749999999
+              },
+              "rectify": {
+                "max": 0.005260097,
+                "mean": 0.0024874826654954336,
+                "p95": 0.0035030190000000004
+              },
+              "rtf": 1.166114702831833,
+              "total": {
+                "max": 0.179148272,
+                "mean": 0.03653418225439209,
+                "p95": 0.05004615525
+              },
+              "wall_s": 121.990258692
+            },
+            "trajectory": {
+              "completion_rate": 0.9982431482782853,
+              "coverage_rate": 0.9982425317720209,
+              "failed": 0,
+              "image_frames": 2846,
+              "ok": 2841,
+              "poses_written": 2841,
+              "rejected": 0,
+              "segments": 1,
+              "total_keyframes": 2150,
+              "total_track_only_frames": 696
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo pnp summary: pnp_successes=2727 pnp_fallbacks=113"
+            ]
+          },
+          "payload_sha256": {
+            "diag.csv": "9d52b8f656a0b1da5f655a56804ff6dce8183f09e21b8022548422794dcd09ce",
+            "est.tum": "f26e67680b7637139972c874a6c3410765395aac97ff1e0e408e386bea423e4e",
+            "kf.tum": "275a00b84d1bd4b801ea721bb6d01bf8c3f5593b844721ed44d290f6a433c40b"
+          },
+          "sidecar_rows": 2846,
+          "bridge_counts": {
+            "NotApplicable": 2846
+          }
+        },
+        "subject": {
+          "wall_seconds": 126.24962404300095,
+          "meta": {
+            "code": {
+              "git_branch": "codex/m5-product-recut-design",
+              "git_commit": "3ea548b9b29ac817f0cd16565ea7d4f6cb3d71f7",
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config": {
+              "estimator.block_culled_rebirth": true,
+              "estimator.enable_moving_bootstrap": true,
+              "estimator.enable_outlier_cull": true,
+              "estimator.enable_outlier_reopt": true,
+              "estimator.enable_pnp_init": true,
+              "estimator.far_return_refresh_px": 6.0,
+              "estimator.hanging_landmark_gate_m": 1.0,
+              "estimator.huber_k_px": 3.0,
+              "estimator.max_outlier_reopts": 3,
+              "estimator.min_landmark_observations": 2,
+              "estimator.min_pnp_inliers": 10,
+              "estimator.min_seed_observations": 10,
+              "estimator.min_shared_landmarks": 10,
+              "estimator.min_track_observations_for_seed": 1,
+              "estimator.outlier_avg_reproj_px": 4.0,
+              "estimator.pnp_confidence": 0.99,
+              "estimator.pnp_reproj_px": 2.0,
+              "estimator.prior_rotation_sigma_rad": 0.0001,
+              "estimator.prior_translation_sigma_m": 0.0001,
+              "estimator.stereo_sigma_px": 1.0,
+              "estimator.velocity_prior_sigma_mps": 0.1,
+              "estimator.visual_coast_horizon_ns": 500000000,
+              "estimator.window_size": 10,
+              "eval.max_dt_ms": 4.166667,
+              "eval.min_match_rate": 0.8,
+              "eval.rpe_delta_s": 1.0,
+              "session.dataset_format": "tum_vi",
+              "session.drop_culled_tracks": true,
+              "session.skip_drop_min_culled": 4,
+              "session.zombie_drop_age": 5,
+              "tracker.forward_backward_px": 0.5,
+              "tracker.lk_pyramid_levels": 4,
+              "tracker.lk_window_px": 21,
+              "tracker.mask_radius_px": 20,
+              "tracker.max_depth_m": 25.0,
+              "tracker.max_epipolar_px": 1.5,
+              "tracker.max_tracks": 200,
+              "tracker.min_depth_m": 0.3,
+              "tracker.min_disparity_px": 2.0,
+              "tracker.min_distance_px": 20.0,
+              "tracker.quality_level": 0.003,
+              "tracker.stereo_bidir_px": 0.5,
+              "tracker.stereo_check_bidir": true,
+              "tracker.stereo_row_tol_px": 0,
+              "tracker.stereo_sad_half_win_px": 7,
+              "tracker.stereo_uniq_ratio": 0.5
+            },
+            "config_canonical_text": "estimator.block_culled_rebirth=true\nestimator.enable_moving_bootstrap=true\nestimator.enable_outlier_cull=true\nestimator.enable_outlier_reopt=true\nestimator.enable_pnp_init=true\nestimator.far_return_refresh_px=6\nestimator.hanging_landmark_gate_m=1\nestimator.huber_k_px=3\nestimator.max_outlier_reopts=3\nestimator.min_landmark_observations=2\nestimator.min_pnp_inliers=10\nestimator.min_seed_observations=10\nestimator.min_shared_landmarks=10\nestimator.min_track_observations_for_seed=1\nestimator.outlier_avg_reproj_px=4\nestimator.pnp_confidence=0.98999999999999999\nestimator.pnp_reproj_px=2\nestimator.prior_rotation_sigma_rad=0.0001\nestimator.prior_translation_sigma_m=0.0001\nestimator.stereo_sigma_px=1\nestimator.velocity_prior_sigma_mps=0.10000000000000001\nestimator.visual_coast_horizon_ns=500000000\nestimator.window_size=10\neval.max_dt_ms=4.1666670000000003\neval.min_match_rate=0.80000000000000004\neval.rpe_delta_s=1\nsession.dataset_format=tum_vi\nsession.drop_culled_tracks=true\nsession.skip_drop_min_culled=4\nsession.zombie_drop_age=5\ntracker.forward_backward_px=0.5\ntracker.lk_pyramid_levels=4\ntracker.lk_window_px=21\ntracker.mask_radius_px=20\ntracker.max_depth_m=25\ntracker.max_epipolar_px=1.5\ntracker.max_tracks=200\ntracker.min_depth_m=0.29999999999999999\ntracker.min_disparity_px=2\ntracker.min_distance_px=20\ntracker.quality_level=0.0030000000000000001\ntracker.stereo_bidir_px=0.5\ntracker.stereo_check_bidir=true\ntracker.stereo_row_tol_px=0\ntracker.stereo_sad_half_win_px=7\ntracker.stereo_uniq_ratio=0.5\n",
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "created_utc": "2026-10-14T16:24:59Z",
+            "paths": {
+              "bench_root": "",
+              "layout_template": "override",
+              "output_dir": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/room5/subject"
+            },
+            "schema_version": 2,
+            "sequence": "room5",
+            "sequence_root": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/input-4ol46l3l",
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline"
+            ]
+          },
+          "summary": {
+            "ate": {
+              "rot_deg": {
+                "max": 43.99307179484386,
+                "mean": 22.404564282805964,
+                "median": 19.148125600992454,
+                "rmse": 26.28889047534844,
+                "stddev": 13.752863764412163
+              },
+              "trans": {
+                "max": 3.9146369181264373,
+                "mean": 1.318213740618941,
+                "median": 1.2996181375989921,
+                "rmse": 1.3453975409129582,
+                "stddev": 0.26908563160833154
+              }
+            },
+            "code": {
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 313,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 10,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 10,
+              "outliers_culled": 90,
+              "outliers_culled_unique": 90,
+              "pnp_fallbacks": 113,
+              "pnp_successes": 2727,
+              "reanchors": 0,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 40,
+              "zombie_age_drops": 9
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 17.22384337181277,
+                "mean": 1.9305079112919599,
+                "median": 1.5771727006480372,
+                "rmse": 2.5390978561408137,
+                "stddev": 1.6492898858290594
+              },
+              "trans": {
+                "max": 5.055006394661866,
+                "mean": 0.1012766871475634,
+                "median": 0.05442076910602418,
+                "rmse": 0.33891543669941104,
+                "stddev": 0.3234295995631307
+              }
+            },
+            "schema_version": 2,
+            "sequence": "room5",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 2847,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 2847,
+              "pushed_right": 2847
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.172200647,
+                "mean": 0.028021877211524975,
+                "p95": 0.042714951
+              },
+              "frontend": {
+                "max": 0.015829071,
+                "mean": 0.007028857190794086,
+                "p95": 0.008708584
+              },
+              "rectify": {
+                "max": 0.004793417,
+                "mean": 0.0025056681447645896,
+                "p95": 0.0035400594999999997
+              },
+              "rtf": 1.1399539280834454,
+              "total": {
+                "max": 0.179925924,
+                "mean": 0.03757849409170763,
+                "p95": 0.0527609135
+              },
+              "wall_s": 124.789810148
+            },
+            "trajectory": {
+              "completion_rate": 0.9982431482782853,
+              "coverage_rate": 0.9982425317720209,
+              "failed": 0,
+              "image_frames": 2846,
+              "ok": 2841,
+              "poses_written": 2841,
+              "rejected": 0,
+              "segments": 1,
+              "total_keyframes": 2150,
+              "total_track_only_frames": 696
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo pnp summary: pnp_successes=2727 pnp_fallbacks=113"
+            ]
+          },
+          "payload_sha256": {
+            "diag.csv": "9d52b8f656a0b1da5f655a56804ff6dce8183f09e21b8022548422794dcd09ce",
+            "est.tum": "f26e67680b7637139972c874a6c3410765395aac97ff1e0e408e386bea423e4e",
+            "kf.tum": "275a00b84d1bd4b801ea721bb6d01bf8c3f5593b844721ed44d290f6a433c40b"
+          },
+          "sidecar_rows": 2846,
+          "bridge_counts": {
+            "NotApplicable": 2846
+          }
+        }
+      },
+      "input": {
+        "archive": "/home/lin/Projects/data/perception/data/raw/tum-vi/exported/euroc/512_16/dataset-room5_512_16.tar",
+        "archive_bytes": 1696430080,
+        "archive_mtime_ns": 1524005745000000000,
+        "selected_files": 5700,
+        "selected_bytes": 1685934887,
+        "manifest_sha256": "f957ccaf3c2d8851298358bb9d53f628a49b5ca38f120487040dff05ebef96c6"
+      },
+      "comparison": {
+        "state": "PASS",
+        "compared_rows": 2846,
+        "checks": {
+          "diag.csv": true,
+          "est.tum": true,
+          "kf.tum": true,
+          "full_sidecar_identity": true,
+          "ordered_input_identity": true,
+          "initialization_identity": true,
+          "bridge_all_not_applicable": true,
+          "config_identity": true
+        }
+      },
+      "temporary_input_removed": true
+    },
+    "room6": {
+      "roles": {
+        "control": {
+          "wall_seconds": 121.03888007400019,
+          "meta": {
+            "code": {
+              "git_branch": "codex/m5-product-recut-design",
+              "git_commit": "3ea548b9b29ac817f0cd16565ea7d4f6cb3d71f7",
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config": {
+              "estimator.block_culled_rebirth": true,
+              "estimator.enable_moving_bootstrap": true,
+              "estimator.enable_outlier_cull": true,
+              "estimator.enable_outlier_reopt": true,
+              "estimator.enable_pnp_init": true,
+              "estimator.far_return_refresh_px": 6.0,
+              "estimator.hanging_landmark_gate_m": 1.0,
+              "estimator.huber_k_px": 3.0,
+              "estimator.max_outlier_reopts": 3,
+              "estimator.min_landmark_observations": 2,
+              "estimator.min_pnp_inliers": 10,
+              "estimator.min_seed_observations": 10,
+              "estimator.min_shared_landmarks": 10,
+              "estimator.min_track_observations_for_seed": 1,
+              "estimator.outlier_avg_reproj_px": 4.0,
+              "estimator.pnp_confidence": 0.99,
+              "estimator.pnp_reproj_px": 2.0,
+              "estimator.prior_rotation_sigma_rad": 0.0001,
+              "estimator.prior_translation_sigma_m": 0.0001,
+              "estimator.stereo_sigma_px": 1.0,
+              "estimator.velocity_prior_sigma_mps": 0.1,
+              "estimator.visual_coast_horizon_ns": 500000000,
+              "estimator.window_size": 10,
+              "eval.max_dt_ms": 4.166667,
+              "eval.min_match_rate": 0.8,
+              "eval.rpe_delta_s": 1.0,
+              "session.dataset_format": "tum_vi",
+              "session.drop_culled_tracks": true,
+              "session.skip_drop_min_culled": 4,
+              "session.zombie_drop_age": 5,
+              "tracker.forward_backward_px": 0.5,
+              "tracker.lk_pyramid_levels": 4,
+              "tracker.lk_window_px": 21,
+              "tracker.mask_radius_px": 20,
+              "tracker.max_depth_m": 25.0,
+              "tracker.max_epipolar_px": 1.5,
+              "tracker.max_tracks": 200,
+              "tracker.min_depth_m": 0.3,
+              "tracker.min_disparity_px": 2.0,
+              "tracker.min_distance_px": 20.0,
+              "tracker.quality_level": 0.003,
+              "tracker.stereo_bidir_px": 0.5,
+              "tracker.stereo_check_bidir": true,
+              "tracker.stereo_row_tol_px": 0,
+              "tracker.stereo_sad_half_win_px": 7,
+              "tracker.stereo_uniq_ratio": 0.5
+            },
+            "config_canonical_text": "estimator.block_culled_rebirth=true\nestimator.enable_moving_bootstrap=true\nestimator.enable_outlier_cull=true\nestimator.enable_outlier_reopt=true\nestimator.enable_pnp_init=true\nestimator.far_return_refresh_px=6\nestimator.hanging_landmark_gate_m=1\nestimator.huber_k_px=3\nestimator.max_outlier_reopts=3\nestimator.min_landmark_observations=2\nestimator.min_pnp_inliers=10\nestimator.min_seed_observations=10\nestimator.min_shared_landmarks=10\nestimator.min_track_observations_for_seed=1\nestimator.outlier_avg_reproj_px=4\nestimator.pnp_confidence=0.98999999999999999\nestimator.pnp_reproj_px=2\nestimator.prior_rotation_sigma_rad=0.0001\nestimator.prior_translation_sigma_m=0.0001\nestimator.stereo_sigma_px=1\nestimator.velocity_prior_sigma_mps=0.10000000000000001\nestimator.visual_coast_horizon_ns=500000000\nestimator.window_size=10\neval.max_dt_ms=4.1666670000000003\neval.min_match_rate=0.80000000000000004\neval.rpe_delta_s=1\nsession.dataset_format=tum_vi\nsession.drop_culled_tracks=true\nsession.skip_drop_min_culled=4\nsession.zombie_drop_age=5\ntracker.forward_backward_px=0.5\ntracker.lk_pyramid_levels=4\ntracker.lk_window_px=21\ntracker.mask_radius_px=20\ntracker.max_depth_m=25\ntracker.max_epipolar_px=1.5\ntracker.max_tracks=200\ntracker.min_depth_m=0.29999999999999999\ntracker.min_disparity_px=2\ntracker.min_distance_px=20\ntracker.quality_level=0.0030000000000000001\ntracker.stereo_bidir_px=0.5\ntracker.stereo_check_bidir=true\ntracker.stereo_row_tol_px=0\ntracker.stereo_sad_half_win_px=7\ntracker.stereo_uniq_ratio=0.5\n",
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "created_utc": "2026-10-14T16:27:10Z",
+            "paths": {
+              "bench_root": "",
+              "layout_template": "override",
+              "output_dir": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/room6/control"
+            },
+            "schema_version": 2,
+            "sequence": "room6",
+            "sequence_root": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/input-124ia6az",
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline"
+            ]
+          },
+          "summary": {
+            "ate": {
+              "rot_deg": {
+                "max": 16.964371158012685,
+                "mean": 8.578134311157333,
+                "median": 8.866694078753952,
+                "rmse": 9.686885170174373,
+                "stddev": 4.500150668576495
+              },
+              "trans": {
+                "max": 0.6116853954730018,
+                "mean": 0.2562282797431204,
+                "median": 0.2359028357860309,
+                "rmse": 0.2892988749370485,
+                "stddev": 0.13431644612527255
+              }
+            },
+            "code": {
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 133,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 1,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 1,
+              "outliers_culled": 42,
+              "outliers_culled_unique": 42,
+              "pnp_fallbacks": 85,
+              "pnp_successes": 2545,
+              "reanchors": 0,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 4,
+              "zombie_age_drops": 1
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 5.082707602412392,
+                "mean": 1.0333746055852755,
+                "median": 0.810193085005442,
+                "rmse": 1.3126708161734695,
+                "stddev": 0.8094699476601949
+              },
+              "trans": {
+                "max": 0.25476788312633014,
+                "mean": 0.042633433120590106,
+                "median": 0.03472771634359539,
+                "rmse": 0.05395991264027984,
+                "stddev": 0.033076616400393846
+              }
+            },
+            "schema_version": 2,
+            "sequence": "room6",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 2636,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 2636,
+              "pushed_right": 2636
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.17248161,
+                "mean": 0.027708930157056215,
+                "p95": 0.0395042335
+              },
+              "frontend": {
+                "max": 0.022539825,
+                "mean": 0.007501502998482549,
+                "p95": 0.00869430525
+              },
+              "rectify": {
+                "max": 0.00578998,
+                "mean": 0.0026676395356601,
+                "p95": 0.00371443175
+              },
+              "rtf": 1.1289374852917327,
+              "total": {
+                "max": 0.182813946,
+                "mean": 0.03790760383421853,
+                "p95": 0.050643021
+              },
+              "wall_s": 116.706321028
+            },
+            "trajectory": {
+              "completion_rate": 0.9981031866464339,
+              "coverage_rate": 0.99810246570695,
+              "failed": 0,
+              "image_frames": 2636,
+              "ok": 2631,
+              "poses_written": 2631,
+              "rejected": 0,
+              "segments": 1,
+              "total_keyframes": 737,
+              "total_track_only_frames": 1899
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo pnp summary: pnp_successes=2545 pnp_fallbacks=85"
+            ]
+          },
+          "payload_sha256": {
+            "diag.csv": "6174cb0a026a7f45b59d984f031371024f8198278adb610b9f844d2ca8e08e6a",
+            "est.tum": "9bdffbc53a30e76e777a645d9f2c0a7cb140b196644329536ea1577a407d0f01",
+            "kf.tum": "5d1c4dea8d133d918a08550b80381936a24ff9668ef7a09750e590a43dd24937"
+          },
+          "sidecar_rows": 2636,
+          "bridge_counts": {
+            "NotApplicable": 2636
+          }
+        },
+        "subject": {
+          "wall_seconds": 121.02575104800053,
+          "meta": {
+            "code": {
+              "git_branch": "codex/m5-product-recut-design",
+              "git_commit": "3ea548b9b29ac817f0cd16565ea7d4f6cb3d71f7",
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config": {
+              "estimator.block_culled_rebirth": true,
+              "estimator.enable_moving_bootstrap": true,
+              "estimator.enable_outlier_cull": true,
+              "estimator.enable_outlier_reopt": true,
+              "estimator.enable_pnp_init": true,
+              "estimator.far_return_refresh_px": 6.0,
+              "estimator.hanging_landmark_gate_m": 1.0,
+              "estimator.huber_k_px": 3.0,
+              "estimator.max_outlier_reopts": 3,
+              "estimator.min_landmark_observations": 2,
+              "estimator.min_pnp_inliers": 10,
+              "estimator.min_seed_observations": 10,
+              "estimator.min_shared_landmarks": 10,
+              "estimator.min_track_observations_for_seed": 1,
+              "estimator.outlier_avg_reproj_px": 4.0,
+              "estimator.pnp_confidence": 0.99,
+              "estimator.pnp_reproj_px": 2.0,
+              "estimator.prior_rotation_sigma_rad": 0.0001,
+              "estimator.prior_translation_sigma_m": 0.0001,
+              "estimator.stereo_sigma_px": 1.0,
+              "estimator.velocity_prior_sigma_mps": 0.1,
+              "estimator.visual_coast_horizon_ns": 500000000,
+              "estimator.window_size": 10,
+              "eval.max_dt_ms": 4.166667,
+              "eval.min_match_rate": 0.8,
+              "eval.rpe_delta_s": 1.0,
+              "session.dataset_format": "tum_vi",
+              "session.drop_culled_tracks": true,
+              "session.skip_drop_min_culled": 4,
+              "session.zombie_drop_age": 5,
+              "tracker.forward_backward_px": 0.5,
+              "tracker.lk_pyramid_levels": 4,
+              "tracker.lk_window_px": 21,
+              "tracker.mask_radius_px": 20,
+              "tracker.max_depth_m": 25.0,
+              "tracker.max_epipolar_px": 1.5,
+              "tracker.max_tracks": 200,
+              "tracker.min_depth_m": 0.3,
+              "tracker.min_disparity_px": 2.0,
+              "tracker.min_distance_px": 20.0,
+              "tracker.quality_level": 0.003,
+              "tracker.stereo_bidir_px": 0.5,
+              "tracker.stereo_check_bidir": true,
+              "tracker.stereo_row_tol_px": 0,
+              "tracker.stereo_sad_half_win_px": 7,
+              "tracker.stereo_uniq_ratio": 0.5
+            },
+            "config_canonical_text": "estimator.block_culled_rebirth=true\nestimator.enable_moving_bootstrap=true\nestimator.enable_outlier_cull=true\nestimator.enable_outlier_reopt=true\nestimator.enable_pnp_init=true\nestimator.far_return_refresh_px=6\nestimator.hanging_landmark_gate_m=1\nestimator.huber_k_px=3\nestimator.max_outlier_reopts=3\nestimator.min_landmark_observations=2\nestimator.min_pnp_inliers=10\nestimator.min_seed_observations=10\nestimator.min_shared_landmarks=10\nestimator.min_track_observations_for_seed=1\nestimator.outlier_avg_reproj_px=4\nestimator.pnp_confidence=0.98999999999999999\nestimator.pnp_reproj_px=2\nestimator.prior_rotation_sigma_rad=0.0001\nestimator.prior_translation_sigma_m=0.0001\nestimator.stereo_sigma_px=1\nestimator.velocity_prior_sigma_mps=0.10000000000000001\nestimator.visual_coast_horizon_ns=500000000\nestimator.window_size=10\neval.max_dt_ms=4.1666670000000003\neval.min_match_rate=0.80000000000000004\neval.rpe_delta_s=1\nsession.dataset_format=tum_vi\nsession.drop_culled_tracks=true\nsession.skip_drop_min_culled=4\nsession.zombie_drop_age=5\ntracker.forward_backward_px=0.5\ntracker.lk_pyramid_levels=4\ntracker.lk_window_px=21\ntracker.mask_radius_px=20\ntracker.max_depth_m=25\ntracker.max_epipolar_px=1.5\ntracker.max_tracks=200\ntracker.min_depth_m=0.29999999999999999\ntracker.min_disparity_px=2\ntracker.min_distance_px=20\ntracker.quality_level=0.0030000000000000001\ntracker.stereo_bidir_px=0.5\ntracker.stereo_check_bidir=true\ntracker.stereo_row_tol_px=0\ntracker.stereo_sad_half_win_px=7\ntracker.stereo_uniq_ratio=0.5\n",
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "created_utc": "2026-10-14T16:29:12Z",
+            "paths": {
+              "bench_root": "",
+              "layout_template": "override",
+              "output_dir": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/room6/subject"
+            },
+            "schema_version": 2,
+            "sequence": "room6",
+            "sequence_root": "/home/lin/Projects/lin_ws/slam_ws/phad-vio/.worktree/codex-m5-product-recut-design/build/world-frame-recovery-20261015-tumvi-guardrail/input-124ia6az",
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline"
+            ]
+          },
+          "summary": {
+            "ate": {
+              "rot_deg": {
+                "max": 16.964371158012685,
+                "mean": 8.578134311157333,
+                "median": 8.866694078753952,
+                "rmse": 9.686885170174373,
+                "stddev": 4.500150668576495
+              },
+              "trans": {
+                "max": 0.6116853954730018,
+                "mean": 0.2562282797431204,
+                "median": 0.2359028357860309,
+                "rmse": 0.2892988749370485,
+                "stddev": 0.13431644612527255
+              }
+            },
+            "code": {
+              "git_commit_short": "3ea548b",
+              "git_dirty": true
+            },
+            "config_hash": "f1c11d2e",
+            "config_label": "default",
+            "robustness": {
+              "cheirality": 133,
+              "deferred_drop_ids": 0,
+              "deferred_drops": 0,
+              "drops_skipped": 1,
+              "evictable_marked": 0,
+              "failed": 0,
+              "low_connectivity": 0,
+              "outlier_reopts": 1,
+              "outliers_culled": 42,
+              "outliers_culled_unique": 42,
+              "pnp_fallbacks": 85,
+              "pnp_successes": 2545,
+              "reanchors": 0,
+              "rejected": 0,
+              "tracks_evicted": 0,
+              "zombie_age_drop_ids": 4,
+              "zombie_age_drops": 1
+            },
+            "rpe": {
+              "rot_deg": {
+                "max": 5.082707602412392,
+                "mean": 1.0333746055852755,
+                "median": 0.810193085005442,
+                "rmse": 1.3126708161734695,
+                "stddev": 0.8094699476601949
+              },
+              "trans": {
+                "max": 0.25476788312633014,
+                "mean": 0.042633433120590106,
+                "median": 0.03472771634359539,
+                "rmse": 0.05395991264027984,
+                "stddev": 0.033076616400393846
+              }
+            },
+            "schema_version": 2,
+            "sequence": "room6",
+            "status": "completed_with_warnings",
+            "sync": {
+              "dropped_left": 0,
+              "dropped_left_overflow": 0,
+              "dropped_right": 0,
+              "dropped_right_overflow": 0,
+              "emitted_stereo": 2636,
+              "max_left_queue": 1,
+              "max_right_queue": 1,
+              "pushed_left": 2636,
+              "pushed_right": 2636
+            },
+            "timing": {
+              "estimator": {
+                "max": 0.171745949,
+                "mean": 0.02769830785091048,
+                "p95": 0.039128104999999996
+              },
+              "frontend": {
+                "max": 0.017172897,
+                "mean": 0.007594706017830033,
+                "p95": 0.0089347495
+              },
+              "rectify": {
+                "max": 0.006236567,
+                "mean": 0.002546385774658575,
+                "p95": 0.0036359055
+              },
+              "rtf": 1.131259770867196,
+              "total": {
+                "max": 0.18212776,
+                "mean": 0.03786878929210925,
+                "p95": 0.050323850499999996
+              },
+              "wall_s": 116.466742628
+            },
+            "trajectory": {
+              "completion_rate": 0.9981031866464339,
+              "coverage_rate": 0.99810246570695,
+              "failed": 0,
+              "image_frames": 2636,
+              "ok": 2631,
+              "poses_written": 2631,
+              "rejected": 0,
+              "segments": 1,
+              "total_keyframes": 737,
+              "total_track_only_frames": 1899
+            },
+            "warnings": [
+              "git working tree is dirty; not suitable as a formal baseline",
+              "vo pnp summary: pnp_successes=2545 pnp_fallbacks=85"
+            ]
+          },
+          "payload_sha256": {
+            "diag.csv": "6174cb0a026a7f45b59d984f031371024f8198278adb610b9f844d2ca8e08e6a",
+            "est.tum": "9bdffbc53a30e76e777a645d9f2c0a7cb140b196644329536ea1577a407d0f01",
+            "kf.tum": "5d1c4dea8d133d918a08550b80381936a24ff9668ef7a09750e590a43dd24937"
+          },
+          "sidecar_rows": 2636,
+          "bridge_counts": {
+            "NotApplicable": 2636
+          }
+        }
+      },
+      "input": {
+        "archive": "/home/lin/Projects/data/perception/data/raw/tum-vi/exported/euroc/512_16/dataset-room6_512_16.tar",
+        "archive_bytes": 1598576640,
+        "archive_mtime_ns": 1524005801000000000,
+        "selected_files": 5278,
+        "selected_bytes": 1588878316,
+        "manifest_sha256": "e43ea9caae4d3b5710071b9cd5ac92f394b38064ba1a82f08301c9b0ae37fa3a"
+      },
+      "comparison": {
+        "state": "PASS",
+        "compared_rows": 2636,
+        "checks": {
+          "diag.csv": true,
+          "est.tum": true,
+          "kf.tum": true,
+          "full_sidecar_identity": true,
+          "ordered_input_identity": true,
+          "initialization_identity": true,
+          "bridge_all_not_applicable": true,
+          "config_identity": true
+        }
+      },
+      "temporary_input_removed": true
+    }
+  },
+  "configuration": {
+    "config_hash": "f1c11d2e",
+    "config": {
+      "estimator.block_culled_rebirth": true,
+      "estimator.enable_moving_bootstrap": true,
+      "estimator.enable_outlier_cull": true,
+      "estimator.enable_outlier_reopt": true,
+      "estimator.enable_pnp_init": true,
+      "estimator.far_return_refresh_px": 6.0,
+      "estimator.hanging_landmark_gate_m": 1.0,
+      "estimator.huber_k_px": 3.0,
+      "estimator.max_outlier_reopts": 3,
+      "estimator.min_landmark_observations": 2,
+      "estimator.min_pnp_inliers": 10,
+      "estimator.min_seed_observations": 10,
+      "estimator.min_shared_landmarks": 10,
+      "estimator.min_track_observations_for_seed": 1,
+      "estimator.outlier_avg_reproj_px": 4.0,
+      "estimator.pnp_confidence": 0.99,
+      "estimator.pnp_reproj_px": 2.0,
+      "estimator.prior_rotation_sigma_rad": 0.0001,
+      "estimator.prior_translation_sigma_m": 0.0001,
+      "estimator.stereo_sigma_px": 1.0,
+      "estimator.velocity_prior_sigma_mps": 0.1,
+      "estimator.visual_coast_horizon_ns": 500000000,
+      "estimator.window_size": 10,
+      "eval.max_dt_ms": 4.166667,
+      "eval.min_match_rate": 0.8,
+      "eval.rpe_delta_s": 1.0,
+      "session.dataset_format": "tum_vi",
+      "session.drop_culled_tracks": true,
+      "session.skip_drop_min_culled": 4,
+      "session.zombie_drop_age": 5,
+      "tracker.forward_backward_px": 0.5,
+      "tracker.lk_pyramid_levels": 4,
+      "tracker.lk_window_px": 21,
+      "tracker.mask_radius_px": 20,
+      "tracker.max_depth_m": 25.0,
+      "tracker.max_epipolar_px": 1.5,
+      "tracker.max_tracks": 200,
+      "tracker.min_depth_m": 0.3,
+      "tracker.min_disparity_px": 2.0,
+      "tracker.min_distance_px": 20.0,
+      "tracker.quality_level": 0.003,
+      "tracker.stereo_bidir_px": 0.5,
+      "tracker.stereo_check_bidir": true,
+      "tracker.stereo_row_tol_px": 0,
+      "tracker.stereo_sad_half_win_px": 7,
+      "tracker.stereo_uniq_ratio": 0.5
+    },
+    "config_canonical_text": "estimator.block_culled_rebirth=true\nestimator.enable_moving_bootstrap=true\nestimator.enable_outlier_cull=true\nestimator.enable_outlier_reopt=true\nestimator.enable_pnp_init=true\nestimator.far_return_refresh_px=6\nestimator.hanging_landmark_gate_m=1\nestimator.huber_k_px=3\nestimator.max_outlier_reopts=3\nestimator.min_landmark_observations=2\nestimator.min_pnp_inliers=10\nestimator.min_seed_observations=10\nestimator.min_shared_landmarks=10\nestimator.min_track_observations_for_seed=1\nestimator.outlier_avg_reproj_px=4\nestimator.pnp_confidence=0.98999999999999999\nestimator.pnp_reproj_px=2\nestimator.prior_rotation_sigma_rad=0.0001\nestimator.prior_translation_sigma_m=0.0001\nestimator.stereo_sigma_px=1\nestimator.velocity_prior_sigma_mps=0.10000000000000001\nestimator.visual_coast_horizon_ns=500000000\nestimator.window_size=10\neval.max_dt_ms=4.1666670000000003\neval.min_match_rate=0.80000000000000004\neval.rpe_delta_s=1\nsession.dataset_format=tum_vi\nsession.drop_culled_tracks=true\nsession.skip_drop_min_culled=4\nsession.zombie_drop_age=5\ntracker.forward_backward_px=0.5\ntracker.lk_pyramid_levels=4\ntracker.lk_window_px=21\ntracker.mask_radius_px=20\ntracker.max_depth_m=25\ntracker.max_epipolar_px=1.5\ntracker.max_tracks=200\ntracker.min_depth_m=0.29999999999999999\ntracker.min_disparity_px=2\ntracker.min_distance_px=20\ntracker.quality_level=0.0030000000000000001\ntracker.stereo_bidir_px=0.5\ntracker.stereo_check_bidir=true\ntracker.stereo_row_tol_px=0\ntracker.stereo_sad_half_win_px=7\ntracker.stereo_uniq_ratio=0.5\n"
+  },
+  "storage": {
+    "cap_bytes": 3221225472,
+    "reserve_bytes": 21474836480,
+    "initial_free_bytes": 126631030784,
+    "peak_task_bytes": 1812463616,
+    "temporary_inputs_retained": false,
+    "new_builds": 0,
+    "new_downloads": 0,
+    "latest_free_bytes": 126489714688,
+    "latest_task_bytes": 126603264,
+    "retained_bytes": 126603264
+  },
+  "raw_artifact_root": "build/world-frame-recovery-20261015-tumvi-guardrail",
+  "scope": {
+    "recovery_issue": 58,
+    "initial_moving_root_formal": "independent_issue51",
+    "euroc11_checkpoint": "not_established_by_this_run"
+  },
+  "input_preparation": {
+    "native_calibration": [
+      "dso/camchain.yaml",
+      "dso/imu_config.yaml"
+    ],
+    "groundtruth": "dso/gt_imu.csv",
+    "preflight_correction_algorithm_processes": 0
+  }
+}

@@ -20,7 +20,8 @@ emitted `meta.json`、config hash、raw artifact root 与完整结果。
 
 ## #58 本地恢复验收
 
-2026-10-14 的有界世界系恢复已完成 EuRoC core-4 的 8 个生产回放，TUM-VI
-room1–6 guardrail 待验收。逐序列指标、完整参数和两臂身份见
+2026-10-14 的有界世界系恢复已完成 EuRoC core-4 的 8 个生产回放；
+2026-10-15 的 [TUM-VI room1–6 guardrail](2026-10-15-bounded-world-frame-recovery-tumvi-guardrail.evidence.json)
+也已完成 12/12 回放，NotApplicable / payload identity 门通过。逐序列指标、完整参数和两臂身份见
 [evidence](2026-10-14-bounded-world-frame-recovery.evidence.json)，实现与限制见
 [恢复报告](../../research/2026-10-14-note-m5-world-frame-recovery-local-solve.md)。
